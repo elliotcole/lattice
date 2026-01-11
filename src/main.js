@@ -1,3 +1,4 @@
+import { customOscillatorTypes, customOscillators } from "web-audio-oscillators";
 const canvas = document.getElementById("lattice");
 const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
@@ -7,6 +8,10 @@ const exportScaleButton = document.getElementById("export-scale");
 const themeSelect = document.getElementById("theme-select");
 const optionsToggle = document.getElementById("options-toggle");
 const optionsPanel = document.getElementById("options-panel");
+const ratioWheelToggle = document.getElementById("ratio-wheel-toggle");
+const ratioWheelDrawer = document.getElementById("ratio-wheel-drawer");
+const ratioWheelClose = document.getElementById("ratio-wheel-close");
+const ratioWheelLarge = document.getElementById("ratio-wheel-large");
 const fundamentalInput = document.getElementById("fundamental");
 const fundamentalNoteSelect = document.getElementById("fundamental-note");
 const a4Input = document.getElementById("a4");
@@ -54,6 +59,8 @@ const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "
 const primes = [2, 3, 5, 7, 11, 13];
 const GRID_COLS = 20;
 const GRID_ROWS = 20;
+const BUILTIN_WAVEFORMS = ["sine", "triangle", "square", "sawtooth"];
+const CUSTOM_WAVEFORMS = new Set(customOscillatorTypes || []);
 const KEYBOARD_MAP = {
   a: 0,
   w: 1,
@@ -492,6 +499,25 @@ function updateFundamentalNotes() {
   fundamentalNoteSelect.value = String(selectedMidi);
 }
 
+function populateWaveformOptions() {
+  if (!waveformSelect) {
+    return;
+  }
+  const selected = waveformSelect.value || "sine";
+  waveformSelect.innerHTML = "";
+  const extras = customOscillatorTypes
+    ? customOscillatorTypes.filter((type) => !BUILTIN_WAVEFORMS.includes(type))
+    : [];
+  const waveforms = [...BUILTIN_WAVEFORMS, ...extras];
+  waveforms.forEach((type) => {
+    const option = document.createElement("option");
+    option.value = type;
+    option.textContent = type;
+    waveformSelect.appendChild(option);
+  });
+  waveformSelect.value = waveforms.includes(selected) ? selected : "sine";
+}
+
 function onFundamentalNoteChange() {
   const midi = Number(fundamentalNoteSelect.value);
   const a4 = Number(a4Input.value) || 440;
@@ -618,6 +644,8 @@ function draw() {
     }
     ctx.restore();
   });
+
+  updateRatioWheels();
 }
 
 function startNodeTone(node) {
@@ -634,11 +662,16 @@ function startNodeTone(node) {
   }
 
   const now = audioCtx.currentTime;
-  const oscillator = audioCtx.createOscillator();
+  const waveformType = waveformSelect.value || "sine";
+  const oscillator = CUSTOM_WAVEFORMS.has(waveformType)
+    ? customOscillators[waveformType](audioCtx)
+    : audioCtx.createOscillator();
   const envGain = audioCtx.createGain();
   const lfoGain = audioCtx.createGain();
 
-  oscillator.type = waveformSelect.value || "sine";
+  if (!CUSTOM_WAVEFORMS.has(waveformType)) {
+    oscillator.type = waveformType;
+  }
   oscillator.frequency.value = node.freq;
   envGain.gain.setValueAtTime(0.0001, now);
   const attack = Number(attackSlider.value) || 0.02;
@@ -959,6 +992,158 @@ function getLfoGainValue(node, nowMs) {
   return (1 - lfoDepth) + lfoDepth * value;
 }
 
+function getActiveRatioAngles() {
+  const seen = new Set();
+  const entries = [];
+
+  nodes.forEach((node) => {
+    if (!node.active) {
+      return;
+    }
+    const ratio = node.numerator / node.denominator;
+    const cents = 1200 * Math.log2(ratio);
+    const key = cents.toFixed(3);
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    entries.push({
+      ratio,
+      cents,
+      numerator: node.numerator,
+      denominator: node.denominator,
+    });
+  });
+
+  entries.sort((a, b) => a.cents - b.cents);
+  return entries.map((entry) => ({
+    ratio: entry.ratio,
+    cents: entry.cents,
+    numerator: entry.numerator,
+    denominator: entry.denominator,
+    angle: -Math.PI / 2 + (2 * Math.PI * entry.cents) / 1200,
+  }));
+}
+
+function gcd(a, b) {
+  let x = Math.abs(a);
+  let y = Math.abs(b);
+  while (y) {
+    const t = y;
+    y = x % y;
+    x = t;
+  }
+  return x || 1;
+}
+
+function formatIntervalRatio(numerator, denominator) {
+  const divisor = gcd(numerator, denominator);
+  return `${numerator / divisor}/${denominator / divisor}`;
+}
+
+function resizeWheelCanvas(canvasEl) {
+  if (!canvasEl) {
+    return;
+  }
+  const rect = canvasEl.getBoundingClientRect();
+  const scale = window.devicePixelRatio || 1;
+  const targetWidth = Math.max(1, Math.floor(rect.width * scale));
+  const targetHeight = Math.max(1, Math.floor(rect.height * scale));
+  if (canvasEl.width !== targetWidth || canvasEl.height !== targetHeight) {
+    canvasEl.width = targetWidth;
+    canvasEl.height = targetHeight;
+  }
+}
+
+function drawRatioWheel(canvasEl) {
+  if (!canvasEl || !themeColors) {
+    return;
+  }
+  resizeWheelCanvas(canvasEl);
+  const ctx2d = canvasEl.getContext("2d");
+  if (!ctx2d) {
+    return;
+  }
+  const width = canvasEl.width;
+  const height = canvasEl.height;
+  ctx2d.clearRect(0, 0, width, height);
+
+  const angles = getActiveRatioAngles();
+  const radius = Math.min(width, height) * 0.4;
+  const cx = width / 2;
+  const cy = height / 2;
+
+  ctx2d.strokeStyle = themeColors.wheelRing;
+  ctx2d.lineWidth = 2;
+  ctx2d.beginPath();
+  ctx2d.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx2d.stroke();
+
+  ctx2d.strokeStyle = themeColors.wheelLine;
+  angles.forEach((item) => {
+    const x = cx + Math.cos(item.angle) * radius;
+    const y = cy + Math.sin(item.angle) * radius;
+    ctx2d.beginPath();
+    ctx2d.moveTo(cx, cy);
+    ctx2d.lineTo(x, y);
+    ctx2d.stroke();
+  });
+
+  if (!angles.length) {
+    return;
+  }
+
+  const fontSize = Math.max(9, Math.round(width * 0.04));
+  ctx2d.fillStyle = themeColors.wheelText;
+  ctx2d.font = `${fontSize}px Georgia`;
+  ctx2d.textAlign = "center";
+  ctx2d.textBaseline = "middle";
+
+  const fundamental = Number(fundamentalInput.value) || 220;
+  const a4 = Number(a4Input.value) || 440;
+
+  angles.forEach((item) => {
+    const noteInfo = getNearestEtInfo(fundamental * item.ratio, a4);
+    const centsRounded = Math.round(noteInfo.cents);
+    const centsLabel = `${centsRounded >= 0 ? "+" : ""}${centsRounded}¢`;
+    const label = `${noteInfo.pitchClass} ${centsLabel}`;
+    const labelRadius = radius + fontSize * 1.5;
+    const lx = cx + Math.cos(item.angle) * labelRadius;
+    const ly = cy + Math.sin(item.angle) * labelRadius;
+    ctx2d.fillText(label, lx, ly);
+  });
+
+  const sliceFont = Math.max(10, Math.round(width * 0.03));
+  ctx2d.font = `${sliceFont}px Georgia`;
+
+  for (let i = 0; i < angles.length; i += 1) {
+    const current = angles[i];
+    const next = angles[(i + 1) % angles.length];
+    let endAngle = next.angle;
+    if (endAngle <= current.angle) {
+      endAngle += Math.PI * 2;
+    }
+    const midAngle = (current.angle + endAngle) / 2;
+    const midRadius = radius * 0.55;
+    const mx = cx + Math.cos(midAngle) * midRadius;
+    const my = cy + Math.sin(midAngle) * midRadius;
+
+    const nextNum =
+      i === angles.length - 1 ? next.numerator * 2 : next.numerator;
+    const nextDen = next.denominator;
+    const intervalNum = nextNum * current.denominator;
+    const intervalDen = nextDen * current.numerator;
+    const intervalLabel = formatIntervalRatio(intervalNum, intervalDen);
+    ctx2d.fillText(intervalLabel, mx, my);
+  }
+}
+
+function updateRatioWheels() {
+  if (ratioWheelDrawer && !ratioWheelDrawer.hidden) {
+    drawRatioWheel(ratioWheelLarge);
+  }
+}
+
 function lfoLoop() {
   const now = performance.now();
   let needsFrame = false;
@@ -1002,6 +1187,9 @@ function refreshThemeColors() {
     deactivate: styles.getPropertyValue("--deactivate").trim() || "rgba(16, 19, 22, 0.2)",
     lfo: styles.getPropertyValue("--lfo").trim() || "#3b82f6",
     playFill: styles.getPropertyValue("--play-fill").trim() || "#f3d64d",
+    wheelLine: styles.getPropertyValue("--wheel-line").trim() || "rgba(16, 19, 22, 0.65)",
+    wheelRing: styles.getPropertyValue("--wheel-ring").trim() || "rgba(16, 19, 22, 0.2)",
+    wheelText: styles.getPropertyValue("--wheel-text").trim() || "#000000",
   };
 }
 
@@ -1044,6 +1232,32 @@ function toggleOptionsPanel() {
   const isOpen = optionsToggle.getAttribute("aria-expanded") === "true";
   optionsToggle.setAttribute("aria-expanded", String(!isOpen));
   optionsPanel.hidden = isOpen;
+}
+
+function openRatioWheelDrawer() {
+  if (!ratioWheelDrawer) {
+    return;
+  }
+  ratioWheelDrawer.hidden = false;
+  updateRatioWheels();
+}
+
+function closeRatioWheelDrawer() {
+  if (!ratioWheelDrawer) {
+    return;
+  }
+  ratioWheelDrawer.hidden = true;
+}
+
+function toggleRatioWheelDrawer() {
+  if (!ratioWheelDrawer) {
+    return;
+  }
+  if (ratioWheelDrawer.hidden) {
+    openRatioWheelDrawer();
+  } else {
+    closeRatioWheelDrawer();
+  }
 }
 
 function formatActiveRatiosForScaleWorkshop() {
@@ -1131,6 +1345,7 @@ function resetLattice() {
 
 populateRatioSelect(ratioXSelect, 3);
 populateRatioSelect(ratioYSelect, 5);
+populateWaveformOptions();
 populateFundamentalNotes();
 updateFundamentalNotes();
 fundamentalNoteSelect.value = "60";
@@ -1145,6 +1360,12 @@ if (themeSelect) {
 }
 if (optionsToggle) {
   optionsToggle.addEventListener("click", toggleOptionsPanel);
+}
+if (ratioWheelToggle) {
+  ratioWheelToggle.addEventListener("click", toggleRatioWheelDrawer);
+}
+if (ratioWheelClose) {
+  ratioWheelClose.addEventListener("click", closeRatioWheelDrawer);
 }
 fundamentalInput.addEventListener("input", updateNodeFrequencies);
 ratioXSelect.addEventListener("change", updateNodeRatios);
@@ -1161,7 +1382,10 @@ if (lfoDepthSlider) {
 waveformSelect.addEventListener("change", () => {
   nodes.forEach((node) => {
     if (node.oscillator) {
-      node.oscillator.type = waveformSelect.value;
+      stopNodeTone(node);
+      if (node.playing) {
+        startNodeTone(node);
+      }
     }
   });
 });
@@ -1181,5 +1405,10 @@ canvas.addEventListener("wheel", onWheel, { passive: false });
 window.addEventListener("resize", resizeCanvas);
 window.addEventListener("keydown", handleKeyDown);
 window.addEventListener("keyup", handleKeyUp);
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeRatioWheelDrawer();
+  }
+});
 
 resizeCanvas();

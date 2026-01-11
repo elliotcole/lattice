@@ -16,6 +16,9 @@
   --deactivate: rgba(16, 19, 22, 0.2);
   --lfo: #2f6df6;
   --play-fill: #f3d64d;
+  --wheel-line: #000000;
+  --wheel-ring: #000000;
+  --wheel-text: #000000;
 }
 
 * {
@@ -48,6 +51,9 @@ body.theme-dark {
   --deactivate: rgba(232, 237, 242, 0.35);
   --lfo: #6cb7ff;
   --play-fill: rgba(243, 214, 77, 0.35);
+  --wheel-line: #f5f7fb;
+  --wheel-ring: #f5f7fb;
+  --wheel-text: #f5f7fb;
   background: var(--bg);
 }
 
@@ -177,6 +183,56 @@ button:active {
 
 .status {
   font-size: 14px;
+}
+
+.ratio-wheel-drawer {
+  position: fixed;
+  top: 120px;
+  right: 0;
+  width: min(520px, 92vw);
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 20px 20px 28px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.ratio-wheel-drawer[hidden] {
+  display: none;
+}
+
+.ratio-wheel-drawer-panel {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-height: calc(100vh - 120px);
+  pointer-events: auto;
+}
+
+.ratio-wheel-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ratio-wheel-drawer-title {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.ratio-wheel-close {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  border-radius: 10px;
+}
+
+.ratio-wheel-drawer canvas {
+  width: 100%;
+  height: auto;
+  max-height: 60vh;
 }
 
 .options-toggle {

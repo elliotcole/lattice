@@ -2,6 +2,7 @@ const canvas = document.getElementById("lattice");
 const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
 const audioToggle = document.getElementById("audio-toggle");
+const resetButton = document.getElementById("reset-lattice");
 const fundamentalInput = document.getElementById("fundamental");
 const fundamentalNoteSelect = document.getElementById("fundamental-note");
 const a4Input = document.getElementById("a4");
@@ -33,6 +34,7 @@ const view = {
 let audioCtx = null;
 let masterGain = null;
 let hoverNodeId = null;
+let hoverDeactivateId = null;
 const activeKeys = new Map();
 
 const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -61,6 +63,7 @@ const ISOMETRIC_ROWS = [
   { keys: "asdfghjkl", yOffset: 0 },
   { keys: "zxcvbnm", yOffset: 1 },
 ];
+const DEACTIVATE_SIZE = 8;
 let nodes = [];
 let edges = [];
 
@@ -209,40 +212,68 @@ function findNodeByGrid(gridX, gridY) {
   return nodes.find((node) => node.gridX === gridX && node.gridY === gridY) || null;
 }
 
-function getLeftmostActiveCenterX() {
+function findIsometricRowForKey(key) {
+  for (const row of ISOMETRIC_ROWS) {
+    const index = row.keys.indexOf(key);
+    if (index !== -1) {
+      return { row, index };
+    }
+  }
+  return null;
+}
+
+function getIsometricAnchorX() {
   const centerY = Math.floor(GRID_ROWS / 2);
+  const rowYs = new Set(ISOMETRIC_ROWS.map((row) => centerY + row.yOffset));
   let minX = null;
+  let anchorY = null;
   nodes.forEach((node) => {
-    if (node.active && node.gridY === centerY) {
-      if (minX == null || node.gridX < minX) {
-        minX = node.gridX;
-      }
+    if (!node.active || !rowYs.has(node.gridY)) {
+      return;
+    }
+    if (minX == null || node.gridX < minX || (node.gridX === minX && node.gridY < anchorY)) {
+      minX = node.gridX;
+      anchorY = node.gridY;
     }
   });
   return minX;
 }
 
-function findIsometricNodeForKey(key) {
+function getActiveNodesInRow(gridY, minX) {
+  return nodes
+    .filter((node) => node.active && node.gridY === gridY && node.gridX >= minX)
+    .sort((a, b) => a.gridX - b.gridX);
+}
+
+function findIsometricNodeForKey(key, compress = false) {
   const centerY = Math.floor(GRID_ROWS / 2);
-  const baseX = getLeftmostActiveCenterX();
+  const match = findIsometricRowForKey(key);
+  if (!match) {
+    return null;
+  }
+
+  const y = centerY + match.row.yOffset;
+  if (y < 0 || y >= GRID_ROWS) {
+    return null;
+  }
+
+  const baseX = getIsometricAnchorX();
   if (baseX == null) {
     return null;
   }
 
-  for (const row of ISOMETRIC_ROWS) {
-    const index = row.keys.indexOf(key);
-    if (index === -1) {
-      continue;
-    }
-    const x = baseX + index;
-    const y = centerY + row.yOffset;
-    if (x < 0 || x >= GRID_COLS || y < 0 || y >= GRID_ROWS) {
-      return null;
-    }
-    return findNodeByGrid(x, y);
+  if (compress) {
+    const activeRow = getActiveNodesInRow(y, baseX);
+    return activeRow[match.index] || null;
   }
 
-  return null;
+  const x = baseX + match.index;
+  if (x < 0 || x >= GRID_COLS) {
+    return null;
+  }
+
+  return findNodeByGrid(x, y);
+
 }
 
 function handleKeyDown(event) {
@@ -271,7 +302,9 @@ function handleKeyDown(event) {
     const targetMidi = KEYBOARD_BASE_MIDI + KEYBOARD_MAP[key];
     node = findNodeForMidi(targetMidi, a4);
   } else if (mode === "iso") {
-    node = findIsometricNodeForKey(key);
+    node = findIsometricNodeForKey(key, false);
+  } else if (mode === "iso-compact") {
+    node = findIsometricNodeForKey(key, true);
   }
 
   if (!node || !node.active) {
@@ -375,6 +408,40 @@ function getNearestEtInfo(freq, a4) {
 
 function getNodeRadius(node) {
   return node.active ? 35 : 32;
+}
+
+function getDeactivateRect(node) {
+  const pos = worldToScreen(node.coordinate);
+  const radius = getNodeRadius(node);
+  const size = DEACTIVATE_SIZE;
+  const padding = 4;
+  return {
+    x: pos.x - radius - size - padding,
+    y: pos.y - radius - size - padding,
+    size,
+  };
+}
+
+function isPointInRect(point, rect) {
+  return (
+    point.x >= rect.x &&
+    point.x <= rect.x + rect.size &&
+    point.y >= rect.y &&
+    point.y <= rect.y + rect.size
+  );
+}
+
+function findDeactivateNodeAtPoint(screenPoint) {
+  for (const node of nodes) {
+    if (!node.active || node.isCenter) {
+      continue;
+    }
+    const rect = getDeactivateRect(node);
+    if (isPointInRect(screenPoint, rect)) {
+      return node;
+    }
+  }
+  return null;
 }
 
 function midiToNoteName(midi) {
@@ -499,6 +566,18 @@ function draw() {
     const cents = Math.round(node.cents_from_et);
     const centsLabel = `${cents >= 0 ? "+" : ""}${cents}¢`;
     ctx.fillText(`${node.note_name} ${centsLabel}`, pos.x + radius + 6, pos.y + radius - 10);
+
+    if (hoverDeactivateId === node.id) {
+      const rect = getDeactivateRect(node);
+      ctx.strokeStyle = "rgba(16, 19, 22, 0.2)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(rect.x, rect.y);
+      ctx.lineTo(rect.x + rect.size, rect.y + rect.size);
+      ctx.moveTo(rect.x + rect.size, rect.y);
+      ctx.lineTo(rect.x, rect.y + rect.size);
+      ctx.stroke();
+    }
     ctx.restore();
   });
 }
@@ -619,9 +698,12 @@ function onPointerMove(event) {
   if (!view.dragging) {
     const world = screenToWorld({ x: event.offsetX, y: event.offsetY });
     const hit = hitTest(world);
+    const deactivateHit = findDeactivateNodeAtPoint({ x: event.offsetX, y: event.offsetY });
     const nextHoverId = hit ? hit.id : null;
-    if (nextHoverId !== hoverNodeId) {
+    const nextDeactivateId = deactivateHit ? deactivateHit.id : null;
+    if (nextHoverId !== hoverNodeId || nextDeactivateId !== hoverDeactivateId) {
       hoverNodeId = nextHoverId;
+      hoverDeactivateId = nextDeactivateId;
       draw();
     }
     return;
@@ -648,7 +730,16 @@ function onPointerUp(event) {
   view.dragging = false;
 
   if (moved < 4) {
-    const world = screenToWorld({ x: event.offsetX, y: event.offsetY });
+    const screenPoint = { x: event.offsetX, y: event.offsetY };
+    const world = screenToWorld(screenPoint);
+    const deactivateHit = findDeactivateNodeAtPoint(screenPoint);
+    if (deactivateHit) {
+      deactivateHit.active = false;
+      deactivateHit.playing = false;
+      stopNodeTone(deactivateHit);
+      draw();
+      return;
+    }
     const hit = hitTest(world);
     if (hit) {
       if (!hit.active) {
@@ -669,6 +760,7 @@ function onPointerUp(event) {
 
 function onPointerLeave() {
   hoverNodeId = null;
+  hoverDeactivateId = null;
   if (view.dragging) {
     view.dragging = false;
   }
@@ -740,15 +832,31 @@ function rebuildLattice() {
   draw();
 }
 
+function resetLattice() {
+  stopAllTones();
+  activeKeys.clear();
+  nodes.forEach((node) => {
+    node.active = node.isCenter;
+    node.playing = false;
+  });
+  view.zoom = 1;
+  view.offsetX = 0;
+  view.offsetY = 0;
+  hoverNodeId = null;
+  hoverDeactivateId = null;
+  draw();
+}
+
 populateRatioSelect(ratioXSelect, 3);
 populateRatioSelect(ratioYSelect, 5);
 populateFundamentalNotes();
 updateFundamentalNotes();
-fundamentalNoteSelect.value = "48";
+fundamentalNoteSelect.value = "60";
 onFundamentalNoteChange();
 rebuildLattice();
 
 audioToggle.addEventListener("click", toggleAudio);
+resetButton.addEventListener("click", resetLattice);
 fundamentalInput.addEventListener("input", updateNodeFrequencies);
 ratioXSelect.addEventListener("change", updateNodeRatios);
 ratioYSelect.addEventListener("change", updateNodeRatios);

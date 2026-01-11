@@ -16,7 +16,7 @@
       <div class="top-bar">
         <header class="title">
           <h1>Tuning Lattice</h1>
-          <p>Drag to pan.<br /> Scroll to zoom.</p>
+          <p>Drag to pan.<br /> Scroll to zoom. <br />Created by <a href="http://www.elliotcolemusic.com/" target="_blank">Elliot Cole</a></p>
         </header>
 
         <section class="panel controls">
@@ -24,7 +24,7 @@
           <label for="fundamental">Fundamental (Hz)</label>
           <div class="control-inline">
             <select id="fundamental-note"></select>
-            <input id="fundamental" type="number" min="20" max="2000" step="1" value="130.81" />
+            <input id="fundamental" type="number" min="20" max="2000" step="1" value="261.63" />
           </div>
         </div>
         <div class="control-group">
@@ -46,6 +46,10 @@
               <input type="radio" name="keyboard-mode" value="iso" />
               <span>Isometric</span>
             </label>
+            <label>
+              <input type="radio" name="keyboard-mode" value="iso-compact" />
+              <span>Iso (Narrow)</span>
+            </label>
           </div>
         </div>
         <div class="ratio-stack">
@@ -59,6 +63,7 @@
           </div>
         </div>
         <button id="audio-toggle" type="button">Enable Audio</button>
+        <button id="reset-lattice" type="button">Reset</button>
         <div class="status" id="status">Audio: off</div>
         </section>
       </div>

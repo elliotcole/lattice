@@ -16,7 +16,7 @@
       <div class="top-bar">
         <header class="title">
           <h1>Tuning Lattice</h1>
-          <p>Drag to pan.<br /> Scroll to zoom. <br />Created by <a href="http://www.elliotcolemusic.com/" target="_blank">Elliot Cole</a></p>
+          <p>Drag to pan. Scroll to zoom. <br />Shift double-click & hold for LFO. <br />Created by <a href="http://www.elliotcolemusic.com/" target="_blank">Elliot Cole</a></p>
         </header>
 
         <section class="panel controls">
@@ -27,30 +27,15 @@
             <input id="fundamental" type="number" min="20" max="2000" step="1" value="261.63" />
           </div>
         </div>
+        
         <div class="control-group">
-          <label for="a4">A4 Reference (Hz)</label>
-          <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
-        </div>
-        <div class="control-group">
-          <label>Keyboard Mode</label>
-          <div class="radio-row">
-            <label>
-              <input type="radio" name="keyboard-mode" value="off" checked />
-              <span>Keyboard Off</span>
-            </label>
-            <label>
-              <input type="radio" name="keyboard-mode" value="piano" />
-              <span>Piano Keyboard</span>
-            </label>
-            <label>
-              <input type="radio" name="keyboard-mode" value="iso" />
-              <span>Isometric</span>
-            </label>
-            <label>
-              <input type="radio" name="keyboard-mode" value="iso-compact" />
-              <span>Iso (Narrow)</span>
-            </label>
-          </div>
+          <label for="keyboard-mode">Keyboard Mode</label>
+          <select id="keyboard-mode">
+            <option value="off" selected>Keyboard Off</option>
+            <option value="piano">Piano Keyboard</option>
+            <option value="iso">Isometric</option>
+            <option value="iso-compact">Iso (Compact)</option>
+          </select>
         </div>
         <div class="ratio-stack">
           <div class="control-group">
@@ -66,6 +51,24 @@
         <button id="reset-lattice" type="button">Reset</button>
         <button id="export-scale" type="button">Export to Scale Workshop</button>
         <div class="status" id="status">Audio: off</div>
+        <div class="control-group options-toggle">
+          <button id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel">
+            Options <span class="chevron">v</span>
+          </button>
+          <div id="options-panel" class="panel options-panel" hidden>
+            <div class="control-group">
+              <label for="a4">A4 Reference (Hz)</label>
+              <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
+            </div>
+            <div class="control-group">
+              <label for="theme-select">Theme</label>
+              <select id="theme-select">
+                <option value="light">Light Mode</option>
+                <option value="dark">Dark Mode</option>
+              </select>
+            </div>
+          </div>
+        </div>
         </section>
       </div>
     </main>
@@ -75,6 +78,11 @@
         <label for="volume">Main Volume (dB)</label>
         <input id="volume" type="range" min="-60" max="0" step="1" value="-12" />
         <span id="volume-readout">-12 dB</span>
+      </div>
+      <div class="synth-group">
+        <label for="lfo-depth">LFO Depth</label>
+        <input id="lfo-depth" type="range" min="0" max="1" step="0.01" value="1" />
+        <span id="lfo-depth-readout">100%</span>
       </div>
       <div class="synth-group">
         <label for="waveform">Waveform</label>

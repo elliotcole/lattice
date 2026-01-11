@@ -7,6 +7,15 @@
   --node: #2d7aa6;
   --node-active: #c94b3d;
   --border: rgba(16, 19, 22, 0.15);
+  --canvas: #fdfbf7;
+  --muted-ink: rgba(16, 19, 22, 0.65);
+  --edge: rgba(0, 0, 0, 0.18);
+  --node-stroke: rgba(0, 0, 0, 0.35);
+  --text-primary: #1e1e1e;
+  --text-secondary: #2a2a2a;
+  --deactivate: rgba(16, 19, 22, 0.2);
+  --lfo: #2f6df6;
+  --play-fill: #f3d64d;
 }
 
 * {
@@ -18,6 +27,28 @@ body {
   font-family: "Lexend", "Helvetica Neue", sans-serif;
   background: radial-gradient(circle at top left, #ffffff, var(--bg));
   color: var(--ink);
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+body.theme-dark {
+  color-scheme: dark;
+  --bg: #0c1117;
+  --panel: rgba(18, 24, 33, 0.8);
+  --ink: #e8edf2;
+  --accent: #4aa3df;
+  --node: #59b0dd;
+  --node-active: #f5a15b;
+  --border: rgba(231, 237, 244, 0.18);
+  --canvas: #0a0f14;
+  --muted-ink: rgba(232, 237, 242, 0.72);
+  --edge: rgba(230, 238, 246, 0.16);
+  --node-stroke: rgba(230, 238, 246, 0.35);
+  --text-primary: #e8edf2;
+  --text-secondary: #b8c1cb;
+  --deactivate: rgba(232, 237, 242, 0.35);
+  --lfo: #6cb7ff;
+  --play-fill: rgba(243, 214, 77, 0.35);
+  background: var(--bg);
 }
 
 .app {
@@ -34,7 +65,7 @@ body {
 }
 
 .title h1 {
-  margin: 15px 0 5px 10px;
+  margin: 15px 0 5px 15px;
   font-size: 26px;
   letter-spacing: 0.4px;
   font-weight: 200;
@@ -42,8 +73,8 @@ body {
 
 
 .title p {
-  margin: 0 0 0 10px;
-  opacity: 0.65;
+  margin: 0 0 0 18px;
+  color: var(--muted-ink);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -109,6 +140,13 @@ select {
   font-size: 14px;
 }
 
+body.theme-dark input[type="number"],
+body.theme-dark select {
+  background: #0f151d;
+  color: #ffffff;
+  border-color: #ffffff;
+}
+
 .narrow-select {
   max-width: 110px;
 }
@@ -141,6 +179,37 @@ button:active {
   font-size: 14px;
 }
 
+.options-toggle {
+  position: relative;
+}
+
+.options-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.options-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 220px;
+  z-index: 3;
+}
+
+.options-panel[hidden] {
+  display: none;
+}
+
+.chevron {
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+.options-toggle button[aria-expanded="true"] .chevron {
+  transform: rotate(180deg);
+}
+
 .synth-panel {
   position: fixed;
   left: 24px;
@@ -162,7 +231,7 @@ canvas {
   inset: 0;
   width: 100%;
   height: 100%;
-  background: #fdfbf7;
+  background: var(--canvas);
   z-index: 0;
 }
 

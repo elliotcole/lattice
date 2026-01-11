@@ -4,6 +4,9 @@ const statusEl = document.getElementById("status");
 const audioToggle = document.getElementById("audio-toggle");
 const resetButton = document.getElementById("reset-lattice");
 const exportScaleButton = document.getElementById("export-scale");
+const themeSelect = document.getElementById("theme-select");
+const optionsToggle = document.getElementById("options-toggle");
+const optionsPanel = document.getElementById("options-panel");
 const fundamentalInput = document.getElementById("fundamental");
 const fundamentalNoteSelect = document.getElementById("fundamental-note");
 const a4Input = document.getElementById("a4");
@@ -11,7 +14,9 @@ const ratioXSelect = document.getElementById("ratio-x");
 const ratioYSelect = document.getElementById("ratio-y");
 const volumeSlider = document.getElementById("volume");
 const volumeReadout = document.getElementById("volume-readout");
-const keyboardModeRadios = document.querySelectorAll('input[name="keyboard-mode"]');
+const lfoDepthSlider = document.getElementById("lfo-depth");
+const lfoDepthReadout = document.getElementById("lfo-depth-readout");
+const keyboardModeSelect = document.getElementById("keyboard-mode");
 const waveformSelect = document.getElementById("waveform");
 const attackSlider = document.getElementById("attack");
 const decaySlider = document.getElementById("decay");
@@ -36,6 +41,13 @@ let audioCtx = null;
 let masterGain = null;
 let hoverNodeId = null;
 let hoverDeactivateId = null;
+let themeColors = null;
+let lfoDepth = 1;
+let lfoArmingId = null;
+let lfoArmingStart = 0;
+let lfoAnimating = false;
+let lastLfoTapTime = 0;
+let lastLfoTapId = null;
 const activeKeys = new Map();
 
 const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -110,7 +122,12 @@ function buildLattice() {
         playing: false,
         volume: 0,
         isCenter,
+        lfoActive: false,
+        lfoHalfPeriod: 0,
+        lfoStartMs: 0,
         oscillator: null,
+        _envGain: null,
+        _lfoGain: null,
       });
     }
   }
@@ -160,8 +177,7 @@ function updateNodeRatios() {
 }
 
 function getKeyboardMode() {
-  const selected = Array.from(keyboardModeRadios).find((radio) => radio.checked);
-  return selected ? selected.value : "off";
+  return keyboardModeSelect ? keyboardModeSelect.value : "off";
 }
 
 function findNearestNodeByFrequency(targetFreq) {
@@ -501,7 +517,11 @@ function screenToWorld(point) {
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.18)";
+  if (!themeColors) {
+    refreshThemeColors();
+  }
+
+  ctx.strokeStyle = themeColors.edge;
   ctx.lineWidth = 1.5;
   edges.forEach(([a, b]) => {
     if (!a.active || !b.active) {
@@ -548,14 +568,30 @@ function draw() {
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.beginPath();
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.strokeStyle = themeColors.nodeStroke;
     ctx.lineWidth = 2;
-    ctx.fillStyle = node.playing ? "#f3d64d" : "transparent";
+    ctx.fillStyle = node.playing ? themeColors.playFill : "transparent";
     ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = "#1e1e1e";
+    if (node.lfoActive || lfoArmingId === node.id) {
+      const now = performance.now();
+      const pulse =
+        lfoArmingId === node.id
+          ? 0.6 + 0.4 * Math.sin((now - lfoArmingStart) / 120)
+          : getLfoGainValue(node, now);
+      ctx.save();
+      ctx.globalAlpha = Math.min(alpha, pulse);
+      ctx.strokeStyle = themeColors.lfo;
+      ctx.lineWidth = node.lfoActive ? 3 : 2;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius + 3, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.fillStyle = themeColors.textPrimary;
     ctx.font = "21px Georgia";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -564,13 +600,14 @@ function draw() {
     ctx.font = "11px Georgia";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
+    ctx.fillStyle = themeColors.textSecondary;
     const cents = Math.round(node.cents_from_et);
     const centsLabel = `${cents >= 0 ? "+" : ""}${cents}¢`;
     ctx.fillText(`${node.note_name} ${centsLabel}`, pos.x + radius + 6, pos.y + radius - 10);
 
     if (hoverDeactivateId === node.id) {
       const rect = getDeactivateRect(node);
-      ctx.strokeStyle = "rgba(16, 19, 22, 0.2)";
+      ctx.strokeStyle = themeColors.deactivate;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(rect.x, rect.y);
@@ -598,22 +635,29 @@ function startNodeTone(node) {
 
   const now = audioCtx.currentTime;
   const oscillator = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
+  const envGain = audioCtx.createGain();
+  const lfoGain = audioCtx.createGain();
 
   oscillator.type = waveformSelect.value || "sine";
   oscillator.frequency.value = node.freq;
-  gain.gain.setValueAtTime(0.0001, now);
+  envGain.gain.setValueAtTime(0.0001, now);
   const attack = Number(attackSlider.value) || 0.02;
   const decay = Number(decaySlider.value) || 0.2;
   const sustain = Number(sustainSlider.value) || 0.6;
-  gain.gain.exponentialRampToValueAtTime(0.2, now + attack);
-  gain.gain.exponentialRampToValueAtTime(0.2 * sustain, now + attack + decay);
+  envGain.gain.exponentialRampToValueAtTime(0.2, now + attack);
+  envGain.gain.exponentialRampToValueAtTime(0.2 * sustain, now + attack + decay);
 
-  oscillator.connect(gain).connect(masterGain);
+  lfoGain.gain.value = getLfoGainValue(node, performance.now());
+  oscillator.connect(envGain).connect(lfoGain).connect(masterGain);
   oscillator.start(now);
 
   node.oscillator = oscillator;
-  node._gain = gain;
+  node._envGain = envGain;
+  node._lfoGain = lfoGain;
+
+  if (node.lfoActive) {
+    ensureLfoLoop();
+  }
 }
 
 function stopNodeTone(node) {
@@ -622,16 +666,18 @@ function stopNodeTone(node) {
   }
 
   const osc = node.oscillator;
-  const gain = node._gain;
+  const envGain = node._envGain;
+  const lfoGain = node._lfoGain;
   node.oscillator = null;
-  node._gain = null;
+  node._envGain = null;
+  node._lfoGain = null;
 
   const now = audioCtx.currentTime;
-  if (gain) {
+  if (envGain) {
     const release = Number(releaseSlider.value) || 0.6;
-    gain.gain.cancelScheduledValues(now);
-    gain.gain.setValueAtTime(Math.max(gain.gain.value, 0.0001), now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + release);
+    envGain.gain.cancelScheduledValues(now);
+    envGain.gain.setValueAtTime(Math.max(envGain.gain.value, 0.0001), now);
+    envGain.gain.exponentialRampToValueAtTime(0.0001, now + release);
     osc.stop(now + release + 0.05);
   } else {
     osc.stop(now + 0.1);
@@ -639,8 +685,11 @@ function stopNodeTone(node) {
 
   osc.onended = () => {
     osc.disconnect();
-    if (gain) {
-      gain.disconnect();
+    if (envGain) {
+      envGain.disconnect();
+    }
+    if (lfoGain) {
+      lfoGain.disconnect();
     }
   };
 }
@@ -688,6 +737,26 @@ function toggleAudio() {
 }
 
 function onPointerDown(event) {
+  const screenPoint = { x: event.offsetX, y: event.offsetY };
+  const world = screenToWorld(screenPoint);
+  const hit = hitTest(world);
+  const now = performance.now();
+
+  if (event.shiftKey && hit) {
+    const isDoubleTap = lastLfoTapId === hit.id && now - lastLfoTapTime < 320;
+    lastLfoTapId = hit.id;
+    lastLfoTapTime = now;
+    if (isDoubleTap) {
+      lfoArmingId = hit.id;
+      lfoArmingStart = now;
+      ensureLfoLoop();
+      canvas.setPointerCapture(event.pointerId);
+      draw();
+      return;
+    }
+    return;
+  }
+
   view.dragging = true;
   view.dragStart = { x: event.offsetX, y: event.offsetY };
   view.dragOffsetStart = { x: view.offsetX, y: view.offsetY };
@@ -719,6 +788,26 @@ function onPointerMove(event) {
 }
 
 function onPointerUp(event) {
+  if (lfoArmingId != null) {
+    const now = performance.now();
+    const duration = (now - lfoArmingStart) / 1000;
+    const node = nodes.find((item) => item.id === lfoArmingId);
+    lfoArmingId = null;
+    if (node && duration >= 0.15) {
+      node.active = true;
+      node.lfoActive = true;
+      node.lfoHalfPeriod = duration;
+      node.lfoStartMs = now;
+      if (!node.playing) {
+        node.playing = true;
+        startNodeTone(node);
+      }
+      ensureLfoLoop();
+    }
+    draw();
+    return;
+  }
+
   if (!view.dragging) {
     return;
   }
@@ -736,6 +825,7 @@ function onPointerUp(event) {
     const deactivateHit = findDeactivateNodeAtPoint(screenPoint);
     if (deactivateHit) {
       deactivateHit.active = false;
+      deactivateHit.lfoActive = false;
       deactivateHit.playing = false;
       stopNodeTone(deactivateHit);
       draw();
@@ -743,6 +833,18 @@ function onPointerUp(event) {
     }
     const hit = hitTest(world);
     if (hit) {
+      if (hit.lfoActive) {
+        hit.lfoActive = false;
+        if (hit._lfoGain) {
+          hit._lfoGain.gain.value = 1;
+        }
+        if (hit.playing) {
+          hit.playing = false;
+          stopNodeTone(hit);
+        }
+        draw();
+        return;
+      }
       if (!hit.active) {
         hit.active = true;
         hit.playing = false;
@@ -762,6 +864,7 @@ function onPointerUp(event) {
 function onPointerLeave() {
   hoverNodeId = null;
   hoverDeactivateId = null;
+  lfoArmingId = null;
   if (view.dragging) {
     view.dragging = false;
   }
@@ -824,6 +927,123 @@ function updateEnvelopeReadouts() {
   decayReadout.textContent = `${Number(decaySlider.value).toFixed(2)}s`;
   sustainReadout.textContent = `${Number(sustainSlider.value).toFixed(2)}`;
   releaseReadout.textContent = `${Number(releaseSlider.value).toFixed(2)}s`;
+}
+
+function updateLfoDepth() {
+  lfoDepth = Number(lfoDepthSlider.value);
+  if (Number.isNaN(lfoDepth)) {
+    lfoDepth = 1;
+  }
+  if (lfoDepthReadout) {
+    lfoDepthReadout.textContent = `${Math.round(lfoDepth * 100)}%`;
+  }
+}
+
+function getLfoValue(node, nowMs) {
+  if (!node.lfoActive || node.lfoHalfPeriod <= 0) {
+    return 1;
+  }
+  const elapsed = (nowMs - node.lfoStartMs) / 1000;
+  if (elapsed < 0) {
+    return 1;
+  }
+  const phase = (elapsed / node.lfoHalfPeriod) % 2;
+  return phase <= 1 ? phase : 2 - phase;
+}
+
+function getLfoGainValue(node, nowMs) {
+  if (!node.lfoActive) {
+    return 1;
+  }
+  const value = getLfoValue(node, nowMs);
+  return (1 - lfoDepth) + lfoDepth * value;
+}
+
+function lfoLoop() {
+  const now = performance.now();
+  let needsFrame = false;
+
+  nodes.forEach((node) => {
+    if (!node.lfoActive) {
+      return;
+    }
+    if (node._lfoGain) {
+      node._lfoGain.gain.value = getLfoGainValue(node, now);
+      needsFrame = true;
+    }
+  });
+
+  if (lfoArmingId != null) {
+    needsFrame = true;
+  }
+
+  if (needsFrame) {
+    draw();
+    requestAnimationFrame(lfoLoop);
+  } else {
+    lfoAnimating = false;
+  }
+}
+
+function ensureLfoLoop() {
+  if (!lfoAnimating) {
+    lfoAnimating = true;
+    requestAnimationFrame(lfoLoop);
+  }
+}
+
+function refreshThemeColors() {
+  const styles = getComputedStyle(document.body);
+  themeColors = {
+    edge: styles.getPropertyValue("--edge").trim() || "rgba(0, 0, 0, 0.18)",
+    nodeStroke: styles.getPropertyValue("--node-stroke").trim() || "rgba(0, 0, 0, 0.35)",
+    textPrimary: styles.getPropertyValue("--text-primary").trim() || "#1e1e1e",
+    textSecondary: styles.getPropertyValue("--text-secondary").trim() || "#2a2a2a",
+    deactivate: styles.getPropertyValue("--deactivate").trim() || "rgba(16, 19, 22, 0.2)",
+    lfo: styles.getPropertyValue("--lfo").trim() || "#3b82f6",
+    playFill: styles.getPropertyValue("--play-fill").trim() || "#f3d64d",
+  };
+}
+
+function applyTheme(theme) {
+  document.body.classList.toggle("theme-dark", theme === "dark");
+  if (themeSelect) {
+    themeSelect.value = theme;
+  }
+  refreshThemeColors();
+  draw();
+}
+
+function toggleTheme() {
+  const nextTheme = document.body.classList.contains("theme-dark") ? "light" : "dark";
+  applyTheme(nextTheme);
+  localStorage.setItem("lattice-theme", nextTheme);
+}
+
+function onThemeSelectChange() {
+  if (!themeSelect) {
+    return;
+  }
+  const selected = themeSelect.value === "dark" ? "dark" : "light";
+  applyTheme(selected);
+  localStorage.setItem("lattice-theme", selected);
+}
+
+function initTheme() {
+  const saved = localStorage.getItem("lattice-theme");
+  const prefersDark =
+    window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const theme = saved || (prefersDark ? "dark" : "light");
+  applyTheme(theme);
+}
+
+function toggleOptionsPanel() {
+  if (!optionsToggle || !optionsPanel) {
+    return;
+  }
+  const isOpen = optionsToggle.getAttribute("aria-expanded") === "true";
+  optionsToggle.setAttribute("aria-expanded", String(!isOpen));
+  optionsPanel.hidden = isOpen;
 }
 
 function formatActiveRatiosForScaleWorkshop() {
@@ -897,6 +1117,9 @@ function resetLattice() {
   nodes.forEach((node) => {
     node.active = node.isCenter;
     node.playing = false;
+    node.lfoActive = false;
+    node.lfoHalfPeriod = 0;
+    node.lfoStartMs = 0;
   });
   view.zoom = 1;
   view.offsetX = 0;
@@ -917,6 +1140,12 @@ rebuildLattice();
 audioToggle.addEventListener("click", toggleAudio);
 resetButton.addEventListener("click", resetLattice);
 exportScaleButton.addEventListener("click", exportToScaleWorkshop);
+if (themeSelect) {
+  themeSelect.addEventListener("change", onThemeSelectChange);
+}
+if (optionsToggle) {
+  optionsToggle.addEventListener("click", toggleOptionsPanel);
+}
 fundamentalInput.addEventListener("input", updateNodeFrequencies);
 ratioXSelect.addEventListener("change", updateNodeRatios);
 ratioYSelect.addEventListener("change", updateNodeRatios);
@@ -926,6 +1155,9 @@ a4Input.addEventListener("input", () => {
 });
 fundamentalNoteSelect.addEventListener("change", onFundamentalNoteChange);
 volumeSlider.addEventListener("input", updateVolume);
+if (lfoDepthSlider) {
+  lfoDepthSlider.addEventListener("input", updateLfoDepth);
+}
 waveformSelect.addEventListener("change", () => {
   nodes.forEach((node) => {
     if (node.oscillator) {
@@ -939,6 +1171,8 @@ sustainSlider.addEventListener("input", updateEnvelopeReadouts);
 releaseSlider.addEventListener("input", updateEnvelopeReadouts);
 
 updateEnvelopeReadouts();
+updateLfoDepth();
+initTheme();
 canvas.addEventListener("pointerdown", onPointerDown);
 canvas.addEventListener("pointermove", onPointerMove);
 canvas.addEventListener("pointerup", onPointerUp);

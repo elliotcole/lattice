@@ -3,6 +3,7 @@ const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
 const audioToggle = document.getElementById("audio-toggle");
 const resetButton = document.getElementById("reset-lattice");
+const exportScaleButton = document.getElementById("export-scale");
 const fundamentalInput = document.getElementById("fundamental");
 const fundamentalNoteSelect = document.getElementById("fundamental-note");
 const a4Input = document.getElementById("a4");
@@ -825,6 +826,64 @@ function updateEnvelopeReadouts() {
   releaseReadout.textContent = `${Number(releaseSlider.value).toFixed(2)}s`;
 }
 
+function formatActiveRatiosForScaleWorkshop() {
+  const ratios = nodes
+    .filter((node) => node.active)
+    .map((node) => ({
+      numerator: node.numerator,
+      denominator: node.denominator,
+      ratio: node.numerator / node.denominator,
+    }))
+    .filter((item) => item.numerator !== item.denominator)
+    .sort((a, b) => a.ratio - b.ratio);
+
+  const withoutOctave = ratios.filter(
+    (item) => !(item.numerator === 2 && item.denominator === 1)
+  );
+  withoutOctave.push({ numerator: 2, denominator: 1, ratio: 2 });
+
+  if (!withoutOctave.length) {
+    return "";
+  }
+
+  return withoutOctave
+    .map((item) => `${item.numerator}/${item.denominator}`)
+    .join("\n");
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "absolute";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
+async function exportToScaleWorkshop() {
+  const ratiosText = formatActiveRatiosForScaleWorkshop();
+  if (!ratiosText) {
+    alert("No active nodes to export.");
+    return;
+  }
+
+  window.open("https://scaleworkshop.plainsound.org/?version=3.1.0", "_blank", "noopener");
+
+  try {
+    await copyTextToClipboard(ratiosText);
+    alert("Ratios copied. Paste them into the Scale Data box in Scale Workshop.");
+  } catch (error) {
+    alert("Couldn't copy to clipboard. Paste manually:\n\n" + ratiosText);
+  }
+}
+
 function rebuildLattice() {
   stopAllTones();
   nodes = buildLattice();
@@ -857,6 +916,7 @@ rebuildLattice();
 
 audioToggle.addEventListener("click", toggleAudio);
 resetButton.addEventListener("click", resetLattice);
+exportScaleButton.addEventListener("click", exportToScaleWorkshop);
 fundamentalInput.addEventListener("input", updateNodeFrequencies);
 ratioXSelect.addEventListener("change", updateNodeRatios);
 ratioYSelect.addEventListener("change", updateNodeRatios);

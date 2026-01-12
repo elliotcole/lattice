@@ -27,6 +27,7 @@ const attackSlider = document.getElementById("attack");
 const decaySlider = document.getElementById("decay");
 const sustainSlider = document.getElementById("sustain");
 const releaseSlider = document.getElementById("release");
+const oneShotCheckbox = document.getElementById("one-shot");
 const attackReadout = document.getElementById("attack-readout");
 const decayReadout = document.getElementById("decay-readout");
 const sustainReadout = document.getElementById("sustain-readout");
@@ -62,19 +63,32 @@ const GRID_ROWS = 20;
 const BUILTIN_WAVEFORMS = ["sine", "triangle", "square", "sawtooth"];
 const CUSTOM_WAVEFORMS = new Set(customOscillatorTypes || []);
 const KEYBOARD_MAP = {
-  a: 0,
-  w: 1,
-  s: 2,
-  e: 3,
-  d: 4,
-  f: 5,
-  t: 6,
-  g: 7,
-  y: 8,
-  h: 9,
-  u: 10,
-  j: 11,
-  k: 12,
+  z: 0,
+  s: 1,
+  x: 2,
+  d: 3,
+  c: 4,
+  v: 5,
+  g: 6,
+  b: 7,
+  h: 8,
+  n: 9,
+  j: 10,
+  m: 11,
+  y: 12,
+  ",": 12,
+  "7": 13,
+  u: 14,
+  "8": 15,
+  i: 16,
+  o: 17,
+  "0": 18,
+  p: 19,
+  "-": 20,
+  "[": 21,
+  "=": 22,
+  "]": 23,
+  "\\": 24,
 };
 const KEYBOARD_BASE_MIDI = 60;
 const ISOMETRIC_ROWS = [
@@ -85,7 +99,13 @@ const ISOMETRIC_ROWS = [
 ];
 const DEACTIVATE_SIZE = 8;
 let nodes = [];
+let nodeById = new Map();
 let edges = [];
+let voices = [];
+let pitchInstances = [];
+let nextVoiceId = 1;
+const MIN_FREQ = 40;
+const MAX_FREQ = 19000;
 
 function buildLattice() {
   const result = [];
@@ -129,12 +149,7 @@ function buildLattice() {
         playing: false,
         volume: 0,
         isCenter,
-        lfoActive: false,
-        lfoHalfPeriod: 0,
-        lfoStartMs: 0,
-        oscillator: null,
-        _envGain: null,
-        _lfoGain: null,
+        baseVoiceId: null,
       });
     }
   }
@@ -152,10 +167,9 @@ function updateNodeFrequencies() {
     node.cents_from_et = etInfo.cents;
     node.note_name = etInfo.name;
     node.pitch_class = etInfo.pitchClass;
-    if (node.oscillator) {
-      node.oscillator.frequency.setTargetAtTime(node.freq, audioCtx.currentTime, 0.01);
-    }
   });
+  updatePitchInstances();
+  updateVoiceFrequencies();
   draw();
 }
 
@@ -175,12 +189,25 @@ function updateNodeRatios() {
     node.cents_from_et = etInfo.cents;
     node.note_name = etInfo.name;
     node.pitch_class = etInfo.pitchClass;
-    if (node.oscillator) {
-      node.oscillator.frequency.setTargetAtTime(node.freq, audioCtx.currentTime, 0.01);
-    }
   });
 
+  updatePitchInstances();
+  updateVoiceFrequencies();
   draw();
+}
+
+function updateVoiceFrequencies() {
+  const fundamental = Number(fundamentalInput.value) || 220;
+  voices.forEach((voice) => {
+    const node = nodes.find((item) => item.id === voice.nodeId);
+    if (!node || !voice.oscillator) {
+      return;
+    }
+    const baseRatio = node.numerator / node.denominator;
+    const freq = fundamental * baseRatio * Math.pow(2, voice.octave);
+    voice.freq = freq;
+    voice.oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.01);
+  });
 }
 
 function getKeyboardMode() {
@@ -234,6 +261,87 @@ function findNodeForMidi(targetMidi, a4) {
 
 function findNodeByGrid(gridX, gridY) {
   return nodes.find((node) => node.gridX === gridX && node.gridY === gridY) || null;
+}
+
+function updatePitchInstances() {
+  const fundamental = Number(fundamentalInput.value) || 220;
+  pitchInstances = [];
+
+  nodes.forEach((node) => {
+    if (!node.active) {
+      return;
+    }
+    const baseRatio = node.numerator / node.denominator;
+    let freq = fundamental * baseRatio;
+    let octave = 0;
+    while (freq < MIN_FREQ) {
+      freq *= 2;
+      octave += 1;
+    }
+    while (freq <= MAX_FREQ) {
+      pitchInstances.push({
+        nodeId: node.id,
+        ratio: baseRatio,
+        octave,
+        freq,
+      });
+      freq *= 2;
+      octave += 1;
+    }
+  });
+
+  pitchInstances.sort((a, b) => a.freq - b.freq);
+}
+
+function findNearestPitchInstance(targetFreq) {
+  if (!pitchInstances.length) {
+    return null;
+  }
+  let best = pitchInstances[0];
+  let bestDistance = Math.abs(Math.log2(best.freq / targetFreq));
+  for (let i = 1; i < pitchInstances.length; i += 1) {
+    const candidate = pitchInstances[i];
+    const distance = Math.abs(Math.log2(candidate.freq / targetFreq));
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+function updateNodePlaybackState() {
+  nodes.forEach((node) => {
+    node.playing = false;
+    node._hasLfo = false;
+  });
+  voices.forEach((voice) => {
+    if (voice.releasing) {
+      return;
+    }
+    const node = nodeById.get(voice.nodeId);
+    if (!node) {
+      return;
+    }
+    node.playing = true;
+    if (voice.lfoActive) {
+      node._hasLfo = true;
+    }
+  });
+}
+
+function removeVoiceById(voiceId) {
+  voices = voices.filter((voice) => voice.id !== voiceId);
+  nodes.forEach((node) => {
+    if (node.baseVoiceId === voiceId) {
+      node.baseVoiceId = null;
+    }
+  });
+  updateNodePlaybackState();
+}
+
+function findVoiceById(voiceId) {
+  return voices.find((voice) => voice.id === voiceId) || null;
 }
 
 function findIsometricRowForKey(key) {
@@ -317,27 +425,54 @@ function handleKeyDown(event) {
   }
 
   const a4 = Number(a4Input.value) || 440;
-  let node = null;
+  let voice = null;
 
   if (mode === "piano") {
     if (!(key in KEYBOARD_MAP)) {
       return;
     }
-    const targetMidi = KEYBOARD_BASE_MIDI + KEYBOARD_MAP[key];
-    node = findNodeForMidi(targetMidi, a4);
+    const semitone = KEYBOARD_MAP[key];
+    const targetMidi = KEYBOARD_BASE_MIDI + semitone;
+    const targetFreq = midiToFrequency(targetMidi, a4);
+    const instance = findNearestPitchInstance(targetFreq);
+    if (!instance) {
+      return;
+    }
+    voice = startVoice({
+      nodeId: instance.nodeId,
+      octave: instance.octave,
+      freq: instance.freq,
+      source: "keyboard",
+    });
   } else if (mode === "iso") {
-    node = findIsometricNodeForKey(key, false);
+    const node = findIsometricNodeForKey(key, false);
+    if (!node || !node.active) {
+      return;
+    }
+    voice = startVoice({
+      nodeId: node.id,
+      octave: 0,
+      freq: node.freq,
+      source: "keyboard",
+    });
   } else if (mode === "iso-compact") {
-    node = findIsometricNodeForKey(key, true);
+    const node = findIsometricNodeForKey(key, true);
+    if (!node || !node.active) {
+      return;
+    }
+    voice = startVoice({
+      nodeId: node.id,
+      octave: 0,
+      freq: node.freq,
+      source: "keyboard",
+    });
   }
 
-  if (!node || !node.active) {
+  if (!voice) {
     return;
   }
 
-  node.playing = true;
-  startNodeTone(node);
-  activeKeys.set(key, node.id);
+  activeKeys.set(key, voice.id);
   draw();
 }
 
@@ -348,17 +483,18 @@ function handleKeyUp(event) {
   }
 
   const key = event.key.toLowerCase();
-  const nodeId = activeKeys.get(key);
-  if (nodeId == null) {
+  const voiceId = activeKeys.get(key);
+  if (voiceId == null) {
     return;
   }
 
-  const node = nodes.find((item) => item.id === nodeId);
-  if (node) {
-    node.playing = false;
-    stopNodeTone(node);
-  }
+  const voice = findVoiceById(voiceId);
   activeKeys.delete(key);
+  const isOneShot = Boolean(oneShotCheckbox && oneShotCheckbox.checked);
+  if (isOneShot) {
+    return;
+  }
+  stopVoice(voice);
   draw();
 }
 
@@ -601,16 +737,17 @@ function draw() {
     ctx.fill();
     ctx.stroke();
 
-    if (node.lfoActive || lfoArmingId === node.id) {
-      const now = performance.now();
+    const now = performance.now();
+    const lfoPulse = getNodeLfoPulse(node.id, now);
+    if (lfoArmingId === node.id || lfoPulse > 0) {
       const pulse =
         lfoArmingId === node.id
           ? 0.6 + 0.4 * Math.sin((now - lfoArmingStart) / 120)
-          : getLfoGainValue(node, now);
+          : lfoPulse;
       ctx.save();
       ctx.globalAlpha = Math.min(alpha, pulse);
       ctx.strokeStyle = themeColors.lfo;
-      ctx.lineWidth = node.lfoActive ? 3 : 2;
+      ctx.lineWidth = lfoPulse > 0 ? 3 : 2;
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, radius + 3, 0, Math.PI * 2);
       ctx.stroke();
@@ -648,17 +785,13 @@ function draw() {
   updateRatioWheels();
 }
 
-function startNodeTone(node) {
+function startVoice(options) {
   if (!audioCtx || !masterGain) {
-    return;
+    return null;
   }
 
   if (audioCtx.state !== "running") {
-    return;
-  }
-
-  if (node.oscillator) {
-    return;
+    return null;
   }
 
   const now = audioCtx.currentTime;
@@ -672,42 +805,83 @@ function startNodeTone(node) {
   if (!CUSTOM_WAVEFORMS.has(waveformType)) {
     oscillator.type = waveformType;
   }
-  oscillator.frequency.value = node.freq;
+  oscillator.frequency.value = options.freq;
+  const isOneShot = Boolean(oneShotCheckbox && oneShotCheckbox.checked);
   envGain.gain.setValueAtTime(0.0001, now);
   const attack = Number(attackSlider.value) || 0.02;
   const decay = Number(decaySlider.value) || 0.2;
   const sustain = Number(sustainSlider.value) || 0.6;
   envGain.gain.exponentialRampToValueAtTime(0.2, now + attack);
   envGain.gain.exponentialRampToValueAtTime(0.2 * sustain, now + attack + decay);
+  if (isOneShot) {
+    const release = Number(releaseSlider.value) || 0.6;
+    envGain.gain.exponentialRampToValueAtTime(0.0001, now + attack + decay + release);
+  }
 
-  lfoGain.gain.value = getLfoGainValue(node, performance.now());
+  const voice = {
+    id: nextVoiceId++,
+    nodeId: options.nodeId,
+    octave: options.octave,
+    freq: options.freq,
+    oscillator,
+    envGain,
+    lfoGain,
+    lfoActive: Boolean(options.lfoActive),
+    releasing: false,
+    lfoHalfPeriod: options.lfoHalfPeriod || 0,
+    lfoStartMs: options.lfoStartMs || 0,
+    source: options.source || "keyboard",
+  };
+
+  lfoGain.gain.value = voice.lfoActive ? getLfoGainValue(voice, performance.now()) : 1;
   oscillator.connect(envGain).connect(lfoGain).connect(masterGain);
   oscillator.start(now);
+  oscillator.onended = () => {
+    oscillator.disconnect();
+    if (envGain) {
+      envGain.disconnect();
+    }
+    if (lfoGain) {
+      lfoGain.disconnect();
+    }
+    removeVoiceById(voice.id);
+  };
 
-  node.oscillator = oscillator;
-  node._envGain = envGain;
-  node._lfoGain = lfoGain;
+  voices.push(voice);
+  updateNodePlaybackState();
 
-  if (node.lfoActive) {
+  if (voice.lfoActive) {
     ensureLfoLoop();
   }
+
+  if (isOneShot) {
+    const release = Number(releaseSlider.value) || 0.6;
+    const stopAt = now + attack + decay + release + 0.05;
+    oscillator.stop(stopAt);
+  }
+
+  return voice;
 }
 
-function stopNodeTone(node) {
-  if (!node.oscillator || !audioCtx) {
+function stopVoice(voice, immediate = false) {
+  if (!voice || !voice.oscillator || !audioCtx) {
     return;
   }
 
-  const osc = node.oscillator;
-  const envGain = node._envGain;
-  const lfoGain = node._lfoGain;
-  node.oscillator = null;
-  node._envGain = null;
-  node._lfoGain = null;
+  const osc = voice.oscillator;
+  const envGain = voice.envGain;
+  const lfoGain = voice.lfoGain;
+  voice.oscillator = null;
+  voice.releasing = true;
+  voice.lfoActive = false;
+  if (lfoGain) {
+    lfoGain.gain.value = 1;
+  }
+  updateNodePlaybackState();
 
   const now = audioCtx.currentTime;
+  const release = immediate ? 0.02 : Number(releaseSlider.value) || 0.6;
   if (envGain) {
-    const release = Number(releaseSlider.value) || 0.6;
     envGain.gain.cancelScheduledValues(now);
     envGain.gain.setValueAtTime(Math.max(envGain.gain.value, 0.0001), now);
     envGain.gain.exponentialRampToValueAtTime(0.0001, now + release);
@@ -716,22 +890,19 @@ function stopNodeTone(node) {
     osc.stop(now + 0.1);
   }
 
-  osc.onended = () => {
-    osc.disconnect();
-    if (envGain) {
-      envGain.disconnect();
-    }
-    if (lfoGain) {
-      lfoGain.disconnect();
-    }
-  };
 }
 
-function stopAllTones() {
-  nodes.forEach((node) => {
-    node.playing = false;
-    stopNodeTone(node);
+function stopVoicesForNode(nodeId, immediate = false) {
+  voices.forEach((voice) => {
+    if (voice.nodeId === nodeId) {
+      stopVoice(voice, immediate);
+    }
   });
+}
+
+function stopAllVoices() {
+  const active = [...voices];
+  active.forEach((voice) => stopVoice(voice, true));
 }
 
 function enableAudio() {
@@ -755,7 +926,7 @@ function disableAudio() {
     return;
   }
 
-  stopAllTones();
+  stopAllVoices();
   audioCtx.suspend();
   statusEl.textContent = "Audio: off";
   audioToggle.textContent = "Enable Audio";
@@ -828,14 +999,20 @@ function onPointerUp(event) {
     lfoArmingId = null;
     if (node && duration >= 0.15) {
       node.active = true;
-      node.lfoActive = true;
-      node.lfoHalfPeriod = duration;
-      node.lfoStartMs = now;
-      if (!node.playing) {
-        node.playing = true;
-        startNodeTone(node);
+      updatePitchInstances();
+      const voice = startVoice({
+        nodeId: node.id,
+        octave: 0,
+        freq: node.freq,
+        lfoActive: true,
+        lfoHalfPeriod: duration,
+        lfoStartMs: now,
+        source: "node",
+      });
+      if (voice) {
+        node.baseVoiceId = voice.id;
+        ensureLfoLoop();
       }
-      ensureLfoLoop();
     }
     draw();
     return;
@@ -858,35 +1035,38 @@ function onPointerUp(event) {
     const deactivateHit = findDeactivateNodeAtPoint(screenPoint);
     if (deactivateHit) {
       deactivateHit.active = false;
-      deactivateHit.lfoActive = false;
-      deactivateHit.playing = false;
-      stopNodeTone(deactivateHit);
+      stopVoicesForNode(deactivateHit.id, false);
+      updatePitchInstances();
       draw();
       return;
     }
     const hit = hitTest(world);
     if (hit) {
-      if (hit.lfoActive) {
-        hit.lfoActive = false;
-        if (hit._lfoGain) {
-          hit._lfoGain.gain.value = 1;
-        }
-        if (hit.playing) {
-          hit.playing = false;
-          stopNodeTone(hit);
-        }
+      const baseVoice = hit.baseVoiceId ? findVoiceById(hit.baseVoiceId) : null;
+      if (baseVoice && baseVoice.lfoActive) {
+        stopVoice(baseVoice);
+        hit.baseVoiceId = null;
         draw();
         return;
       }
       if (!hit.active) {
         hit.active = true;
-        hit.playing = false;
+        updatePitchInstances();
+        draw();
+        return;
+      }
+      if (baseVoice) {
+        stopVoice(baseVoice);
+        hit.baseVoiceId = null;
       } else {
-        hit.playing = !hit.playing;
-        if (hit.playing) {
-          startNodeTone(hit);
-        } else {
-          stopNodeTone(hit);
+        const voice = startVoice({
+          nodeId: hit.id,
+          octave: 0,
+          freq: hit.freq,
+          source: "node",
+        });
+        if (voice) {
+          hit.baseVoiceId = voice.id;
         }
       }
     }
@@ -972,24 +1152,34 @@ function updateLfoDepth() {
   }
 }
 
-function getLfoValue(node, nowMs) {
-  if (!node.lfoActive || node.lfoHalfPeriod <= 0) {
+function getLfoValue(voice, nowMs) {
+  if (!voice.lfoActive || voice.lfoHalfPeriod <= 0) {
     return 1;
   }
-  const elapsed = (nowMs - node.lfoStartMs) / 1000;
+  const elapsed = (nowMs - voice.lfoStartMs) / 1000;
   if (elapsed < 0) {
     return 1;
   }
-  const phase = (elapsed / node.lfoHalfPeriod) % 2;
+  const phase = (elapsed / voice.lfoHalfPeriod) % 2;
   return phase <= 1 ? phase : 2 - phase;
 }
 
-function getLfoGainValue(node, nowMs) {
-  if (!node.lfoActive) {
+function getLfoGainValue(voice, nowMs) {
+  if (!voice.lfoActive) {
     return 1;
   }
-  const value = getLfoValue(node, nowMs);
+  const value = getLfoValue(voice, nowMs);
   return (1 - lfoDepth) + lfoDepth * value;
+}
+
+function getNodeLfoPulse(nodeId, nowMs) {
+  let pulse = 0;
+  voices.forEach((voice) => {
+    if (voice.nodeId === nodeId && voice.lfoActive) {
+      pulse = Math.max(pulse, getLfoGainValue(voice, nowMs));
+    }
+  });
+  return pulse;
 }
 
 function getActiveRatioAngles() {
@@ -1148,14 +1338,12 @@ function lfoLoop() {
   const now = performance.now();
   let needsFrame = false;
 
-  nodes.forEach((node) => {
-    if (!node.lfoActive) {
+  voices.forEach((voice) => {
+    if (!voice.lfoActive || !voice.lfoGain) {
       return;
     }
-    if (node._lfoGain) {
-      node._lfoGain.gain.value = getLfoGainValue(node, now);
-      needsFrame = true;
-    }
+    voice.lfoGain.gain.value = getLfoGainValue(voice, now);
+    needsFrame = true;
   });
 
   if (lfoArmingId != null) {
@@ -1319,22 +1507,23 @@ async function exportToScaleWorkshop() {
 }
 
 function rebuildLattice() {
-  stopAllTones();
+  stopAllVoices();
   nodes = buildLattice();
+  nodeById = new Map(nodes.map((node) => [node.id, node]));
   edges = buildEdges(nodes, GRID_COLS);
+  updatePitchInstances();
   draw();
 }
 
 function resetLattice() {
-  stopAllTones();
+  stopAllVoices();
   activeKeys.clear();
   nodes.forEach((node) => {
     node.active = node.isCenter;
     node.playing = false;
-    node.lfoActive = false;
-    node.lfoHalfPeriod = 0;
-    node.lfoStartMs = 0;
+    node.baseVoiceId = null;
   });
+  updatePitchInstances();
   view.zoom = 1;
   view.offsetX = 0;
   view.offsetY = 0;
@@ -1380,12 +1569,21 @@ if (lfoDepthSlider) {
   lfoDepthSlider.addEventListener("input", updateLfoDepth);
 }
 waveformSelect.addEventListener("change", () => {
-  nodes.forEach((node) => {
-    if (node.oscillator) {
-      stopNodeTone(node);
-      if (node.playing) {
-        startNodeTone(node);
-      }
+  const snapshot = [...voices];
+  snapshot.forEach((voice) => {
+    const wasBase = nodes.find((node) => node.baseVoiceId === voice.id);
+    stopVoice(voice, true);
+    const newVoice = startVoice({
+      nodeId: voice.nodeId,
+      octave: voice.octave,
+      freq: voice.freq,
+      lfoActive: voice.lfoActive,
+      lfoHalfPeriod: voice.lfoHalfPeriod,
+      lfoStartMs: voice.lfoStartMs,
+      source: voice.source,
+    });
+    if (newVoice && wasBase) {
+      wasBase.baseVoiceId = newVoice.id;
     }
   });
 });

@@ -112,7 +112,7 @@ const ISOMORPHIC_ROWS = [
   { keys: "asdfghjkl", yOffset: 0 },
   { keys: "zxcvbnm", yOffset: 1 },
 ];
-const KEYBOARD_ROW_SKEW = [0, 0, 0, 0];
+const KEYBOARD_ROW_SKEW = [-0.6, -0.35, -0.15, 0];
 let nodes = [];
 let nodeById = new Map();
 let edges = [];
@@ -133,10 +133,14 @@ let zKeyHeld = false;
 let isAddMode = false;
 let shiftHeld = false;
 let isomorphicKeyMap = null;
+let isomorphicLayout = null;
 let isomorphicDirty = true;
+let keyboardKeyPositions = null;
 
 function markIsomorphicDirty() {
   isomorphicDirty = true;
+  isomorphicKeyMap = null;
+  isomorphicLayout = null;
 }
 
 function buildLattice() {
@@ -457,158 +461,229 @@ function buildScreenIsomorphicLayout() {
     return { node, x: pos.x, y: pos.y };
   });
 
-  const axis = getScreenAxisDir();
-  const byId = new Map(projected.map((item) => [item.node.id, item]));
-  const globalSpacingCandidates = [];
-  const maxPairSamples = 1200;
-  const sampleStep = Math.max(1, Math.floor(activeNodes.length / 40));
-  let sampleCount = 0;
-  pairLoop: for (let i = 0; i < activeNodes.length; i += sampleStep) {
-    for (let j = i + sampleStep; j < activeNodes.length; j += sampleStep) {
-      const a = activeNodes[i];
-      const b = activeNodes[j];
-      const isSameRow = axis.axis === "x" ? a.gridY === b.gridY : a.gridX === b.gridX;
-      const delta = axis.axis === "x" ? a.gridX - b.gridX : a.gridY - b.gridY;
-      if (!isSameRow || delta === 0) {
-        continue;
-      }
-      const pa = byId.get(a.id);
-      const pb = byId.get(b.id);
-      if (!pa || !pb) {
-        continue;
-      }
-      const dx = pb.x - pa.x;
-      const dy = pb.y - pa.y;
-      const du = Math.abs(dx * axis.dir.x + dy * axis.dir.y);
-      globalSpacingCandidates.push(du / Math.abs(delta));
-      sampleCount += 1;
-      if (sampleCount >= maxPairSamples) {
-        break pairLoop;
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  projected.forEach((item) => {
+    minX = Math.min(minX, item.x);
+    maxX = Math.max(maxX, item.x);
+    minY = Math.min(minY, item.y);
+    maxY = Math.max(maxY, item.y);
+  });
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
+
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const items = projected.map((item) => ({
+    ...item,
+    uNorm: (item.x - minX) / spanX,
+    vNorm: (item.y - minY) / spanY,
+  }));
+
+  const rowThreshold = (() => {
+    const values = items.map((item) => item.vNorm);
+    if (values.length < 2) {
+      return 0.15;
+    }
+    const sorted = [...values].sort((a, b) => a - b);
+    const diffs = [];
+    for (let i = 1; i < sorted.length; i += 1) {
+      const diff = sorted[i] - sorted[i - 1];
+      if (diff > 0) {
+        diffs.push(diff);
       }
     }
-  }
-  if (!globalSpacingCandidates.length) {
-    globalSpacingCandidates.push(GRID_SPACING * view.zoom);
-  }
-  globalSpacingCandidates.sort((a, b) => a - b);
-  const globalSpacing = globalSpacingCandidates[Math.floor(globalSpacingCandidates.length / 2)];
+    if (!diffs.length) {
+      return 0.15;
+    }
+    diffs.sort((a, b) => a - b);
+    const median = diffs[Math.floor(diffs.length / 2)];
+    return Math.max(0.08, median * 0.6);
+  })();
 
-  const items = projected.map((item) => {
-    const u = item.x * axis.dir.x + item.y * axis.dir.y;
-    const v = item.x * axis.perp.x + item.y * axis.perp.y;
-    return { ...item, u, v };
-  });
-
-  const rowThreshold = computeRowBandThreshold(items.map((item) => item.v));
   const rows = [];
-  const sortedByV = [...items].sort((a, b) => a.v - b.v);
-  sortedByV.forEach((item) => {
-    const last = rows[rows.length - 1];
-    if (!last || Math.abs(item.v - last.centerV) > rowThreshold) {
-      rows.push({ centerV: item.v, items: [item] });
-    } else {
-      last.items.push(item);
-      last.centerV =
-        (last.centerV * (last.items.length - 1) + item.v) / last.items.length;
+  const sortedByV = [...items].sort((a, b) => a.vNorm - b.vNorm);
+  const updateRowStats = (row, item) => {
+    const gridY = item.node.gridY;
+    row.items.push(item);
+    row.centerV = (row.centerV * (row.items.length - 1) + item.vNorm) / row.items.length;
+    const nextCount = (row.gridYCounts.get(gridY) || 0) + 1;
+    row.gridYCounts.set(gridY, nextCount);
+    if (row.dominantGridY == null || nextCount > row.gridYCounts.get(row.dominantGridY)) {
+      row.dominantGridY = gridY;
     }
-  });
-
-  const mergeThreshold = rowThreshold * 1.1;
-  while (rows.length > 4) {
-    let closest = null;
-    for (let i = 0; i < rows.length - 1; i += 1) {
-      const gap = Math.abs(rows[i + 1].centerV - rows[i].centerV);
-      if (!closest || gap < closest.gap) {
-        closest = { index: i, gap };
-      }
-    }
-    if (!closest || closest.gap > mergeThreshold) {
-      break;
-    }
-    const mergedItems = rows[closest.index].items.concat(rows[closest.index + 1].items);
-    const centerV =
-      mergedItems.reduce((sum, item) => sum + item.v, 0) / mergedItems.length;
-    rows.splice(closest.index, 2, { centerV, items: mergedItems });
-  }
-
-  if (rows.length > 4) {
-    const sortedBySize = [...rows].sort((a, b) => b.items.length - a.items.length);
-    rows.length = 0;
-    sortedBySize.slice(0, 4).forEach((row) => rows.push(row));
-    rows.sort((a, b) => a.centerV - b.centerV);
-  }
-
-  rows.forEach((row) => {
-    row.items.sort((a, b) => a.u - b.u);
-  });
-
-  const centerNode = nodes.find((node) => node.isCenter) || activeNodes[0];
-  const centerProjected = byId.get(centerNode.id);
-  const centerU = centerProjected
-    ? centerProjected.x * axis.dir.x + centerProjected.y * axis.dir.y
-    : items[0].u;
-  const leftmostItem = items.reduce((best, item) => (item.u < best.u ? item : best), items[0]);
-  const leftmostRowIndex = rows.findIndex((row) => row.items.includes(leftmostItem));
-  const leftmostU = leftmostItem.u;
-  const leftmostColumnOffset = Math.round((leftmostU - centerU) / globalSpacing);
-  const globalLeftU = centerU + leftmostColumnOffset * globalSpacing;
-  const candidateOffsets = [];
-  for (let rowIndex = 0; rowIndex < ISOMORPHIC_ROWS.length; rowIndex += 1) {
-    candidateOffsets.push(leftmostRowIndex - rowIndex);
-  }
-
-  const evaluateOffset = (offset) => {
-    const map = new Map();
-    let count = 0;
-    ISOMORPHIC_ROWS.forEach((row, rowIndex) => {
-      const groupIndex = rowIndex + offset;
-      if (groupIndex < 0 || groupIndex >= rows.length) {
-        return;
-      }
-      const group = rows[groupIndex];
-      const keyRow = row.keys;
-      const rowSkew = KEYBOARD_ROW_SKEW[rowIndex] || 0;
-      const adjustedLeftU = globalLeftU - rowSkew * globalSpacing;
-      const columnAssignments = new Map();
-      group.items.forEach((item) => {
-        const column = Math.round((item.u - adjustedLeftU) / globalSpacing);
-        if (column < 0 || column >= keyRow.length) {
-          return;
-        }
-        const targetU = adjustedLeftU + column * globalSpacing;
-        const existing = columnAssignments.get(column);
-        if (!existing || Math.abs(item.u - targetU) < Math.abs(existing.u - targetU)) {
-          columnAssignments.set(column, item);
-        }
-      });
-      columnAssignments.forEach((item, column) => {
-        map.set(keyRow[column], item.node);
-        count += 1;
-      });
-    });
-    return { map, count };
   };
 
-  let best = { map: new Map(), count: -1 };
-  candidateOffsets.forEach((offset) => {
-    const result = evaluateOffset(offset);
-    if (result.count > best.count) {
-      best = result;
+  sortedByV.forEach((item) => {
+    const last = rows[rows.length - 1];
+    if (!last) {
+      rows.push({
+        centerV: item.vNorm,
+        items: [item],
+        gridYCounts: new Map([[item.node.gridY, 1]]),
+        dominantGridY: item.node.gridY,
+      });
+      return;
     }
+    const gap = Math.abs(item.vNorm - last.centerV);
+    const prefersRow = item.node.gridY === last.dominantGridY;
+    const threshold = prefersRow ? rowThreshold * 1.6 : rowThreshold;
+    if (gap > threshold) {
+      rows.push({
+        centerV: item.vNorm,
+        items: [item],
+        gridYCounts: new Map([[item.node.gridY, 1]]),
+        dominantGridY: item.node.gridY,
+      });
+      return;
+    }
+    updateRowStats(last, item);
   });
 
-  return best.map;
-}
-
-function getIsomorphicKeyMap() {
-  const layout = buildScreenIsomorphicLayout();
-  const keyMap = new Map();
-  layout.forEach((node, key) => {
-    if (node && node.active) {
-      keyMap.set(node.id, key.toUpperCase());
+  const maxRows = ISOMORPHIC_ROWS.length;
+  if (rows.length > maxRows) {
+    while (rows.length > maxRows) {
+      let closest = null;
+      for (let i = 0; i < rows.length - 1; i += 1) {
+        const gap = Math.abs(rows[i + 1].centerV - rows[i].centerV);
+        if (!closest || gap < closest.gap) {
+          closest = { index: i, gap };
+        }
+      }
+      if (!closest) {
+        break;
+      }
+      const rowA = rows[closest.index];
+      const rowB = rows[closest.index + 1];
+      const mergedItems = rowA.items.concat(rowB.items);
+      const centerV =
+        mergedItems.reduce((sum, item) => sum + item.vNorm, 0) / mergedItems.length;
+      const gridYCounts = new Map(rowA.gridYCounts);
+      rowB.gridYCounts.forEach((count, key) => {
+        gridYCounts.set(key, (gridYCounts.get(key) || 0) + count);
+      });
+      let dominantGridY = null;
+      gridYCounts.forEach((count, key) => {
+        if (dominantGridY == null || count > gridYCounts.get(dominantGridY)) {
+          dominantGridY = key;
+        }
+      });
+      rows.splice(closest.index, 2, {
+        centerV,
+        items: mergedItems,
+        gridYCounts,
+        dominantGridY,
+      });
     }
+  }
+
+  const countClusters = (values) => {
+    if (!values.length) {
+      return 0;
+    }
+    const sorted = [...values].sort((a, b) => a - b);
+    if (sorted.length === 1) {
+      return 1;
+    }
+    const diffs = [];
+    for (let i = 1; i < sorted.length; i += 1) {
+      const diff = sorted[i] - sorted[i - 1];
+      if (diff > 0) {
+        diffs.push(diff);
+      }
+    }
+    if (!diffs.length) {
+      return 1;
+    }
+    diffs.sort((a, b) => a - b);
+    const median = diffs[Math.floor(diffs.length / 2)];
+    const threshold = Math.max(0.08, median * 0.6);
+    let count = 1;
+    for (let i = 1; i < sorted.length; i += 1) {
+      if (sorted[i] - sorted[i - 1] > threshold) {
+        count += 1;
+      }
+    }
+    return count;
+  };
+
+  let columnsNeeded = 1;
+  rows.forEach((row) => {
+    columnsNeeded = Math.max(columnsNeeded, countClusters(row.items.map((item) => item.uNorm)));
   });
-  return keyMap;
+
+  const getKeyboardRowsForCount = (count) => {
+    if (count <= 1) {
+      return [ISOMORPHIC_ROWS[2]];
+    }
+    if (count === 2) {
+      return [ISOMORPHIC_ROWS[1], ISOMORPHIC_ROWS[2]];
+    }
+    if (count === 3) {
+      return [ISOMORPHIC_ROWS[1], ISOMORPHIC_ROWS[2], ISOMORPHIC_ROWS[3]];
+    }
+    return ISOMORPHIC_ROWS;
+  };
+
+  const keyboardRows = getKeyboardRowsForCount(rows.length);
+  const keyboardSkews = keyboardRows.map((row) => {
+    const index = ISOMORPHIC_ROWS.indexOf(row);
+    return KEYBOARD_ROW_SKEW[index] || 0;
+  });
+  const maxRowKeys = Math.max(...keyboardRows.map((row) => row.keys.length));
+  columnsNeeded = Math.max(1, Math.min(columnsNeeded, maxRowKeys));
+
+  const rowMeta = keyboardRows.map((row, rowIndex) => {
+    const columns = Math.min(columnsNeeded, row.keys.length);
+    const startIndex = Math.max(0, Math.floor((row.keys.length - columns) / 2));
+    const rowStart = keyboardSkews[rowIndex] + startIndex;
+    const rowEnd = rowStart + columns - 1;
+    return {
+      row,
+      columns,
+      startIndex,
+      rowStart,
+      rowEnd,
+      centerV: rows[rowIndex] ? rows[rowIndex].centerV : rowIndex / Math.max(1, rows.length - 1),
+    };
+  });
+  const minStart = Math.min(...rowMeta.map((meta) => meta.rowStart));
+  const maxEnd = Math.max(...rowMeta.map((meta) => meta.rowEnd));
+  const keySpan = Math.max(1, maxEnd - minStart);
+
+  const layout = new Map();
+  rows.forEach((rowGroup, rowIndex) => {
+    const meta = rowMeta[rowIndex];
+    if (!meta) {
+      return;
+    }
+    rowGroup.items.forEach((item) => {
+      const uKey = minStart + item.uNorm * keySpan;
+      const rawIndex = uKey - meta.rowStart;
+      const keyIndex = clamp(
+        Math.floor(rawIndex + 0.5 - 1e-6),
+        0,
+        meta.columns - 1
+      );
+      const key = meta.row.keys[meta.startIndex + keyIndex];
+      const keyCenterU = (meta.rowStart + keyIndex - minStart) / keySpan;
+      const keyCenterV = meta.centerV;
+      const dist =
+        Math.pow(item.uNorm - keyCenterU, 2) + Math.pow(item.vNorm - keyCenterV, 2);
+      const existing = layout.get(key);
+      if (!existing || dist < existing.dist) {
+        layout.set(key, { node: item.node, dist });
+      }
+    });
+  });
+
+  const result = new Map();
+  layout.forEach((value, key) => {
+    result.set(key, value.node);
+  });
+
+  return result;
 }
 
 function drawKeyBanner(pos, radius, label, alpha) {
@@ -639,8 +714,72 @@ function drawKeyBanner(pos, radius, label, alpha) {
 }
 
 function findIsomorphicNodeForKey(key) {
+  ensureIsomorphicMaps();
+  return isomorphicLayout.get(key) || null;
+}
+
+function getKeyboardKeyPositions() {
+  if (keyboardKeyPositions) {
+    return keyboardKeyPositions;
+  }
+  const positions = new Map();
+  ISOMORPHIC_ROWS.forEach((row, rowIndex) => {
+    const skew = KEYBOARD_ROW_SKEW[rowIndex] || 0;
+    row.keys.split("").forEach((key, colIndex) => {
+      positions.set(key, { x: colIndex + skew, y: rowIndex });
+    });
+  });
+  keyboardKeyPositions = positions;
+  return positions;
+}
+
+function findNearestIsomorphicNodeForKey(key) {
+  const target = getKeyboardKeyPositions().get(key);
+  if (!target) {
+    return null;
+  }
+  ensureIsomorphicMaps();
+  if (!isomorphicLayout) {
+    return null;
+  }
+  let bestNode = null;
+  let bestDist = Number.POSITIVE_INFINITY;
+  let bestX = Number.POSITIVE_INFINITY;
+  const positions = getKeyboardKeyPositions();
+  isomorphicLayout.forEach((node, layoutKey) => {
+    if (!node || !node.active) {
+      return;
+    }
+    const pos = positions.get(layoutKey);
+    if (!pos) {
+      return;
+    }
+    const dx = pos.x - target.x;
+    const dy = pos.y - target.y;
+    const dist = dx * dx + dy * dy;
+    if (dist < bestDist - 1e-6 || (Math.abs(dist - bestDist) < 1e-6 && pos.x < bestX)) {
+      bestDist = dist;
+      bestNode = node;
+      bestX = pos.x;
+    }
+  });
+  return bestNode;
+}
+
+function ensureIsomorphicMaps() {
+  if (!isomorphicDirty && isomorphicLayout && isomorphicKeyMap) {
+    return;
+  }
   const layout = buildScreenIsomorphicLayout();
-  return layout.get(key) || null;
+  const keyMap = new Map();
+  layout.forEach((node, layoutKey) => {
+    if (node && node.active) {
+      keyMap.set(node.id, layoutKey.toUpperCase());
+    }
+  });
+  isomorphicLayout = layout;
+  isomorphicKeyMap = keyMap;
+  isomorphicDirty = false;
 }
 
 function handleKeyDown(event) {
@@ -679,15 +818,17 @@ function handleKeyDown(event) {
       freq: instance.freq,
       source: "keyboard",
     });
-  } else if (mode === "iso") {
+  } else if (mode === "iso" || mode === "iso-fuzzy") {
     const node = findIsomorphicNodeForKey(key);
-    if (!node || !node.active) {
+    const resolved =
+      node || (mode === "iso-fuzzy" ? findNearestIsomorphicNodeForKey(key) : null);
+    if (!resolved || !resolved.active) {
       return;
     }
     voice = startVoice({
-      nodeId: node.id,
+      nodeId: resolved.id,
       octave: 0,
-      freq: node.freq,
+      freq: resolved.freq,
       source: "keyboard",
     });
   }
@@ -1031,10 +1172,9 @@ function draw() {
     .sort((a, b) => a.pos.depth - b.pos.depth);
 
   const keyboardMode = getKeyboardMode();
-  const isIsomorphicMode = keyboardMode === "iso";
-  if (isIsomorphicMode && (isomorphicDirty || !isomorphicKeyMap)) {
-    isomorphicKeyMap = getIsomorphicKeyMap();
-    isomorphicDirty = false;
+  const isIsomorphicMode = keyboardMode === "iso" || keyboardMode === "iso-fuzzy";
+  if (isIsomorphicMode) {
+    ensureIsomorphicMaps();
   }
   const keyMap = isIsomorphicMode ? isomorphicKeyMap : null;
 
@@ -1557,6 +1697,7 @@ function resizeCanvas() {
   canvas.width = Math.floor(canvas.clientWidth * scale);
   canvas.height = Math.floor(canvas.clientHeight * scale);
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  markIsomorphicDirty();
   draw();
 }
 

@@ -16,9 +16,10 @@
       <div class="top-bar">
         <header class="title">
           <h1>Tuning Lattice</h1>
-          <p>Drag to pan. Scroll to zoom. <br />Shift double-click & hold for LFO. <br />Created by <a href="http://www.elliotcolemusic.com/" target="_blank">Elliot Cole</a></p>
+          <p class="creator">Created by <a href="http://www.elliotcolemusic.com/" target="_blank">Elliot Cole</a></p>
         </header>
 
+        <div class="controls-wrap">
         <section class="panel controls">
         <div class="control-group">
           <label for="fundamental">Fundamental (Hz)</label>
@@ -29,57 +30,64 @@
         </div>
         
         <div class="control-group">
-          <label for="keyboard-mode">Keyboard Mode</label>
-          <select id="keyboard-mode">
-            <option value="off" selected>Keyboard Off</option>
-            <option value="piano">Piano Keyboard</option>
-            <option value="iso">Isometric</option>
-            <option value="iso-compact">Iso (Compact)</option>
-          </select>
-        </div>
-        <div class="ratio-stack">
-          <div class="control-group">
-            <label for="ratio-x">X Ratio</label>
-            <select id="ratio-x" class="narrow-select"></select>
-          </div>
-          <div class="control-group">
-            <label for="ratio-y">Y Ratio</label>
-            <select id="ratio-y" class="narrow-select"></select>
+          <div class="control-inline">
+            <input id="mode-3d" type="checkbox" />
+            <span>3D</span>
           </div>
         </div>
-        <button id="audio-toggle" type="button">Enable Audio</button>
-        <button id="reset-lattice" type="button">Reset</button>
-        <button id="export-scale" type="button">Export to Scale Workshop</button>
-        <div class="ratio-wheel-toggle">
-          <button id="ratio-wheel-toggle" type="button">Octave Wheel</button>
-          <div id="ratio-wheel-drawer" class="panel ratio-wheel-drawer" hidden>
-            <div class="ratio-wheel-drawer-header">
-              <div class="ratio-wheel-drawer-title">Ratio Wheel</div>
-              <button id="ratio-wheel-close" type="button" class="ratio-wheel-close" aria-label="Close ratio wheel">Close</button>
-            </div>
-            <canvas id="ratio-wheel-large" width="420" height="420"></canvas>
-          </div>
+        <div class="control-group ratios-inline">
+          <span class="ratios-label">Ratios:</span>
+          <span class="ratio-axis-label">X</span>
+          <label for="ratio-x" class="visually-hidden">X Ratio</label>
+          <select id="ratio-x" class="narrow-select"></select>
+          <span class="ratio-axis-label">Y</span>
+          <label for="ratio-y" class="visually-hidden">Y Ratio</label>
+          <select id="ratio-y" class="narrow-select"></select>
+          <span class="ratio-axis-label">Z</span>
+          <label for="ratio-z" class="visually-hidden">Z Ratio</label>
+          <select id="ratio-z" class="narrow-select ratio-z"></select>
         </div>
-        <div class="status" id="status">Audio: off</div>
-        <div class="control-group options-toggle">
-          <button id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel">
-            Options <span class="chevron">v</span>
-          </button>
-          <div id="options-panel" class="panel options-panel" hidden>
-            <div class="control-group">
-              <label for="a4">A4 Reference (Hz)</label>
-              <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
-            </div>
-            <div class="control-group">
-              <label for="theme-select">Theme</label>
-              <select id="theme-select">
-                <option value="light">Light Mode</option>
-                <option value="dark">Dark Mode</option>
-              </select>
+        <div class="control-actions">
+          <button id="audio-toggle" type="button">Enable Audio</button>
+          <button id="reset-lattice" type="button">Reset</button>
+          <div class="ratio-wheel-toggle">
+            <button id="ratio-wheel-toggle" type="button" class="ratio-wheel-button" aria-label="Octave Wheel">
+              <canvas id="ratio-wheel-mini" class="ratio-wheel-canvas" width="40" height="40"></canvas>
+            </button>
+          </div>
+          <div class="control-group options-toggle">
+            <button id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel">
+              Options <span class="chevron">v</span>
+            </button>
+            <div id="options-panel" class="panel options-panel" hidden>
+              <div class="control-group">
+                <label for="a4">A4 Reference (Hz)</label>
+                <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
+              </div>
+              <div class="control-group">
+                <label for="theme-select">Theme</label>
+                <select id="theme-select">
+                  <option value="light">Light Mode</option>
+                  <option value="dark">Dark Mode</option>
+                </select>
+              </div>
+              <button id="export-scale" type="button">Export to Scale Workshop</button>
             </div>
           </div>
         </div>
         </section>
+        <div class="hint-row">
+          <div id="ui-hint" class="ui-hint"></div>
+          <div id="z-mode-message" class="ui-hint z-mode-message" hidden></div>
+        </div>
+        </div>
+        <div id="ratio-wheel-drawer" class="panel ratio-wheel-drawer" hidden>
+          <div class="ratio-wheel-drawer-header">
+            <div class="ratio-wheel-drawer-title">Ratio Wheel</div>
+            <button id="ratio-wheel-close" type="button" class="ratio-wheel-close" aria-label="Close ratio wheel">Close</button>
+          </div>
+          <canvas id="ratio-wheel-large" class="ratio-wheel-canvas" width="420" height="420"></canvas>
+        </div>
       </div>
     </main>
 
@@ -93,6 +101,14 @@
         <label for="lfo-depth">LFO Depth</label>
         <input id="lfo-depth" type="range" min="0" max="1" step="0.01" value="1" />
         <span id="lfo-depth-readout">100%</span>
+      </div>
+      <div class="synth-group">
+        <label for="keyboard-mode">Keyboard Mode</label>
+        <select id="keyboard-mode">
+          <option value="off" selected>Keyboard Off</option>
+          <option value="piano">Piano Keyboard</option>
+          <option value="iso">Isomorphic</option>
+        </select>
       </div>
       <div class="synth-group">
         <label for="waveform">Waveform</label>
@@ -131,6 +147,54 @@
         </div>
       </div>
     </section>
+
+    <aside id="nav-3d" class="nav-3d" hidden>
+      <div class="panel nav-3d-panel">
+        <div class="nav-3d-section">
+          <div class="nav-3d-title">Views</div>
+          <button type="button" data-view="xy">X-Y</button>
+          <button type="button" data-view="zy">Z-Y</button>
+          <button type="button" data-view="quarter">Quarter</button>
+          <button type="button" data-action="best-view">Best View</button>
+        </div>
+        
+        <div class="nav-3d-section">
+          <label class="nav-3d-toggle">
+            <input id="nav-axes" type="checkbox" checked />
+            <span>Axes</span>
+          </label>
+          <label class="nav-3d-toggle">
+            <input id="nav-grid" type="checkbox" checked />
+            <span>Grid</span>
+          </label>
+        </div>
+        <div class="nav-3d-section">
+          <div class="nav-3d-title">Rotate</div>
+          <div class="nav-3d-buttons">
+            <button type="button" data-action="rot-up">Up</button>
+            <button type="button" data-action="rot-down">Down</button>
+            <button type="button" data-action="rot-left">Left</button>
+            <button type="button" data-action="rot-right">Right</button>
+          </div>
+        </div>
+        <div class="nav-3d-section">
+          <div class="nav-3d-title">Pan</div>
+          <div class="nav-3d-buttons">
+            <button type="button" data-action="pan-up">Up</button>
+            <button type="button" data-action="pan-down">Down</button>
+            <button type="button" data-action="pan-left">Left</button>
+            <button type="button" data-action="pan-right">Right</button>
+          </div>
+        </div>
+        <div class="nav-3d-section">
+          <div class="nav-3d-title">Zoom</div>
+          <div class="nav-3d-buttons">
+            <button type="button" data-action="zoom-in">+</button>
+            <button type="button" data-action="zoom-out">-</button>
+          </div>
+        </div>
+      </div>
+    </aside>
 
     <script type="module" src="./src/main.js"></script>
   </body>

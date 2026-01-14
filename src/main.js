@@ -1,7 +1,6 @@
 import { customOscillatorTypes, customOscillators } from "web-audio-oscillators";
 const canvas = document.getElementById("lattice");
 const ctx = canvas.getContext("2d");
-const statusEl = document.getElementById("status");
 const audioToggle = document.getElementById("audio-toggle");
 const resetButton = document.getElementById("reset-lattice");
 const exportScaleButton = document.getElementById("export-scale");
@@ -12,11 +11,15 @@ const ratioWheelToggle = document.getElementById("ratio-wheel-toggle");
 const ratioWheelDrawer = document.getElementById("ratio-wheel-drawer");
 const ratioWheelClose = document.getElementById("ratio-wheel-close");
 const ratioWheelLarge = document.getElementById("ratio-wheel-large");
+const ratioWheelMini = document.getElementById("ratio-wheel-mini");
+const uiHint = document.getElementById("ui-hint");
+const zModeMessage = document.getElementById("z-mode-message");
 const fundamentalInput = document.getElementById("fundamental");
 const fundamentalNoteSelect = document.getElementById("fundamental-note");
 const a4Input = document.getElementById("a4");
 const ratioXSelect = document.getElementById("ratio-x");
 const ratioYSelect = document.getElementById("ratio-y");
+const ratioZSelect = document.getElementById("ratio-z");
 const volumeSlider = document.getElementById("volume");
 const volumeReadout = document.getElementById("volume-readout");
 const lfoDepthSlider = document.getElementById("lfo-depth");
@@ -32,21 +35,31 @@ const attackReadout = document.getElementById("attack-readout");
 const decayReadout = document.getElementById("decay-readout");
 const sustainReadout = document.getElementById("sustain-readout");
 const releaseReadout = document.getElementById("release-readout");
+const mode3dCheckbox = document.getElementById("mode-3d");
+const nav3dPanel = document.getElementById("nav-3d");
+const navAddModeToggle = document.getElementById("nav-add-mode");
+const navAxesToggle = document.getElementById("nav-axes");
+const navGridToggle = document.getElementById("nav-grid");
+const nav3dButtons = nav3dPanel ? nav3dPanel.querySelectorAll("button[data-view], button[data-action]") : [];
 
 const view = {
   zoom: 1,
   offsetX: 0,
   offsetY: 0,
   dragging: false,
+  rotating: false,
   dragStart: { x: 0, y: 0 },
   dragOffsetStart: { x: 0, y: 0 },
+  rotateStart: { x: 0, y: 0 },
+  rotateAnglesStart: { x: 0, y: 0 },
   lastPointer: { x: 0, y: 0 },
+  rotX: 0,
+  rotY: 0,
 };
 
 let audioCtx = null;
 let masterGain = null;
 let hoverNodeId = null;
-let hoverDeactivateId = null;
 let themeColors = null;
 let lfoDepth = 1;
 let lfoArmingId = null;
@@ -60,6 +73,8 @@ const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "
 const primes = [2, 3, 5, 7, 11, 13];
 const GRID_COLS = 20;
 const GRID_ROWS = 20;
+const GRID_DEPTH = 7;
+const GRID_SPACING = 120;
 const BUILTIN_WAVEFORMS = ["sine", "triangle", "square", "sawtooth"];
 const CUSTOM_WAVEFORMS = new Set(customOscillatorTypes || []);
 const KEYBOARD_MAP = {
@@ -91,13 +106,13 @@ const KEYBOARD_MAP = {
   "\\": 24,
 };
 const KEYBOARD_BASE_MIDI = 60;
-const ISOMETRIC_ROWS = [
+const ISOMORPHIC_ROWS = [
   { keys: "1234567890", yOffset: -2 },
   { keys: "qwertyuiop", yOffset: -1 },
   { keys: "asdfghjkl", yOffset: 0 },
   { keys: "zxcvbnm", yOffset: 1 },
 ];
-const DEACTIVATE_SIZE = 8;
+const KEYBOARD_ROW_SKEW = [0, 0, 0, 0];
 let nodes = [];
 let nodeById = new Map();
 let edges = [];
@@ -106,51 +121,84 @@ let pitchInstances = [];
 let nextVoiceId = 1;
 const MIN_FREQ = 40;
 const MAX_FREQ = 19000;
+let is3DMode = false;
+let isFlattened2D = false;
+let showAxes = true;
+let showGrid = true;
+let gridDepth = 1;
+let gridCenterZ = 0;
+let zModeActive = false;
+let zModeAnchor = null;
+let zKeyHeld = false;
+let isAddMode = false;
+let shiftHeld = false;
+let isomorphicKeyMap = null;
+let isomorphicDirty = true;
+
+function markIsomorphicDirty() {
+  isomorphicDirty = true;
+}
 
 function buildLattice() {
   const result = [];
   const cols = GRID_COLS;
   const rows = GRID_ROWS;
-  const spacing = 120;
+  const spacing = GRID_SPACING;
   let id = 0;
   const fundamental = Number(fundamentalInput.value) || 220;
   const a4 = Number(a4Input.value) || 440;
   const ratioX = Number(ratioXSelect.value) || 3;
   const ratioY = Number(ratioYSelect.value) || 5;
+  const ratioZ = Number(ratioZSelect.value) || 7;
   const centerX = Math.floor(cols / 2);
   const centerY = Math.floor(rows / 2);
+  const depth = is3DMode || isFlattened2D ? GRID_DEPTH : 1;
+  gridDepth = depth;
+  gridCenterZ = Math.floor(depth / 2);
 
-  for (let y = 0; y < rows; y += 1) {
-    for (let x = 0; x < cols; x += 1) {
-      const pitchIndex = y * cols + x;
-      const exponentX = x - centerX;
-      const exponentY = centerY - y;
-      const baseRatio = buildRatioComponents(ratioX, ratioY, exponentX, exponentY);
-      const reduced = reduceToOctave(baseRatio.numerator, baseRatio.denominator);
-      const etInfo = getNearestEtInfo(fundamental * reduced.ratio, a4);
-      const isCenter = exponentX === 0 && exponentY === 0;
-      result.push({
-        id: id++,
-        numerator: reduced.numerator,
-        denominator: reduced.denominator,
-        exponentX,
-        exponentY,
-        gridX: x,
-        gridY: y,
-        coordinate: {
-          x: (x - centerX) * spacing,
-          y: (y - centerY) * spacing,
-        },
-        freq: fundamental * reduced.ratio,
-        cents_from_et: etInfo.cents,
-        note_name: etInfo.name,
-        pitch_class: etInfo.pitchClass,
-        active: isCenter,
-        playing: false,
-        volume: 0,
-        isCenter,
-        baseVoiceId: null,
-      });
+  for (let z = 0; z < depth; z += 1) {
+    for (let y = 0; y < rows; y += 1) {
+      for (let x = 0; x < cols; x += 1) {
+        const exponentX = x - centerX;
+        const exponentY = centerY - y;
+        const exponentZ = gridCenterZ - z;
+        const baseRatio = buildRatioComponents(
+          ratioX,
+          ratioY,
+          ratioZ,
+          exponentX,
+          exponentY,
+          exponentZ
+        );
+        const reduced = reduceToOctave(baseRatio.numerator, baseRatio.denominator);
+        const etInfo = getNearestEtInfo(fundamental * reduced.ratio, a4);
+        const isCenter = exponentX === 0 && exponentY === 0 && exponentZ === 0;
+        result.push({
+          id: id++,
+          numerator: reduced.numerator,
+          denominator: reduced.denominator,
+          exponentX,
+          exponentY,
+          exponentZ,
+          gridX: x,
+          gridY: y,
+          gridZ: z,
+          coordinate: {
+            x: (x - centerX) * spacing,
+            y: (y - centerY) * spacing,
+            z: (z - gridCenterZ) * spacing,
+          },
+          freq: fundamental * reduced.ratio,
+          cents_from_et: etInfo.cents,
+          note_name: etInfo.name,
+          pitch_class: etInfo.pitchClass,
+          active: isCenter,
+          playing: false,
+          volume: 0,
+          isCenter,
+          baseVoiceId: null,
+        });
+      }
     }
   }
 
@@ -171,6 +219,7 @@ function updateNodeFrequencies() {
   updatePitchInstances();
   updateVoiceFrequencies();
   draw();
+  schedulePresetUrlUpdate();
 }
 
 function updateNodeRatios() {
@@ -178,9 +227,17 @@ function updateNodeRatios() {
   const a4 = Number(a4Input.value) || 440;
   const ratioX = Number(ratioXSelect.value) || 3;
   const ratioY = Number(ratioYSelect.value) || 5;
+  const ratioZ = Number(ratioZSelect.value) || 7;
 
   nodes.forEach((node) => {
-    const baseRatio = buildRatioComponents(ratioX, ratioY, node.exponentX, node.exponentY);
+    const baseRatio = buildRatioComponents(
+      ratioX,
+      ratioY,
+      ratioZ,
+      node.exponentX,
+      node.exponentY,
+      node.exponentZ || 0
+    );
     const reduced = reduceToOctave(baseRatio.numerator, baseRatio.denominator);
     node.numerator = reduced.numerator;
     node.denominator = reduced.denominator;
@@ -194,6 +251,7 @@ function updateNodeRatios() {
   updatePitchInstances();
   updateVoiceFrequencies();
   draw();
+  schedulePresetUrlUpdate();
 }
 
 function updateVoiceFrequencies() {
@@ -344,68 +402,245 @@ function findVoiceById(voiceId) {
   return voices.find((voice) => voice.id === voiceId) || null;
 }
 
-function findIsometricRowForKey(key) {
-  for (const row of ISOMETRIC_ROWS) {
-    const index = row.keys.indexOf(key);
-    if (index !== -1) {
-      return { row, index };
+function computeRowBandThreshold(values) {
+  if (values.length < 2) {
+    return Math.max(14, GRID_SPACING * view.zoom * 0.35);
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const diffs = [];
+  for (let i = 1; i < sorted.length; i += 1) {
+    const diff = sorted[i] - sorted[i - 1];
+    if (diff > 0) {
+      diffs.push(diff);
     }
   }
-  return null;
+  if (!diffs.length) {
+    return Math.max(14, GRID_SPACING * view.zoom * 0.35);
+  }
+  diffs.sort((a, b) => a - b);
+  const median = diffs[Math.floor(diffs.length / 2)];
+  return Math.max(14, median * 0.6);
 }
 
-function getIsometricAnchorX() {
-  const centerY = Math.floor(GRID_ROWS / 2);
-  const rowYs = new Set(ISOMETRIC_ROWS.map((row) => centerY + row.yOffset));
-  let minX = null;
-  let anchorY = null;
-  nodes.forEach((node) => {
-    if (!node.active || !rowYs.has(node.gridY)) {
-      return;
+function getScreenAxisDir() {
+  const origin = projectPoint({ x: 0, y: 0, z: 0 });
+  const xAxis = projectPoint({ x: GRID_SPACING, y: 0, z: 0 });
+  const yAxis = projectPoint({ x: 0, y: GRID_SPACING, z: 0 });
+  const xVec = {
+    x: (xAxis.x - origin.x) * view.zoom,
+    y: (xAxis.y - origin.y) * view.zoom,
+  };
+  const yVec = {
+    x: (yAxis.x - origin.x) * view.zoom,
+    y: (yAxis.y - origin.y) * view.zoom,
+  };
+  const xScore = Math.abs(xVec.x);
+  const yScore = Math.abs(yVec.x);
+  const useXAxis = xScore >= yScore;
+  let raw = useXAxis ? xVec : yVec;
+  const length = Math.hypot(raw.x, raw.y) || 1;
+  let dir = { x: raw.x / length, y: raw.y / length };
+  if (dir.x < 0) {
+    dir = { x: -dir.x, y: -dir.y };
+  }
+  return { dir, perp: { x: -dir.y, y: dir.x }, axis: useXAxis ? "x" : "y" };
+}
+
+function buildScreenIsomorphicLayout() {
+  const activeNodes = nodes.filter((node) => node.active);
+  if (!activeNodes.length) {
+    return new Map();
+  }
+
+  const projected = activeNodes.map((node) => {
+    const pos = worldToScreen(node.coordinate);
+    return { node, x: pos.x, y: pos.y };
+  });
+
+  const axis = getScreenAxisDir();
+  const byId = new Map(projected.map((item) => [item.node.id, item]));
+  const globalSpacingCandidates = [];
+  const maxPairSamples = 1200;
+  const sampleStep = Math.max(1, Math.floor(activeNodes.length / 40));
+  let sampleCount = 0;
+  pairLoop: for (let i = 0; i < activeNodes.length; i += sampleStep) {
+    for (let j = i + sampleStep; j < activeNodes.length; j += sampleStep) {
+      const a = activeNodes[i];
+      const b = activeNodes[j];
+      const isSameRow = axis.axis === "x" ? a.gridY === b.gridY : a.gridX === b.gridX;
+      const delta = axis.axis === "x" ? a.gridX - b.gridX : a.gridY - b.gridY;
+      if (!isSameRow || delta === 0) {
+        continue;
+      }
+      const pa = byId.get(a.id);
+      const pb = byId.get(b.id);
+      if (!pa || !pb) {
+        continue;
+      }
+      const dx = pb.x - pa.x;
+      const dy = pb.y - pa.y;
+      const du = Math.abs(dx * axis.dir.x + dy * axis.dir.y);
+      globalSpacingCandidates.push(du / Math.abs(delta));
+      sampleCount += 1;
+      if (sampleCount >= maxPairSamples) {
+        break pairLoop;
+      }
     }
-    if (minX == null || node.gridX < minX || (node.gridX === minX && node.gridY < anchorY)) {
-      minX = node.gridX;
-      anchorY = node.gridY;
+  }
+  if (!globalSpacingCandidates.length) {
+    globalSpacingCandidates.push(GRID_SPACING * view.zoom);
+  }
+  globalSpacingCandidates.sort((a, b) => a - b);
+  const globalSpacing = globalSpacingCandidates[Math.floor(globalSpacingCandidates.length / 2)];
+
+  const items = projected.map((item) => {
+    const u = item.x * axis.dir.x + item.y * axis.dir.y;
+    const v = item.x * axis.perp.x + item.y * axis.perp.y;
+    return { ...item, u, v };
+  });
+
+  const rowThreshold = computeRowBandThreshold(items.map((item) => item.v));
+  const rows = [];
+  const sortedByV = [...items].sort((a, b) => a.v - b.v);
+  sortedByV.forEach((item) => {
+    const last = rows[rows.length - 1];
+    if (!last || Math.abs(item.v - last.centerV) > rowThreshold) {
+      rows.push({ centerV: item.v, items: [item] });
+    } else {
+      last.items.push(item);
+      last.centerV =
+        (last.centerV * (last.items.length - 1) + item.v) / last.items.length;
     }
   });
-  return minX;
+
+  const mergeThreshold = rowThreshold * 1.1;
+  while (rows.length > 4) {
+    let closest = null;
+    for (let i = 0; i < rows.length - 1; i += 1) {
+      const gap = Math.abs(rows[i + 1].centerV - rows[i].centerV);
+      if (!closest || gap < closest.gap) {
+        closest = { index: i, gap };
+      }
+    }
+    if (!closest || closest.gap > mergeThreshold) {
+      break;
+    }
+    const mergedItems = rows[closest.index].items.concat(rows[closest.index + 1].items);
+    const centerV =
+      mergedItems.reduce((sum, item) => sum + item.v, 0) / mergedItems.length;
+    rows.splice(closest.index, 2, { centerV, items: mergedItems });
+  }
+
+  if (rows.length > 4) {
+    const sortedBySize = [...rows].sort((a, b) => b.items.length - a.items.length);
+    rows.length = 0;
+    sortedBySize.slice(0, 4).forEach((row) => rows.push(row));
+    rows.sort((a, b) => a.centerV - b.centerV);
+  }
+
+  rows.forEach((row) => {
+    row.items.sort((a, b) => a.u - b.u);
+  });
+
+  const centerNode = nodes.find((node) => node.isCenter) || activeNodes[0];
+  const centerProjected = byId.get(centerNode.id);
+  const centerU = centerProjected
+    ? centerProjected.x * axis.dir.x + centerProjected.y * axis.dir.y
+    : items[0].u;
+  const leftmostItem = items.reduce((best, item) => (item.u < best.u ? item : best), items[0]);
+  const leftmostRowIndex = rows.findIndex((row) => row.items.includes(leftmostItem));
+  const leftmostU = leftmostItem.u;
+  const leftmostColumnOffset = Math.round((leftmostU - centerU) / globalSpacing);
+  const globalLeftU = centerU + leftmostColumnOffset * globalSpacing;
+  const candidateOffsets = [];
+  for (let rowIndex = 0; rowIndex < ISOMORPHIC_ROWS.length; rowIndex += 1) {
+    candidateOffsets.push(leftmostRowIndex - rowIndex);
+  }
+
+  const evaluateOffset = (offset) => {
+    const map = new Map();
+    let count = 0;
+    ISOMORPHIC_ROWS.forEach((row, rowIndex) => {
+      const groupIndex = rowIndex + offset;
+      if (groupIndex < 0 || groupIndex >= rows.length) {
+        return;
+      }
+      const group = rows[groupIndex];
+      const keyRow = row.keys;
+      const rowSkew = KEYBOARD_ROW_SKEW[rowIndex] || 0;
+      const adjustedLeftU = globalLeftU - rowSkew * globalSpacing;
+      const columnAssignments = new Map();
+      group.items.forEach((item) => {
+        const column = Math.round((item.u - adjustedLeftU) / globalSpacing);
+        if (column < 0 || column >= keyRow.length) {
+          return;
+        }
+        const targetU = adjustedLeftU + column * globalSpacing;
+        const existing = columnAssignments.get(column);
+        if (!existing || Math.abs(item.u - targetU) < Math.abs(existing.u - targetU)) {
+          columnAssignments.set(column, item);
+        }
+      });
+      columnAssignments.forEach((item, column) => {
+        map.set(keyRow[column], item.node);
+        count += 1;
+      });
+    });
+    return { map, count };
+  };
+
+  let best = { map: new Map(), count: -1 };
+  candidateOffsets.forEach((offset) => {
+    const result = evaluateOffset(offset);
+    if (result.count > best.count) {
+      best = result;
+    }
+  });
+
+  return best.map;
 }
 
-function getActiveNodesInRow(gridY, minX) {
-  return nodes
-    .filter((node) => node.active && node.gridY === gridY && node.gridX >= minX)
-    .sort((a, b) => a.gridX - b.gridX);
+function getIsomorphicKeyMap() {
+  const layout = buildScreenIsomorphicLayout();
+  const keyMap = new Map();
+  layout.forEach((node, key) => {
+    if (node && node.active) {
+      keyMap.set(node.id, key.toUpperCase());
+    }
+  });
+  return keyMap;
 }
 
-function findIsometricNodeForKey(key, compress = false) {
-  const centerY = Math.floor(GRID_ROWS / 2);
-  const match = findIsometricRowForKey(key);
-  if (!match) {
-    return null;
-  }
+function drawKeyBanner(pos, radius, label, alpha) {
+  const paddingX = 6;
+  const paddingY = 3;
+  const fontSize = 11;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `${fontSize}px "Courier New", monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const metrics = ctx.measureText(label);
+  const textWidth = metrics.width;
+  const boxWidth = textWidth + paddingX * 2;
+  const boxHeight = fontSize + paddingY * 2;
+  const x = pos.x - boxWidth / 2;
+  const y = pos.y - radius - boxHeight - 3;
+  ctx.fillStyle = "rgba(10, 15, 20, 0.7)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(x, y, boxWidth, boxHeight, 6);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(label, pos.x, y + boxHeight / 2);
+  ctx.restore();
+}
 
-  const y = centerY + match.row.yOffset;
-  if (y < 0 || y >= GRID_ROWS) {
-    return null;
-  }
-
-  const baseX = getIsometricAnchorX();
-  if (baseX == null) {
-    return null;
-  }
-
-  if (compress) {
-    const activeRow = getActiveNodesInRow(y, baseX);
-    return activeRow[match.index] || null;
-  }
-
-  const x = baseX + match.index;
-  if (x < 0 || x >= GRID_COLS) {
-    return null;
-  }
-
-  return findNodeByGrid(x, y);
-
+function findIsomorphicNodeForKey(key) {
+  const layout = buildScreenIsomorphicLayout();
+  return layout.get(key) || null;
 }
 
 function handleKeyDown(event) {
@@ -445,18 +680,7 @@ function handleKeyDown(event) {
       source: "keyboard",
     });
   } else if (mode === "iso") {
-    const node = findIsometricNodeForKey(key, false);
-    if (!node || !node.active) {
-      return;
-    }
-    voice = startVoice({
-      nodeId: node.id,
-      octave: 0,
-      freq: node.freq,
-      source: "keyboard",
-    });
-  } else if (mode === "iso-compact") {
-    const node = findIsometricNodeForKey(key, true);
+    const node = findIsomorphicNodeForKey(key);
     if (!node || !node.active) {
       return;
     }
@@ -498,21 +722,30 @@ function handleKeyUp(event) {
   draw();
 }
 
-function buildEdges(nodesList, cols) {
-  const lookup = new Map(nodesList.map((node) => [node.id, node]));
+function buildEdges(nodesList, cols, rows, depth) {
+  const lookup = new Map(
+    nodesList.map((node) => [`${node.gridX},${node.gridY},${node.gridZ || 0}`, node])
+  );
   const edgesList = [];
 
   nodesList.forEach((node) => {
-    const col = node.id % cols;
-    const right = lookup.get(node.id + 1);
-    const down = lookup.get(node.id + cols);
+    const x = node.gridX;
+    const y = node.gridY;
+    const z = node.gridZ || 0;
+    const right = lookup.get(`${x + 1},${y},${z}`);
+    const down = lookup.get(`${x},${y + 1},${z}`);
+    const forward = lookup.get(`${x},${y},${z + 1}`);
 
-    if (right && col < cols - 1) {
+    if (right && x < cols - 1) {
       edgesList.push([node, right]);
     }
 
-    if (down) {
+    if (down && y < rows - 1) {
       edgesList.push([node, down]);
+    }
+
+    if (forward && z < depth - 1) {
+      edgesList.push([node, forward]);
     }
   });
 
@@ -537,7 +770,7 @@ function reduceToOctave(numerator, denominator) {
   return { numerator: num, denominator: den, ratio };
 }
 
-function buildRatioComponents(ratioX, ratioY, exponentX, exponentY) {
+function buildRatioComponents(ratioX, ratioY, ratioZ, exponentX, exponentY, exponentZ) {
   let numerator = 1;
   let denominator = 1;
 
@@ -551,6 +784,12 @@ function buildRatioComponents(ratioX, ratioY, exponentX, exponentY) {
     numerator *= Math.pow(ratioY, exponentY);
   } else {
     denominator *= Math.pow(ratioY, Math.abs(exponentY));
+  }
+
+  if (exponentZ >= 0) {
+    numerator *= Math.pow(ratioZ, exponentZ);
+  } else {
+    denominator *= Math.pow(ratioZ, Math.abs(exponentZ));
   }
 
   return { numerator, denominator };
@@ -568,40 +807,6 @@ function getNearestEtInfo(freq, a4) {
 
 function getNodeRadius(node) {
   return node.active ? 35 : 32;
-}
-
-function getDeactivateRect(node) {
-  const pos = worldToScreen(node.coordinate);
-  const radius = getNodeRadius(node);
-  const size = DEACTIVATE_SIZE;
-  const padding = 4;
-  return {
-    x: pos.x - radius - size - padding,
-    y: pos.y - radius - size - padding,
-    size,
-  };
-}
-
-function isPointInRect(point, rect) {
-  return (
-    point.x >= rect.x &&
-    point.x <= rect.x + rect.size &&
-    point.y >= rect.y &&
-    point.y <= rect.y + rect.size
-  );
-}
-
-function findDeactivateNodeAtPoint(screenPoint) {
-  for (const node of nodes) {
-    if (!node.active || node.isCenter) {
-      continue;
-    }
-    const rect = getDeactivateRect(node);
-    if (isPointInRect(screenPoint, rect)) {
-      return node;
-    }
-  }
-  return null;
 }
 
 function midiToNoteName(midi) {
@@ -662,10 +867,46 @@ function onFundamentalNoteChange() {
   updateNodeFrequencies();
 }
 
-function worldToScreen(point) {
+function projectPoint(point, disableScale = false) {
+  if (!is3DMode && !isFlattened2D) {
+    return { x: point.x, y: point.y, depth: 0, scale: 1 };
+  }
+  const cosY = Math.cos(view.rotY);
+  const sinY = Math.sin(view.rotY);
+  const cosX = Math.cos(view.rotX);
+  const sinX = Math.sin(view.rotX);
+
+  const x1 = point.x * cosY + point.z * sinY;
+  const z1 = -point.x * sinY + point.z * cosY;
+  const y1 = point.y * cosX - z1 * sinX;
+  const z2 = point.y * sinX + z1 * cosX;
+
+  const scale = disableScale ? 1 : 1 / (1 + z2 * 0.002);
+  return { x: x1 * scale, y: y1 * scale, depth: z2, scale };
+}
+
+function projectPointWithAngles(point, rotX, rotY, disableScale = false) {
+  const cosY = Math.cos(rotY);
+  const sinY = Math.sin(rotY);
+  const cosX = Math.cos(rotX);
+  const sinX = Math.sin(rotX);
+
+  const x1 = point.x * cosY + point.z * sinY;
+  const z1 = -point.x * sinY + point.z * cosY;
+  const y1 = point.y * cosX - z1 * sinX;
+  const z2 = point.y * sinX + z1 * cosX;
+
+  const scale = disableScale ? 1 : 1 / (1 + z2 * 0.002);
+  return { x: x1 * scale, y: y1 * scale, depth: z2, scale };
+}
+
+function worldToScreen(point, disableScale = false) {
+  const projected = projectPoint(point, disableScale);
   return {
-    x: (point.x + view.offsetX) * view.zoom + canvas.clientWidth / 2,
-    y: (point.y + view.offsetY) * view.zoom + canvas.clientHeight / 2,
+    x: (projected.x + view.offsetX) * view.zoom + canvas.clientWidth / 2,
+    y: (projected.y + view.offsetY) * view.zoom + canvas.clientHeight / 2,
+    depth: projected.depth,
+    scale: projected.scale,
   };
 }
 
@@ -676,23 +917,23 @@ function screenToWorld(point) {
   };
 }
 
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+const AXIS_EDGE_COLORS = {
+  x: "rgba(59, 130, 246, 0.5)",
+  y: "rgba(239, 68, 68, 0.5)",
+  z: "rgba(16, 185, 129, 0.5)",
+};
+const LIGHT_DIR = { x: -0.6, y: -0.8 };
 
-  if (!themeColors) {
-    refreshThemeColors();
-  }
+function draw3DEdges() {
 
-  ctx.strokeStyle = themeColors.edge;
-  ctx.lineWidth = 1.5;
   edges.forEach(([a, b]) => {
     if (!a.active || !b.active) {
       return;
     }
     const start = worldToScreen(a.coordinate);
     const end = worldToScreen(b.coordinate);
-    const radiusA = getNodeRadius(a);
-    const radiusB = getNodeRadius(b);
+    const radiusA = getNodeRadius(a) * (start.scale || 1);
+    const radiusB = getNodeRadius(b) * (end.scale || 1);
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const dist = Math.hypot(dx, dy);
@@ -709,32 +950,144 @@ function draw() {
       x: end.x - ux * radiusB,
       y: end.y - uy * radiusB,
     };
+    let color = AXIS_EDGE_COLORS.x;
+    if (a.gridY !== b.gridY) {
+      color = AXIS_EDGE_COLORS.y;
+    } else if (a.gridZ !== b.gridZ) {
+      color = AXIS_EDGE_COLORS.z;
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.4;
     ctx.beginPath();
     ctx.moveTo(edgeStart.x, edgeStart.y);
     ctx.lineTo(edgeEnd.x, edgeEnd.y);
     ctx.stroke();
   });
+}
 
-  nodes.forEach((node) => {
+function getSphereFill(pos, radius, baseFill, shadowColor) {
+  const lx = pos.x + LIGHT_DIR.x * radius * 0.7;
+  const ly = pos.y + LIGHT_DIR.y * radius * 0.7;
+  const gradient = ctx.createRadialGradient(lx, ly, radius * 0.2, pos.x, pos.y, radius);
+  gradient.addColorStop(0, "rgba(255, 255, 255, 0.35)");
+  gradient.addColorStop(0.45, baseFill);
+  gradient.addColorStop(1, shadowColor);
+  return gradient;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!themeColors) {
+    refreshThemeColors();
+  }
+
+  if (is3DMode && showGrid) {
+    drawGrid();
+  }
+
+  if (is3DMode && (showAxes || (zModeActive && isAddMode))) {
+    drawAxes();
+  }
+
+  if (is3DMode) {
+    draw3DEdges();
+  } else {
+    ctx.strokeStyle = themeColors.edge;
+    ctx.lineWidth = 1.5;
+    edges.forEach(([a, b]) => {
+      if (!a.active || !b.active) {
+        return;
+      }
+      const start = worldToScreen(a.coordinate);
+      const end = worldToScreen(b.coordinate);
+      const radiusA = getNodeRadius(a) * (start.scale || 1);
+      const radiusB = getNodeRadius(b) * (end.scale || 1);
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist === 0) {
+        return;
+      }
+      const ux = dx / dist;
+      const uy = dy / dist;
+      const edgeStart = {
+        x: start.x + ux * radiusA,
+        y: start.y + uy * radiusA,
+      };
+      const edgeEnd = {
+        x: end.x - ux * radiusB,
+        y: end.y - uy * radiusB,
+      };
+      ctx.beginPath();
+      ctx.moveTo(edgeStart.x, edgeStart.y);
+      ctx.lineTo(edgeEnd.x, edgeEnd.y);
+      ctx.stroke();
+    });
+  }
+
+  const nodeRenderList = nodes
+    .map((node) => ({ node, pos: worldToScreen(node.coordinate) }))
+    .sort((a, b) => a.pos.depth - b.pos.depth);
+
+  const keyboardMode = getKeyboardMode();
+  const isIsomorphicMode = keyboardMode === "iso";
+  if (isIsomorphicMode && (isomorphicDirty || !isomorphicKeyMap)) {
+    isomorphicKeyMap = getIsomorphicKeyMap();
+    isomorphicDirty = false;
+  }
+  const keyMap = isIsomorphicMode ? isomorphicKeyMap : null;
+
+  const centerX = Math.floor(GRID_COLS / 2);
+  const centerY = Math.floor(GRID_ROWS / 2);
+  nodeRenderList.forEach(({ node, pos }) => {
     const isHovered = node.id === hoverNodeId;
-    const isVisible = node.isCenter || node.active || isHovered;
-    const alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
+    const canShowInactive = isInactiveNodeAvailable(node);
+    const canInteractInactive = !is3DMode || isAddMode;
+    const isVisible =
+      node.isCenter ||
+      node.active ||
+      (isHovered && canShowInactive && canInteractInactive);
+    let alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
+    if (zModeActive && zModeAnchor) {
+      const inZLine = node.gridX === zModeAnchor.x && node.gridY === zModeAnchor.y;
+      if (!inZLine) {
+        alpha *= 0.3;
+      }
+    }
 
     if (!isVisible) {
       return;
     }
 
-    const pos = worldToScreen(node.coordinate);
-    const radius = getNodeRadius(node);
+    const radius = getNodeRadius(node) * (pos.scale || 1);
 
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.beginPath();
     ctx.strokeStyle = themeColors.nodeStroke;
     ctx.lineWidth = 2;
-    ctx.fillStyle = node.playing ? themeColors.playFill : "transparent";
+    if (is3DMode) {
+      const baseFill = node.playing ? themeColors.playFill : "rgba(255, 255, 255, 0.02)";
+      const shadowColor = node.playing
+        ? "rgba(243, 214, 77, 0.55)"
+        : "rgba(0, 0, 0, 0.22)";
+      if (node.playing) {
+        ctx.shadowColor = themeColors.lfo;
+        ctx.shadowBlur = Math.max(6, radius * 0.6);
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+      }
+      ctx.fillStyle = getSphereFill(pos, radius, baseFill, shadowColor);
+    } else {
+      ctx.fillStyle = node.playing ? themeColors.playFill : "transparent";
+    }
     ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
     ctx.fill();
+    if (is3DMode && node.playing) {
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+    }
     ctx.stroke();
 
     const now = performance.now();
@@ -768,19 +1121,28 @@ function draw() {
     const centsLabel = `${cents >= 0 ? "+" : ""}${cents}¢`;
     ctx.fillText(`${node.note_name} ${centsLabel}`, pos.x + radius + 6, pos.y + radius - 10);
 
-    if (hoverDeactivateId === node.id) {
-      const rect = getDeactivateRect(node);
-      ctx.strokeStyle = themeColors.deactivate;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(rect.x, rect.y);
-      ctx.lineTo(rect.x + rect.size, rect.y + rect.size);
-      ctx.moveTo(rect.x + rect.size, rect.y);
-      ctx.lineTo(rect.x, rect.y + rect.size);
-      ctx.stroke();
+    if (keyMap && node.active) {
+      const keyLabel = keyMap.get(node.id);
+      if (keyLabel) {
+        if (is3DMode) {
+          drawKeyBanner(pos, radius, keyLabel, alpha);
+        } else {
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.font = '11px "Courier New", monospace';
+          ctx.textAlign = "right";
+          ctx.textBaseline = "bottom";
+          ctx.fillStyle = themeColors.textSecondary;
+          ctx.fillText(keyLabel, pos.x - radius - 3, pos.y - radius - 3);
+          ctx.restore();
+        }
+      }
     }
+
     ctx.restore();
   });
+
+  updateZModeMessage();
 
   updateRatioWheels();
 }
@@ -917,8 +1279,8 @@ function enableAudio() {
     audioCtx.resume();
   }
 
-  statusEl.textContent = "Audio: on";
   audioToggle.textContent = "Disable Audio";
+  audioToggle.classList.add("button-on");
 }
 
 function disableAudio() {
@@ -928,8 +1290,8 @@ function disableAudio() {
 
   stopAllVoices();
   audioCtx.suspend();
-  statusEl.textContent = "Audio: off";
   audioToggle.textContent = "Enable Audio";
+  audioToggle.classList.remove("button-on");
 }
 
 function toggleAudio() {
@@ -942,8 +1304,7 @@ function toggleAudio() {
 
 function onPointerDown(event) {
   const screenPoint = { x: event.offsetX, y: event.offsetY };
-  const world = screenToWorld(screenPoint);
-  const hit = hitTest(world);
+  const hit = hitTestScreen(screenPoint);
   const now = performance.now();
 
   if (event.shiftKey && hit) {
@@ -958,6 +1319,20 @@ function onPointerDown(event) {
       draw();
       return;
     }
+  }
+
+  if (is3DMode) {
+    if (event.shiftKey) {
+      view.dragging = true;
+      view.dragStart = { x: event.offsetX, y: event.offsetY };
+      view.dragOffsetStart = { x: view.offsetX, y: view.offsetY };
+    } else {
+      view.rotating = true;
+      view.rotateStart = { x: event.offsetX, y: event.offsetY };
+      view.rotateAnglesStart = { x: view.rotX, y: view.rotY };
+    }
+    view.lastPointer = { x: event.offsetX, y: event.offsetY };
+    canvas.setPointerCapture(event.pointerId);
     return;
   }
 
@@ -969,15 +1344,23 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
+  if (view.rotating) {
+    const dx = event.offsetX - view.rotateStart.x;
+    const dy = event.offsetY - view.rotateStart.y;
+    view.rotY = view.rotateAnglesStart.y + dx * 0.005;
+    view.rotX = view.rotateAnglesStart.x + dy * 0.005;
+    view.rotX = Math.max(-1.2, Math.min(1.2, view.rotX));
+    draw();
+    markIsomorphicDirty();
+    schedulePresetUrlUpdate();
+    return;
+  }
   if (!view.dragging) {
-    const world = screenToWorld({ x: event.offsetX, y: event.offsetY });
-    const hit = hitTest(world);
-    const deactivateHit = findDeactivateNodeAtPoint({ x: event.offsetX, y: event.offsetY });
+    const screenPoint = { x: event.offsetX, y: event.offsetY };
+    const hit = hitTestScreen(screenPoint);
     const nextHoverId = hit ? hit.id : null;
-    const nextDeactivateId = deactivateHit ? deactivateHit.id : null;
-    if (nextHoverId !== hoverNodeId || nextDeactivateId !== hoverDeactivateId) {
+    if (nextHoverId !== hoverNodeId) {
       hoverNodeId = nextHoverId;
-      hoverDeactivateId = nextDeactivateId;
       draw();
     }
     return;
@@ -989,9 +1372,21 @@ function onPointerMove(event) {
   view.offsetY = view.dragOffsetStart.y + dy;
   view.lastPointer = { x: event.offsetX, y: event.offsetY };
   draw();
+  markIsomorphicDirty();
+  schedulePresetUrlUpdate();
 }
 
 function onPointerUp(event) {
+  const wasRotating = view.rotating;
+  let moved = 0;
+  if (view.rotating) {
+    moved = Math.hypot(
+      event.offsetX - view.rotateStart.x,
+      event.offsetY - view.rotateStart.y
+    );
+    view.rotating = false;
+    markIsomorphicDirty();
+  }
   if (lfoArmingId != null) {
     const now = performance.now();
     const duration = (now - lfoArmingStart) / 1000;
@@ -1000,6 +1395,8 @@ function onPointerUp(event) {
     if (node && duration >= 0.15) {
       node.active = true;
       updatePitchInstances();
+      markIsomorphicDirty();
+      schedulePresetUrlUpdate();
       const voice = startVoice({
         nodeId: node.id,
         octave: 0,
@@ -1018,30 +1415,39 @@ function onPointerUp(event) {
     return;
   }
 
-  if (!view.dragging) {
-    return;
+  if (view.dragging) {
+    moved = Math.hypot(
+      event.offsetX - view.dragStart.x,
+      event.offsetY - view.dragStart.y
+    );
+    view.dragging = false;
+    markIsomorphicDirty();
   }
-
-  const moved = Math.hypot(
-    event.offsetX - view.dragStart.x,
-    event.offsetY - view.dragStart.y
-  );
-
-  view.dragging = false;
 
   if (moved < 4) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
-    const world = screenToWorld(screenPoint);
-    const deactivateHit = findDeactivateNodeAtPoint(screenPoint);
-    if (deactivateHit) {
-      deactivateHit.active = false;
-      stopVoicesForNode(deactivateHit.id, false);
-      updatePitchInstances();
-      draw();
-      return;
-    }
-    const hit = hitTest(world);
+    const hit = hitTestScreen(screenPoint);
     if (hit) {
+      if (event.altKey && hit.active && !hit.isCenter) {
+        hit.active = false;
+        stopVoicesForNode(hit.id, false);
+        updatePitchInstances();
+        updateUiHint();
+        markIsomorphicDirty();
+        schedulePresetUrlUpdate();
+        draw();
+        return;
+      }
+      if (is3DMode && zKeyHeld) {
+        zModeActive = true;
+        zModeAnchor = { x: hit.gridX, y: hit.gridY };
+        updateAddModeFromShift();
+        draw();
+        return;
+      }
+      if (is3DMode && !isAddMode && !hit.active && !hit.isCenter) {
+        return;
+      }
       const baseVoice = hit.baseVoiceId ? findVoiceById(hit.baseVoiceId) : null;
       if (baseVoice && baseVoice.lfoActive) {
         stopVoice(baseVoice);
@@ -1052,6 +1458,9 @@ function onPointerUp(event) {
       if (!hit.active) {
         hit.active = true;
         updatePitchInstances();
+        updateUiHint();
+        markIsomorphicDirty();
+        schedulePresetUrlUpdate();
         draw();
         return;
       }
@@ -1076,8 +1485,8 @@ function onPointerUp(event) {
 
 function onPointerLeave() {
   hoverNodeId = null;
-  hoverDeactivateId = null;
   lfoArmingId = null;
+  view.rotating = false;
   if (view.dragging) {
     view.dragging = false;
   }
@@ -1087,6 +1496,13 @@ function onPointerLeave() {
 function onWheel(event) {
   event.preventDefault();
   const zoomDelta = event.deltaY > 0 ? 0.92 : 1.08;
+  if (is3DMode) {
+    view.zoom = Math.min(2.2, Math.max(0.5, view.zoom * zoomDelta));
+    draw();
+    markIsomorphicDirty();
+    schedulePresetUrlUpdate();
+    return;
+  }
   const before = screenToWorld({ x: event.offsetX, y: event.offsetY });
   view.zoom = Math.min(2.2, Math.max(0.5, view.zoom * zoomDelta));
   const after = screenToWorld({ x: event.offsetX, y: event.offsetY });
@@ -1094,15 +1510,46 @@ function onWheel(event) {
   view.offsetX += before.x - after.x;
   view.offsetY += before.y - after.y;
   draw();
+  markIsomorphicDirty();
+  schedulePresetUrlUpdate();
 }
 
-function hitTest(worldPoint) {
+function isInactiveNodeAvailable(node) {
+  if (!is3DMode) {
+    return shiftHeld;
+  }
+  const z = node.gridZ || 0;
+  if (zModeActive && zModeAnchor) {
+    return node.gridX === zModeAnchor.x && node.gridY === zModeAnchor.y;
+  }
+  return z === gridCenterZ;
+}
+
+function hitTestScreen(screenPoint) {
   const radius = 36 / view.zoom;
-  return nodes.find((node) => {
-    const dx = node.coordinate.x - worldPoint.x;
-    const dy = node.coordinate.y - worldPoint.y;
-    return Math.hypot(dx, dy) <= radius;
+  let best = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let bestDepth = Number.NEGATIVE_INFINITY;
+
+  nodes.forEach((node) => {
+    if (!node.active && (!isInactiveNodeAvailable(node) || (is3DMode && !isAddMode))) {
+      return;
+    }
+    const projected = worldToScreen(node.coordinate);
+    const dx = projected.x - screenPoint.x;
+    const dy = projected.y - screenPoint.y;
+    const distance = Math.hypot(dx, dy);
+    const adjustedRadius = radius * (projected.scale || 1);
+    if (distance <= adjustedRadius) {
+      if (distance < bestDistance || projected.depth > bestDepth) {
+        best = node;
+        bestDistance = distance;
+        bestDepth = projected.depth;
+      }
+    }
   });
+
+  return best;
 }
 
 function resizeCanvas() {
@@ -1113,7 +1560,16 @@ function resizeCanvas() {
   draw();
 }
 
-function populateRatioSelect(selectEl, defaultValue) {
+function populateRatioSelect(selectEl, defaultValue, includeOne = false) {
+  if (includeOne) {
+    const option = document.createElement("option");
+    option.value = "1";
+    option.textContent = "1";
+    if (defaultValue === 1) {
+      option.selected = true;
+    }
+    selectEl.appendChild(option);
+  }
   primes.forEach((prime) => {
     const option = document.createElement("option");
     option.value = String(prime);
@@ -1150,6 +1606,80 @@ function updateLfoDepth() {
   if (lfoDepthReadout) {
     lfoDepthReadout.textContent = `${Math.round(lfoDepth * 100)}%`;
   }
+}
+
+function drawAxes() {
+  const axisLengthXY = GRID_SPACING * (GRID_COLS / 2);
+  const axisLengthZ = GRID_SPACING * (gridDepth / 2);
+  ctx.strokeStyle = themeColors.nodeStroke;
+  ctx.lineWidth = 1.5;
+
+  if (zModeActive && zModeAnchor) {
+    const centerX = Math.floor(GRID_COLS / 2);
+    const centerY = Math.floor(GRID_ROWS / 2);
+    const anchorPoint = {
+      x: (zModeAnchor.x - centerX) * GRID_SPACING,
+      y: (zModeAnchor.y - centerY) * GRID_SPACING,
+      z: 0,
+    };
+    const start = worldToScreen({ ...anchorPoint, z: -axisLengthZ });
+    const end = worldToScreen({ ...anchorPoint, z: axisLengthZ });
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+    return;
+  }
+
+  const axes = [
+    { start: { x: -axisLengthXY, y: 0, z: 0 }, end: { x: axisLengthXY, y: 0, z: 0 } },
+    { start: { x: 0, y: -axisLengthXY, z: 0 }, end: { x: 0, y: axisLengthXY, z: 0 } },
+    { start: { x: 0, y: 0, z: -axisLengthZ }, end: { x: 0, y: 0, z: axisLengthZ } },
+  ];
+
+  axes.forEach((axis) => {
+    const start = worldToScreen(axis.start, true);
+    const end = worldToScreen(axis.end, true);
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+  });
+}
+
+function drawGrid() {
+  const size = GRID_SPACING * (GRID_COLS / 2);
+  const step = GRID_SPACING;
+  ctx.save();
+  ctx.strokeStyle = themeColors.edge;
+  ctx.lineWidth = 1;
+  for (let x = -size; x <= size; x += step) {
+    const start = worldToScreen({ x, y: -size, z: 0 });
+    const end = worldToScreen({ x, y: size, z: 0 });
+    const avgDepth = (start.depth + end.depth) / 2;
+    const depthFade = Number.isFinite(avgDepth)
+      ? Math.max(0.15, Math.min(1, 1 - Math.max(0, avgDepth) / 2000))
+      : 1;
+    ctx.globalAlpha = depthFade;
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+  }
+  for (let y = -size; y <= size; y += step) {
+    const start = worldToScreen({ x: -size, y, z: 0 });
+    const end = worldToScreen({ x: size, y, z: 0 });
+    const avgDepth = (start.depth + end.depth) / 2;
+    const depthFade = Number.isFinite(avgDepth)
+      ? Math.max(0.15, Math.min(1, 1 - Math.max(0, avgDepth) / 2000))
+      : 1;
+    ctx.globalAlpha = depthFade;
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function getLfoValue(voice, nowMs) {
@@ -1245,10 +1775,11 @@ function resizeWheelCanvas(canvasEl) {
   }
 }
 
-function drawRatioWheel(canvasEl) {
+function drawRatioWheel(canvasEl, options = {}) {
   if (!canvasEl || !themeColors) {
     return;
   }
+  const { showLabels = true, showIntervals = true } = options;
   resizeWheelCanvas(canvasEl);
   const ctx2d = canvasEl.getContext("2d");
   if (!ctx2d) {
@@ -1279,52 +1810,56 @@ function drawRatioWheel(canvasEl) {
     ctx2d.stroke();
   });
 
-  if (!angles.length) {
+  if (!angles.length || (!showLabels && !showIntervals)) {
     return;
   }
 
-  const fontSize = Math.max(9, Math.round(width * 0.04));
-  ctx2d.fillStyle = themeColors.wheelText;
-  ctx2d.font = `${fontSize}px Georgia`;
-  ctx2d.textAlign = "center";
-  ctx2d.textBaseline = "middle";
+  if (showLabels) {
+    const fontSize = Math.max(9, Math.round(width * 0.04));
+    ctx2d.fillStyle = themeColors.wheelText;
+    ctx2d.font = `${fontSize}px Georgia`;
+    ctx2d.textAlign = "center";
+    ctx2d.textBaseline = "middle";
 
-  const fundamental = Number(fundamentalInput.value) || 220;
-  const a4 = Number(a4Input.value) || 440;
+    const fundamental = Number(fundamentalInput.value) || 220;
+    const a4 = Number(a4Input.value) || 440;
 
-  angles.forEach((item) => {
-    const noteInfo = getNearestEtInfo(fundamental * item.ratio, a4);
-    const centsRounded = Math.round(noteInfo.cents);
-    const centsLabel = `${centsRounded >= 0 ? "+" : ""}${centsRounded}¢`;
-    const label = `${noteInfo.pitchClass} ${centsLabel}`;
-    const labelRadius = radius + fontSize * 1.5;
-    const lx = cx + Math.cos(item.angle) * labelRadius;
-    const ly = cy + Math.sin(item.angle) * labelRadius;
-    ctx2d.fillText(label, lx, ly);
-  });
+    angles.forEach((item) => {
+      const noteInfo = getNearestEtInfo(fundamental * item.ratio, a4);
+      const centsRounded = Math.round(noteInfo.cents);
+      const centsLabel = `${centsRounded >= 0 ? "+" : ""}${centsRounded}¢`;
+      const label = `${noteInfo.pitchClass} ${centsLabel}`;
+      const labelRadius = radius + fontSize * 1.5;
+      const lx = cx + Math.cos(item.angle) * labelRadius;
+      const ly = cy + Math.sin(item.angle) * labelRadius;
+      ctx2d.fillText(label, lx, ly);
+    });
+  }
 
-  const sliceFont = Math.max(10, Math.round(width * 0.03));
-  ctx2d.font = `${sliceFont}px Georgia`;
+  if (showIntervals) {
+    const sliceFont = Math.max(10, Math.round(width * 0.03));
+    ctx2d.font = `${sliceFont}px Georgia`;
 
-  for (let i = 0; i < angles.length; i += 1) {
-    const current = angles[i];
-    const next = angles[(i + 1) % angles.length];
-    let endAngle = next.angle;
-    if (endAngle <= current.angle) {
-      endAngle += Math.PI * 2;
+    for (let i = 0; i < angles.length; i += 1) {
+      const current = angles[i];
+      const next = angles[(i + 1) % angles.length];
+      let endAngle = next.angle;
+      if (endAngle <= current.angle) {
+        endAngle += Math.PI * 2;
+      }
+      const midAngle = (current.angle + endAngle) / 2;
+      const midRadius = radius * 0.55;
+      const mx = cx + Math.cos(midAngle) * midRadius;
+      const my = cy + Math.sin(midAngle) * midRadius;
+
+      const nextNum =
+        i === angles.length - 1 ? next.numerator * 2 : next.numerator;
+      const nextDen = next.denominator;
+      const intervalNum = nextNum * current.denominator;
+      const intervalDen = nextDen * current.numerator;
+      const intervalLabel = formatIntervalRatio(intervalNum, intervalDen);
+      ctx2d.fillText(intervalLabel, mx, my);
     }
-    const midAngle = (current.angle + endAngle) / 2;
-    const midRadius = radius * 0.55;
-    const mx = cx + Math.cos(midAngle) * midRadius;
-    const my = cy + Math.sin(midAngle) * midRadius;
-
-    const nextNum =
-      i === angles.length - 1 ? next.numerator * 2 : next.numerator;
-    const nextDen = next.denominator;
-    const intervalNum = nextNum * current.denominator;
-    const intervalDen = nextDen * current.numerator;
-    const intervalLabel = formatIntervalRatio(intervalNum, intervalDen);
-    ctx2d.fillText(intervalLabel, mx, my);
   }
 }
 
@@ -1332,6 +1867,242 @@ function updateRatioWheels() {
   if (ratioWheelDrawer && !ratioWheelDrawer.hidden) {
     drawRatioWheel(ratioWheelLarge);
   }
+  if (ratioWheelMini) {
+    drawRatioWheel(ratioWheelMini, { showLabels: false, showIntervals: false });
+  }
+}
+
+function updateUiHint() {
+  if (!uiHint) {
+    return;
+  }
+  if (keyboardModeSelect && keyboardModeSelect.value === "piano") {
+    uiHint.textContent =
+      "Two octave piano layout, starting on Z (as C) and Y (C an octave higher)\n(click to hide)";
+    return;
+  }
+  if (!is3DMode) {
+    uiHint.textContent =
+      "Drag to pan. Scroll to zoom. Shift-click to add. Option-click to remove. Shift double-click & hold for LFO.\n(click to hide)";
+    return;
+  }
+  uiHint.textContent =
+    "3D Mode:\nShift-click to add\nOption-click to remove\nZ-click to access Z axis\nClick-drag to rotate\nShift double-click & hold for LFO\nArrow keys to pan\nScroll to zoom\n(click to hide)";
+}
+
+function updateZModeMessage() {
+  if (!zModeMessage) {
+    return;
+  }
+  if (!zModeActive || !zModeAnchor) {
+    zModeMessage.hidden = true;
+    zModeMessage.textContent = "";
+    return;
+  }
+  const centerX = Math.floor(GRID_COLS / 2);
+  const centerY = Math.floor(GRID_ROWS / 2);
+  const coordX = zModeAnchor.x - centerX;
+  const coordY = centerY - zModeAnchor.y;
+  zModeMessage.textContent = `Editing Z axis for node [${coordX},${coordY}]: press Escape to return`;
+  zModeMessage.hidden = false;
+}
+
+function updateAddModeFromShift() {
+  if (!is3DMode) {
+    isAddMode = false;
+  } else {
+    isAddMode = shiftHeld || zModeActive;
+  }
+  if (navAddModeToggle) {
+    navAddModeToggle.checked = isAddMode;
+  }
+}
+
+function set3DMode(enabled) {
+  const activeKeys = captureActiveNodeKeys();
+  const had3DNodes = gridDepth > 1;
+  is3DMode = enabled;
+  isFlattened2D = !enabled && had3DNodes;
+  markIsomorphicDirty();
+  if (nav3dPanel) {
+    nav3dPanel.hidden = !enabled;
+  }
+  if (ratioZSelect) {
+    ratioZSelect.hidden = false;
+  }
+  if (!enabled) {
+    zModeActive = false;
+    zModeAnchor = null;
+  }
+  if (enabled && uiHint) {
+    uiHint.hidden = false;
+  }
+  updateAddModeFromShift();
+  updateUiHint();
+  if (enabled && !had3DNodes) {
+    rebuildLattice(activeKeys);
+  } else {
+    draw();
+  }
+}
+
+function setViewPreset(preset) {
+  if (!is3DMode) {
+    return;
+  }
+  if (preset === "xy") {
+    view.rotX = 0;
+    view.rotY = 0;
+  } else if (preset === "zy") {
+    view.rotX = 0;
+    view.rotY = Math.PI / 2;
+  } else if (preset === "quarter") {
+    view.rotX = -0.6;
+    view.rotY = 0.7;
+  }
+  draw();
+  markIsomorphicDirty();
+  schedulePresetUrlUpdate();
+}
+
+function applyNavAction(action) {
+  const step = 0.1;
+  const panStep = 40 / view.zoom;
+  if (action === "rot-up") {
+    view.rotX = Math.max(-1.2, view.rotX - step);
+  } else if (action === "rot-down") {
+    view.rotX = Math.min(1.2, view.rotX + step);
+  } else if (action === "rot-left") {
+    view.rotY -= step;
+  } else if (action === "rot-right") {
+    view.rotY += step;
+  } else if (action === "pan-up") {
+    view.offsetY -= panStep;
+  } else if (action === "pan-down") {
+    view.offsetY += panStep;
+  } else if (action === "pan-left") {
+    view.offsetX -= panStep;
+  } else if (action === "pan-right") {
+    view.offsetX += panStep;
+  } else if (action === "zoom-in") {
+    view.zoom = Math.min(2.2, view.zoom * 1.1);
+  } else if (action === "zoom-out") {
+    view.zoom = Math.max(0.5, view.zoom / 1.1);
+  } else if (action === "best-view") {
+    applyBestView();
+    schedulePresetUrlUpdate();
+    return;
+  }
+  draw();
+  markIsomorphicDirty();
+  schedulePresetUrlUpdate();
+}
+
+function applyBestView() {
+  if (!is3DMode) {
+    return;
+  }
+  const activeNodes = nodes.filter((node) => node.active);
+  if (!activeNodes.length) {
+    return;
+  }
+
+  const yawSteps = [];
+  for (let yaw = -Math.PI; yaw <= Math.PI; yaw += Math.PI / 6) {
+    yawSteps.push(yaw);
+  }
+  const pitchSteps = [];
+  for (let pitch = -0.9; pitch <= 0.9; pitch += Math.PI / 9) {
+    pitchSteps.push(pitch);
+  }
+
+  const preferredRotX = -0.6;
+  const preferredRotY = 0.7;
+  const orientationWeight = 50;
+  const angleDistance = (a, b) => {
+    const diff = Math.atan2(Math.sin(a - b), Math.cos(a - b));
+    return Math.abs(diff);
+  };
+
+  let best = { score: Number.POSITIVE_INFINITY, rotX: view.rotX, rotY: view.rotY };
+
+  pitchSteps.forEach((rotX) => {
+    yawSteps.forEach((rotY) => {
+      let score = 0;
+      for (let i = 0; i < activeNodes.length; i += 1) {
+        const nodeA = activeNodes[i];
+        const projA = projectPointWithAngles(nodeA.coordinate, rotX, rotY);
+        const radiusA = getNodeRadius(nodeA) * projA.scale;
+        for (let j = i + 1; j < activeNodes.length; j += 1) {
+          const nodeB = activeNodes[j];
+          const projB = projectPointWithAngles(nodeB.coordinate, rotX, rotY);
+          const radiusB = getNodeRadius(nodeB) * projB.scale;
+          const dx = projA.x - projB.x;
+          const dy = projA.y - projB.y;
+          const dist = Math.hypot(dx, dy);
+          const overlap = radiusA + radiusB - dist;
+          if (overlap > 0) {
+            score += overlap * overlap;
+          }
+        }
+      }
+      const orientationPenalty =
+        orientationWeight *
+        (Math.pow(rotX - preferredRotX, 2) +
+          Math.pow(angleDistance(rotY, preferredRotY), 2));
+      score += orientationPenalty;
+      if (score < best.score) {
+        best = { score, rotX, rotY };
+      }
+    });
+  });
+
+  view.rotX = best.rotX;
+  view.rotY = best.rotY;
+
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  activeNodes.forEach((node) => {
+    const proj = projectPointWithAngles(node.coordinate, view.rotX, view.rotY);
+    const radius = getNodeRadius(node) * proj.scale;
+    minX = Math.min(minX, proj.x - radius);
+    maxX = Math.max(maxX, proj.x + radius);
+    minY = Math.min(minY, proj.y - radius);
+    maxY = Math.max(maxY, proj.y + radius);
+  });
+
+  const topBar = document.querySelector(".top-bar");
+  const leftNav = document.getElementById("nav-3d");
+  const synthPanel = document.querySelector(".synth-panel");
+  const topBarRect = topBar ? topBar.getBoundingClientRect() : null;
+  const leftNavRect =
+    leftNav && !leftNav.hidden ? leftNav.getBoundingClientRect() : null;
+  const synthRect = synthPanel ? synthPanel.getBoundingClientRect() : null;
+  const safeTop = topBarRect ? topBarRect.height : 0;
+  const safeLeft = leftNavRect ? leftNavRect.width : 0;
+  const safeBottom = synthRect ? synthRect.height : 0;
+  const safeRight = 0;
+
+  const padding = 80;
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const availableWidth = Math.max(1, canvas.clientWidth - safeLeft - safeRight - padding);
+  const availableHeight = Math.max(1, canvas.clientHeight - safeTop - safeBottom - padding);
+  const zoomX = availableWidth / width;
+  const zoomY = availableHeight / height;
+  view.zoom = Math.min(2.2, Math.max(0.5, Math.min(zoomX, zoomY)));
+
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const targetCenterX = safeLeft + (canvas.clientWidth - safeLeft - safeRight) / 2;
+  const targetCenterY = safeTop + (canvas.clientHeight - safeTop - safeBottom) / 2;
+  view.offsetX = (targetCenterX - canvas.clientWidth / 2) / view.zoom - centerX;
+  view.offsetY = (targetCenterY - canvas.clientHeight / 2) / view.zoom - centerY;
+  draw();
+  markIsomorphicDirty();
+  schedulePresetUrlUpdate();
 }
 
 function lfoLoop() {
@@ -1370,9 +2141,9 @@ function refreshThemeColors() {
   themeColors = {
     edge: styles.getPropertyValue("--edge").trim() || "rgba(0, 0, 0, 0.18)",
     nodeStroke: styles.getPropertyValue("--node-stroke").trim() || "rgba(0, 0, 0, 0.35)",
+    nodeActive: styles.getPropertyValue("--node-active").trim() || "#c94b3d",
     textPrimary: styles.getPropertyValue("--text-primary").trim() || "#1e1e1e",
     textSecondary: styles.getPropertyValue("--text-secondary").trim() || "#2a2a2a",
-    deactivate: styles.getPropertyValue("--deactivate").trim() || "rgba(16, 19, 22, 0.2)",
     lfo: styles.getPropertyValue("--lfo").trim() || "#3b82f6",
     playFill: styles.getPropertyValue("--play-fill").trim() || "#f3d64d",
     wheelLine: styles.getPropertyValue("--wheel-line").trim() || "rgba(16, 19, 22, 0.65)",
@@ -1448,6 +2219,177 @@ function toggleRatioWheelDrawer() {
   }
 }
 
+const PRESET_PARAM = "s";
+let presetSyncEnabled = false;
+let presetUpdateTimer = null;
+
+function encodePresetState(state) {
+  const json = JSON.stringify(state);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function decodePresetState(encoded) {
+  let base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = base64.length % 4;
+  if (pad) {
+    base64 += "=".repeat(4 - pad);
+  }
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  const json = new TextDecoder().decode(bytes);
+  return JSON.parse(json);
+}
+
+function getPresetState() {
+  const active = nodes
+    .filter((node) => node.active)
+    .map((node) => [node.exponentX, node.exponentY, node.exponentZ || 0]);
+  return {
+    v: 1,
+    active,
+    mode3d: is3DMode,
+    view: {
+      zoom: view.zoom,
+      offsetX: view.offsetX,
+      offsetY: view.offsetY,
+      rotX: view.rotX,
+      rotY: view.rotY,
+    },
+    ratios: [
+      Number(ratioXSelect.value) || 3,
+      Number(ratioYSelect.value) || 5,
+      Number(ratioZSelect.value) || 7,
+    ],
+    fundamental: Number(fundamentalInput.value) || 220,
+    a4: Number(a4Input.value) || 440,
+  };
+}
+
+function updatePresetUrl() {
+  if (!presetSyncEnabled) {
+    return;
+  }
+  const encoded = encodePresetState(getPresetState());
+  const nextHash = `${PRESET_PARAM}=${encoded}`;
+  if (location.hash === `#${nextHash}`) {
+    return;
+  }
+  history.replaceState(null, "", `${location.pathname}${location.search}#${nextHash}`);
+}
+
+function schedulePresetUrlUpdate() {
+  if (!presetSyncEnabled) {
+    return;
+  }
+  if (presetUpdateTimer) {
+    clearTimeout(presetUpdateTimer);
+  }
+  presetUpdateTimer = setTimeout(updatePresetUrl, 250);
+}
+
+function readPresetFromUrl() {
+  const hash = location.hash.replace(/^#/, "");
+  if (!hash) {
+    return null;
+  }
+  const params = new URLSearchParams(hash);
+  const encoded = params.get(PRESET_PARAM);
+  if (!encoded) {
+    return null;
+  }
+  try {
+    return decodePresetState(encoded);
+  } catch (error) {
+    return null;
+  }
+}
+
+function applyPresetState(state) {
+  if (!state || typeof state !== "object") {
+    return;
+  }
+  const viewState = state.view && typeof state.view === "object" ? state.view : null;
+  const activeHasZ = Array.isArray(state.active)
+    ? state.active.some((entry) => Array.isArray(entry) && Number(entry[2]) !== 0)
+    : false;
+  const wants3D = Boolean(state.mode3d) || activeHasZ;
+  if (mode3dCheckbox) {
+    mode3dCheckbox.checked = wants3D;
+  }
+  is3DMode = wants3D;
+  isFlattened2D = false;
+  if (nav3dPanel) {
+    nav3dPanel.hidden = !wants3D;
+  }
+  if (ratioZSelect) {
+    ratioZSelect.hidden = false;
+  }
+  if (!wants3D) {
+    zModeActive = false;
+    zModeAnchor = null;
+  }
+  updateAddModeFromShift();
+  updateUiHint();
+  if (Number.isFinite(state.fundamental)) {
+    fundamentalInput.value = String(state.fundamental);
+  }
+  if (Number.isFinite(state.a4)) {
+    a4Input.value = String(state.a4);
+  }
+  if (Array.isArray(state.ratios)) {
+    const [x, y, z] = state.ratios;
+    if (Number.isFinite(x)) {
+      ratioXSelect.value = String(x);
+    }
+    if (Number.isFinite(y)) {
+      ratioYSelect.value = String(y);
+    }
+    if (Number.isFinite(z) && ratioZSelect) {
+      ratioZSelect.value = String(z);
+    }
+  }
+
+  if (viewState) {
+    if (Number.isFinite(viewState.zoom)) {
+      view.zoom = Math.min(2.2, Math.max(0.5, viewState.zoom));
+    }
+    if (Number.isFinite(viewState.offsetX)) {
+      view.offsetX = viewState.offsetX;
+    }
+    if (Number.isFinite(viewState.offsetY)) {
+      view.offsetY = viewState.offsetY;
+    }
+    if (Number.isFinite(viewState.rotX)) {
+      view.rotX = Math.max(-1.2, Math.min(1.2, viewState.rotX));
+    }
+    if (Number.isFinite(viewState.rotY)) {
+      view.rotY = viewState.rotY;
+    }
+  }
+
+  updateFundamentalNotes();
+
+  const activeKeys = new Set();
+  if (Array.isArray(state.active)) {
+    state.active.forEach((entry) => {
+      if (!Array.isArray(entry) || entry.length < 2) {
+        return;
+      }
+      const [x, y, z = 0] = entry;
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        return;
+      }
+      activeKeys.add(`${x},${y},${z}`);
+    });
+  }
+  rebuildLattice(activeKeys);
+}
+
 function formatActiveRatiosForScaleWorkshop() {
   const ratios = nodes
     .filter((node) => node.active)
@@ -1506,12 +2448,40 @@ async function exportToScaleWorkshop() {
   }
 }
 
-function rebuildLattice() {
+function captureActiveNodeKeys() {
+  const keys = new Set();
+  nodes.forEach((node) => {
+    if (node.active) {
+      const z = node.exponentZ || 0;
+      keys.add(`${node.exponentX},${node.exponentY},${z}`);
+    }
+  });
+  return keys;
+}
+
+function applyActiveNodeKeys(keys) {
+  if (!keys || !keys.size) {
+    return;
+  }
+  nodes.forEach((node) => {
+    const z = node.exponentZ || 0;
+    const key = `${node.exponentX},${node.exponentY},${z}`;
+    if (keys.has(key)) {
+      node.active = true;
+    }
+  });
+  updatePitchInstances();
+  markIsomorphicDirty();
+}
+
+function rebuildLattice(activeKeys = null) {
   stopAllVoices();
   nodes = buildLattice();
   nodeById = new Map(nodes.map((node) => [node.id, node]));
-  edges = buildEdges(nodes, GRID_COLS);
+  applyActiveNodeKeys(activeKeys);
+  edges = buildEdges(nodes, GRID_COLS, GRID_ROWS, gridDepth);
   updatePitchInstances();
+  markIsomorphicDirty();
   draw();
 }
 
@@ -1524,25 +2494,85 @@ function resetLattice() {
     node.baseVoiceId = null;
   });
   updatePitchInstances();
+  updateUiHint();
   view.zoom = 1;
   view.offsetX = 0;
   view.offsetY = 0;
+  view.rotX = 0;
+  view.rotY = 0;
   hoverNodeId = null;
-  hoverDeactivateId = null;
+  markIsomorphicDirty();
   draw();
+  schedulePresetUrlUpdate();
 }
 
 populateRatioSelect(ratioXSelect, 3);
 populateRatioSelect(ratioYSelect, 5);
+populateRatioSelect(ratioZSelect, 7, true);
 populateWaveformOptions();
 populateFundamentalNotes();
 updateFundamentalNotes();
+if (navAxesToggle) {
+  showAxes = navAxesToggle.checked;
+}
+if (navGridToggle) {
+  showGrid = navGridToggle.checked;
+}
+if (mode3dCheckbox) {
+  is3DMode = mode3dCheckbox.checked;
+  if (nav3dPanel) {
+    nav3dPanel.hidden = !is3DMode;
+  }
+  if (ratioZSelect) {
+    ratioZSelect.hidden = false;
+  }
+}
+updateAddModeFromShift();
+updateUiHint();
 fundamentalNoteSelect.value = "60";
 onFundamentalNoteChange();
-rebuildLattice();
+const presetState = readPresetFromUrl();
+if (presetState) {
+  applyPresetState(presetState);
+} else {
+  rebuildLattice();
+}
+presetSyncEnabled = true;
+updatePresetUrl();
 
 audioToggle.addEventListener("click", toggleAudio);
 resetButton.addEventListener("click", resetLattice);
+if (mode3dCheckbox) {
+  mode3dCheckbox.addEventListener("change", () => {
+    set3DMode(mode3dCheckbox.checked);
+    schedulePresetUrlUpdate();
+  });
+}
+if (navAxesToggle) {
+  navAxesToggle.addEventListener("change", () => {
+    showAxes = navAxesToggle.checked;
+    draw();
+  });
+}
+if (navGridToggle) {
+  navGridToggle.addEventListener("change", () => {
+    showGrid = navGridToggle.checked;
+    draw();
+  });
+}
+if (nav3dButtons && nav3dButtons.length) {
+  nav3dButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const viewPreset = button.getAttribute("data-view");
+      const action = button.getAttribute("data-action");
+      if (viewPreset) {
+        setViewPreset(viewPreset);
+      } else if (action) {
+        applyNavAction(action);
+      }
+    });
+  });
+}
 exportScaleButton.addEventListener("click", exportToScaleWorkshop);
 if (themeSelect) {
   themeSelect.addEventListener("change", onThemeSelectChange);
@@ -1556,9 +2586,17 @@ if (ratioWheelToggle) {
 if (ratioWheelClose) {
   ratioWheelClose.addEventListener("click", closeRatioWheelDrawer);
 }
+if (uiHint) {
+  uiHint.addEventListener("click", () => {
+    uiHint.hidden = true;
+  });
+}
 fundamentalInput.addEventListener("input", updateNodeFrequencies);
 ratioXSelect.addEventListener("change", updateNodeRatios);
 ratioYSelect.addEventListener("change", updateNodeRatios);
+if (ratioZSelect) {
+  ratioZSelect.addEventListener("change", updateNodeRatios);
+}
 a4Input.addEventListener("input", () => {
   updateFundamentalNotes();
   updateNodeFrequencies();
@@ -1587,6 +2625,11 @@ waveformSelect.addEventListener("change", () => {
     }
   });
 });
+keyboardModeSelect.addEventListener("change", updateUiHint);
+keyboardModeSelect.addEventListener("change", () => {
+  markIsomorphicDirty();
+  draw();
+});
 attackSlider.addEventListener("input", updateEnvelopeReadouts);
 decaySlider.addEventListener("input", updateEnvelopeReadouts);
 sustainSlider.addEventListener("input", updateEnvelopeReadouts);
@@ -1604,8 +2647,46 @@ window.addEventListener("resize", resizeCanvas);
 window.addEventListener("keydown", handleKeyDown);
 window.addEventListener("keyup", handleKeyUp);
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Shift") {
+    shiftHeld = true;
+    updateAddModeFromShift();
+    draw();
+  }
+  if (event.key.toLowerCase() === "z") {
+    zKeyHeld = true;
+  }
+  if (event.key === "ArrowUp") {
+    view.offsetY += (is3DMode ? 1 : -1) * (24 / view.zoom);
+    draw();
+  }
+  if (event.key === "ArrowDown") {
+    view.offsetY -= (is3DMode ? 1 : -1) * (24 / view.zoom);
+    draw();
+  }
+  if (event.key === "ArrowLeft") {
+    view.offsetX += (is3DMode ? 1 : -1) * (24 / view.zoom);
+    draw();
+  }
+  if (event.key === "ArrowRight") {
+    view.offsetX -= (is3DMode ? 1 : -1) * (24 / view.zoom);
+    draw();
+  }
   if (event.key === "Escape") {
     closeRatioWheelDrawer();
+    zModeActive = false;
+    zModeAnchor = null;
+    updateAddModeFromShift();
+    draw();
+  }
+});
+window.addEventListener("keyup", (event) => {
+  if (event.key === "Shift") {
+    shiftHeld = false;
+    updateAddModeFromShift();
+    draw();
+  }
+  if (event.key.toLowerCase() === "z") {
+    zKeyHeld = false;
   }
 });
 

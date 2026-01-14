@@ -109,8 +109,8 @@ const KEYBOARD_BASE_MIDI = 60;
 const ISOMORPHIC_ROWS = [
   { keys: "1234567890", yOffset: -2 },
   { keys: "qwertyuiop", yOffset: -1 },
-  { keys: "asdfghjkl", yOffset: 0 },
-  { keys: "zxcvbnm", yOffset: 1 },
+  { keys: "asdfghjkl;", yOffset: 0 },
+  { keys: "zxcvbnm,./", yOffset: 1 },
 ];
 const KEYBOARD_ROW_SKEW = [-0.6, -0.35, -0.15, 0];
 let nodes = [];
@@ -501,6 +501,8 @@ function buildScreenIsomorphicLayout() {
     const median = diffs[Math.floor(diffs.length / 2)];
     return Math.max(0.08, median * 0.6);
   })();
+  const minRowGapNorm = Math.max(0.08, 32 / spanY);
+  const minColGapNorm = Math.max(0.08, 32 / spanX);
 
   const rows = [];
   const sortedByV = [...items].sort((a, b) => a.vNorm - b.vNorm);
@@ -528,7 +530,7 @@ function buildScreenIsomorphicLayout() {
     }
     const gap = Math.abs(item.vNorm - last.centerV);
     const prefersRow = item.node.gridY === last.dominantGridY;
-    const threshold = prefersRow ? rowThreshold * 1.6 : rowThreshold;
+    const threshold = Math.max(minRowGapNorm, prefersRow ? rowThreshold * 1.6 : rowThreshold);
     if (gap > threshold) {
       rows.push({
         centerV: item.vNorm,
@@ -578,7 +580,7 @@ function buildScreenIsomorphicLayout() {
     }
   }
 
-  const countClusters = (values) => {
+  const countClusters = (values, minGap) => {
     if (!values.length) {
       return 0;
     }
@@ -598,7 +600,7 @@ function buildScreenIsomorphicLayout() {
     }
     diffs.sort((a, b) => a - b);
     const median = diffs[Math.floor(diffs.length / 2)];
-    const threshold = Math.max(0.08, median * 0.6);
+    const threshold = Math.max(minGap, median * 0.6);
     let count = 1;
     for (let i = 1; i < sorted.length; i += 1) {
       if (sorted[i] - sorted[i - 1] > threshold) {
@@ -610,7 +612,10 @@ function buildScreenIsomorphicLayout() {
 
   let columnsNeeded = 1;
   rows.forEach((row) => {
-    columnsNeeded = Math.max(columnsNeeded, countClusters(row.items.map((item) => item.uNorm)));
+    columnsNeeded = Math.max(
+      columnsNeeded,
+      countClusters(row.items.map((item) => item.uNorm), minColGapNorm)
+    );
   });
 
   const getKeyboardRowsForCount = (count) => {
@@ -626,60 +631,96 @@ function buildScreenIsomorphicLayout() {
     return ISOMORPHIC_ROWS;
   };
 
-  const keyboardRows = getKeyboardRowsForCount(rows.length);
-  const keyboardSkews = keyboardRows.map((row) => {
-    const index = ISOMORPHIC_ROWS.indexOf(row);
-    return KEYBOARD_ROW_SKEW[index] || 0;
-  });
-  const maxRowKeys = Math.max(...keyboardRows.map((row) => row.keys.length));
-  columnsNeeded = Math.max(1, Math.min(columnsNeeded, maxRowKeys));
-
-  const rowMeta = keyboardRows.map((row, rowIndex) => {
-    const columns = Math.min(columnsNeeded, row.keys.length);
-    const startIndex = Math.max(0, Math.floor((row.keys.length - columns) / 2));
-    const rowStart = keyboardSkews[rowIndex] + startIndex;
-    const rowEnd = rowStart + columns - 1;
-    return {
-      row,
-      columns,
-      startIndex,
-      rowStart,
-      rowEnd,
-      centerV: rows[rowIndex] ? rows[rowIndex].centerV : rowIndex / Math.max(1, rows.length - 1),
-    };
-  });
-  const minStart = Math.min(...rowMeta.map((meta) => meta.rowStart));
-  const maxEnd = Math.max(...rowMeta.map((meta) => meta.rowEnd));
-  const keySpan = Math.max(1, maxEnd - minStart);
-
-  const layout = new Map();
-  rows.forEach((rowGroup, rowIndex) => {
-    const meta = rowMeta[rowIndex];
-    if (!meta) {
-      return;
-    }
-    rowGroup.items.forEach((item) => {
-      const uKey = minStart + item.uNorm * keySpan;
-      const rawIndex = uKey - meta.rowStart;
-      const keyIndex = clamp(
-        Math.floor(rawIndex + 0.5 - 1e-6),
-        0,
-        meta.columns - 1
-      );
-      const key = meta.row.keys[meta.startIndex + keyIndex];
-      const keyCenterU = (meta.rowStart + keyIndex - minStart) / keySpan;
-      const keyCenterV = meta.centerV;
-      const dist =
-        Math.pow(item.uNorm - keyCenterU, 2) + Math.pow(item.vNorm - keyCenterV, 2);
-      const existing = layout.get(key);
-      if (!existing || dist < existing.dist) {
-        layout.set(key, { node: item.node, dist });
-      }
+  const buildLayoutForConfig = (rowCount, columnsTarget) => {
+    const keyboardRows = getKeyboardRowsForCount(rowCount);
+    const keyboardSkews = keyboardRows.map((row) => {
+      const index = ISOMORPHIC_ROWS.indexOf(row);
+      return KEYBOARD_ROW_SKEW[index] || 0;
     });
-  });
+    const maxRowKeys = Math.max(...keyboardRows.map((row) => row.keys.length));
+    const columns = Math.max(1, Math.min(columnsTarget, maxRowKeys));
+
+    const rowMeta = keyboardRows.map((row, rowIndex) => {
+      const rowColumns = Math.min(columns, row.keys.length);
+      const startIndex = Math.max(0, Math.floor((row.keys.length - rowColumns) / 2));
+      const rowStart = keyboardSkews[rowIndex] + startIndex;
+      const rowEnd = rowStart + rowColumns - 1;
+      return {
+        row,
+        columns: rowColumns,
+        startIndex,
+        rowStart,
+        rowEnd,
+        centerV: rows[rowIndex]
+          ? rows[rowIndex].centerV
+          : rowIndex / Math.max(1, rows.length - 1),
+      };
+    });
+    const minStart = Math.min(...rowMeta.map((meta) => meta.rowStart));
+    const maxEnd = Math.max(...rowMeta.map((meta) => meta.rowEnd));
+    const keySpan = Math.max(1, maxEnd - minStart);
+
+    const layout = new Map();
+    rows.forEach((rowGroup, rowIndex) => {
+      const meta = rowMeta[rowIndex];
+      if (!meta) {
+        return;
+      }
+      rowGroup.items.forEach((item) => {
+        const uKey = minStart + item.uNorm * keySpan;
+        const rawIndex = uKey - meta.rowStart;
+        const keyIndex = clamp(
+          Math.floor(rawIndex + 0.5 - 1e-6),
+          0,
+          meta.columns - 1
+        );
+        const key = meta.row.keys[meta.startIndex + keyIndex];
+        const keyCenterU = (meta.rowStart + keyIndex - minStart) / keySpan;
+        const keyCenterV = meta.centerV;
+        const dist =
+          Math.pow(item.uNorm - keyCenterU, 2) + Math.pow(item.vNorm - keyCenterV, 2);
+        const existing = layout.get(key);
+        if (!existing || dist < existing.dist) {
+          layout.set(key, { node: item.node, dist });
+        }
+      });
+    });
+    const mappedNodes = new Set();
+    layout.forEach((value) => {
+      mappedNodes.add(value.node.id);
+    });
+    return {
+      layout,
+      mappedCount: mappedNodes.size,
+      maxRowKeys,
+    };
+  };
+
+  let best = { layout: new Map(), mappedCount: 0 };
+  let foundAll = false;
+  for (let rowCount = rows.length; rowCount <= maxRows; rowCount += 1) {
+    const maxRowKeys = Math.max(
+      ...getKeyboardRowsForCount(rowCount).map((row) => row.keys.length)
+    );
+    const startColumns = Math.max(1, Math.min(columnsNeeded, maxRowKeys));
+    for (let columns = startColumns; columns <= maxRowKeys; columns += 1) {
+      const candidate = buildLayoutForConfig(rowCount, columns);
+      if (candidate.mappedCount > best.mappedCount) {
+        best = { layout: candidate.layout, mappedCount: candidate.mappedCount };
+      }
+      if (candidate.mappedCount === items.length) {
+        best = { layout: candidate.layout, mappedCount: candidate.mappedCount };
+        foundAll = true;
+        break;
+      }
+    }
+    if (foundAll) {
+      break;
+    }
+  }
 
   const result = new Map();
-  layout.forEach((value, key) => {
+  best.layout.forEach((value, key) => {
     result.set(key, value.node);
   });
 

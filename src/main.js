@@ -7,9 +7,17 @@ const exportScaleButton = document.getElementById("export-scale");
 const themeSelect = document.getElementById("theme-select");
 const optionsToggle = document.getElementById("options-toggle");
 const optionsPanel = document.getElementById("options-panel");
+const presetToggle = document.getElementById("preset-toggle");
+const presetPanel = document.getElementById("preset-panel");
+const presetList = document.getElementById("preset-list");
+const topBar = document.querySelector(".top-bar");
+const synthPanel = document.querySelector(".synth-panel");
+const envelopeToggle = document.getElementById("envelope-toggle");
+const envelopePanel = document.getElementById("envelope-panel");
+const animationToggle = document.getElementById("animation-toggle");
+const animationPanel = document.getElementById("animation-panel");
 const ratioWheelToggle = document.getElementById("ratio-wheel-toggle");
-const ratioWheelDrawer = document.getElementById("ratio-wheel-drawer");
-const ratioWheelClose = document.getElementById("ratio-wheel-close");
+const ratioWheelPanel = document.getElementById("ratio-wheel-panel");
 const ratioWheelLarge = document.getElementById("ratio-wheel-large");
 const ratioWheelMini = document.getElementById("ratio-wheel-mini");
 const uiHint = document.getElementById("ui-hint");
@@ -31,6 +39,14 @@ const decaySlider = document.getElementById("decay");
 const sustainSlider = document.getElementById("sustain");
 const releaseSlider = document.getElementById("release");
 const oneShotCheckbox = document.getElementById("one-shot");
+const looperToggle = document.getElementById("looper-toggle");
+const tempoSlider = document.getElementById("tempo");
+const tempoReadout = document.getElementById("tempo-readout");
+const sequencePatternSelect = document.getElementById("sequence-pattern");
+const rhythmPatternSelect = document.getElementById("rhythm-pattern");
+const octavePatternSelect = document.getElementById("octave-pattern");
+const patternBuildButton = document.getElementById("pattern-build");
+const scorePlayToggle = document.getElementById("score-play-toggle");
 const attackReadout = document.getElementById("attack-readout");
 const decayReadout = document.getElementById("decay-readout");
 const sustainReadout = document.getElementById("sustain-readout");
@@ -70,7 +86,10 @@ let lastLfoTapId = null;
 const activeKeys = new Map();
 
 const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-const primes = [2, 3, 5, 7, 11, 13];
+const primes = [
+  3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73,
+  79, 83, 89, 97,
+];
 const GRID_COLS = 20;
 const GRID_ROWS = 20;
 const GRID_DEPTH = 7;
@@ -136,11 +155,325 @@ let isomorphicKeyMap = null;
 let isomorphicLayout = null;
 let isomorphicDirty = true;
 let keyboardKeyPositions = null;
+let looperState = "idle";
+let looperEvents = [];
+let looperStartMs = 0;
+let looperLoopDurationMs = 0;
+let looperCycleTimer = null;
+let looperTimeouts = [];
+let looperVoicesByNode = new Map();
+let patternPlayerState = "idle";
+let patternNextTimer = null;
+let patternOffTimers = [];
+let patternActiveNodes = [];
+let patternSequenceState = null;
+let patternRhythmState = null;
+let patternOctaveState = null;
+let patternVoices = new Set();
+let tempoBpm = 120;
 
 function markIsomorphicDirty() {
   isomorphicDirty = true;
   isomorphicKeyMap = null;
   isomorphicLayout = null;
+}
+
+function updateLooperButton() {
+  if (!looperToggle) {
+    return;
+  }
+  if (looperState === "recording") {
+    looperToggle.textContent = "Play";
+    looperToggle.classList.add("button-on");
+  } else if (looperState === "playing") {
+    looperToggle.textContent = "Stop";
+    looperToggle.classList.add("button-on");
+  } else if (looperState === "ready") {
+    looperToggle.textContent = "Play";
+    looperToggle.classList.remove("button-on");
+  } else {
+    looperToggle.textContent = "Record";
+    looperToggle.classList.remove("button-on");
+  }
+}
+
+function updateScoreButton() {
+  if (!scorePlayToggle) {
+    return;
+  }
+  if (patternPlayerState === "playing") {
+    scorePlayToggle.textContent = "Stop";
+    scorePlayToggle.classList.add("button-on");
+  } else {
+    scorePlayToggle.textContent = "Play";
+    scorePlayToggle.classList.remove("button-on");
+  }
+}
+
+function updateTempoReadout() {
+  if (!tempoSlider || !tempoReadout) {
+    return;
+  }
+  tempoBpm = Number(tempoSlider.value) || 120;
+  tempoReadout.textContent = `${tempoBpm} BPM`;
+}
+
+function beatsToMs(beats) {
+  return (beats * 60000) / tempoBpm;
+}
+
+function stopPatternVoices() {
+  patternVoices.forEach((voice) => stopVoice(voice));
+  patternVoices = new Set();
+}
+
+function getActiveNodeOrder() {
+  return nodes
+    .filter((node) => node.active)
+    .map((node) => ({
+      nodeId: node.id,
+      ratio: node.numerator / node.denominator,
+    }))
+    .sort((a, b) => a.ratio - b.ratio)
+    .map((item) => item.nodeId);
+}
+
+function shuffleArray(items) {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function buildPatternStates() {
+  patternActiveNodes = getActiveNodeOrder();
+  const count = patternActiveNodes.length;
+  const sequencePattern = sequencePatternSelect ? sequencePatternSelect.value : "ascending";
+  const rhythmPattern = rhythmPatternSelect ? rhythmPatternSelect.value : "steady";
+  const octavePattern = octavePatternSelect ? octavePatternSelect.value : "unison";
+
+  let order = Array.from({ length: count }, (_, index) => index);
+  if (sequencePattern === "descending") {
+    order = order.reverse();
+  } else if (sequencePattern === "shuffle") {
+    order = shuffleArray(order);
+  }
+  patternSequenceState = {
+    type: sequencePattern,
+    order,
+    index: 0,
+  };
+
+  patternRhythmState = {
+    type: rhythmPattern,
+    values: rhythmPattern === "random" ? [0.25, 0.25, 0.5, 1, 2] : [1],
+    index: 0,
+  };
+
+  patternOctaveState = {
+    type: octavePattern,
+    values: octavePattern === "random" ? [-1, 0, 1, 2] : [0],
+    index: 0,
+  };
+}
+
+function nextSequenceIndex() {
+  if (!patternSequenceState || !patternActiveNodes.length) {
+    return null;
+  }
+  if (patternSequenceState.type === "random") {
+    return Math.floor(Math.random() * patternActiveNodes.length);
+  }
+  const value = patternSequenceState.order[
+    patternSequenceState.index % patternSequenceState.order.length
+  ];
+  patternSequenceState.index += 1;
+  return value;
+}
+
+function nextRhythmBeats() {
+  if (!patternRhythmState) {
+    return 1;
+  }
+  if (patternRhythmState.type === "random") {
+    const values = patternRhythmState.values;
+    return values[Math.floor(Math.random() * values.length)];
+  }
+  const value =
+    patternRhythmState.values[patternRhythmState.index % patternRhythmState.values.length];
+  patternRhythmState.index += 1;
+  return value;
+}
+
+function nextOctaveOffset() {
+  if (!patternOctaveState) {
+    return 0;
+  }
+  if (patternOctaveState.type === "random") {
+    const values = patternOctaveState.values;
+    return values[Math.floor(Math.random() * values.length)];
+  }
+  const value =
+    patternOctaveState.values[patternOctaveState.index % patternOctaveState.values.length];
+  patternOctaveState.index += 1;
+  return value;
+}
+
+function scheduleNextPatternEvent(delayMs) {
+  if (patternNextTimer) {
+    clearTimeout(patternNextTimer);
+  }
+  patternNextTimer = setTimeout(() => {
+    if (patternPlayerState !== "playing") {
+      return;
+    }
+    const nextIndex = nextSequenceIndex();
+    const durationBeats = nextRhythmBeats();
+    const octave = nextOctaveOffset();
+    if (nextIndex != null) {
+      const nodeId = patternActiveNodes[nextIndex];
+      const node = nodeById.get(nodeId);
+      if (node) {
+        const freq = node.freq * Math.pow(2, octave);
+        const voice = startVoice({
+          nodeId: node.id,
+          octave,
+          freq,
+          source: "pattern",
+        });
+        if (voice) {
+          patternVoices.add(voice);
+          draw();
+          const offTimer = setTimeout(() => {
+            stopVoice(voice);
+            patternVoices.delete(voice);
+            draw();
+          }, Math.max(0, beatsToMs(durationBeats)));
+          patternOffTimers.push(offTimer);
+        }
+      }
+    }
+    scheduleNextPatternEvent(beatsToMs(durationBeats));
+  }, Math.max(0, delayMs));
+}
+
+function startPatternPlayback() {
+  if (!patternSequenceState) {
+    buildPatternStates();
+  }
+  patternPlayerState = "playing";
+  updateScoreButton();
+  scheduleNextPatternEvent(0);
+}
+
+function stopPatternPlayback() {
+  if (patternNextTimer) {
+    clearTimeout(patternNextTimer);
+    patternNextTimer = null;
+  }
+  patternOffTimers.forEach((timer) => clearTimeout(timer));
+  patternOffTimers = [];
+  stopPatternVoices();
+  patternPlayerState = "idle";
+  updateScoreButton();
+  draw();
+}
+
+function disableVoiceLfo(voice) {
+  if (!voice) {
+    return;
+  }
+  voice.lfoActive = false;
+  voice.lfoHalfPeriod = 0;
+  voice.lfoStartMs = 0;
+  if (voice.lfoGain) {
+    voice.lfoGain.gain.value = 1;
+  }
+  updateNodePlaybackState();
+}
+
+function clearLooperTimers() {
+  looperTimeouts.forEach((timer) => clearTimeout(timer));
+  looperTimeouts = [];
+  if (looperCycleTimer) {
+    clearInterval(looperCycleTimer);
+    looperCycleTimer = null;
+  }
+}
+
+function stopLooperVoices() {
+  looperVoicesByNode.forEach((voicesList) => {
+    voicesList.forEach((voice) => stopVoice(voice));
+  });
+  looperVoicesByNode = new Map();
+}
+
+function startLooperRecording() {
+  looperEvents = [];
+  looperStartMs = performance.now();
+  looperLoopDurationMs = 0;
+  looperState = "recording";
+  updateLooperButton();
+}
+
+function scheduleLooperCycle() {
+  looperEvents.forEach((event) => {
+    const timer = setTimeout(() => {
+      if (looperState !== "playing") {
+        return;
+      }
+      const node = nodeById.get(event.nodeId);
+      if (!node) {
+        return;
+      }
+      if (event.type === "on") {
+        const voice = startVoice({
+          nodeId: node.id,
+          octave: 0,
+          freq: node.freq,
+          source: "looper",
+        });
+        if (voice) {
+          const list = looperVoicesByNode.get(node.id) || [];
+          list.push(voice);
+          looperVoicesByNode.set(node.id, list);
+        }
+      } else if (event.type === "off") {
+        const list = looperVoicesByNode.get(node.id);
+        if (list && list.length) {
+          const voice = list.shift();
+          if (voice) {
+            stopVoice(voice);
+          }
+        }
+      }
+    }, event.t);
+    looperTimeouts.push(timer);
+  });
+}
+
+function startLooperPlayback() {
+  if (!looperEvents.length) {
+    looperState = "idle";
+    updateLooperButton();
+    return;
+  }
+  looperLoopDurationMs = Math.max(looperLoopDurationMs, 250);
+  looperState = "playing";
+  updateLooperButton();
+  clearLooperTimers();
+  stopLooperVoices();
+  scheduleLooperCycle();
+  looperCycleTimer = setInterval(scheduleLooperCycle, looperLoopDurationMs);
+}
+
+function stopLooperPlayback() {
+  clearLooperTimers();
+  stopLooperVoices();
+  looperState = looperEvents.length ? "ready" : "idle";
+  updateLooperButton();
 }
 
 function buildLattice() {
@@ -376,6 +709,7 @@ function updateNodePlaybackState() {
   nodes.forEach((node) => {
     node.playing = false;
     node._hasLfo = false;
+    node._scorePlaying = false;
   });
   voices.forEach((voice) => {
     if (voice.releasing) {
@@ -388,6 +722,9 @@ function updateNodePlaybackState() {
     node.playing = true;
     if (voice.lfoActive) {
       node._hasLfo = true;
+    }
+    if (voice.source === "score" || voice.source === "pattern") {
+      node._scorePlaying = true;
     }
   });
 }
@@ -610,11 +947,63 @@ function buildScreenIsomorphicLayout() {
     return count;
   };
 
+  const computeVisualExtraColumns = (values, minGap) => {
+    if (values.length < 2) {
+      return 0;
+    }
+    const sorted = [...values].sort((a, b) => a - b);
+    const gaps = [];
+    for (let i = 1; i < sorted.length; i += 1) {
+      const diff = sorted[i] - sorted[i - 1];
+      if (diff >= minGap) {
+        gaps.push(diff);
+      }
+    }
+    if (!gaps.length) {
+      return 0;
+    }
+    gaps.sort((a, b) => a - b);
+    const median = gaps[Math.floor(gaps.length / 2)];
+    const maxGap = gaps[gaps.length - 1];
+    if (median <= 0) {
+      return 0;
+    }
+    const ratio = maxGap / median;
+    if (ratio < 1.6) {
+      return 0;
+    }
+    return Math.min(6, Math.floor(ratio) - 1);
+  };
+
   let columnsNeeded = 1;
   rows.forEach((row) => {
+    const uValues = row.items.map((item) => item.uNorm);
+    const sortedU = [...uValues].sort((a, b) => a - b);
+    let minU = sortedU[0] ?? 0;
+    let maxU = sortedU[sortedU.length - 1] ?? 0;
+    let medianGap = 0;
+    if (sortedU.length > 1) {
+      const gaps = [];
+      for (let i = 1; i < sortedU.length; i += 1) {
+        const gap = sortedU[i] - sortedU[i - 1];
+        if (gap > 0) {
+          gaps.push(gap);
+        }
+      }
+      gaps.sort((a, b) => a - b);
+      medianGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+    }
+    const baseColumns = countClusters(uValues, minColGapNorm);
+    const extraColumns = computeVisualExtraColumns(uValues, minColGapNorm);
+    const span = Math.max(0, maxU - minU);
+    const gapSize = Math.max(minColGapNorm, medianGap || minColGapNorm);
+    const minColsForSpan = sortedU.length
+      ? 1 + Math.ceil(span / gapSize)
+      : 1;
     columnsNeeded = Math.max(
       columnsNeeded,
-      countClusters(row.items.map((item) => item.uNorm), minColGapNorm)
+      baseColumns + extraColumns,
+      minColsForSpan
     );
   });
 
@@ -1063,7 +1452,8 @@ function projectPoint(point, disableScale = false) {
   const y1 = point.y * cosX - z1 * sinX;
   const z2 = point.y * sinX + z1 * cosX;
 
-  const scale = disableScale ? 1 : 1 / (1 + z2 * 0.002);
+  const scaleRaw = disableScale ? 1 : 1 / (1 + z2 * 0.002);
+  const scale = disableScale ? 1 : Math.max(0.15, scaleRaw);
   return { x: x1 * scale, y: y1 * scale, depth: z2, scale };
 }
 
@@ -1078,7 +1468,8 @@ function projectPointWithAngles(point, rotX, rotY, disableScale = false) {
   const y1 = point.y * cosX - z1 * sinX;
   const z2 = point.y * sinX + z1 * cosX;
 
-  const scale = disableScale ? 1 : 1 / (1 + z2 * 0.002);
+  const scaleRaw = disableScale ? 1 : 1 / (1 + z2 * 0.002);
+  const scale = disableScale ? 1 : Math.max(0.15, scaleRaw);
   return { x: x1 * scale, y: y1 * scale, depth: z2, scale };
 }
 
@@ -1288,6 +1679,19 @@ function draw() {
       ctx.restore();
     }
 
+    if (node._scorePlaying) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(alpha, 0.9);
+      ctx.strokeStyle = themeColors.playFill;
+      ctx.lineWidth = 3;
+      ctx.shadowColor = "rgba(243, 214, 77, 0.7)";
+      ctx.shadowBlur = Math.max(6, radius * 0.8);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius + 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     ctx.fillStyle = themeColors.textPrimary;
     ctx.font = "21px Georgia";
     ctx.textAlign = "center";
@@ -1374,6 +1778,7 @@ function startVoice(options) {
     lfoHalfPeriod: options.lfoHalfPeriod || 0,
     lfoStartMs: options.lfoStartMs || 0,
     source: options.source || "keyboard",
+    loopOffRecorded: false,
   };
 
   lfoGain.gain.value = voice.lfoActive ? getLfoGainValue(voice, performance.now()) : 1;
@@ -1401,6 +1806,19 @@ function startVoice(options) {
     const release = Number(releaseSlider.value) || 0.6;
     const stopAt = now + attack + decay + release + 0.05;
     oscillator.stop(stopAt);
+  }
+
+  if (looperState === "recording" && voice.source !== "looper") {
+    const t = performance.now() - looperStartMs;
+    looperEvents.push({ type: "on", nodeId: voice.nodeId, t });
+    looperLoopDurationMs = Math.max(looperLoopDurationMs, t);
+    if (isOneShot) {
+      const release = Number(releaseSlider.value) || 0.6;
+      const offAt = t + (attack + decay + release) * 1000;
+      looperEvents.push({ type: "off", nodeId: voice.nodeId, t: offAt });
+      looperLoopDurationMs = Math.max(looperLoopDurationMs, offAt);
+      voice.loopOffRecorded = true;
+    }
   }
 
   return voice;
@@ -1431,6 +1849,13 @@ function stopVoice(voice, immediate = false) {
     osc.stop(now + release + 0.05);
   } else {
     osc.stop(now + 0.1);
+  }
+
+  if (looperState === "recording" && voice.source !== "looper" && !voice.loopOffRecorded) {
+    const t = performance.now() - looperStartMs;
+    looperEvents.push({ type: "off", nodeId: voice.nodeId, t });
+    looperLoopDurationMs = Math.max(looperLoopDurationMs, t);
+    voice.loopOffRecorded = true;
   }
 
 }
@@ -1574,6 +1999,18 @@ function onPointerUp(event) {
     const node = nodes.find((item) => item.id === lfoArmingId);
     lfoArmingId = null;
     if (node && duration >= 0.15) {
+      if (node.baseVoiceId) {
+        const baseVoice = findVoiceById(node.baseVoiceId);
+        if (baseVoice) {
+          stopVoice(baseVoice, true);
+        }
+        node.baseVoiceId = null;
+      }
+      voices.forEach((voice) => {
+        if (voice.nodeId === node.id && voice.source === "node") {
+          stopVoice(voice, true);
+        }
+      });
       node.active = true;
       updatePitchInstances();
       markIsomorphicDirty();
@@ -1619,11 +2056,18 @@ function onPointerUp(event) {
         draw();
         return;
       }
-      if (is3DMode && zKeyHeld) {
+      if (zKeyHeld) {
+        if (!is3DMode) {
+          if (mode3dCheckbox) {
+            mode3dCheckbox.checked = true;
+          }
+          set3DMode(true);
+        }
         zModeActive = true;
         zModeAnchor = { x: hit.gridX, y: hit.gridY };
         updateAddModeFromShift();
         draw();
+        schedulePresetUrlUpdate();
         return;
       }
       if (is3DMode && !isAddMode && !hit.active && !hit.isCenter) {
@@ -1631,8 +2075,7 @@ function onPointerUp(event) {
       }
       const baseVoice = hit.baseVoiceId ? findVoiceById(hit.baseVoiceId) : null;
       if (baseVoice && baseVoice.lfoActive) {
-        stopVoice(baseVoice);
-        hit.baseVoiceId = null;
+        disableVoiceLfo(baseVoice);
         draw();
         return;
       }
@@ -1697,7 +2140,7 @@ function onWheel(event) {
 
 function isInactiveNodeAvailable(node) {
   if (!is3DMode) {
-    return shiftHeld;
+    return shiftHeld && (node.gridZ || 0) === gridCenterZ;
   }
   const z = node.gridZ || 0;
   if (zModeActive && zModeAnchor) {
@@ -1740,6 +2183,20 @@ function resizeCanvas() {
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   markIsomorphicDirty();
   draw();
+}
+
+function updateRatioWheelPosition() {
+  if (!ratioWheelToggle || !ratioWheelPanel) {
+    return;
+  }
+  const gap = 8;
+  const buttonRect = ratioWheelToggle.getBoundingClientRect();
+  const panelWidth = Math.min(420, window.innerWidth * 0.9);
+  const maxLeft = Math.max(8, window.innerWidth - panelWidth - 8);
+  const left = Math.min(Math.max(buttonRect.right - panelWidth, 8), maxLeft);
+  const top = Math.round(buttonRect.bottom + gap);
+  document.documentElement.style.setProperty("--ratio-wheel-left", `${Math.round(left)}px`);
+  document.documentElement.style.setProperty("--ratio-wheel-top", `${top}px`);
 }
 
 function populateRatioSelect(selectEl, defaultValue, includeOne = false) {
@@ -1831,36 +2288,56 @@ function drawAxes() {
 
 function drawGrid() {
   const size = GRID_SPACING * (GRID_COLS / 2);
+  const sizeZ = GRID_SPACING * (gridDepth / 2);
   const step = GRID_SPACING;
+  const coarseStep = GRID_SPACING * 2;
   ctx.save();
   ctx.strokeStyle = themeColors.edge;
   ctx.lineWidth = 1;
-  for (let x = -size; x <= size; x += step) {
-    const start = worldToScreen({ x, y: -size, z: 0 });
-    const end = worldToScreen({ x, y: size, z: 0 });
+
+  const drawLine = (start, end, baseAlpha) => {
     const avgDepth = (start.depth + end.depth) / 2;
     const depthFade = Number.isFinite(avgDepth)
-      ? Math.max(0.15, Math.min(1, 1 - Math.max(0, avgDepth) / 2000))
+      ? Math.max(0.12, Math.min(1, 1 - Math.max(0, avgDepth) / 2000))
       : 1;
-    ctx.globalAlpha = depthFade;
+    ctx.globalAlpha = baseAlpha * depthFade;
     ctx.beginPath();
     ctx.moveTo(start.x, start.y);
     ctx.lineTo(end.x, end.y);
     ctx.stroke();
-  }
-  for (let y = -size; y <= size; y += step) {
-    const start = worldToScreen({ x: -size, y, z: 0 });
-    const end = worldToScreen({ x: size, y, z: 0 });
-    const avgDepth = (start.depth + end.depth) / 2;
-    const depthFade = Number.isFinite(avgDepth)
-      ? Math.max(0.15, Math.min(1, 1 - Math.max(0, avgDepth) / 2000))
-      : 1;
-    ctx.globalAlpha = depthFade;
-    ctx.beginPath();
-    ctx.moveTo(start.x, start.y);
-    ctx.lineTo(end.x, end.y);
-    ctx.stroke();
-  }
+  };
+
+  const drawPlaneGrid = (plane, planeAlpha) => {
+    const [axisA, axisB, axisConst] = plane;
+    const limitA = axisA === "z" ? sizeZ : size;
+    const limitB = axisB === "z" ? sizeZ : size;
+    const stepA = axisA === "z" ? step : coarseStep;
+    const stepB = axisB === "z" ? step : coarseStep;
+    for (let a = -limitA; a <= limitA; a += stepA) {
+      const start = { x: 0, y: 0, z: 0 };
+      const end = { x: 0, y: 0, z: 0 };
+      start[axisA] = a;
+      end[axisA] = a;
+      start[axisB] = -limitB;
+      end[axisB] = limitB;
+      start[axisConst.axis] = axisConst.value;
+      end[axisConst.axis] = axisConst.value;
+      drawLine(worldToScreen(start), worldToScreen(end), planeAlpha);
+    }
+    for (let b = -limitB; b <= limitB; b += stepB) {
+      const start = { x: 0, y: 0, z: 0 };
+      const end = { x: 0, y: 0, z: 0 };
+      start[axisB] = b;
+      end[axisB] = b;
+      start[axisA] = -limitA;
+      end[axisA] = limitA;
+      start[axisConst.axis] = axisConst.value;
+      end[axisConst.axis] = axisConst.value;
+      drawLine(worldToScreen(start), worldToScreen(end), planeAlpha);
+    }
+  };
+
+  drawPlaneGrid(["x", "y", { axis: "z", value: 0 }], 0.35);
   ctx.restore();
 }
 
@@ -2046,7 +2523,7 @@ function drawRatioWheel(canvasEl, options = {}) {
 }
 
 function updateRatioWheels() {
-  if (ratioWheelDrawer && !ratioWheelDrawer.hidden) {
+  if (ratioWheelPanel && !ratioWheelPanel.hidden) {
     drawRatioWheel(ratioWheelLarge);
   }
   if (ratioWheelMini) {
@@ -2132,6 +2609,9 @@ function setViewPreset(preset) {
   if (!is3DMode) {
     return;
   }
+  view.offsetX = 0;
+  view.offsetY = 0;
+  view.zoom = 1;
   if (preset === "xy") {
     view.rotX = 0;
     view.rotY = 0;
@@ -2373,31 +2853,116 @@ function toggleOptionsPanel() {
   const isOpen = optionsToggle.getAttribute("aria-expanded") === "true";
   optionsToggle.setAttribute("aria-expanded", String(!isOpen));
   optionsPanel.hidden = isOpen;
+  optionsPanel.classList.toggle("panel-open", !isOpen);
+  const parentPanel = optionsToggle.closest(".panel");
+  if (parentPanel) {
+    parentPanel.classList.toggle("panel-open", !isOpen);
+  }
 }
 
-function openRatioWheelDrawer() {
-  if (!ratioWheelDrawer) {
+function togglePresetPanel() {
+  if (!presetToggle || !presetPanel) {
     return;
   }
-  ratioWheelDrawer.hidden = false;
-  updateRatioWheels();
+  const isOpen = presetToggle.getAttribute("aria-expanded") === "true";
+  presetToggle.setAttribute("aria-expanded", String(!isOpen));
+  presetPanel.hidden = isOpen;
+  presetPanel.classList.toggle("panel-open", !isOpen);
+  const parentPanel = presetToggle.closest(".panel");
+  if (parentPanel) {
+    parentPanel.classList.toggle("panel-open", !isOpen);
+  }
 }
 
-function closeRatioWheelDrawer() {
-  if (!ratioWheelDrawer) {
+function toggleEnvelopePanel() {
+  if (!envelopeToggle || !envelopePanel) {
     return;
   }
-  ratioWheelDrawer.hidden = true;
+  const isOpen = envelopeToggle.getAttribute("aria-expanded") === "true";
+  envelopeToggle.setAttribute("aria-expanded", String(!isOpen));
+  envelopePanel.hidden = isOpen;
 }
 
-function toggleRatioWheelDrawer() {
-  if (!ratioWheelDrawer) {
+function toggleAnimationPanel() {
+  if (!animationToggle || !animationPanel) {
     return;
   }
-  if (ratioWheelDrawer.hidden) {
-    openRatioWheelDrawer();
-  } else {
-    closeRatioWheelDrawer();
+  const isOpen = animationToggle.getAttribute("aria-expanded") === "true";
+  animationToggle.setAttribute("aria-expanded", String(!isOpen));
+  animationPanel.hidden = isOpen;
+}
+
+function closeRatioWheelPanel() {
+  if (!ratioWheelToggle || !ratioWheelPanel) {
+    return;
+  }
+  ratioWheelToggle.setAttribute("aria-expanded", "false");
+  ratioWheelPanel.hidden = true;
+}
+
+function toggleRatioWheelPanel() {
+  if (!ratioWheelToggle || !ratioWheelPanel) {
+    return;
+  }
+  const isOpen = ratioWheelToggle.getAttribute("aria-expanded") === "true";
+  ratioWheelToggle.setAttribute("aria-expanded", String(!isOpen));
+  ratioWheelPanel.hidden = isOpen;
+  if (!isOpen) {
+    updateRatioWheelPosition();
+    updateRatioWheels();
+  }
+}
+
+async function loadPresets() {
+  if (!presetList) {
+    return;
+  }
+  presetList.innerHTML = "";
+  try {
+    const response = await fetch(new URL("./presets.json", import.meta.url));
+    if (!response.ok) {
+      throw new Error(`Preset fetch failed: ${response.status}`);
+    }
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      throw new Error("Preset data is not an array");
+    }
+    if (data.length === 0) {
+      const emptyItem = document.createElement("li");
+      emptyItem.className = "preset-empty";
+      emptyItem.textContent = "No presets yet.";
+      presetList.appendChild(emptyItem);
+      return;
+    }
+    data.forEach((entry) => {
+      if (!Array.isArray(entry) || entry.length < 2) {
+        return;
+      }
+      const [name, uri] = entry;
+      const item = document.createElement("li");
+      const link = document.createElement("a");
+      link.textContent = String(name);
+      const uriString = String(uri);
+      if (uriString.startsWith("http://") || uriString.startsWith("https://")) {
+        link.href = uriString;
+      } else if (uriString.startsWith("#")) {
+        link.href = `${window.location.origin}${window.location.pathname}${uriString}`;
+      } else if (uriString.startsWith("/")) {
+        link.href = `${window.location.origin}${uriString}`;
+      } else {
+        link.href = `${window.location.origin}/${uriString}`;
+      }
+      link.target = "_self";
+      link.rel = "noopener";
+      item.appendChild(link);
+      presetList.appendChild(item);
+    });
+  } catch (error) {
+    const errorItem = document.createElement("li");
+    errorItem.className = "preset-empty";
+    errorItem.textContent = "Failed to load presets.";
+    presetList.appendChild(errorItem);
+    console.warn(error);
   }
 }
 
@@ -2442,6 +3007,8 @@ function getPresetState() {
       rotX: view.rotX,
       rotY: view.rotY,
     },
+    axes: showAxes,
+    grid: showGrid,
     ratios: [
       Number(ratioXSelect.value) || 3,
       Number(ratioYSelect.value) || 5,
@@ -2449,6 +3016,17 @@ function getPresetState() {
     ],
     fundamental: Number(fundamentalInput.value) || 220,
     a4: Number(a4Input.value) || 440,
+    synth: {
+      volume: Number(volumeSlider.value),
+      lfoDepth: Number(lfoDepthSlider.value),
+      keyboardMode: keyboardModeSelect ? keyboardModeSelect.value : "off",
+      waveform: waveformSelect ? waveformSelect.value : "sine",
+      attack: Number(attackSlider.value),
+      decay: Number(decaySlider.value),
+      sustain: Number(sustainSlider.value),
+      release: Number(releaseSlider.value),
+      oneShot: Boolean(oneShotCheckbox && oneShotCheckbox.checked),
+    },
   };
 }
 
@@ -2495,6 +3073,18 @@ function applyPresetState(state) {
   if (!state || typeof state !== "object") {
     return;
   }
+  if (typeof state.axes === "boolean") {
+    showAxes = state.axes;
+    if (navAxesToggle) {
+      navAxesToggle.checked = showAxes;
+    }
+  }
+  if (typeof state.grid === "boolean") {
+    showGrid = state.grid;
+    if (navGridToggle) {
+      navGridToggle.checked = showGrid;
+    }
+  }
   const viewState = state.view && typeof state.view === "object" ? state.view : null;
   const activeHasZ = Array.isArray(state.active)
     ? state.active.some((entry) => Array.isArray(entry) && Number(entry[2]) !== 0)
@@ -2534,6 +3124,42 @@ function applyPresetState(state) {
     if (Number.isFinite(z) && ratioZSelect) {
       ratioZSelect.value = String(z);
     }
+  }
+
+  if (state.synth && typeof state.synth === "object") {
+    if (Number.isFinite(state.synth.volume)) {
+      volumeSlider.value = String(state.synth.volume);
+      updateVolume();
+    }
+    if (Number.isFinite(state.synth.lfoDepth) && lfoDepthSlider) {
+      lfoDepthSlider.value = String(state.synth.lfoDepth);
+      updateLfoDepth();
+    }
+    if (keyboardModeSelect && typeof state.synth.keyboardMode === "string") {
+      keyboardModeSelect.value = state.synth.keyboardMode;
+      updateUiHint();
+      markIsomorphicDirty();
+    }
+    if (waveformSelect && typeof state.synth.waveform === "string") {
+      waveformSelect.value = state.synth.waveform;
+      waveformSelect.dispatchEvent(new Event("change"));
+    }
+    if (Number.isFinite(state.synth.attack)) {
+      attackSlider.value = String(state.synth.attack);
+    }
+    if (Number.isFinite(state.synth.decay)) {
+      decaySlider.value = String(state.synth.decay);
+    }
+    if (Number.isFinite(state.synth.sustain)) {
+      sustainSlider.value = String(state.synth.sustain);
+    }
+    if (Number.isFinite(state.synth.release)) {
+      releaseSlider.value = String(state.synth.release);
+    }
+    if (oneShotCheckbox && typeof state.synth.oneShot === "boolean") {
+      oneShotCheckbox.checked = state.synth.oneShot;
+    }
+    updateEnvelopeReadouts();
   }
 
   if (viewState) {
@@ -2724,6 +3350,12 @@ updatePresetUrl();
 
 audioToggle.addEventListener("click", toggleAudio);
 resetButton.addEventListener("click", resetLattice);
+window.addEventListener("hashchange", () => {
+  const presetState = readPresetFromUrl();
+  if (presetState) {
+    applyPresetState(presetState);
+  }
+});
 if (mode3dCheckbox) {
   mode3dCheckbox.addEventListener("change", () => {
     set3DMode(mode3dCheckbox.checked);
@@ -2734,12 +3366,14 @@ if (navAxesToggle) {
   navAxesToggle.addEventListener("change", () => {
     showAxes = navAxesToggle.checked;
     draw();
+    schedulePresetUrlUpdate();
   });
 }
 if (navGridToggle) {
   navGridToggle.addEventListener("change", () => {
     showGrid = navGridToggle.checked;
     draw();
+    schedulePresetUrlUpdate();
   });
 }
 if (nav3dButtons && nav3dButtons.length) {
@@ -2762,11 +3396,17 @@ if (themeSelect) {
 if (optionsToggle) {
   optionsToggle.addEventListener("click", toggleOptionsPanel);
 }
-if (ratioWheelToggle) {
-  ratioWheelToggle.addEventListener("click", toggleRatioWheelDrawer);
+if (envelopeToggle) {
+  envelopeToggle.addEventListener("click", toggleEnvelopePanel);
 }
-if (ratioWheelClose) {
-  ratioWheelClose.addEventListener("click", closeRatioWheelDrawer);
+if (animationToggle) {
+  animationToggle.addEventListener("click", toggleAnimationPanel);
+}
+if (ratioWheelToggle) {
+  ratioWheelToggle.addEventListener("click", toggleRatioWheelPanel);
+}
+if (presetToggle) {
+  presetToggle.addEventListener("click", togglePresetPanel);
 }
 if (uiHint) {
   uiHint.addEventListener("click", () => {
@@ -2784,9 +3424,15 @@ a4Input.addEventListener("input", () => {
   updateNodeFrequencies();
 });
 fundamentalNoteSelect.addEventListener("change", onFundamentalNoteChange);
-volumeSlider.addEventListener("input", updateVolume);
+volumeSlider.addEventListener("input", () => {
+  updateVolume();
+  schedulePresetUrlUpdate();
+});
 if (lfoDepthSlider) {
-  lfoDepthSlider.addEventListener("input", updateLfoDepth);
+  lfoDepthSlider.addEventListener("input", () => {
+    updateLfoDepth();
+    schedulePresetUrlUpdate();
+  });
 }
 waveformSelect.addEventListener("change", () => {
   const snapshot = [...voices];
@@ -2806,26 +3452,89 @@ waveformSelect.addEventListener("change", () => {
       wasBase.baseVoiceId = newVoice.id;
     }
   });
+  schedulePresetUrlUpdate();
 });
 keyboardModeSelect.addEventListener("change", updateUiHint);
 keyboardModeSelect.addEventListener("change", () => {
   markIsomorphicDirty();
   draw();
+  schedulePresetUrlUpdate();
 });
-attackSlider.addEventListener("input", updateEnvelopeReadouts);
-decaySlider.addEventListener("input", updateEnvelopeReadouts);
-sustainSlider.addEventListener("input", updateEnvelopeReadouts);
-releaseSlider.addEventListener("input", updateEnvelopeReadouts);
+attackSlider.addEventListener("input", () => {
+  updateEnvelopeReadouts();
+  schedulePresetUrlUpdate();
+});
+decaySlider.addEventListener("input", () => {
+  updateEnvelopeReadouts();
+  schedulePresetUrlUpdate();
+});
+sustainSlider.addEventListener("input", () => {
+  updateEnvelopeReadouts();
+  schedulePresetUrlUpdate();
+});
+releaseSlider.addEventListener("input", () => {
+  updateEnvelopeReadouts();
+  schedulePresetUrlUpdate();
+});
+if (oneShotCheckbox) {
+  oneShotCheckbox.addEventListener("change", schedulePresetUrlUpdate);
+}
+if (looperToggle) {
+  looperToggle.addEventListener("click", () => {
+    if (looperState === "recording") {
+      startLooperPlayback();
+      return;
+    }
+    if (looperState === "playing") {
+      stopLooperPlayback();
+      return;
+    }
+    if (looperState === "ready") {
+      startLooperPlayback();
+      return;
+    }
+    startLooperRecording();
+  });
+}
+if (scorePlayToggle) {
+  scorePlayToggle.addEventListener("click", () => {
+    if (patternPlayerState === "playing") {
+      stopPatternPlayback();
+    } else {
+      startPatternPlayback();
+    }
+  });
+}
+if (patternBuildButton) {
+  patternBuildButton.addEventListener("click", () => {
+    buildPatternStates();
+    if (patternPlayerState === "playing") {
+      stopPatternPlayback();
+      startPatternPlayback();
+    }
+  });
+}
+if (tempoSlider) {
+  tempoSlider.addEventListener("input", () => {
+    updateTempoReadout();
+  });
+}
 
 updateEnvelopeReadouts();
 updateLfoDepth();
+updateTempoReadout();
 initTheme();
+updateLooperButton();
+updateScoreButton();
+buildPatternStates();
+loadPresets();
 canvas.addEventListener("pointerdown", onPointerDown);
 canvas.addEventListener("pointermove", onPointerMove);
 canvas.addEventListener("pointerup", onPointerUp);
 canvas.addEventListener("pointerleave", onPointerLeave);
 canvas.addEventListener("wheel", onWheel, { passive: false });
 window.addEventListener("resize", resizeCanvas);
+window.addEventListener("resize", updateRatioWheelPosition);
 window.addEventListener("keydown", handleKeyDown);
 window.addEventListener("keyup", handleKeyUp);
 window.addEventListener("keydown", (event) => {
@@ -2854,7 +3563,7 @@ window.addEventListener("keydown", (event) => {
     draw();
   }
   if (event.key === "Escape") {
-    closeRatioWheelDrawer();
+    closeRatioWheelPanel();
     zModeActive = false;
     zModeAnchor = null;
     updateAddModeFromShift();
@@ -2873,3 +3582,4 @@ window.addEventListener("keyup", (event) => {
 });
 
 resizeCanvas();
+updateRatioWheelPosition();

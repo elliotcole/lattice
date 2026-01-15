@@ -49,9 +49,24 @@
         </div>
         <div class="control-actions">
           <button id="audio-toggle" type="button">Enable Audio</button>
+          <div class="control-group preset-toggle">
+            <button id="preset-toggle" type="button" aria-expanded="false" aria-controls="preset-panel">
+              Presets <span class="chevron">v</span>
+            </button>
+            <div id="preset-panel" class="panel preset-panel" hidden>
+              <ul id="preset-list" class="preset-list"></ul>
+            </div>
+          </div>
           <button id="reset-lattice" type="button">Reset</button>
           <div class="ratio-wheel-toggle">
-            <button id="ratio-wheel-toggle" type="button" class="ratio-wheel-button" aria-label="Octave Wheel">
+            <button
+              id="ratio-wheel-toggle"
+              type="button"
+              class="ratio-wheel-button"
+              aria-label="Octave Wheel"
+              aria-expanded="false"
+              aria-controls="ratio-wheel-panel"
+            >
               <canvas id="ratio-wheel-mini" class="ratio-wheel-canvas" width="40" height="40"></canvas>
             </button>
           </div>
@@ -80,13 +95,6 @@
           <div id="ui-hint" class="ui-hint"></div>
           <div id="z-mode-message" class="ui-hint z-mode-message" hidden></div>
         </div>
-        </div>
-        <div id="ratio-wheel-drawer" class="panel ratio-wheel-drawer" hidden>
-          <div class="ratio-wheel-drawer-header">
-            <div class="ratio-wheel-drawer-title">Ratio Wheel</div>
-            <button id="ratio-wheel-close" type="button" class="ratio-wheel-close" aria-label="Close ratio wheel">Close</button>
-          </div>
-          <canvas id="ratio-wheel-large" class="ratio-wheel-canvas" width="420" height="420"></canvas>
         </div>
       </div>
     </main>
@@ -120,6 +128,18 @@
           <option value="sawtooth">Sawtooth</option>
         </select>
       </div>
+      <div class="synth-group envelope-toggle">
+        <label class="visually-hidden" for="envelope-toggle">Envelope Panel</label>
+        <button id="envelope-toggle" type="button" aria-expanded="false" aria-controls="envelope-panel">Envelope</button>
+      </div>
+      <div class="synth-group animation-toggle">
+        <label class="visually-hidden" for="animation-toggle">Animation Panel</label>
+        <button id="animation-toggle" type="button" aria-expanded="false" aria-controls="animation-panel">Animation</button>
+      </div>
+    </section>
+
+    <aside id="envelope-panel" class="panel envelope-panel" hidden>
+      <div class="envelope-panel-header">Envelope</div>
       <div class="synth-group">
         <label for="attack">Attack</label>
         <input id="attack" type="range" min="0.005" max="2" step="0.005" value="0.02" />
@@ -147,7 +167,53 @@
           <span>One-shot</span>
         </div>
       </div>
-    </section>
+    </aside>
+
+    <aside id="animation-panel" class="panel animation-panel" hidden>
+      <div class="animation-panel-header">Animation</div>
+      <div class="synth-group">
+        <label for="looper-toggle">Looper</label>
+        <button id="looper-toggle" type="button">Record</button>
+      </div>
+      <div class="synth-group">
+        <label for="tempo">Tempo</label>
+        <input id="tempo" type="range" min="30" max="300" step="1" value="120" />
+        <span id="tempo-readout">120 BPM</span>
+      </div>
+      <div class="synth-group">
+        <label for="sequence-pattern">Sequence</label>
+        <select id="sequence-pattern">
+          <option value="ascending" selected>Ascending</option>
+          <option value="descending">Descending</option>
+          <option value="shuffle">Shuffle</option>
+          <option value="random">Random</option>
+        </select>
+        <button id="pattern-build" type="button">Build</button>
+      </div>
+      <div class="synth-group">
+        <label for="rhythm-pattern">Rhythm</label>
+        <select id="rhythm-pattern">
+          <option value="steady" selected>Steady</option>
+          <option value="random">Random</option>
+        </select>
+      </div>
+      <div class="synth-group">
+        <label for="octave-pattern">Octave</label>
+        <select id="octave-pattern">
+          <option value="unison" selected>Unison</option>
+          <option value="random">Random</option>
+        </select>
+      </div>
+      <div class="synth-group">
+        <label for="score-play-toggle">Score Player</label>
+        <button id="score-play-toggle" type="button">Play</button>
+      </div>
+    </aside>
+
+    <aside id="ratio-wheel-panel" class="panel ratio-wheel-panel" hidden>
+      <div class="ratio-wheel-panel-header">Ratio Wheel</div>
+      <canvas id="ratio-wheel-large" class="ratio-wheel-canvas" width="420" height="420"></canvas>
+    </aside>
 
     <aside id="nav-3d" class="nav-3d" hidden>
       <div class="panel nav-3d-panel">

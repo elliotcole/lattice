@@ -7,8 +7,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="./assets/index-BBpUWFs7.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DhfUVRUe.css">
+    <script type="module" crossorigin src="./assets/index-BNblZxR_.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-C7c7Z_Z-.css">
   </head>
   <body>
     <canvas id="lattice"></canvas>
@@ -173,7 +173,10 @@
     <aside id="animation-panel" class="panel animation-panel" hidden>
       <div class="animation-panel-header">Animation</div>
       <div class="synth-group">
-        <label for="looper-toggle">Looper</label>
+        <label for="looper-toggle" class="looper-label">
+          Looper
+          <button id="looper-clear" type="button" class="looper-clear">clear</button>
+        </label>
         <button id="looper-toggle" type="button">Record</button>
       </div>
       <div class="synth-group">
@@ -188,14 +191,19 @@
           <option value="descending">Descending</option>
           <option value="shuffle">Shuffle</option>
           <option value="random">Random</option>
+          <option value="left-right">Left to Right</option>
+          <option value="spiral-in">Spiral In</option>
+          <option value="merukhand">Merukhand</option>
+          <option value="plain-bob-minor">Plain Bob Minor</option>
         </select>
-        <button id="pattern-build" type="button">Build</button>
       </div>
       <div class="synth-group">
         <label for="rhythm-pattern">Rhythm</label>
         <select id="rhythm-pattern">
           <option value="steady" selected>Steady</option>
           <option value="random">Random</option>
+          <option value="euclidean">Euclidean</option>
+          <option value="golden">Golden</option>
         </select>
       </div>
       <div class="synth-group">
@@ -203,11 +211,21 @@
         <select id="octave-pattern">
           <option value="unison" selected>Unison</option>
           <option value="random">Random</option>
+          <option value="down-unison">-1, 0, 0, 0</option>
+          <option value="down-up">-1, 0, 1, 0</option>
         </select>
+        <button id="pattern-build" type="button">Build</button>
       </div>
       <div class="synth-group">
         <label for="score-play-toggle">Score Player</label>
         <button id="score-play-toggle" type="button">Play</button>
+      </div>
+      <div class="synth-group">
+        <label for="random-lfos" class="lfo-label">
+          LFOs
+          <button id="lfo-stop" type="button" class="lfo-stop">stop</button>
+        </label>
+        <button id="random-lfos" type="button">Random LFOs</button>
       </div>
     </aside>
 

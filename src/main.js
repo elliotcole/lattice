@@ -44,6 +44,11 @@ const looperToggle = document.getElementById("looper-toggle");
 const looperClear = document.getElementById("looper-clear");
 const tempoSlider = document.getElementById("tempo");
 const tempoReadout = document.getElementById("tempo-readout");
+const patternLengthSlider = document.getElementById("pattern-length");
+const patternLengthReadout = document.getElementById("pattern-length-readout");
+const patternLengthModeInputs = document.querySelectorAll(
+  'input[name="pattern-length-mode"]'
+);
 const sequencePatternSelect = document.getElementById("sequence-pattern");
 const rhythmPatternSelect = document.getElementById("rhythm-pattern");
 const octavePatternSelect = document.getElementById("octave-pattern");
@@ -51,6 +56,7 @@ const patternBuildButton = document.getElementById("pattern-build");
 const scorePlayToggle = document.getElementById("score-play-toggle");
 const randomLfosButton = document.getElementById("random-lfos");
 const lfoStopButton = document.getElementById("lfo-stop");
+const allNotesOffButton = document.getElementById("all-notes-off");
 const attackReadout = document.getElementById("attack-readout");
 const decayReadout = document.getElementById("decay-readout");
 const sustainReadout = document.getElementById("sustain-readout");
@@ -186,6 +192,8 @@ let patternRhythmState = null;
 let patternOctaveState = null;
 let patternVoices = new Set();
 let tempoBpm = 120;
+let patternLengthValue = 1;
+let patternLengthMode = "sustain";
 
 function markIsomorphicDirty() {
   isomorphicDirty = true;
@@ -231,6 +239,17 @@ function updateTempoReadout() {
   }
   tempoBpm = Number(tempoSlider.value) || 120;
   tempoReadout.textContent = `${tempoBpm} BPM`;
+}
+
+function updatePatternLengthReadout() {
+  if (!patternLengthSlider || !patternLengthReadout) {
+    return;
+  }
+  patternLengthValue = Number(patternLengthSlider.value) || 1;
+  patternLengthReadout.textContent =
+    patternLengthMode === "gate"
+      ? `${patternLengthValue.toFixed(2)}x`
+      : `${patternLengthValue.toFixed(2)} beats`;
 }
 
 function beatsToMs(beats) {
@@ -338,6 +357,20 @@ function buildEuclideanDurations(pulses) {
     durations[0] = (durations[0] || 0) + count * 0.5;
   }
   return durations.length ? durations : [0.5];
+}
+
+function buildBloomsDurations() {
+  const count = Math.floor(Math.random() * 4) + 3;
+  const durations = [];
+  let total = 0;
+  for (let i = 0; i < count; i += 1) {
+    const value = 0.1 + Math.random() * 0.7;
+    durations.push(value);
+    total += value;
+  }
+  const remainder = Math.max(0.1, 12 - total);
+  durations.push(remainder);
+  return durations;
 }
 
 function getLeftRightOrderIndices() {
@@ -460,6 +493,7 @@ function buildPatternStates(preserveIndices = false) {
   const prevSequenceIndex = patternSequenceState ? patternSequenceState.index : 0;
   const prevSequenceStep = patternSequenceState ? patternSequenceState.stepInLead : 0;
   const prevSequencePos = patternSequenceState ? patternSequenceState.posInRow : 0;
+  const prevSequenceCycles = patternSequenceState ? patternSequenceState.cyclesCompleted : 0;
   const prevRhythmIndex = patternRhythmState ? patternRhythmState.index : 0;
   const prevOctaveIndex = patternOctaveState ? patternOctaveState.index : 0;
   patternActiveNodes = getActiveNodeOrder();
@@ -472,6 +506,8 @@ function buildPatternStates(preserveIndices = false) {
   if (sequencePattern === "descending") {
     order = order.reverse();
   } else if (sequencePattern === "shuffle") {
+    order = shuffleArray(order);
+  } else if (sequencePattern === "mutate") {
     order = shuffleArray(order);
   } else if (sequencePattern === "left-right") {
     order = getLeftRightOrderIndices();
@@ -488,6 +524,14 @@ function buildPatternStates(preserveIndices = false) {
       stepInLead: preserveIndices ? prevSequenceStep % getPlainBobMinorOps().length : 0,
       ops: getPlainBobMinorOps(),
     };
+  } else if (sequencePattern === "mutate") {
+    patternSequenceState = {
+      type: sequencePattern,
+      order,
+      octaveOffsets: Array.from({ length: order.length }, () => 0),
+      index: preserveIndices ? prevSequenceIndex : 0,
+      cyclesCompleted: preserveIndices ? prevSequenceCycles : 0,
+    };
   } else {
     patternSequenceState = {
       type: sequencePattern,
@@ -503,6 +547,10 @@ function buildPatternStates(preserveIndices = false) {
     rhythmValues = buildEuclideanDurations(count);
   } else if (rhythmPattern === "golden") {
     rhythmValues = [...GOLDEN_DURATIONS];
+  } else if (rhythmPattern === "blooms") {
+    rhythmValues = buildBloomsDurations();
+  } else if (rhythmPattern === "even-pairs") {
+    rhythmValues = [0, 0.5];
   }
   patternRhythmState = {
     type: rhythmPattern,
@@ -524,12 +572,39 @@ function buildPatternStates(preserveIndices = false) {
   };
 }
 
-function nextSequenceIndex() {
+function maybeMutateSequence(state, count) {
+  if (!state || state.type !== "mutate" || !state.order.length) {
+    return;
+  }
+  if (state.cyclesCompleted < 4) {
+    return;
+  }
+  if (state.cyclesCompleted % 2 !== 0) {
+    return;
+  }
+  const targetIndex = Math.floor(Math.random() * state.order.length);
+  if (Math.random() < 0.5 && count > 0) {
+    let nextIndex = state.order[targetIndex];
+    for (let i = 0; i < 4; i += 1) {
+      const candidate = Math.floor(Math.random() * count);
+      if (candidate !== nextIndex) {
+        nextIndex = candidate;
+        break;
+      }
+    }
+    state.order[targetIndex] = nextIndex;
+  } else {
+    const delta = Math.random() < 0.5 ? -1 : 1;
+    state.octaveOffsets[targetIndex] = (state.octaveOffsets[targetIndex] || 0) + delta;
+  }
+}
+
+function nextSequenceStep() {
   if (!patternSequenceState || !patternActiveNodes.length) {
     return null;
   }
   if (patternSequenceState.type === "random") {
-    return Math.floor(Math.random() * patternActiveNodes.length);
+    return { index: Math.floor(Math.random() * patternActiveNodes.length), octaveOffset: 0 };
   }
   if (patternSequenceState.type === "plain-bob-minor") {
     const row = patternSequenceState.row;
@@ -545,7 +620,7 @@ function nextSequenceIndex() {
         (patternSequenceState.stepInLead + 1) % patternSequenceState.ops.length;
       patternSequenceState.posInRow = 0;
     }
-    return index;
+    return { index, octaveOffset: 0 };
   }
   if (
     patternSequenceState.type === "left-right" &&
@@ -559,11 +634,25 @@ function nextSequenceIndex() {
   ) {
     patternSequenceState.order = getSpiralInOrderIndices();
   }
+  if (patternSequenceState.type === "mutate") {
+    if (patternSequenceState.index % patternSequenceState.order.length === 0) {
+      if (patternSequenceState.index > 0) {
+        patternSequenceState.cyclesCompleted += 1;
+        maybeMutateSequence(patternSequenceState, patternActiveNodes.length);
+      }
+    }
+    const stepIndex =
+      patternSequenceState.index % patternSequenceState.order.length;
+    const value = patternSequenceState.order[stepIndex];
+    const octaveOffset = patternSequenceState.octaveOffsets[stepIndex] || 0;
+    patternSequenceState.index += 1;
+    return { index: value, octaveOffset };
+  }
   const value = patternSequenceState.order[
     patternSequenceState.index % patternSequenceState.order.length
   ];
   patternSequenceState.index += 1;
-  return value;
+  return { index: value, octaveOffset: 0 };
 }
 
 function nextRhythmBeats() {
@@ -579,6 +668,12 @@ function nextRhythmBeats() {
     patternRhythmState.index % patternRhythmState.values.length === 0
   ) {
     patternRhythmState.values = buildEuclideanDurations(patternActiveNodes.length);
+  }
+  if (
+    patternRhythmState.type === "blooms" &&
+    patternRhythmState.index % patternRhythmState.values.length === 0
+  ) {
+    patternRhythmState.values = buildBloomsDurations();
   }
   const value =
     patternRhythmState.values[patternRhythmState.index % patternRhythmState.values.length];
@@ -609,9 +704,10 @@ function scheduleNextPatternEvent(delayMs) {
       return;
     }
     const isOneShot = Boolean(oneShotCheckbox && oneShotCheckbox.checked);
-    const nextIndex = nextSequenceIndex();
+    const step = nextSequenceStep();
+    const nextIndex = step ? step.index : null;
     const durationBeats = nextRhythmBeats();
-    const octave = nextOctaveOffset();
+    const octave = nextOctaveOffset() + (step ? step.octaveOffset : 0);
     if (nextIndex != null) {
       const nodeId = patternActiveNodes[nextIndex];
       const node = nodeById.get(nodeId);
@@ -637,11 +733,15 @@ function scheduleNextPatternEvent(delayMs) {
             }, Math.max(0, cleanupMs));
             patternOffTimers.push(cleanupTimer);
           } else {
+            const lengthBeats =
+              patternLengthMode === "gate"
+                ? durationBeats * patternLengthValue
+                : patternLengthValue;
             const offTimer = setTimeout(() => {
               stopVoice(voice);
               patternVoices.delete(voice);
               draw();
-            }, Math.max(0, beatsToMs(durationBeats)));
+            }, Math.max(0, beatsToMs(lengthBeats)));
             patternOffTimers.push(offTimer);
           }
         }
@@ -754,6 +854,24 @@ function scheduleLfoStopsAtCycleEnd() {
     }, Math.max(0, remaining * 1000));
     lfoStopTimers.push(timer);
   });
+}
+
+function allNotesOff() {
+  stopPatternPlayback();
+  stopLooperPlayback();
+  clearLfoStopTimers();
+  lfoArmingId = null;
+  lfoArmingStart = 0;
+  stopAllVoices();
+  nodes.forEach((node) => {
+    node.baseVoiceId = null;
+    node.playing = false;
+    node._hasLfo = false;
+    node._scorePlaying = false;
+    node._looperPlaying = false;
+  });
+  updateNodePlaybackState();
+  draw();
 }
 
 function refreshPatternFromActiveNodes() {
@@ -4066,15 +4184,37 @@ if (lfoStopButton) {
     scheduleLfoStopsAtCycleEnd();
   });
 }
+if (allNotesOffButton) {
+  allNotesOffButton.addEventListener("click", () => {
+    allNotesOff();
+  });
+}
 if (tempoSlider) {
   tempoSlider.addEventListener("input", () => {
     updateTempoReadout();
+  });
+}
+if (patternLengthSlider) {
+  patternLengthSlider.addEventListener("input", () => {
+    updatePatternLengthReadout();
+  });
+}
+if (patternLengthModeInputs.length) {
+  patternLengthModeInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      const selected = document.querySelector(
+        'input[name="pattern-length-mode"]:checked'
+      );
+      patternLengthMode = selected ? selected.value : "sustain";
+      updatePatternLengthReadout();
+    });
   });
 }
 
 updateEnvelopeReadouts();
 updateLfoDepth();
 updateTempoReadout();
+updatePatternLengthReadout();
 initTheme();
 updateLooperButton();
 updateScoreButton();

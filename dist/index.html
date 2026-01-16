@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tuning Lattice</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&display=swap" rel="stylesheet">
+    <script type="module" crossorigin src="./assets/index-BBpUWFs7.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DhfUVRUe.css">
+  </head>
+  <body>
+    <canvas id="lattice"></canvas>
+
+    <main class="app">
+      <div class="top-bar">
+        <header class="title">
+          <h1>Tuning Lattice</h1>
+          <p class="creator">Created by <a href="http://www.elliotcolemusic.com/" target="_blank">Elliot Cole</a></p>
+        </header>
+
+        <div class="controls-wrap">
+        <section class="panel controls">
+        <div class="control-group">
+          <label for="fundamental">Fundamental (Hz)</label>
+          <div class="control-inline">
+            <select id="fundamental-note"></select>
+            <input id="fundamental" type="number" min="20" max="2000" step="1" value="261.63" />
+          </div>
+        </div>
+        
+        <div class="control-group">
+          <div class="control-inline">
+            <input id="mode-3d" type="checkbox" />
+            <span>3D</span>
+          </div>
+        </div>
+        <div class="control-group ratios-inline">
+          <span class="ratios-label">Ratios:</span>
+          <span class="ratio-axis-label">X</span>
+          <label for="ratio-x" class="visually-hidden">X Ratio</label>
+          <select id="ratio-x" class="narrow-select"></select>
+          <span class="ratio-axis-label">Y</span>
+          <label for="ratio-y" class="visually-hidden">Y Ratio</label>
+          <select id="ratio-y" class="narrow-select"></select>
+          <span class="ratio-axis-label">Z</span>
+          <label for="ratio-z" class="visually-hidden">Z Ratio</label>
+          <select id="ratio-z" class="narrow-select ratio-z"></select>
+        </div>
+        <div class="control-actions">
+          <button id="audio-toggle" type="button">Enable Audio</button>
+          <div class="control-group preset-toggle">
+            <button id="preset-toggle" type="button" aria-expanded="false" aria-controls="preset-panel">
+              Presets <span class="chevron">v</span>
+            </button>
+            <div id="preset-panel" class="panel preset-panel" hidden>
+              <ul id="preset-list" class="preset-list"></ul>
+            </div>
+          </div>
+          <button id="reset-lattice" type="button">Reset</button>
+          <div class="ratio-wheel-toggle">
+            <button
+              id="ratio-wheel-toggle"
+              type="button"
+              class="ratio-wheel-button"
+              aria-label="Octave Wheel"
+              aria-expanded="false"
+              aria-controls="ratio-wheel-panel"
+            >
+              <canvas id="ratio-wheel-mini" class="ratio-wheel-canvas" width="40" height="40"></canvas>
+            </button>
+          </div>
+          <div class="control-group options-toggle">
+            <button id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel">
+              Options <span class="chevron">v</span>
+            </button>
+            <div id="options-panel" class="panel options-panel" hidden>
+              <div class="control-group">
+                <label for="a4">A4 Reference (Hz)</label>
+                <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
+              </div>
+              <div class="control-group">
+                <label for="theme-select">Theme</label>
+                <select id="theme-select">
+                  <option value="light">Light Mode</option>
+                  <option value="dark">Dark Mode</option>
+                </select>
+              </div>
+              <button id="export-scale" type="button">Export to Scale Workshop</button>
+            </div>
+          </div>
+        </div>
+        </section>
+        <div class="hint-row">
+          <div id="ui-hint" class="ui-hint"></div>
+          <div id="z-mode-message" class="ui-hint z-mode-message" hidden></div>
+        </div>
+        </div>
+      </div>
+    </main>
+
+    <section class="panel synth-panel">
+      <div class="synth-group">
+        <label for="volume">Main Volume (dB)</label>
+        <input id="volume" type="range" min="-60" max="0" step="1" value="-12" />
+        <span id="volume-readout">-12 dB</span>
+      </div>
+      <div class="synth-group">
+        <label for="lfo-depth">LFO Depth</label>
+        <input id="lfo-depth" type="range" min="0" max="1" step="0.01" value="1" />
+        <span id="lfo-depth-readout">100%</span>
+      </div>
+      <div class="synth-group">
+        <label for="keyboard-mode">Keyboard Mode</label>
+        <select id="keyboard-mode">
+          <option value="off" selected>Keyboard Off</option>
+          <option value="piano">Piano Keyboard</option>
+          <option value="iso">Isomorphic</option>
+          <option value="iso-fuzzy">Isomorphic (fuzzy)</option>
+        </select>
+      </div>
+      <div class="synth-group">
+        <label for="waveform">Waveform</label>
+        <select id="waveform">
+          <option value="sine">Sine</option>
+          <option value="triangle">Triangle</option>
+          <option value="square">Square</option>
+          <option value="sawtooth">Sawtooth</option>
+        </select>
+      </div>
+      <div class="synth-group envelope-toggle">
+        <label class="visually-hidden" for="envelope-toggle">Envelope Panel</label>
+        <button id="envelope-toggle" type="button" aria-expanded="false" aria-controls="envelope-panel">Envelope</button>
+      </div>
+      <div class="synth-group animation-toggle">
+        <label class="visually-hidden" for="animation-toggle">Animation Panel</label>
+        <button id="animation-toggle" type="button" aria-expanded="false" aria-controls="animation-panel">Animation</button>
+      </div>
+    </section>
+
+    <aside id="envelope-panel" class="panel envelope-panel" hidden>
+      <div class="envelope-panel-header">Envelope</div>
+      <div class="synth-group">
+        <label for="attack">Attack</label>
+        <input id="attack" type="range" min="0.005" max="2" step="0.005" value="0.02" />
+        <span id="attack-readout">0.02s</span>
+      </div>
+      <div class="synth-group">
+        <label for="decay">Decay</label>
+        <input id="decay" type="range" min="0.01" max="3" step="0.01" value="0.2" />
+        <span id="decay-readout">0.20s</span>
+      </div>
+      <div class="synth-group">
+        <label for="sustain">Sustain</label>
+        <input id="sustain" type="range" min="0" max="1" step="0.01" value="0.6" />
+        <span id="sustain-readout">0.60</span>
+      </div>
+      <div class="synth-group">
+        <label for="release">Release</label>
+        <input id="release" type="range" min="0.01" max="5" step="0.01" value="0.6" />
+        <span id="release-readout">0.60s</span>
+      </div>
+      <div class="synth-group">
+        <label for="one-shot">Envelope</label>
+        <div class="control-inline">
+          <input id="one-shot" type="checkbox" />
+          <span>One-shot</span>
+        </div>
+      </div>
+    </aside>
+
+    <aside id="animation-panel" class="panel animation-panel" hidden>
+      <div class="animation-panel-header">Animation</div>
+      <div class="synth-group">
+        <label for="looper-toggle">Looper</label>
+        <button id="looper-toggle" type="button">Record</button>
+      </div>
+      <div class="synth-group">
+        <label for="tempo">Tempo</label>
+        <input id="tempo" type="range" min="30" max="300" step="1" value="120" />
+        <span id="tempo-readout">120 BPM</span>
+      </div>
+      <div class="synth-group">
+        <label for="sequence-pattern">Sequence</label>
+        <select id="sequence-pattern">
+          <option value="ascending" selected>Ascending</option>
+          <option value="descending">Descending</option>
+          <option value="shuffle">Shuffle</option>
+          <option value="random">Random</option>
+        </select>
+        <button id="pattern-build" type="button">Build</button>
+      </div>
+      <div class="synth-group">
+        <label for="rhythm-pattern">Rhythm</label>
+        <select id="rhythm-pattern">
+          <option value="steady" selected>Steady</option>
+          <option value="random">Random</option>
+        </select>
+      </div>
+      <div class="synth-group">
+        <label for="octave-pattern">Octave</label>
+        <select id="octave-pattern">
+          <option value="unison" selected>Unison</option>
+          <option value="random">Random</option>
+        </select>
+      </div>
+      <div class="synth-group">
+        <label for="score-play-toggle">Score Player</label>
+        <button id="score-play-toggle" type="button">Play</button>
+      </div>
+    </aside>
+
+    <aside id="ratio-wheel-panel" class="panel ratio-wheel-panel" hidden>
+      <div class="ratio-wheel-panel-header">Ratio Wheel</div>
+      <canvas id="ratio-wheel-large" class="ratio-wheel-canvas" width="420" height="420"></canvas>
+    </aside>
+
+    <aside id="nav-3d" class="nav-3d" hidden>
+      <div class="panel nav-3d-panel">
+        <div class="nav-3d-section">
+          <div class="nav-3d-title">Views</div>
+          <button type="button" data-view="xy">X-Y</button>
+          <button type="button" data-view="zy">Z-Y</button>
+          <button type="button" data-view="quarter">Quarter</button>
+          <button type="button" data-action="best-view">Best View</button>
+        </div>
+        
+        <div class="nav-3d-section">
+          <label class="nav-3d-toggle">
+            <input id="nav-axes" type="checkbox" checked />
+            <span>Axes</span>
+          </label>
+          <label class="nav-3d-toggle">
+            <input id="nav-grid" type="checkbox" checked />
+            <span>Grid</span>
+          </label>
+        </div>
+        <div class="nav-3d-section">
+          <div class="nav-3d-title">Rotate</div>
+          <div class="nav-3d-buttons">
+            <button type="button" data-action="rot-up">Up</button>
+            <button type="button" data-action="rot-down">Down</button>
+            <button type="button" data-action="rot-left">Left</button>
+            <button type="button" data-action="rot-right">Right</button>
+          </div>
+        </div>
+        <div class="nav-3d-section">
+          <div class="nav-3d-title">Pan</div>
+          <div class="nav-3d-buttons">
+            <button type="button" data-action="pan-up">Up</button>
+            <button type="button" data-action="pan-down">Down</button>
+            <button type="button" data-action="pan-left">Left</button>
+            <button type="button" data-action="pan-right">Right</button>
+          </div>
+        </div>
+        <div class="nav-3d-section">
+          <div class="nav-3d-title">Zoom</div>
+          <div class="nav-3d-buttons">
+            <button type="button" data-action="zoom-in">+</button>
+            <button type="button" data-action="zoom-out">-</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </body>
+</html>

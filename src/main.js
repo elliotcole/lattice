@@ -11,6 +11,7 @@ const presetToggle = document.getElementById("preset-toggle");
 const presetPanel = document.getElementById("preset-panel");
 const presetList = document.getElementById("preset-list");
 const topBar = document.querySelector(".top-bar");
+const controlsPanel = document.querySelector(".controls");
 const synthPanel = document.querySelector(".synth-panel");
 const envelopeToggle = document.getElementById("envelope-toggle");
 const envelopePanel = document.getElementById("envelope-panel");
@@ -40,6 +41,7 @@ const sustainSlider = document.getElementById("sustain");
 const releaseSlider = document.getElementById("release");
 const oneShotCheckbox = document.getElementById("one-shot");
 const looperToggle = document.getElementById("looper-toggle");
+const looperClear = document.getElementById("looper-clear");
 const tempoSlider = document.getElementById("tempo");
 const tempoReadout = document.getElementById("tempo-readout");
 const sequencePatternSelect = document.getElementById("sequence-pattern");
@@ -47,6 +49,8 @@ const rhythmPatternSelect = document.getElementById("rhythm-pattern");
 const octavePatternSelect = document.getElementById("octave-pattern");
 const patternBuildButton = document.getElementById("pattern-build");
 const scorePlayToggle = document.getElementById("score-play-toggle");
+const randomLfosButton = document.getElementById("random-lfos");
+const lfoStopButton = document.getElementById("lfo-stop");
 const attackReadout = document.getElementById("attack-readout");
 const decayReadout = document.getElementById("decay-readout");
 const sustainReadout = document.getElementById("sustain-readout");
@@ -81,6 +85,7 @@ let lfoDepth = 1;
 let lfoArmingId = null;
 let lfoArmingStart = 0;
 let lfoAnimating = false;
+let lfoStopTimers = [];
 let lastLfoTapTime = 0;
 let lastLfoTapId = null;
 const activeKeys = new Map();
@@ -132,6 +137,16 @@ const ISOMORPHIC_ROWS = [
   { keys: "zxcvbnm,./", yOffset: 1 },
 ];
 const KEYBOARD_ROW_SKEW = [-0.6, -0.35, -0.15, 0];
+const GOLDEN_DURATIONS = [
+  0.5835921350012612,
+  0.36067977499789805,
+  0.5835921350012612,
+  0.5835921350012612,
+  0.36067977499789805,
+  0.5835921350012612,
+  0.36067977499789805,
+  0.5835921350012612,
+];
 let nodes = [];
 let nodeById = new Map();
 let edges = [];
@@ -247,7 +262,206 @@ function shuffleArray(items) {
   return copy;
 }
 
-function buildPatternStates() {
+function buildEuclideanPattern(steps, pulses) {
+  if (pulses <= 0) {
+    return Array.from({ length: steps }, () => 0);
+  }
+  if (pulses >= steps) {
+    return Array.from({ length: steps }, () => 1);
+  }
+  let pattern = [];
+  let counts = [];
+  let remainders = [];
+  remainders.push(pulses);
+  let divisor = steps - pulses;
+  let level = 0;
+
+  while (true) {
+    counts.push(Math.floor(divisor / remainders[level]));
+    remainders.push(divisor % remainders[level]);
+    divisor = remainders[level];
+    level += 1;
+    if (remainders[level] <= 1) {
+      break;
+    }
+  }
+  counts.push(divisor);
+
+  const build = (lvl) => {
+    if (lvl === -1) {
+      pattern.push(0);
+      return;
+    }
+    if (lvl === -2) {
+      pattern.push(1);
+      return;
+    }
+    for (let i = 0; i < counts[lvl]; i += 1) {
+      build(lvl - 1);
+    }
+    if (remainders[lvl] !== 0) {
+      build(lvl - 2);
+    }
+  };
+
+  build(level);
+
+  while (pattern.length && pattern[0] === 0) {
+    pattern.push(pattern.shift());
+  }
+
+  return pattern;
+}
+
+function buildEuclideanDurations(pulses) {
+  if (pulses <= 0) {
+    return [0.5];
+  }
+  let steps = Math.round(pulses * 1.5);
+  if (steps % 2 === 1) {
+    steps += 1;
+  }
+  if (steps < pulses) {
+    steps = pulses + (pulses % 2);
+  }
+  const pattern = buildEuclideanPattern(steps, pulses);
+  const durations = [];
+  let count = 0;
+  pattern.forEach((hit) => {
+    count += 1;
+    if (hit === 1) {
+      durations.push(count * 0.5);
+      count = 0;
+    }
+  });
+  if (count > 0) {
+    durations[0] = (durations[0] || 0) + count * 0.5;
+  }
+  return durations.length ? durations : [0.5];
+}
+
+function getLeftRightOrderIndices() {
+  return patternActiveNodes
+    .map((nodeId, index) => {
+      const node = nodeById.get(nodeId);
+      if (!node) {
+        return null;
+      }
+      const pos = worldToScreen(node.coordinate);
+      return { index, x: pos.x, y: pos.y };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.x !== b.x) {
+        return a.x - b.x;
+      }
+      return a.y - b.y;
+    })
+    .map((item) => item.index);
+}
+
+function getSpiralInOrderIndices() {
+  const centerX = canvas.clientWidth / 2;
+  const centerY = canvas.clientHeight / 2;
+  return patternActiveNodes
+    .map((nodeId, index) => {
+      const node = nodeById.get(nodeId);
+      if (!node) {
+        return null;
+      }
+      const pos = worldToScreen(node.coordinate);
+      const dx = pos.x - centerX;
+      const dy = pos.y - centerY;
+      return {
+        index,
+        radius: Math.hypot(dx, dy),
+        angle: Math.atan2(dy, dx),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.radius !== b.radius) {
+        return b.radius - a.radius;
+      }
+      return a.angle - b.angle;
+    })
+    .map((item) => item.index);
+}
+
+function getMerukhandOrderIndices(count) {
+  if (count < 3) {
+    return Array.from({ length: count }, (_, index) => index);
+  }
+  const permutations = [
+    [0, 1, 2],
+    [1, 0, 2],
+    [0, 2, 1],
+    [2, 0, 1],
+    [1, 2, 0],
+    [2, 1, 0],
+  ];
+  const order = [];
+  for (let i = 0; i <= count - 3; i += 1) {
+    for (let j = i + 1; j <= count - 2; j += 1) {
+      for (let k = j + 1; k <= count - 1; k += 1) {
+        const trio = [i, j, k];
+        permutations.forEach((perm) => {
+          order.push(trio[perm[0]], trio[perm[1]], trio[perm[2]]);
+        });
+      }
+    }
+  }
+  return order;
+}
+
+function getPlainBobMinorOps() {
+  return ["x", "16", "x", "16", "x", "16", "12", "16", "x", "16", "x", "16"];
+}
+
+function applyPlaceNotation(row, op) {
+  const n = row.length;
+  if (n < 2) {
+    return row.slice();
+  }
+  if (op === "x") {
+    const next = row.slice();
+    for (let i = 0; i < n - 1; i += 2) {
+      const temp = next[i];
+      next[i] = next[i + 1];
+      next[i + 1] = temp;
+    }
+    return next;
+  }
+  let fixed = [];
+  if (op === "16") {
+    fixed = [1, 6];
+  } else if (op === "12") {
+    fixed = [1, 2];
+  } else {
+    fixed = op.split("").map((digit) => Number(digit));
+  }
+  const fixedPositions = new Set(fixed.filter((pos) => pos >= 1 && pos <= n).map((pos) => pos - 1));
+  const next = row.slice();
+  let i = 0;
+  while (i < n - 1) {
+    if (fixedPositions.has(i) || fixedPositions.has(i + 1)) {
+      i += 1;
+      continue;
+    }
+    const temp = next[i];
+    next[i] = next[i + 1];
+    next[i + 1] = temp;
+    i += 2;
+  }
+  return next;
+}
+
+function buildPatternStates(preserveIndices = false) {
+  const prevSequenceIndex = patternSequenceState ? patternSequenceState.index : 0;
+  const prevSequenceStep = patternSequenceState ? patternSequenceState.stepInLead : 0;
+  const prevSequencePos = patternSequenceState ? patternSequenceState.posInRow : 0;
+  const prevRhythmIndex = patternRhythmState ? patternRhythmState.index : 0;
+  const prevOctaveIndex = patternOctaveState ? patternOctaveState.index : 0;
   patternActiveNodes = getActiveNodeOrder();
   const count = patternActiveNodes.length;
   const sequencePattern = sequencePatternSelect ? sequencePatternSelect.value : "ascending";
@@ -259,23 +473,54 @@ function buildPatternStates() {
     order = order.reverse();
   } else if (sequencePattern === "shuffle") {
     order = shuffleArray(order);
+  } else if (sequencePattern === "left-right") {
+    order = getLeftRightOrderIndices();
+  } else if (sequencePattern === "spiral-in") {
+    order = getSpiralInOrderIndices();
+  } else if (sequencePattern === "merukhand") {
+    order = getMerukhandOrderIndices(count);
   }
-  patternSequenceState = {
-    type: sequencePattern,
-    order,
-    index: 0,
-  };
+  if (sequencePattern === "plain-bob-minor") {
+    patternSequenceState = {
+      type: sequencePattern,
+      row: Array.from({ length: count }, (_, index) => index),
+      posInRow: preserveIndices ? prevSequencePos % Math.max(count, 1) : 0,
+      stepInLead: preserveIndices ? prevSequenceStep % getPlainBobMinorOps().length : 0,
+      ops: getPlainBobMinorOps(),
+    };
+  } else {
+    patternSequenceState = {
+      type: sequencePattern,
+      order,
+      index: preserveIndices ? prevSequenceIndex : 0,
+    };
+  }
 
+  let rhythmValues = [0.5];
+  if (rhythmPattern === "random") {
+    rhythmValues = [0.25, 0.25, 0.5, 1, 2];
+  } else if (rhythmPattern === "euclidean") {
+    rhythmValues = buildEuclideanDurations(count);
+  } else if (rhythmPattern === "golden") {
+    rhythmValues = [...GOLDEN_DURATIONS];
+  }
   patternRhythmState = {
     type: rhythmPattern,
-    values: rhythmPattern === "random" ? [0.25, 0.25, 0.5, 1, 2] : [1],
-    index: 0,
+    values: rhythmValues,
+    index: preserveIndices ? prevRhythmIndex : 0,
   };
 
   patternOctaveState = {
     type: octavePattern,
-    values: octavePattern === "random" ? [-1, 0, 1, 2] : [0],
-    index: 0,
+    values:
+      octavePattern === "random"
+        ? [-1, 0, 1, 2]
+        : octavePattern === "down-unison"
+          ? [-1, 0, 0, 0]
+          : octavePattern === "down-up"
+            ? [-1, 0, 1, 0]
+            : [0],
+    index: preserveIndices ? prevOctaveIndex : 0,
   };
 }
 
@@ -285,6 +530,34 @@ function nextSequenceIndex() {
   }
   if (patternSequenceState.type === "random") {
     return Math.floor(Math.random() * patternActiveNodes.length);
+  }
+  if (patternSequenceState.type === "plain-bob-minor") {
+    const row = patternSequenceState.row;
+    if (!row || row.length === 0) {
+      return null;
+    }
+    const index = row[patternSequenceState.posInRow];
+    patternSequenceState.posInRow += 1;
+    if (patternSequenceState.posInRow >= row.length) {
+      const op = patternSequenceState.ops[patternSequenceState.stepInLead];
+      patternSequenceState.row = applyPlaceNotation(row, op);
+      patternSequenceState.stepInLead =
+        (patternSequenceState.stepInLead + 1) % patternSequenceState.ops.length;
+      patternSequenceState.posInRow = 0;
+    }
+    return index;
+  }
+  if (
+    patternSequenceState.type === "left-right" &&
+    patternSequenceState.index % patternSequenceState.order.length === 0
+  ) {
+    patternSequenceState.order = getLeftRightOrderIndices();
+  }
+  if (
+    patternSequenceState.type === "spiral-in" &&
+    patternSequenceState.index % patternSequenceState.order.length === 0
+  ) {
+    patternSequenceState.order = getSpiralInOrderIndices();
   }
   const value = patternSequenceState.order[
     patternSequenceState.index % patternSequenceState.order.length
@@ -300,6 +573,12 @@ function nextRhythmBeats() {
   if (patternRhythmState.type === "random") {
     const values = patternRhythmState.values;
     return values[Math.floor(Math.random() * values.length)];
+  }
+  if (
+    patternRhythmState.type === "euclidean" &&
+    patternRhythmState.index % patternRhythmState.values.length === 0
+  ) {
+    patternRhythmState.values = buildEuclideanDurations(patternActiveNodes.length);
   }
   const value =
     patternRhythmState.values[patternRhythmState.index % patternRhythmState.values.length];
@@ -329,6 +608,7 @@ function scheduleNextPatternEvent(delayMs) {
     if (patternPlayerState !== "playing") {
       return;
     }
+    const isOneShot = Boolean(oneShotCheckbox && oneShotCheckbox.checked);
     const nextIndex = nextSequenceIndex();
     const durationBeats = nextRhythmBeats();
     const octave = nextOctaveOffset();
@@ -346,12 +626,24 @@ function scheduleNextPatternEvent(delayMs) {
         if (voice) {
           patternVoices.add(voice);
           draw();
-          const offTimer = setTimeout(() => {
-            stopVoice(voice);
-            patternVoices.delete(voice);
-            draw();
-          }, Math.max(0, beatsToMs(durationBeats)));
-          patternOffTimers.push(offTimer);
+          if (isOneShot) {
+            const attack = Number(attackSlider.value) || 0.02;
+            const decay = Number(decaySlider.value) || 0.2;
+            const release = Number(releaseSlider.value) || 0.6;
+            const cleanupMs = (attack + decay + release) * 1000 + 60;
+            const cleanupTimer = setTimeout(() => {
+              patternVoices.delete(voice);
+              draw();
+            }, Math.max(0, cleanupMs));
+            patternOffTimers.push(cleanupTimer);
+          } else {
+            const offTimer = setTimeout(() => {
+              stopVoice(voice);
+              patternVoices.delete(voice);
+              draw();
+            }, Math.max(0, beatsToMs(durationBeats)));
+            patternOffTimers.push(offTimer);
+          }
         }
       }
     }
@@ -361,7 +653,7 @@ function scheduleNextPatternEvent(delayMs) {
 
 function startPatternPlayback() {
   if (!patternSequenceState) {
-    buildPatternStates();
+    buildPatternStates(false);
   }
   patternPlayerState = "playing";
   updateScoreButton();
@@ -394,11 +686,81 @@ function disableVoiceLfo(voice) {
   updateNodePlaybackState();
 }
 
+function randomizeLfosForActiveNodes() {
+  const now = performance.now();
+  const activeNodes = nodes.filter((node) => node.active);
+  if (!activeNodes.length) {
+    return;
+  }
+  activeNodes.forEach((node) => {
+    if (node.baseVoiceId) {
+      const baseVoice = findVoiceById(node.baseVoiceId);
+      if (baseVoice) {
+        stopVoice(baseVoice, true);
+      }
+      node.baseVoiceId = null;
+    }
+    voices.forEach((voice) => {
+      if (voice.nodeId === node.id && voice.source === "node") {
+        stopVoice(voice, true);
+      }
+    });
+    const duration = 2 + Math.random() * 8;
+    const phaseOffset = Math.random() * duration * 1000;
+    const voice = startVoice({
+      nodeId: node.id,
+      octave: 0,
+      freq: node.freq,
+      lfoActive: true,
+      lfoHalfPeriod: duration,
+      lfoStartMs: now - phaseOffset,
+      source: "node",
+    });
+    if (voice) {
+      node.baseVoiceId = voice.id;
+    }
+  });
+  ensureLfoLoop();
+  draw();
+}
+
+function clearLfoStopTimers() {
+  lfoStopTimers.forEach((timer) => clearTimeout(timer));
+  lfoStopTimers = [];
+}
+
+function scheduleLfoStopsAtCycleEnd() {
+  clearLfoStopTimers();
+  const now = performance.now();
+  voices.forEach((voice) => {
+    if (!voice.lfoActive || voice.releasing) {
+      return;
+    }
+    const halfPeriod = Number(voice.lfoHalfPeriod) || 0;
+    if (halfPeriod <= 0) {
+      return;
+    }
+    const period = halfPeriod * 2;
+    const elapsed = (now - voice.lfoStartMs) / 1000;
+    const phase = ((elapsed % period) + period) % period;
+    const remaining = period - phase;
+    const timer = setTimeout(() => {
+      stopVoice(voice, false);
+      const node = nodeById.get(voice.nodeId);
+      if (node && node.baseVoiceId === voice.id) {
+        node.baseVoiceId = null;
+      }
+      draw();
+    }, Math.max(0, remaining * 1000));
+    lfoStopTimers.push(timer);
+  });
+}
+
 function refreshPatternFromActiveNodes() {
   if (!sequencePatternSelect) {
     return;
   }
-  buildPatternStates();
+  buildPatternStates(true);
 }
 
 function clearLooperTimers() {
@@ -436,23 +798,28 @@ function scheduleLooperCycle() {
         return;
       }
       if (event.type === "on") {
+        const octave = Number(event.octave) || 0;
         const voice = startVoice({
           nodeId: node.id,
-          octave: 0,
-          freq: node.freq,
+          octave,
+          freq: node.freq * Math.pow(2, octave),
           source: "looper",
         });
         if (voice) {
           const list = looperVoicesByNode.get(node.id) || [];
           list.push(voice);
           looperVoicesByNode.set(node.id, list);
+          draw();
         }
       } else if (event.type === "off") {
         const list = looperVoicesByNode.get(node.id);
         if (list && list.length) {
-          const voice = list.shift();
+          const targetOctave = Number(event.octave) || 0;
+          const matchIndex = list.findIndex((voice) => voice.octave === targetOctave);
+          const voice = matchIndex >= 0 ? list.splice(matchIndex, 1)[0] : list.shift();
           if (voice) {
             stopVoice(voice);
+            draw();
           }
         }
       }
@@ -481,6 +848,17 @@ function stopLooperPlayback() {
   stopLooperVoices();
   looperState = looperEvents.length ? "ready" : "idle";
   updateLooperButton();
+  draw();
+}
+
+function clearLooper() {
+  clearLooperTimers();
+  stopLooperVoices();
+  looperEvents = [];
+  looperLoopDurationMs = 0;
+  looperState = "idle";
+  updateLooperButton();
+  draw();
 }
 
 function buildLattice() {
@@ -717,6 +1095,7 @@ function updateNodePlaybackState() {
     node.playing = false;
     node._hasLfo = false;
     node._scorePlaying = false;
+    node._looperPlaying = false;
   });
   voices.forEach((voice) => {
     if (voice.releasing) {
@@ -732,6 +1111,9 @@ function updateNodePlaybackState() {
     }
     if (voice.source === "score" || voice.source === "pattern") {
       node._scorePlaying = true;
+    }
+    if (voice.source === "looper") {
+      node._looperPlaying = true;
     }
   });
 }
@@ -1699,6 +2081,19 @@ function draw() {
       ctx.restore();
     }
 
+    if (node._looperPlaying) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(alpha, 0.85);
+      ctx.strokeStyle = themeColors.looperFill;
+      ctx.lineWidth = 3;
+      ctx.shadowColor = "rgba(240, 191, 58, 0.65)";
+      ctx.shadowBlur = Math.max(6, radius * 0.7);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius + 9, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     ctx.fillStyle = themeColors.textPrimary;
     ctx.font = "21px Georgia";
     ctx.textAlign = "center";
@@ -1817,12 +2212,17 @@ function startVoice(options) {
 
   if (looperState === "recording" && voice.source !== "looper") {
     const t = performance.now() - looperStartMs;
-    looperEvents.push({ type: "on", nodeId: voice.nodeId, t });
+    looperEvents.push({ type: "on", nodeId: voice.nodeId, t, octave: voice.octave });
     looperLoopDurationMs = Math.max(looperLoopDurationMs, t);
     if (isOneShot) {
       const release = Number(releaseSlider.value) || 0.6;
       const offAt = t + (attack + decay + release) * 1000;
-      looperEvents.push({ type: "off", nodeId: voice.nodeId, t: offAt });
+      looperEvents.push({
+        type: "off",
+        nodeId: voice.nodeId,
+        t: offAt,
+        octave: voice.octave,
+      });
       looperLoopDurationMs = Math.max(looperLoopDurationMs, offAt);
       voice.loopOffRecorded = true;
     }
@@ -1860,7 +2260,7 @@ function stopVoice(voice, immediate = false) {
 
   if (looperState === "recording" && voice.source !== "looper" && !voice.loopOffRecorded) {
     const t = performance.now() - looperStartMs;
-    looperEvents.push({ type: "off", nodeId: voice.nodeId, t });
+    looperEvents.push({ type: "off", nodeId: voice.nodeId, t, octave: voice.octave });
     looperLoopDurationMs = Math.max(looperLoopDurationMs, t);
     voice.loopOffRecorded = true;
   }
@@ -1915,7 +2315,18 @@ function toggleAudio() {
   }
 }
 
+function enableAudioFromGesture() {
+  if (audioCtx && audioCtx.state === "running") {
+    return;
+  }
+  enableAudio();
+  window.removeEventListener("pointerdown", enableAudioFromGesture);
+  window.removeEventListener("keydown", enableAudioFromGesture);
+}
+
 function onPointerDown(event) {
+  closeTopMenus();
+  closeBottomMenus();
   const screenPoint = { x: event.offsetX, y: event.offsetY };
   const hit = hitTestScreen(screenPoint);
   const now = performance.now();
@@ -2818,6 +3229,7 @@ function refreshThemeColors() {
     textSecondary: styles.getPropertyValue("--text-secondary").trim() || "#2a2a2a",
     lfo: styles.getPropertyValue("--lfo").trim() || "#3b82f6",
     playFill: styles.getPropertyValue("--play-fill").trim() || "#f3d64d",
+    looperFill: styles.getPropertyValue("--looper-fill").trim() || "#f1c94a",
     wheelLine: styles.getPropertyValue("--wheel-line").trim() || "rgba(16, 19, 22, 0.65)",
     wheelRing: styles.getPropertyValue("--wheel-ring").trim() || "rgba(16, 19, 22, 0.2)",
     wheelText: styles.getPropertyValue("--wheel-text").trim() || "#000000",
@@ -2861,6 +3273,9 @@ function toggleOptionsPanel() {
     return;
   }
   const isOpen = optionsToggle.getAttribute("aria-expanded") === "true";
+  if (!isOpen) {
+    closeTopMenus("options");
+  }
   optionsToggle.setAttribute("aria-expanded", String(!isOpen));
   optionsPanel.hidden = isOpen;
   optionsPanel.classList.toggle("panel-open", !isOpen);
@@ -2868,6 +3283,7 @@ function toggleOptionsPanel() {
   if (parentPanel) {
     parentPanel.classList.toggle("panel-open", !isOpen);
   }
+  syncTopMenuPanelState();
 }
 
 function togglePresetPanel() {
@@ -2875,6 +3291,9 @@ function togglePresetPanel() {
     return;
   }
   const isOpen = presetToggle.getAttribute("aria-expanded") === "true";
+  if (!isOpen) {
+    closeTopMenus("presets");
+  }
   presetToggle.setAttribute("aria-expanded", String(!isOpen));
   presetPanel.hidden = isOpen;
   presetPanel.classList.toggle("panel-open", !isOpen);
@@ -2882,6 +3301,7 @@ function togglePresetPanel() {
   if (parentPanel) {
     parentPanel.classList.toggle("panel-open", !isOpen);
   }
+  syncTopMenuPanelState();
 }
 
 function toggleEnvelopePanel() {
@@ -2889,8 +3309,13 @@ function toggleEnvelopePanel() {
     return;
   }
   const isOpen = envelopeToggle.getAttribute("aria-expanded") === "true";
+  if (!isOpen) {
+    closeBottomMenus("envelope");
+  }
   envelopeToggle.setAttribute("aria-expanded", String(!isOpen));
   envelopePanel.hidden = isOpen;
+  envelopePanel.classList.toggle("panel-open", !isOpen);
+  syncBottomMenuPanelState();
 }
 
 function toggleAnimationPanel() {
@@ -2898,8 +3323,13 @@ function toggleAnimationPanel() {
     return;
   }
   const isOpen = animationToggle.getAttribute("aria-expanded") === "true";
+  if (!isOpen) {
+    closeBottomMenus("animation");
+  }
   animationToggle.setAttribute("aria-expanded", String(!isOpen));
   animationPanel.hidden = isOpen;
+  animationPanel.classList.toggle("panel-open", !isOpen);
+  syncBottomMenuPanelState();
 }
 
 function closeRatioWheelPanel() {
@@ -2908,6 +3338,8 @@ function closeRatioWheelPanel() {
   }
   ratioWheelToggle.setAttribute("aria-expanded", "false");
   ratioWheelPanel.hidden = true;
+  ratioWheelPanel.classList.remove("panel-open");
+  syncTopMenuPanelState();
 }
 
 function toggleRatioWheelPanel() {
@@ -2915,12 +3347,105 @@ function toggleRatioWheelPanel() {
     return;
   }
   const isOpen = ratioWheelToggle.getAttribute("aria-expanded") === "true";
+  if (!isOpen) {
+    closeTopMenus("ratio-wheel");
+  }
   ratioWheelToggle.setAttribute("aria-expanded", String(!isOpen));
   ratioWheelPanel.hidden = isOpen;
+  ratioWheelPanel.classList.toggle("panel-open", !isOpen);
   if (!isOpen) {
     updateRatioWheelPosition();
     updateRatioWheels();
   }
+  syncTopMenuPanelState();
+}
+
+function closeOptionsPanel() {
+  if (!optionsToggle || !optionsPanel) {
+    return;
+  }
+  optionsToggle.setAttribute("aria-expanded", "false");
+  optionsPanel.hidden = true;
+  optionsPanel.classList.remove("panel-open");
+  const parentPanel = optionsToggle.closest(".panel");
+  if (parentPanel) {
+    parentPanel.classList.remove("panel-open");
+  }
+}
+
+function closePresetPanel() {
+  if (!presetToggle || !presetPanel) {
+    return;
+  }
+  presetToggle.setAttribute("aria-expanded", "false");
+  presetPanel.hidden = true;
+  presetPanel.classList.remove("panel-open");
+  const parentPanel = presetToggle.closest(".panel");
+  if (parentPanel) {
+    parentPanel.classList.remove("panel-open");
+  }
+}
+
+function closeEnvelopePanel() {
+  if (!envelopeToggle || !envelopePanel) {
+    return;
+  }
+  envelopeToggle.setAttribute("aria-expanded", "false");
+  envelopePanel.hidden = true;
+  envelopePanel.classList.remove("panel-open");
+}
+
+function closeAnimationPanel() {
+  if (!animationToggle || !animationPanel) {
+    return;
+  }
+  animationToggle.setAttribute("aria-expanded", "false");
+  animationPanel.hidden = true;
+  animationPanel.classList.remove("panel-open");
+}
+
+function closeTopMenus(except = "") {
+  if (except !== "options") {
+    closeOptionsPanel();
+  }
+  if (except !== "presets") {
+    closePresetPanel();
+  }
+  if (except !== "ratio-wheel") {
+    closeRatioWheelPanel();
+  }
+  syncTopMenuPanelState();
+}
+
+function closeBottomMenus(except = "") {
+  if (except !== "envelope") {
+    closeEnvelopePanel();
+  }
+  if (except !== "animation") {
+    closeAnimationPanel();
+  }
+  syncBottomMenuPanelState();
+}
+
+function syncTopMenuPanelState() {
+  if (!controlsPanel) {
+    return;
+  }
+  const anyOpen =
+    (optionsPanel && !optionsPanel.hidden) ||
+    (presetPanel && !presetPanel.hidden) ||
+    (ratioWheelPanel && !ratioWheelPanel.hidden);
+  controlsPanel.classList.toggle("panel-open", anyOpen);
+}
+
+function syncBottomMenuPanelState() {
+  if (!synthPanel) {
+    return;
+  }
+  const anyOpen =
+    (envelopePanel && !envelopePanel.hidden) ||
+    (animationPanel && !animationPanel.hidden);
+  synthPanel.classList.toggle("panel-open", anyOpen);
 }
 
 async function loadPresets() {
@@ -3508,6 +4033,11 @@ if (looperToggle) {
     startLooperRecording();
   });
 }
+if (looperClear) {
+  looperClear.addEventListener("click", () => {
+    clearLooper();
+  });
+}
 if (scorePlayToggle) {
   scorePlayToggle.addEventListener("click", () => {
     if (patternPlayerState === "playing") {
@@ -3519,11 +4049,21 @@ if (scorePlayToggle) {
 }
 if (patternBuildButton) {
   patternBuildButton.addEventListener("click", () => {
-    buildPatternStates();
+    buildPatternStates(false);
     if (patternPlayerState === "playing") {
       stopPatternPlayback();
       startPatternPlayback();
     }
+  });
+}
+if (randomLfosButton) {
+  randomLfosButton.addEventListener("click", () => {
+    randomizeLfosForActiveNodes();
+  });
+}
+if (lfoStopButton) {
+  lfoStopButton.addEventListener("click", () => {
+    scheduleLfoStopsAtCycleEnd();
   });
 }
 if (tempoSlider) {
@@ -3547,6 +4087,8 @@ canvas.addEventListener("pointerleave", onPointerLeave);
 canvas.addEventListener("wheel", onWheel, { passive: false });
 window.addEventListener("resize", resizeCanvas);
 window.addEventListener("resize", updateRatioWheelPosition);
+window.addEventListener("pointerdown", enableAudioFromGesture);
+window.addEventListener("keydown", enableAudioFromGesture);
 window.addEventListener("keydown", handleKeyDown);
 window.addEventListener("keyup", handleKeyUp);
 window.addEventListener("keydown", (event) => {

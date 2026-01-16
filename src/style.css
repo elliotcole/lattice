@@ -15,6 +15,7 @@
   --text-secondary: #2a2a2a;
   --lfo: #2f6df6;
   --play-fill: #f3d64d;
+  --looper-fill: #f0bf3a;
   --wheel-line: #000000;
   --wheel-ring: #000000;
   --wheel-text: #000000;
@@ -49,6 +50,7 @@ body.theme-dark {
   --text-secondary: #b8c1cb;
   --lfo: #6cb7ff;
   --play-fill: #f3d64d;
+  --looper-fill: #f0bf3a;
   --wheel-line: #f5f7fb;
   --wheel-ring: #f5f7fb;
   --wheel-text: #f5f7fb;
@@ -460,6 +462,48 @@ button:active {
 .synth-group {
   display: grid;
   gap: 6px;
+}
+
+.looper-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.looper-clear {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--muted-ink);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.looper-clear:hover,
+.looper-clear:focus {
+  color: var(--accent);
+}
+
+.lfo-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lfo-stop {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--muted-ink);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.lfo-stop:hover,
+.lfo-stop:focus {
+  color: var(--accent);
 }
 
 .animation-toggle {

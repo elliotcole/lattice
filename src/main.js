@@ -394,6 +394,13 @@ function disableVoiceLfo(voice) {
   updateNodePlaybackState();
 }
 
+function refreshPatternFromActiveNodes() {
+  if (!sequencePatternSelect) {
+    return;
+  }
+  buildPatternStates();
+}
+
 function clearLooperTimers() {
   looperTimeouts.forEach((timer) => clearTimeout(timer));
   looperTimeouts = [];
@@ -2013,6 +2020,7 @@ function onPointerUp(event) {
       });
       node.active = true;
       updatePitchInstances();
+      refreshPatternFromActiveNodes();
       markIsomorphicDirty();
       schedulePresetUrlUpdate();
       const voice = startVoice({
@@ -2050,6 +2058,7 @@ function onPointerUp(event) {
         hit.active = false;
         stopVoicesForNode(hit.id, false);
         updatePitchInstances();
+        refreshPatternFromActiveNodes();
         updateUiHint();
         markIsomorphicDirty();
         schedulePresetUrlUpdate();
@@ -2082,6 +2091,7 @@ function onPointerUp(event) {
       if (!hit.active) {
         hit.active = true;
         updatePitchInstances();
+        refreshPatternFromActiveNodes();
         updateUiHint();
         markIsomorphicDirty();
         schedulePresetUrlUpdate();
@@ -3290,6 +3300,7 @@ function rebuildLattice(activeKeys = null) {
   edges = buildEdges(nodes, GRID_COLS, GRID_ROWS, gridDepth);
   updatePitchInstances();
   markIsomorphicDirty();
+  refreshPatternFromActiveNodes();
   draw();
 }
 
@@ -3302,6 +3313,7 @@ function resetLattice() {
     node.baseVoiceId = null;
   });
   updatePitchInstances();
+  refreshPatternFromActiveNodes();
   updateUiHint();
   view.zoom = 1;
   view.offsetX = 0;

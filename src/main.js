@@ -7,6 +7,9 @@ const exportScaleButton = document.getElementById("export-scale");
 const themeSelect = document.getElementById("theme-select");
 const optionsToggle = document.getElementById("options-toggle");
 const optionsPanel = document.getElementById("options-panel");
+const midiEnable = document.getElementById("midi-enable");
+const midiPortSelect = document.getElementById("midi-port");
+const midiChannelSelect = document.getElementById("midi-channel");
 const presetToggle = document.getElementById("preset-toggle");
 const presetPanel = document.getElementById("preset-panel");
 const presetList = document.getElementById("preset-list");
@@ -54,8 +57,11 @@ const rhythmPatternSelect = document.getElementById("rhythm-pattern");
 const octavePatternSelect = document.getElementById("octave-pattern");
 const patternBuildButton = document.getElementById("pattern-build");
 const scorePlayToggle = document.getElementById("score-play-toggle");
-const randomLfosButton = document.getElementById("random-lfos");
+const lfoPresetSelect = document.getElementById("lfo-preset");
+const lfoPlayToggle = document.getElementById("lfo-play-toggle");
 const lfoStopButton = document.getElementById("lfo-stop");
+const sequenceLfoDensitySlider = document.getElementById("sequence-lfo-density");
+const sequenceLfoDensityReadout = document.getElementById("sequence-lfo-density-readout");
 const allNotesOffButton = document.getElementById("all-notes-off");
 const attackReadout = document.getElementById("attack-readout");
 const decayReadout = document.getElementById("decay-readout");
@@ -92,6 +98,15 @@ let lfoArmingId = null;
 let lfoArmingStart = 0;
 let lfoAnimating = false;
 let lfoStopTimers = [];
+let sequenceLfoTimers = [];
+let sequenceLfoCycleTimer = null;
+let sequenceLfoVoices = new Map();
+let sequenceLfoOverlap = 4;
+let lfoPresetPlaying = false;
+let midiAccess = null;
+let midiInput = null;
+let midiEnabled = false;
+const midiActiveNotes = new Map();
 let lastLfoTapTime = 0;
 let lastLfoTapId = null;
 const activeKeys = new Map();
@@ -153,6 +168,7 @@ const GOLDEN_DURATIONS = [
   0.36067977499789805,
   0.5835921350012612,
 ];
+const MAX_SEQUENCE_LFO_WAIT_BEATS = 32;
 let nodes = [];
 let nodeById = new Map();
 let edges = [];
@@ -250,6 +266,22 @@ function updatePatternLengthReadout() {
     patternLengthMode === "gate"
       ? `${patternLengthValue.toFixed(2)}x`
       : `${patternLengthValue.toFixed(2)} beats`;
+}
+
+function updateLfoPlayButton() {
+  if (!lfoPlayToggle) {
+    return;
+  }
+  lfoPlayToggle.textContent = lfoPresetPlaying ? "Stop" : "Play";
+  lfoPlayToggle.classList.toggle("button-on", lfoPresetPlaying);
+}
+
+function updateSequenceLfoDensityReadout() {
+  if (!sequenceLfoDensitySlider || !sequenceLfoDensityReadout) {
+    return;
+  }
+  sequenceLfoOverlap = Number(sequenceLfoDensitySlider.value) || 4;
+  sequenceLfoDensityReadout.textContent = `${sequenceLfoOverlap.toFixed(0)}`;
 }
 
 function beatsToMs(beats) {
@@ -783,7 +815,6 @@ function disableVoiceLfo(voice) {
   if (voice.lfoGain) {
     voice.lfoGain.gain.value = 1;
   }
-  updateNodePlaybackState();
 }
 
 function randomizeLfosForActiveNodes() {
@@ -807,6 +838,7 @@ function randomizeLfosForActiveNodes() {
     });
     const duration = 2 + Math.random() * 8;
     const phaseOffset = Math.random() * duration * 1000;
+    const curve = 0.5 + Math.random() * 2.2;
     const voice = startVoice({
       nodeId: node.id,
       octave: 0,
@@ -814,7 +846,8 @@ function randomizeLfosForActiveNodes() {
       lfoActive: true,
       lfoHalfPeriod: duration,
       lfoStartMs: now - phaseOffset,
-      source: "node",
+      lfoCurve: curve,
+      source: "random-lfo",
     });
     if (voice) {
       node.baseVoiceId = voice.id;
@@ -829,21 +862,201 @@ function clearLfoStopTimers() {
   lfoStopTimers = [];
 }
 
+function clearSequenceLfoTimers() {
+  sequenceLfoTimers.forEach((timer) => clearTimeout(timer));
+  sequenceLfoTimers = [];
+  if (sequenceLfoCycleTimer) {
+    clearInterval(sequenceLfoCycleTimer);
+    sequenceLfoCycleTimer = null;
+  }
+}
+
+function stopSequenceLfoVoices() {
+  sequenceLfoVoices.forEach((voice) => stopVoice(voice));
+  sequenceLfoVoices = new Map();
+}
+
+function getSequenceOrderIndices() {
+  if (!patternSequenceState || !patternActiveNodes.length) {
+    return [];
+  }
+  const type = patternSequenceState.type;
+  if (type === "plain-bob-minor" && Array.isArray(patternSequenceState.row)) {
+    return [...patternSequenceState.row];
+  }
+  if (Array.isArray(patternSequenceState.order)) {
+    return [...patternSequenceState.order];
+  }
+  return Array.from({ length: patternActiveNodes.length }, (_, index) => index);
+}
+
+function getSequenceNodeOrder() {
+  const type = patternSequenceState ? patternSequenceState.type : "ascending";
+  if (type === "left-right") {
+    const indices = getLeftRightOrderIndices();
+    return indices.map((index) => patternActiveNodes[index]).filter((id) => id != null);
+  }
+  if (type === "spiral-in") {
+    const indices = getSpiralInOrderIndices();
+    return indices.map((index) => patternActiveNodes[index]).filter((id) => id != null);
+  }
+  const indices = getSequenceOrderIndices();
+  const seen = new Set();
+  const result = [];
+  indices.forEach((index) => {
+    const nodeId = patternActiveNodes[index];
+    if (nodeId == null || seen.has(nodeId)) {
+      return;
+    }
+    seen.add(nodeId);
+    result.push(nodeId);
+  });
+  return result;
+}
+
+function scheduleSequenceLfoCycle(voice, startTime, beatSec, waitStartBeats, waitEndBeats) {
+  if (!voice.lfoGain) {
+    return;
+  }
+  const cycleSec = (16 + waitStartBeats + waitEndBeats) * beatSec;
+  const riseSec = 8 * beatSec;
+  const fallSec = 8 * beatSec;
+  const waitStartSec = waitStartBeats * beatSec;
+  const waitEndSec = waitEndBeats * beatSec;
+  const startFade = startTime + waitStartSec;
+  const endRise = startFade + riseSec;
+  const endFall = endRise + fallSec;
+  const endCycle = startTime + cycleSec;
+  voice.lfoGain.gain.cancelScheduledValues(startTime);
+  voice.lfoGain.gain.setValueAtTime(0, startTime);
+  voice.lfoGain.gain.linearRampToValueAtTime(0, startFade);
+  voice.lfoGain.gain.linearRampToValueAtTime(1, endRise);
+  voice.lfoGain.gain.linearRampToValueAtTime(0, endFall);
+  voice.lfoGain.gain.setValueAtTime(0, endCycle);
+}
+
+function scheduleSequenceLfoCycleForOrder(order, startTime, beatSec, waitBeats) {
+  const cycleSec = (16 + waitBeats) * beatSec;
+  const nextIds = new Set(order);
+  const activeNodes = new Set(patternActiveNodes);
+  sequenceLfoVoices.forEach((voice, nodeId) => {
+    if (!nextIds.has(nodeId) || !activeNodes.has(nodeId)) {
+      stopVoice(voice);
+      sequenceLfoVoices.delete(nodeId);
+    }
+  });
+  order.forEach((nodeId, index) => {
+    const node = nodeById.get(nodeId);
+    if (!node) {
+      return;
+    }
+    let voice = sequenceLfoVoices.get(nodeId);
+    if (!voice) {
+      voice = startVoice({
+        nodeId: node.id,
+        octave: 0,
+        freq: node.freq,
+        source: "lfo-sequence",
+        ignoreOneShot: true,
+      });
+      if (!voice) {
+        return;
+      }
+      if (voice.lfoGain) {
+        voice.lfoGain.gain.setValueAtTime(0, audioCtx.currentTime);
+      }
+      sequenceLfoVoices.set(nodeId, voice);
+    }
+    const offsetBeats = index * 4;
+    const offsetSec = offsetBeats * beatSec;
+    const start = startTime + offsetSec;
+    const waitStartBeats = Math.min(waitBeats, offsetBeats);
+    const waitEndBeats = Math.max(0, waitBeats - waitStartBeats);
+    voice.lfoSequenceStartSec = startTime;
+    voice.lfoSequenceCycleSec = cycleSec;
+    voice.lfoSequenceBeatSec = beatSec;
+    voice.lfoSequenceOffsetSec = offsetSec;
+    voice.lfoSequenceWaitStartBeats = waitStartBeats;
+    voice.lfoSequenceWaitEndBeats = waitEndBeats;
+    scheduleSequenceLfoCycle(voice, start, beatSec, waitStartBeats, waitEndBeats);
+  });
+}
+
+function getSequenceLfoWaitBeats() {
+  const min = 2;
+  const max = 16;
+  const clamped = Math.max(min, Math.min(max, sequenceLfoOverlap));
+  const t = (clamped - min) / (max - min);
+  return MAX_SEQUENCE_LFO_WAIT_BEATS * (1 - t);
+}
+
+function scheduleNextSequenceLfoCycle(beatSec) {
+  if (sequenceLfoCycleTimer) {
+    clearTimeout(sequenceLfoCycleTimer);
+    sequenceLfoCycleTimer = null;
+  }
+  const waitBeats = getSequenceLfoWaitBeats();
+  const cycleSec = (16 + waitBeats) * beatSec;
+  sequenceLfoCycleTimer = setTimeout(() => {
+    const nextOrder = getSequenceNodeOrder();
+    const startTime = audioCtx.currentTime;
+    if (nextOrder.length) {
+      scheduleSequenceLfoCycleForOrder(
+        nextOrder,
+        startTime,
+        beatSec,
+        waitBeats
+      );
+    }
+    scheduleNextSequenceLfoCycle(beatSec);
+  }, cycleSec * 1000);
+}
+
+function startSequenceLfos() {
+  if (!audioCtx || audioCtx.state !== "running") {
+    enableAudio();
+  }
+  clearSequenceLfoTimers();
+  stopSequenceLfoVoices();
+  const beatSec = 60 / tempoBpm;
+  const now = audioCtx.currentTime;
+  const order = getSequenceNodeOrder();
+  if (!order.length) {
+    return;
+  }
+  const waitBeats = getSequenceLfoWaitBeats();
+  scheduleSequenceLfoCycleForOrder(order, now, beatSec, waitBeats);
+  scheduleNextSequenceLfoCycle(beatSec);
+  draw();
+  ensureLfoLoop();
+}
+
 function scheduleLfoStopsAtCycleEnd() {
   clearLfoStopTimers();
+  clearSequenceLfoTimers();
   const now = performance.now();
   voices.forEach((voice) => {
-    if (!voice.lfoActive || voice.releasing) {
+    if (voice.releasing) {
       return;
     }
-    const halfPeriod = Number(voice.lfoHalfPeriod) || 0;
-    if (halfPeriod <= 0) {
+    let remaining = null;
+    if (voice.lfoActive) {
+      const halfPeriod = Number(voice.lfoHalfPeriod) || 0;
+      if (halfPeriod <= 0) {
+        return;
+      }
+      const period = halfPeriod * 2;
+      const elapsed = (now - voice.lfoStartMs) / 1000;
+      const phase = ((elapsed % period) + period) % period;
+      remaining = period - phase;
+    } else if (voice.source === "lfo-sequence" && voice.lfoSequenceCycleSec) {
+      const cycleSec = voice.lfoSequenceCycleSec;
+      const elapsed = (audioCtx ? audioCtx.currentTime : 0) - voice.lfoSequenceStartSec;
+      const phase = ((elapsed % cycleSec) + cycleSec) % cycleSec;
+      remaining = cycleSec - phase;
+    } else {
       return;
     }
-    const period = halfPeriod * 2;
-    const elapsed = (now - voice.lfoStartMs) / 1000;
-    const phase = ((elapsed % period) + period) % period;
-    const remaining = period - phase;
     const timer = setTimeout(() => {
       stopVoice(voice, false);
       const node = nodeById.get(voice.nodeId);
@@ -856,21 +1069,26 @@ function scheduleLfoStopsAtCycleEnd() {
   });
 }
 
+function stopLfoPresets() {
+  lfoPresetPlaying = false;
+  updateLfoPlayButton();
+  scheduleLfoStopsAtCycleEnd();
+  clearSequenceLfoTimers();
+  stopSequenceLfoVoices();
+}
+
 function allNotesOff() {
   stopPatternPlayback();
   stopLooperPlayback();
   clearLfoStopTimers();
+  clearSequenceLfoTimers();
+  stopSequenceLfoVoices();
   lfoArmingId = null;
   lfoArmingStart = 0;
   stopAllVoices();
   nodes.forEach((node) => {
     node.baseVoiceId = null;
-    node.playing = false;
-    node._hasLfo = false;
-    node._scorePlaying = false;
-    node._looperPlaying = false;
   });
-  updateNodePlaybackState();
   draw();
 }
 
@@ -1033,8 +1251,6 @@ function buildLattice() {
           note_name: etInfo.name,
           pitch_class: etInfo.pitchClass,
           active: isCenter,
-          playing: false,
-          volume: 0,
           isCenter,
           baseVoiceId: null,
         });
@@ -1172,9 +1388,9 @@ function updatePitchInstances() {
     const baseRatio = node.numerator / node.denominator;
     let freq = fundamental * baseRatio;
     let octave = 0;
-    while (freq < MIN_FREQ) {
-      freq *= 2;
-      octave += 1;
+    while (freq / 2 >= MIN_FREQ) {
+      freq /= 2;
+      octave -= 1;
     }
     while (freq <= MAX_FREQ) {
       pitchInstances.push({
@@ -1208,32 +1424,76 @@ function findNearestPitchInstance(targetFreq) {
   return best;
 }
 
-function updateNodePlaybackState() {
-  nodes.forEach((node) => {
-    node.playing = false;
-    node._hasLfo = false;
-    node._scorePlaying = false;
-    node._looperPlaying = false;
-  });
+function getVoiceBaseEnvelope(voice, nowSec) {
+  if (!voice || voice.startTimeSec == null) {
+    return 0;
+  }
+  const elapsed = nowSec - voice.startTimeSec;
+  if (elapsed <= 0) {
+    return 0;
+  }
+  const attack = voice.envAttackSec || 0;
+  const decay = voice.envDecaySec || 0;
+  const sustain = Math.max(0, Math.min(1, Number(voice.envSustain) || 0));
+  const peakGain = voice.peakGain || 0;
+  if (attack > 0 && elapsed < attack) {
+    return (elapsed / attack) * peakGain;
+  }
+  const afterAttack = elapsed - attack;
+  if (decay > 0 && afterAttack < decay) {
+    const from = peakGain;
+    const to = peakGain * sustain;
+    return from + (to - from) * (afterAttack / decay);
+  }
+  return peakGain * sustain;
+}
+
+function getVoiceEnvelopeLevel(voice, nowSec) {
+  const base = getVoiceBaseEnvelope(voice, nowSec);
+  if (voice.releaseStartSec == null || voice.releaseDurationSec == null) {
+    return base;
+  }
+  if (nowSec < voice.releaseStartSec) {
+    return base;
+  }
+  const releaseElapsed = nowSec - voice.releaseStartSec;
+  if (releaseElapsed >= voice.releaseDurationSec) {
+    return 0;
+  }
+  const startLevel = voice.releaseStartLevel ?? base;
+  return Math.max(0, startLevel * (1 - releaseElapsed / voice.releaseDurationSec));
+}
+
+function getVoiceAmplitude(voice, nowSec, nowMs) {
+  if (!voice) {
+    return 0;
+  }
+  const envLevel = getVoiceEnvelopeLevel(voice, nowSec);
+  if (envLevel <= 0) {
+    return 0;
+  }
+  let lfoLevel = 1;
+  if (voice.lfoActive) {
+    lfoLevel = getLfoGainValue(voice, nowMs);
+  } else if (voice.source === "lfo-sequence") {
+    lfoLevel = getSequenceLfoValue(voice, nowSec);
+  }
+  const masterLevel = masterGain ? Number(masterGain.gain.value) || 0 : 1;
+  const normalized = (envLevel / 0.2) * lfoLevel * masterLevel;
+  return Math.max(0, normalized);
+}
+
+function getNodeAmplitudeMap(nowSec, nowMs) {
+  const amps = new Map();
   voices.forEach((voice) => {
-    if (voice.releasing) {
+    const amp = getVoiceAmplitude(voice, nowSec, nowMs);
+    if (amp <= 0) {
       return;
     }
-    const node = nodeById.get(voice.nodeId);
-    if (!node) {
-      return;
-    }
-    node.playing = true;
-    if (voice.lfoActive) {
-      node._hasLfo = true;
-    }
-    if (voice.source === "score" || voice.source === "pattern") {
-      node._scorePlaying = true;
-    }
-    if (voice.source === "looper") {
-      node._looperPlaying = true;
-    }
+    const sum = (amps.get(voice.nodeId) || 0) + amp;
+    amps.set(voice.nodeId, sum);
   });
+  return amps;
 }
 
 function removeVoiceById(voiceId) {
@@ -1243,7 +1503,6 @@ function removeVoiceById(voiceId) {
       node.baseVoiceId = null;
     }
   });
-  updateNodePlaybackState();
 }
 
 function findVoiceById(voiceId) {
@@ -2109,6 +2368,9 @@ function draw() {
   const nodeRenderList = nodes
     .map((node) => ({ node, pos: worldToScreen(node.coordinate) }))
     .sort((a, b) => a.pos.depth - b.pos.depth);
+  const nowMs = performance.now();
+  const nowSec = audioCtx ? audioCtx.currentTime : nowMs / 1000;
+  const nodeAmplitudes = getNodeAmplitudeMap(nowSec, nowMs);
 
   const keyboardMode = getKeyboardMode();
   const isIsomorphicMode = keyboardMode === "iso" || keyboardMode === "iso-fuzzy";
@@ -2117,15 +2379,16 @@ function draw() {
   }
   const keyMap = isIsomorphicMode ? isomorphicKeyMap : null;
 
-  const centerX = Math.floor(GRID_COLS / 2);
-  const centerY = Math.floor(GRID_ROWS / 2);
   nodeRenderList.forEach(({ node, pos }) => {
     const isHovered = node.id === hoverNodeId;
     const canShowInactive = isInactiveNodeAvailable(node);
     const canInteractInactive = !is3DMode || isAddMode;
+    const amplitude = nodeAmplitudes.get(node.id) || 0;
+    const brightness = 1 - Math.exp(-amplitude * 1.5);
     const isVisible =
       node.isCenter ||
       node.active ||
+      brightness > 0.01 ||
       (isHovered && canShowInactive && canInteractInactive);
     let alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
     if (zModeActive && zModeAnchor) {
@@ -2147,11 +2410,11 @@ function draw() {
     ctx.strokeStyle = themeColors.nodeStroke;
     ctx.lineWidth = 2;
     if (is3DMode) {
-      const baseFill = node.playing ? themeColors.playFill : "rgba(255, 255, 255, 0.02)";
-      const shadowColor = node.playing
+      const baseFill = brightness > 0 ? themeColors.playFill : "rgba(255, 255, 255, 0.02)";
+      const shadowColor = brightness > 0
         ? "rgba(243, 214, 77, 0.55)"
         : "rgba(0, 0, 0, 0.22)";
-      if (node.playing) {
+      if (brightness > 0) {
         ctx.shadowColor = themeColors.lfo;
         ctx.shadowBlur = Math.max(6, radius * 0.6);
         ctx.shadowOffsetX = 0;
@@ -2159,58 +2422,22 @@ function draw() {
       }
       ctx.fillStyle = getSphereFill(pos, radius, baseFill, shadowColor);
     } else {
-      ctx.fillStyle = node.playing ? themeColors.playFill : "transparent";
+      ctx.fillStyle = brightness > 0 ? themeColors.playFill : "transparent";
     }
     ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-    ctx.fill();
-    if (is3DMode && node.playing) {
+    if (brightness > 0) {
+      ctx.save();
+      ctx.globalAlpha *= brightness;
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.fill();
+    }
+    if (is3DMode && brightness > 0) {
       ctx.shadowColor = "transparent";
       ctx.shadowBlur = 0;
     }
     ctx.stroke();
-
-    const now = performance.now();
-    const lfoPulse = getNodeLfoPulse(node.id, now);
-    if (lfoArmingId === node.id || lfoPulse > 0) {
-      const pulse =
-        lfoArmingId === node.id
-          ? 0.6 + 0.4 * Math.sin((now - lfoArmingStart) / 120)
-          : lfoPulse;
-      ctx.save();
-      ctx.globalAlpha = Math.min(alpha, pulse);
-      ctx.strokeStyle = themeColors.lfo;
-      ctx.lineWidth = lfoPulse > 0 ? 3 : 2;
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, radius + 3, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    if (node._scorePlaying) {
-      ctx.save();
-      ctx.globalAlpha = Math.min(alpha, 0.9);
-      ctx.strokeStyle = themeColors.playFill;
-      ctx.lineWidth = 3;
-      ctx.shadowColor = "rgba(243, 214, 77, 0.7)";
-      ctx.shadowBlur = Math.max(6, radius * 0.8);
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, radius + 6, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    if (node._looperPlaying) {
-      ctx.save();
-      ctx.globalAlpha = Math.min(alpha, 0.85);
-      ctx.strokeStyle = themeColors.looperFill;
-      ctx.lineWidth = 3;
-      ctx.shadowColor = "rgba(240, 191, 58, 0.65)";
-      ctx.shadowBlur = Math.max(6, radius * 0.7);
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, radius + 9, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
 
     ctx.fillStyle = themeColors.textPrimary;
     ctx.font = "21px Georgia";
@@ -2262,6 +2489,7 @@ function startVoice(options) {
   }
 
   const now = audioCtx.currentTime;
+  const velocity = Math.max(0, Math.min(1, Number(options.velocity ?? 1)));
   const waveformType = waveformSelect.value || "sine";
   const oscillator = CUSTOM_WAVEFORMS.has(waveformType)
     ? customOscillators[waveformType](audioCtx)
@@ -2273,17 +2501,18 @@ function startVoice(options) {
     oscillator.type = waveformType;
   }
   oscillator.frequency.value = options.freq;
-  const isOneShot = Boolean(oneShotCheckbox && oneShotCheckbox.checked);
+  const isOneShot =
+    Boolean(oneShotCheckbox && oneShotCheckbox.checked) && !options.ignoreOneShot;
   envGain.gain.setValueAtTime(0.0001, now);
   const attack = Number(attackSlider.value) || 0.02;
   const decay = Number(decaySlider.value) || 0.2;
   const sustain = Number(sustainSlider.value) || 0.6;
-  envGain.gain.exponentialRampToValueAtTime(0.2, now + attack);
-  envGain.gain.exponentialRampToValueAtTime(0.2 * sustain, now + attack + decay);
-  if (isOneShot) {
-    const release = Number(releaseSlider.value) || 0.6;
-    envGain.gain.exponentialRampToValueAtTime(0.0001, now + attack + decay + release);
-  }
+  const peakGain = Math.max(0.0001, 0.2 * velocity);
+  envGain.gain.exponentialRampToValueAtTime(peakGain, now + attack);
+  envGain.gain.exponentialRampToValueAtTime(
+    Math.max(0.0001, peakGain * sustain),
+    now + attack + decay
+  );
 
   const voice = {
     id: nextVoiceId++,
@@ -2295,11 +2524,29 @@ function startVoice(options) {
     lfoGain,
     lfoActive: Boolean(options.lfoActive),
     releasing: false,
+    startTimeSec: now,
+    envAttackSec: attack,
+    envDecaySec: decay,
+    envSustain: sustain,
+    envReleaseSec: Number(releaseSlider.value) || 0.6,
+    peakGain,
+    releaseStartSec: null,
+    releaseDurationSec: null,
+    releaseStartLevel: null,
     lfoHalfPeriod: options.lfoHalfPeriod || 0,
     lfoStartMs: options.lfoStartMs || 0,
+    lfoCurve: Number.isFinite(options.lfoCurve) ? options.lfoCurve : 1,
     source: options.source || "keyboard",
     loopOffRecorded: false,
   };
+
+  if (isOneShot) {
+    const release = Number(releaseSlider.value) || 0.6;
+    envGain.gain.exponentialRampToValueAtTime(0.0001, now + attack + decay + release);
+    voice.releaseStartSec = now + attack + decay;
+    voice.releaseDurationSec = release;
+    voice.releaseStartLevel = peakGain * sustain;
+  }
 
   lfoGain.gain.value = voice.lfoActive ? getLfoGainValue(voice, performance.now()) : 1;
   oscillator.connect(envGain).connect(lfoGain).connect(masterGain);
@@ -2316,11 +2563,8 @@ function startVoice(options) {
   };
 
   voices.push(voice);
-  updateNodePlaybackState();
 
-  if (voice.lfoActive) {
-    ensureLfoLoop();
-  }
+  ensureLfoLoop();
 
   if (isOneShot) {
     const release = Number(releaseSlider.value) || 0.6;
@@ -2363,10 +2607,14 @@ function stopVoice(voice, immediate = false) {
   if (lfoGain) {
     lfoGain.gain.value = 1;
   }
-  updateNodePlaybackState();
 
   const now = audioCtx.currentTime;
   const release = immediate ? 0.02 : Number(releaseSlider.value) || 0.6;
+  const baseLevel = getVoiceBaseEnvelope(voice, now);
+  voice.releaseStartSec = now;
+  voice.releaseDurationSec = release;
+  voice.releaseStartLevel = baseLevel;
+  ensureLfoLoop();
   if (envGain) {
     envGain.gain.cancelScheduledValues(now);
     envGain.gain.setValueAtTime(Math.max(envGain.gain.value, 0.0001), now);
@@ -2440,6 +2688,129 @@ function enableAudioFromGesture() {
   enableAudio();
   window.removeEventListener("pointerdown", enableAudioFromGesture);
   window.removeEventListener("keydown", enableAudioFromGesture);
+}
+
+
+function populateMidiChannels() {
+  if (!midiChannelSelect) {
+    return;
+  }
+  midiChannelSelect.innerHTML = "";
+  const allOption = document.createElement("option");
+  allOption.value = "all";
+  allOption.textContent = "All";
+  midiChannelSelect.appendChild(allOption);
+  for (let channel = 0; channel < 16; channel += 1) {
+    const option = document.createElement("option");
+    option.value = String(channel);
+    option.textContent = String(channel);
+    midiChannelSelect.appendChild(option);
+  }
+}
+
+function populateMidiPorts() {
+  if (!midiPortSelect || !midiAccess) {
+    return;
+  }
+  const current = midiPortSelect.value;
+  midiPortSelect.innerHTML = "";
+  const inputs = Array.from(midiAccess.inputs.values());
+  if (!inputs.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No MIDI inputs";
+    midiPortSelect.appendChild(option);
+    return;
+  }
+  inputs.forEach((input) => {
+    const option = document.createElement("option");
+    option.value = input.id;
+    option.textContent = input.name || `MIDI ${input.id}`;
+    midiPortSelect.appendChild(option);
+  });
+  const nextValue = inputs.find((input) => input.id === current) ? current : inputs[0].id;
+  midiPortSelect.value = nextValue;
+  selectMidiInput(nextValue);
+}
+
+function handleMidiMessage(event) {
+  if (!midiEnabled) {
+    return;
+  }
+  const [status, data1, data2] = event.data;
+  const command = status & 0xf0;
+  const channel = status & 0x0f;
+  if (midiChannelSelect && midiChannelSelect.value !== "all") {
+    const selected = Number(midiChannelSelect.value);
+    if (!Number.isNaN(selected) && channel !== selected) {
+      return;
+    }
+  }
+  if (!audioCtx || audioCtx.state !== "running") {
+    enableAudio();
+  }
+  const velocity = data2 / 127;
+  const key = `${channel}:${data1}`;
+  if (command === 0x90 && data2 > 0) {
+    const targetFreq = midiToFrequency(data1, Number(a4Input.value) || 440);
+    const instance = findNearestPitchInstance(targetFreq);
+    if (!instance) {
+      return;
+    }
+    const voice = startVoice({
+      nodeId: instance.nodeId,
+      octave: instance.octave,
+      freq: instance.freq,
+      source: "midi",
+      velocity,
+    });
+    if (voice) {
+      midiActiveNotes.set(key, voice.id);
+      draw();
+    }
+  } else if (command === 0x80 || (command === 0x90 && data2 === 0)) {
+    const voiceId = midiActiveNotes.get(key);
+    if (voiceId == null) {
+      return;
+    }
+    const voice = findVoiceById(voiceId);
+    midiActiveNotes.delete(key);
+    stopVoice(voice);
+    draw();
+  }
+}
+
+function selectMidiInput(inputId) {
+  if (!midiAccess) {
+    return;
+  }
+  if (midiInput) {
+    midiInput.onmidimessage = null;
+  }
+  const nextInput = Array.from(midiAccess.inputs.values()).find((input) => input.id === inputId);
+  if (!nextInput) {
+    midiInput = null;
+    return;
+  }
+  midiInput = nextInput;
+  midiInput.onmidimessage = handleMidiMessage;
+}
+
+async function initMidi() {
+  if (!navigator.requestMIDIAccess) {
+    alert("Web MIDI is not supported in this browser.");
+    return;
+  }
+  try {
+    midiAccess = await navigator.requestMIDIAccess();
+    midiAccess.onstatechange = () => {
+      populateMidiPorts();
+    };
+    populateMidiPorts();
+    populateMidiChannels();
+  } catch (error) {
+    console.warn("MIDI access failed", error);
+  }
 }
 
 function onPointerDown(event) {
@@ -2547,11 +2918,6 @@ function onPointerUp(event) {
           stopVoice(voice, true);
         }
       });
-      node.active = true;
-      updatePitchInstances();
-      refreshPatternFromActiveNodes();
-      markIsomorphicDirty();
-      schedulePresetUrlUpdate();
       const voice = startVoice({
         nodeId: node.id,
         octave: 0,
@@ -2559,6 +2925,7 @@ function onPointerUp(event) {
         lfoActive: true,
         lfoHalfPeriod: duration,
         lfoStartMs: now,
+        lfoCurve: 1,
         source: "node",
       });
       if (voice) {
@@ -2789,7 +3156,6 @@ function updateLfoDepth() {
 function drawAxes() {
   const axisLengthXY = GRID_SPACING * (GRID_COLS / 2);
   const axisLengthZ = GRID_SPACING * (gridDepth / 2);
-  ctx.strokeStyle = themeColors.nodeStroke;
   ctx.lineWidth = 1.5;
 
   if (zModeActive && zModeAnchor) {
@@ -2802,6 +3168,7 @@ function drawAxes() {
     };
     const start = worldToScreen({ ...anchorPoint, z: -axisLengthZ });
     const end = worldToScreen({ ...anchorPoint, z: axisLengthZ });
+    ctx.strokeStyle = AXIS_EDGE_COLORS.z;
     ctx.beginPath();
     ctx.moveTo(start.x, start.y);
     ctx.lineTo(end.x, end.y);
@@ -2810,14 +3177,27 @@ function drawAxes() {
   }
 
   const axes = [
-    { start: { x: -axisLengthXY, y: 0, z: 0 }, end: { x: axisLengthXY, y: 0, z: 0 } },
-    { start: { x: 0, y: -axisLengthXY, z: 0 }, end: { x: 0, y: axisLengthXY, z: 0 } },
-    { start: { x: 0, y: 0, z: -axisLengthZ }, end: { x: 0, y: 0, z: axisLengthZ } },
+    {
+      start: { x: -axisLengthXY, y: 0, z: 0 },
+      end: { x: axisLengthXY, y: 0, z: 0 },
+      color: AXIS_EDGE_COLORS.x,
+    },
+    {
+      start: { x: 0, y: -axisLengthXY, z: 0 },
+      end: { x: 0, y: axisLengthXY, z: 0 },
+      color: AXIS_EDGE_COLORS.y,
+    },
+    {
+      start: { x: 0, y: 0, z: -axisLengthZ },
+      end: { x: 0, y: 0, z: axisLengthZ },
+      color: AXIS_EDGE_COLORS.z,
+    },
   ];
 
   axes.forEach((axis) => {
     const start = worldToScreen(axis.start, true);
     const end = worldToScreen(axis.end, true);
+    ctx.strokeStyle = axis.color;
     ctx.beginPath();
     ctx.moveTo(start.x, start.y);
     ctx.lineTo(end.x, end.y);
@@ -2889,7 +3269,10 @@ function getLfoValue(voice, nowMs) {
     return 1;
   }
   const phase = (elapsed / voice.lfoHalfPeriod) % 2;
-  return phase <= 1 ? phase : 2 - phase;
+  const normalized = phase <= 1 ? phase : 2 - phase;
+  const value = normalized;
+  const curve = Math.max(0.2, Number(voice.lfoCurve) || 1);
+  return Math.pow(value, curve);
 }
 
 function getLfoGainValue(voice, nowMs) {
@@ -2900,14 +3283,32 @@ function getLfoGainValue(voice, nowMs) {
   return (1 - lfoDepth) + lfoDepth * value;
 }
 
-function getNodeLfoPulse(nodeId, nowMs) {
-  let pulse = 0;
-  voices.forEach((voice) => {
-    if (voice.nodeId === nodeId && voice.lfoActive) {
-      pulse = Math.max(pulse, getLfoGainValue(voice, nowMs));
-    }
-  });
-  return pulse;
+function getSequenceLfoValue(voice, nowSec) {
+  if (!voice || voice.lfoSequenceStartSec == null || !voice.lfoSequenceCycleSec) {
+    return 0;
+  }
+  const beatSec = voice.lfoSequenceBeatSec || (60 / tempoBpm);
+  const riseSec = 8 * beatSec;
+  const fallSec = 8 * beatSec;
+  const cycleSec = voice.lfoSequenceCycleSec;
+  const offsetSec = Number(voice.lfoSequenceOffsetSec) || 0;
+  const elapsed = nowSec - (voice.lfoSequenceStartSec + offsetSec);
+  if (elapsed < 0) {
+    return 0;
+  }
+  const phase = elapsed % cycleSec;
+  const waitStartSec = (Number(voice.lfoSequenceWaitStartBeats) || 0) * beatSec;
+  const waitEndSec = (Number(voice.lfoSequenceWaitEndBeats) || 0) * beatSec;
+  if (phase < waitStartSec) {
+    return 0;
+  }
+  if (phase < waitStartSec + riseSec) {
+    return (phase - waitStartSec) / riseSec;
+  }
+  if (phase < waitStartSec + riseSec + fallSec) {
+    return 1 - (phase - waitStartSec - riseSec) / fallSec;
+  }
+  return 0;
 }
 
 function getActiveRatioAngles() {
@@ -3307,20 +3708,32 @@ function applyBestView() {
 }
 
 function lfoLoop() {
-  const now = performance.now();
+  const nowMs = performance.now();
+  const nowSec = audioCtx ? audioCtx.currentTime : nowMs / 1000;
   let needsFrame = false;
 
   voices.forEach((voice) => {
-    if (!voice.lfoActive || !voice.lfoGain) {
-      return;
+    let voiceNeedsFrame = false;
+    if (voice.lfoActive && voice.lfoGain) {
+      voice.lfoGain.gain.value = getLfoGainValue(voice, nowMs);
+      voiceNeedsFrame = true;
     }
-    voice.lfoGain.gain.value = getLfoGainValue(voice, now);
-    needsFrame = true;
+    if (voice.source === "lfo-sequence") {
+      voiceNeedsFrame = true;
+    }
+    const attack = voice.envAttackSec || 0;
+    const decay = voice.envDecaySec || 0;
+    if (voice.releaseStartSec != null && voice.releaseDurationSec != null) {
+      if (nowSec < voice.releaseStartSec + voice.releaseDurationSec) {
+        voiceNeedsFrame = true;
+      }
+    } else if (voice.startTimeSec != null && nowSec < voice.startTimeSec + attack + decay) {
+      voiceNeedsFrame = true;
+    }
+    if (voiceNeedsFrame) {
+      needsFrame = true;
+    }
   });
-
-  if (lfoArmingId != null) {
-    needsFrame = true;
-  }
 
   if (needsFrame) {
     draw();
@@ -3597,7 +4010,16 @@ async function loadPresets() {
       link.textContent = String(name);
       const uriString = String(uri);
       if (uriString.startsWith("http://") || uriString.startsWith("https://")) {
-        link.href = uriString;
+        try {
+          const parsed = new URL(uriString);
+          if (parsed.hash) {
+            link.href = `${window.location.origin}${window.location.pathname}${parsed.hash}`;
+          } else {
+            link.href = `${window.location.origin}${parsed.pathname}${parsed.search}`;
+          }
+        } catch (error) {
+          link.href = uriString;
+        }
       } else if (uriString.startsWith("#")) {
         link.href = `${window.location.origin}${window.location.pathname}${uriString}`;
       } else if (uriString.startsWith("/")) {
@@ -3952,7 +4374,6 @@ function resetLattice() {
   activeKeys.clear();
   nodes.forEach((node) => {
     node.active = node.isCenter;
-    node.playing = false;
     node.baseVoiceId = null;
   });
   updatePitchInstances();
@@ -4051,6 +4472,19 @@ if (themeSelect) {
 if (optionsToggle) {
   optionsToggle.addEventListener("click", toggleOptionsPanel);
 }
+if (midiEnable) {
+  midiEnable.addEventListener("change", async () => {
+    midiEnabled = midiEnable.checked;
+    if (midiEnabled && !midiAccess) {
+      await initMidi();
+    }
+  });
+}
+if (midiPortSelect) {
+  midiPortSelect.addEventListener("change", () => {
+    selectMidiInput(midiPortSelect.value);
+  });
+}
 if (envelopeToggle) {
   envelopeToggle.addEventListener("click", toggleEnvelopePanel);
 }
@@ -4101,6 +4535,7 @@ waveformSelect.addEventListener("change", () => {
       lfoActive: voice.lfoActive,
       lfoHalfPeriod: voice.lfoHalfPeriod,
       lfoStartMs: voice.lfoStartMs,
+      lfoCurve: voice.lfoCurve,
       source: voice.source,
     });
     if (newVoice && wasBase) {
@@ -4174,9 +4609,27 @@ if (patternBuildButton) {
     }
   });
 }
-if (randomLfosButton) {
-  randomLfosButton.addEventListener("click", () => {
-    randomizeLfosForActiveNodes();
+if (lfoPlayToggle) {
+  lfoPlayToggle.addEventListener("click", () => {
+    if (lfoPresetPlaying) {
+      stopLfoPresets();
+      return;
+    }
+    const preset = lfoPresetSelect ? lfoPresetSelect.value : "random";
+    if (preset === "sequence") {
+      startSequenceLfos();
+    } else {
+      randomizeLfosForActiveNodes();
+    }
+    lfoPresetPlaying = true;
+    updateLfoPlayButton();
+  });
+}
+if (lfoPresetSelect) {
+  lfoPresetSelect.addEventListener("change", () => {
+    if (lfoPresetPlaying) {
+      stopLfoPresets();
+    }
   });
 }
 if (lfoStopButton) {
@@ -4210,15 +4663,23 @@ if (patternLengthModeInputs.length) {
     });
   });
 }
+if (sequenceLfoDensitySlider) {
+  sequenceLfoDensitySlider.addEventListener("input", () => {
+    updateSequenceLfoDensityReadout();
+  });
+}
 
 updateEnvelopeReadouts();
 updateLfoDepth();
 updateTempoReadout();
 updatePatternLengthReadout();
+updateSequenceLfoDensityReadout();
 initTheme();
 updateLooperButton();
 updateScoreButton();
+updateLfoPlayButton();
 buildPatternStates();
+populateMidiChannels();
 loadPresets();
 canvas.addEventListener("pointerdown", onPointerDown);
 canvas.addEventListener("pointermove", onPointerMove);

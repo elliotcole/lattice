@@ -481,6 +481,22 @@ button:active {
   gap: 6px;
 }
 
+.synth-group.is-disabled {
+  opacity: 0.45;
+}
+
+.synth-group.is-disabled input,
+.synth-group.is-disabled select,
+.synth-group.is-disabled button {
+  pointer-events: none;
+}
+
+.control-note {
+  font-size: 10px;
+  color: var(--muted-ink);
+  letter-spacing: 0.2px;
+}
+
 .looper-label {
   display: inline-flex;
   align-items: center;

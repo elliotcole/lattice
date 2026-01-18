@@ -49,8 +49,13 @@ const tempoSlider = document.getElementById("tempo");
 const tempoReadout = document.getElementById("tempo-readout");
 const patternLengthSlider = document.getElementById("pattern-length");
 const patternLengthReadout = document.getElementById("pattern-length-readout");
+const patternLengthGroup = document.getElementById("pattern-length-group");
+const patternLengthNote = document.getElementById("pattern-length-note");
 const patternLengthModeInputs = document.querySelectorAll(
   'input[name="pattern-length-mode"]'
+);
+const envelopeTimeModeInputs = document.querySelectorAll(
+  'input[name="envelope-time"]'
 );
 const sequencePatternSelect = document.getElementById("sequence-pattern");
 const rhythmPatternSelect = document.getElementById("rhythm-pattern");
@@ -60,8 +65,6 @@ const scorePlayToggle = document.getElementById("score-play-toggle");
 const lfoPresetSelect = document.getElementById("lfo-preset");
 const lfoPlayToggle = document.getElementById("lfo-play-toggle");
 const lfoStopButton = document.getElementById("lfo-stop");
-const sequenceLfoDensitySlider = document.getElementById("sequence-lfo-density");
-const sequenceLfoDensityReadout = document.getElementById("sequence-lfo-density-readout");
 const allNotesOffButton = document.getElementById("all-notes-off");
 const attackReadout = document.getElementById("attack-readout");
 const decayReadout = document.getElementById("decay-readout");
@@ -98,10 +101,6 @@ let lfoArmingId = null;
 let lfoArmingStart = 0;
 let lfoAnimating = false;
 let lfoStopTimers = [];
-let sequenceLfoTimers = [];
-let sequenceLfoCycleTimer = null;
-let sequenceLfoVoices = new Map();
-let sequenceLfoOverlap = 4;
 let lfoPresetPlaying = false;
 let midiAccess = null;
 let midiInput = null;
@@ -210,6 +209,7 @@ let patternVoices = new Set();
 let tempoBpm = 120;
 let patternLengthValue = 1;
 let patternLengthMode = "sustain";
+let envelopeTimeMode = "absolute";
 
 function markIsomorphicDirty() {
   isomorphicDirty = true;
@@ -257,6 +257,22 @@ function updateTempoReadout() {
   tempoReadout.textContent = `${tempoBpm} BPM`;
 }
 
+function updatePatternLengthAvailability() {
+  const isOneShot = Boolean(oneShotCheckbox && oneShotCheckbox.checked);
+  patternLengthModeInputs.forEach((input) => {
+    input.disabled = isOneShot;
+  });
+  if (patternLengthSlider) {
+    patternLengthSlider.disabled = isOneShot;
+  }
+  if (patternLengthGroup) {
+    patternLengthGroup.classList.toggle("is-disabled", isOneShot);
+  }
+  if (patternLengthNote) {
+    patternLengthNote.hidden = !isOneShot;
+  }
+}
+
 function updatePatternLengthReadout() {
   if (!patternLengthSlider || !patternLengthReadout) {
     return;
@@ -276,16 +292,28 @@ function updateLfoPlayButton() {
   lfoPlayToggle.classList.toggle("button-on", lfoPresetPlaying);
 }
 
-function updateSequenceLfoDensityReadout() {
-  if (!sequenceLfoDensitySlider || !sequenceLfoDensityReadout) {
-    return;
-  }
-  sequenceLfoOverlap = Number(sequenceLfoDensitySlider.value) || 4;
-  sequenceLfoDensityReadout.textContent = `${sequenceLfoOverlap.toFixed(0)}`;
-}
-
 function beatsToMs(beats) {
   return (beats * 60000) / tempoBpm;
+}
+
+function envelopeToSeconds(value) {
+  const numeric = Number(value) || 0;
+  if (envelopeTimeMode === "tempo") {
+    return beatsToMs(numeric) / 1000;
+  }
+  return numeric;
+}
+
+function getEnvelopeAttackSeconds() {
+  return envelopeToSeconds(attackSlider.value);
+}
+
+function getEnvelopeDecaySeconds() {
+  return envelopeToSeconds(decaySlider.value);
+}
+
+function getEnvelopeReleaseSeconds() {
+  return envelopeToSeconds(releaseSlider.value);
 }
 
 function stopPatternVoices() {
@@ -755,9 +783,9 @@ function scheduleNextPatternEvent(delayMs) {
           patternVoices.add(voice);
           draw();
           if (isOneShot) {
-            const attack = Number(attackSlider.value) || 0.02;
-            const decay = Number(decaySlider.value) || 0.2;
-            const release = Number(releaseSlider.value) || 0.6;
+            const attack = getEnvelopeAttackSeconds() || 0.02;
+            const decay = getEnvelopeDecaySeconds() || 0.2;
+            const release = getEnvelopeReleaseSeconds() || 0.6;
             const cleanupMs = (attack + decay + release) * 1000 + 60;
             const cleanupTimer = setTimeout(() => {
               patternVoices.delete(voice);
@@ -862,20 +890,6 @@ function clearLfoStopTimers() {
   lfoStopTimers = [];
 }
 
-function clearSequenceLfoTimers() {
-  sequenceLfoTimers.forEach((timer) => clearTimeout(timer));
-  sequenceLfoTimers = [];
-  if (sequenceLfoCycleTimer) {
-    clearInterval(sequenceLfoCycleTimer);
-    sequenceLfoCycleTimer = null;
-  }
-}
-
-function stopSequenceLfoVoices() {
-  sequenceLfoVoices.forEach((voice) => stopVoice(voice));
-  sequenceLfoVoices = new Map();
-}
-
 function getSequenceOrderIndices() {
   if (!patternSequenceState || !patternActiveNodes.length) {
     return [];
@@ -914,126 +928,8 @@ function getSequenceNodeOrder() {
   return result;
 }
 
-function scheduleSequenceLfoCycle(voice, startTime, beatSec, waitStartBeats, waitEndBeats) {
-  if (!voice.lfoGain) {
-    return;
-  }
-  const cycleSec = (16 + waitStartBeats + waitEndBeats) * beatSec;
-  const riseSec = 8 * beatSec;
-  const fallSec = 8 * beatSec;
-  const waitStartSec = waitStartBeats * beatSec;
-  const waitEndSec = waitEndBeats * beatSec;
-  const startFade = startTime + waitStartSec;
-  const endRise = startFade + riseSec;
-  const endFall = endRise + fallSec;
-  const endCycle = startTime + cycleSec;
-  voice.lfoGain.gain.cancelScheduledValues(startTime);
-  voice.lfoGain.gain.setValueAtTime(0, startTime);
-  voice.lfoGain.gain.linearRampToValueAtTime(0, startFade);
-  voice.lfoGain.gain.linearRampToValueAtTime(1, endRise);
-  voice.lfoGain.gain.linearRampToValueAtTime(0, endFall);
-  voice.lfoGain.gain.setValueAtTime(0, endCycle);
-}
-
-function scheduleSequenceLfoCycleForOrder(order, startTime, beatSec, waitBeats) {
-  const cycleSec = (16 + waitBeats) * beatSec;
-  const nextIds = new Set(order);
-  const activeNodes = new Set(patternActiveNodes);
-  sequenceLfoVoices.forEach((voice, nodeId) => {
-    if (!nextIds.has(nodeId) || !activeNodes.has(nodeId)) {
-      stopVoice(voice);
-      sequenceLfoVoices.delete(nodeId);
-    }
-  });
-  order.forEach((nodeId, index) => {
-    const node = nodeById.get(nodeId);
-    if (!node) {
-      return;
-    }
-    let voice = sequenceLfoVoices.get(nodeId);
-    if (!voice) {
-      voice = startVoice({
-        nodeId: node.id,
-        octave: 0,
-        freq: node.freq,
-        source: "lfo-sequence",
-        ignoreOneShot: true,
-      });
-      if (!voice) {
-        return;
-      }
-      if (voice.lfoGain) {
-        voice.lfoGain.gain.setValueAtTime(0, audioCtx.currentTime);
-      }
-      sequenceLfoVoices.set(nodeId, voice);
-    }
-    const offsetBeats = index * 4;
-    const offsetSec = offsetBeats * beatSec;
-    const start = startTime + offsetSec;
-    const waitStartBeats = Math.min(waitBeats, offsetBeats);
-    const waitEndBeats = Math.max(0, waitBeats - waitStartBeats);
-    voice.lfoSequenceStartSec = startTime;
-    voice.lfoSequenceCycleSec = cycleSec;
-    voice.lfoSequenceBeatSec = beatSec;
-    voice.lfoSequenceOffsetSec = offsetSec;
-    voice.lfoSequenceWaitStartBeats = waitStartBeats;
-    voice.lfoSequenceWaitEndBeats = waitEndBeats;
-    scheduleSequenceLfoCycle(voice, start, beatSec, waitStartBeats, waitEndBeats);
-  });
-}
-
-function getSequenceLfoWaitBeats() {
-  const min = 2;
-  const max = 16;
-  const clamped = Math.max(min, Math.min(max, sequenceLfoOverlap));
-  const t = (clamped - min) / (max - min);
-  return MAX_SEQUENCE_LFO_WAIT_BEATS * (1 - t);
-}
-
-function scheduleNextSequenceLfoCycle(beatSec) {
-  if (sequenceLfoCycleTimer) {
-    clearTimeout(sequenceLfoCycleTimer);
-    sequenceLfoCycleTimer = null;
-  }
-  const waitBeats = getSequenceLfoWaitBeats();
-  const cycleSec = (16 + waitBeats) * beatSec;
-  sequenceLfoCycleTimer = setTimeout(() => {
-    const nextOrder = getSequenceNodeOrder();
-    const startTime = audioCtx.currentTime;
-    if (nextOrder.length) {
-      scheduleSequenceLfoCycleForOrder(
-        nextOrder,
-        startTime,
-        beatSec,
-        waitBeats
-      );
-    }
-    scheduleNextSequenceLfoCycle(beatSec);
-  }, cycleSec * 1000);
-}
-
-function startSequenceLfos() {
-  if (!audioCtx || audioCtx.state !== "running") {
-    enableAudio();
-  }
-  clearSequenceLfoTimers();
-  stopSequenceLfoVoices();
-  const beatSec = 60 / tempoBpm;
-  const now = audioCtx.currentTime;
-  const order = getSequenceNodeOrder();
-  if (!order.length) {
-    return;
-  }
-  const waitBeats = getSequenceLfoWaitBeats();
-  scheduleSequenceLfoCycleForOrder(order, now, beatSec, waitBeats);
-  scheduleNextSequenceLfoCycle(beatSec);
-  draw();
-  ensureLfoLoop();
-}
-
 function scheduleLfoStopsAtCycleEnd() {
   clearLfoStopTimers();
-  clearSequenceLfoTimers();
   const now = performance.now();
   voices.forEach((voice) => {
     if (voice.releasing) {
@@ -1049,11 +945,6 @@ function scheduleLfoStopsAtCycleEnd() {
       const elapsed = (now - voice.lfoStartMs) / 1000;
       const phase = ((elapsed % period) + period) % period;
       remaining = period - phase;
-    } else if (voice.source === "lfo-sequence" && voice.lfoSequenceCycleSec) {
-      const cycleSec = voice.lfoSequenceCycleSec;
-      const elapsed = (audioCtx ? audioCtx.currentTime : 0) - voice.lfoSequenceStartSec;
-      const phase = ((elapsed % cycleSec) + cycleSec) % cycleSec;
-      remaining = cycleSec - phase;
     } else {
       return;
     }
@@ -1073,16 +964,12 @@ function stopLfoPresets() {
   lfoPresetPlaying = false;
   updateLfoPlayButton();
   scheduleLfoStopsAtCycleEnd();
-  clearSequenceLfoTimers();
-  stopSequenceLfoVoices();
 }
 
 function allNotesOff() {
   stopPatternPlayback();
   stopLooperPlayback();
   clearLfoStopTimers();
-  clearSequenceLfoTimers();
-  stopSequenceLfoVoices();
   lfoArmingId = null;
   lfoArmingStart = 0;
   stopAllVoices();
@@ -1475,11 +1362,8 @@ function getVoiceAmplitude(voice, nowSec, nowMs) {
   let lfoLevel = 1;
   if (voice.lfoActive) {
     lfoLevel = getLfoGainValue(voice, nowMs);
-  } else if (voice.source === "lfo-sequence") {
-    lfoLevel = getSequenceLfoValue(voice, nowSec);
   }
-  const masterLevel = masterGain ? Number(masterGain.gain.value) || 0 : 1;
-  const normalized = (envLevel / 0.2) * lfoLevel * masterLevel;
+  const normalized = (envLevel / 0.2) * lfoLevel;
   return Math.max(0, normalized);
 }
 
@@ -2304,11 +2188,43 @@ function draw3DEdges() {
   });
 }
 
-function getSphereFill(pos, radius, baseFill, shadowColor) {
+function colorWithAlpha(color, alpha) {
+  const clamped = Math.max(0, Math.min(1, alpha));
+  if (!color || typeof color !== "string") {
+    return `rgba(255, 255, 255, ${clamped})`;
+  }
+  if (color.startsWith("#")) {
+    let hex = color.slice(1);
+    if (hex.length === 3) {
+      hex = hex
+        .split("")
+        .map((char) => char + char)
+        .join("");
+    }
+    if (hex.length === 6) {
+      const value = parseInt(hex, 16);
+      const r = (value >> 16) & 255;
+      const g = (value >> 8) & 255;
+      const b = value & 255;
+      return `rgba(${r}, ${g}, ${b}, ${clamped})`;
+    }
+  }
+  const match = color.match(/rgba?\(([^)]+)\)/i);
+  if (match) {
+    const parts = match[1].split(",").map((part) => part.trim());
+    const r = Number(parts[0]) || 0;
+    const g = Number(parts[1]) || 0;
+    const b = Number(parts[2]) || 0;
+    return `rgba(${r}, ${g}, ${b}, ${clamped})`;
+  }
+  return color;
+}
+
+function getSphereFill(pos, radius, baseFill, shadowColor, highlightColor) {
   const lx = pos.x + LIGHT_DIR.x * radius * 0.7;
   const ly = pos.y + LIGHT_DIR.y * radius * 0.7;
   const gradient = ctx.createRadialGradient(lx, ly, radius * 0.2, pos.x, pos.y, radius);
-  gradient.addColorStop(0, "rgba(255, 255, 255, 0.35)");
+  gradient.addColorStop(0, highlightColor);
   gradient.addColorStop(0.45, baseFill);
   gradient.addColorStop(1, shadowColor);
   return gradient;
@@ -2384,7 +2300,7 @@ function draw() {
     const canShowInactive = isInactiveNodeAvailable(node);
     const canInteractInactive = !is3DMode || isAddMode;
     const amplitude = nodeAmplitudes.get(node.id) || 0;
-    const brightness = 1 - Math.exp(-amplitude * 1.5);
+    const brightness = Math.min(1, amplitude);
     const isVisible =
       node.isCenter ||
       node.active ||
@@ -2410,32 +2326,35 @@ function draw() {
     ctx.strokeStyle = themeColors.nodeStroke;
     ctx.lineWidth = 2;
     if (is3DMode) {
-      const baseFill = brightness > 0 ? themeColors.playFill : "rgba(255, 255, 255, 0.02)";
-      const shadowColor = brightness > 0
-        ? "rgba(243, 214, 77, 0.55)"
-        : "rgba(0, 0, 0, 0.22)";
-      if (brightness > 0) {
-        ctx.shadowColor = themeColors.lfo;
-        ctx.shadowBlur = Math.max(6, radius * 0.6);
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-      }
-      ctx.fillStyle = getSphereFill(pos, radius, baseFill, shadowColor);
+      const inactiveFill = "rgba(255, 255, 255, 0.02)";
+      const shadowColor = "rgba(0, 0, 0, 0.22)";
+      const fillAlpha = Math.min(1, brightness);
+      const baseFill =
+        fillAlpha > 0 ? colorWithAlpha(themeColors.playFill, fillAlpha) : inactiveFill;
+      const highlightColor =
+        fillAlpha > 0
+          ? colorWithAlpha(themeColors.playFill, 0.35 + 0.65 * fillAlpha)
+          : "rgba(255, 255, 255, 0.35)";
+      ctx.shadowColor = shadowColor;
+      ctx.shadowBlur = Math.max(6, radius * 0.6);
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+      ctx.fillStyle = getSphereFill(pos, radius, baseFill, shadowColor, highlightColor);
     } else {
       ctx.fillStyle = brightness > 0 ? themeColors.playFill : "transparent";
     }
     ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-    if (brightness > 0) {
+    if (is3DMode) {
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+    } else if (brightness > 0) {
       ctx.save();
       ctx.globalAlpha *= brightness;
       ctx.fill();
       ctx.restore();
     } else {
       ctx.fill();
-    }
-    if (is3DMode && brightness > 0) {
-      ctx.shadowColor = "transparent";
-      ctx.shadowBlur = 0;
     }
     ctx.stroke();
 
@@ -2504,9 +2423,10 @@ function startVoice(options) {
   const isOneShot =
     Boolean(oneShotCheckbox && oneShotCheckbox.checked) && !options.ignoreOneShot;
   envGain.gain.setValueAtTime(0.0001, now);
-  const attack = Number(attackSlider.value) || 0.02;
-  const decay = Number(decaySlider.value) || 0.2;
+  const attack = getEnvelopeAttackSeconds() || 0.02;
+  const decay = getEnvelopeDecaySeconds() || 0.2;
   const sustain = Number(sustainSlider.value) || 0.6;
+  const release = getEnvelopeReleaseSeconds() || 0.6;
   const peakGain = Math.max(0.0001, 0.2 * velocity);
   envGain.gain.exponentialRampToValueAtTime(peakGain, now + attack);
   envGain.gain.exponentialRampToValueAtTime(
@@ -2528,7 +2448,7 @@ function startVoice(options) {
     envAttackSec: attack,
     envDecaySec: decay,
     envSustain: sustain,
-    envReleaseSec: Number(releaseSlider.value) || 0.6,
+    envReleaseSec: release,
     peakGain,
     releaseStartSec: null,
     releaseDurationSec: null,
@@ -2541,7 +2461,6 @@ function startVoice(options) {
   };
 
   if (isOneShot) {
-    const release = Number(releaseSlider.value) || 0.6;
     envGain.gain.exponentialRampToValueAtTime(0.0001, now + attack + decay + release);
     voice.releaseStartSec = now + attack + decay;
     voice.releaseDurationSec = release;
@@ -2567,7 +2486,6 @@ function startVoice(options) {
   ensureLfoLoop();
 
   if (isOneShot) {
-    const release = Number(releaseSlider.value) || 0.6;
     const stopAt = now + attack + decay + release + 0.05;
     oscillator.stop(stopAt);
   }
@@ -2577,7 +2495,6 @@ function startVoice(options) {
     looperEvents.push({ type: "on", nodeId: voice.nodeId, t, octave: voice.octave });
     looperLoopDurationMs = Math.max(looperLoopDurationMs, t);
     if (isOneShot) {
-      const release = Number(releaseSlider.value) || 0.6;
       const offAt = t + (attack + decay + release) * 1000;
       looperEvents.push({
         type: "off",
@@ -2609,7 +2526,7 @@ function stopVoice(voice, immediate = false) {
   }
 
   const now = audioCtx.currentTime;
-  const release = immediate ? 0.02 : Number(releaseSlider.value) || 0.6;
+  const release = immediate ? 0.02 : getEnvelopeReleaseSeconds() || 0.6;
   const baseLevel = getVoiceBaseEnvelope(voice, now);
   voice.releaseStartSec = now;
   voice.releaseDurationSec = release;
@@ -3137,10 +3054,11 @@ function updateVolume() {
 }
 
 function updateEnvelopeReadouts() {
-  attackReadout.textContent = `${Number(attackSlider.value).toFixed(2)}s`;
-  decayReadout.textContent = `${Number(decaySlider.value).toFixed(2)}s`;
+  const unit = envelopeTimeMode === "tempo" ? " beats" : "s";
+  attackReadout.textContent = `${Number(attackSlider.value).toFixed(2)}${unit}`;
+  decayReadout.textContent = `${Number(decaySlider.value).toFixed(2)}${unit}`;
   sustainReadout.textContent = `${Number(sustainSlider.value).toFixed(2)}`;
-  releaseReadout.textContent = `${Number(releaseSlider.value).toFixed(2)}s`;
+  releaseReadout.textContent = `${Number(releaseSlider.value).toFixed(2)}${unit}`;
 }
 
 function updateLfoDepth() {
@@ -3281,34 +3199,6 @@ function getLfoGainValue(voice, nowMs) {
   }
   const value = getLfoValue(voice, nowMs);
   return (1 - lfoDepth) + lfoDepth * value;
-}
-
-function getSequenceLfoValue(voice, nowSec) {
-  if (!voice || voice.lfoSequenceStartSec == null || !voice.lfoSequenceCycleSec) {
-    return 0;
-  }
-  const beatSec = voice.lfoSequenceBeatSec || (60 / tempoBpm);
-  const riseSec = 8 * beatSec;
-  const fallSec = 8 * beatSec;
-  const cycleSec = voice.lfoSequenceCycleSec;
-  const offsetSec = Number(voice.lfoSequenceOffsetSec) || 0;
-  const elapsed = nowSec - (voice.lfoSequenceStartSec + offsetSec);
-  if (elapsed < 0) {
-    return 0;
-  }
-  const phase = elapsed % cycleSec;
-  const waitStartSec = (Number(voice.lfoSequenceWaitStartBeats) || 0) * beatSec;
-  const waitEndSec = (Number(voice.lfoSequenceWaitEndBeats) || 0) * beatSec;
-  if (phase < waitStartSec) {
-    return 0;
-  }
-  if (phase < waitStartSec + riseSec) {
-    return (phase - waitStartSec) / riseSec;
-  }
-  if (phase < waitStartSec + riseSec + fallSec) {
-    return 1 - (phase - waitStartSec - riseSec) / fallSec;
-  }
-  return 0;
 }
 
 function getActiveRatioAngles() {
@@ -3486,7 +3376,7 @@ function updateUiHint() {
     return;
   }
   uiHint.textContent =
-    "3D Mode:\nShift-click to add\nOption-click to remove\nZ-click to access Z axis\nClick-drag to rotate\nShift double-click & hold for LFO\nArrow keys to pan\nScroll to zoom\n(click to hide)";
+    "3D Mode:\nShift-click to add\nOption-click to remove\nZ-click a node to access Z axis for that node\nClick-drag to rotate\nShift double-click & hold for LFO\nArrow keys to pan\nScroll to zoom\n(click to hide)";
 }
 
 function updateZModeMessage() {
@@ -3716,9 +3606,6 @@ function lfoLoop() {
     let voiceNeedsFrame = false;
     if (voice.lfoActive && voice.lfoGain) {
       voice.lfoGain.gain.value = getLfoGainValue(voice, nowMs);
-      voiceNeedsFrame = true;
-    }
-    if (voice.source === "lfo-sequence") {
       voiceNeedsFrame = true;
     }
     const attack = voice.envAttackSec || 0;
@@ -4101,6 +3988,7 @@ function getPresetState() {
       sustain: Number(sustainSlider.value),
       release: Number(releaseSlider.value),
       oneShot: Boolean(oneShotCheckbox && oneShotCheckbox.checked),
+      envelopeTimeMode,
     },
   };
 }
@@ -4234,7 +4122,14 @@ function applyPresetState(state) {
     if (oneShotCheckbox && typeof state.synth.oneShot === "boolean") {
       oneShotCheckbox.checked = state.synth.oneShot;
     }
+    if (typeof state.synth.envelopeTimeMode === "string") {
+      envelopeTimeMode = state.synth.envelopeTimeMode === "tempo" ? "tempo" : "absolute";
+      envelopeTimeModeInputs.forEach((input) => {
+        input.checked = input.value === envelopeTimeMode;
+      });
+    }
     updateEnvelopeReadouts();
+    updatePatternLengthAvailability();
   }
 
   if (viewState) {
@@ -4567,7 +4462,20 @@ releaseSlider.addEventListener("input", () => {
   schedulePresetUrlUpdate();
 });
 if (oneShotCheckbox) {
-  oneShotCheckbox.addEventListener("change", schedulePresetUrlUpdate);
+  oneShotCheckbox.addEventListener("change", () => {
+    updatePatternLengthAvailability();
+    schedulePresetUrlUpdate();
+  });
+}
+if (envelopeTimeModeInputs.length) {
+  envelopeTimeModeInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      const selected = document.querySelector('input[name="envelope-time"]:checked');
+      envelopeTimeMode = selected ? selected.value : "absolute";
+      updateEnvelopeReadouts();
+      schedulePresetUrlUpdate();
+    });
+  });
 }
 if (looperToggle) {
   looperToggle.addEventListener("click", () => {
@@ -4615,21 +4523,9 @@ if (lfoPlayToggle) {
       stopLfoPresets();
       return;
     }
-    const preset = lfoPresetSelect ? lfoPresetSelect.value : "random";
-    if (preset === "sequence") {
-      startSequenceLfos();
-    } else {
-      randomizeLfosForActiveNodes();
-    }
+    randomizeLfosForActiveNodes();
     lfoPresetPlaying = true;
     updateLfoPlayButton();
-  });
-}
-if (lfoPresetSelect) {
-  lfoPresetSelect.addEventListener("change", () => {
-    if (lfoPresetPlaying) {
-      stopLfoPresets();
-    }
   });
 }
 if (lfoStopButton) {
@@ -4663,17 +4559,11 @@ if (patternLengthModeInputs.length) {
     });
   });
 }
-if (sequenceLfoDensitySlider) {
-  sequenceLfoDensitySlider.addEventListener("input", () => {
-    updateSequenceLfoDensityReadout();
-  });
-}
-
 updateEnvelopeReadouts();
 updateLfoDepth();
 updateTempoReadout();
 updatePatternLengthReadout();
-updateSequenceLfoDensityReadout();
+updatePatternLengthAvailability();
 initTheme();
 updateLooperButton();
 updateScoreButton();

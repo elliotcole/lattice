@@ -75,6 +75,7 @@
               Options <span class="chevron">v</span>
             </button>
             <div id="options-panel" class="panel options-panel" hidden>
+              <button id="add-custom-ratio" type="button" class="button-full">Add Custom Ratio</button>
               <div class="control-group">
                 <label for="a4">A4 Reference (Hz)</label>
                 <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
@@ -101,7 +102,7 @@
                 <label for="midi-channel">MIDI Channel</label>
                 <select id="midi-channel"></select>
               </div>
-              <button id="export-scale" type="button">Export to Scale Workshop</button>
+              <button id="export-scale" type="button" class="button-full">Export to Scale Workshop</button>
             </div>
           </div>
         </div>
@@ -347,6 +348,24 @@
         </div>
       </div>
     </aside>
+
+    <dialog id="custom-ratio-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form">
+        <div class="dialog-title">Add Custom Ratio</div>
+        <label>
+          Numerator
+          <input id="custom-ratio-numerator" type="number" min="1" step="1" required />
+        </label>
+        <label>
+          Denominator
+          <input id="custom-ratio-denominator" type="number" min="1" step="1" required />
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="confirm">Add</button>
+        </menu>
+      </form>
+    </dialog>
 
     <script type="module" src="./src/main.js"></script>
   </body>

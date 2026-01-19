@@ -66,6 +66,10 @@ const lfoPresetSelect = document.getElementById("lfo-preset");
 const lfoPlayToggle = document.getElementById("lfo-play-toggle");
 const lfoStopButton = document.getElementById("lfo-stop");
 const allNotesOffButton = document.getElementById("all-notes-off");
+const addCustomRatioButton = document.getElementById("add-custom-ratio");
+const customRatioDialog = document.getElementById("custom-ratio-dialog");
+const customRatioNumerator = document.getElementById("custom-ratio-numerator");
+const customRatioDenominator = document.getElementById("custom-ratio-denominator");
 const attackReadout = document.getElementById("attack-readout");
 const decayReadout = document.getElementById("decay-readout");
 const sustainReadout = document.getElementById("sustain-readout");
@@ -210,6 +214,10 @@ let tempoBpm = 120;
 let patternLengthValue = 1;
 let patternLengthMode = "sustain";
 let envelopeTimeMode = "absolute";
+let customNodes = [];
+let nextCustomNodeId = 100000;
+let customDrag = null;
+let customDragJustPlaced = false;
 
 function markIsomorphicDirty() {
   isomorphicDirty = true;
@@ -928,6 +936,107 @@ function getSequenceNodeOrder() {
   return result;
 }
 
+function createCustomNode(numerator, denominator, position, isActive = true) {
+  const num = Number(numerator);
+  const den = Number(denominator);
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) {
+    return null;
+  }
+  const ratio = num / den;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return null;
+  }
+  const fundamental = Number(fundamentalInput.value) || 220;
+  const a4 = Number(a4Input.value) || 440;
+  const freq = fundamental * ratio;
+  const etInfo = getNearestEtInfo(freq, a4);
+  return {
+    id: nextCustomNodeId++,
+    numerator: num,
+    denominator: den,
+    exponentX: null,
+    exponentY: null,
+    exponentZ: 0,
+    gridX: null,
+    gridY: null,
+    gridZ: gridCenterZ,
+    coordinate: { x: position.x, y: position.y, z: 0 },
+    freq,
+    cents_from_et: etInfo.cents,
+    note_name: etInfo.name,
+    pitch_class: etInfo.pitchClass,
+    active: isActive,
+    isCenter: false,
+    baseVoiceId: null,
+    isCustom: true,
+  };
+}
+
+function addCustomRatioNode(numerator, denominator) {
+  const center = screenToWorld({
+    x: view.lastPointer ? view.lastPointer.x : canvas.clientWidth / 2,
+    y: view.lastPointer ? view.lastPointer.y : canvas.clientHeight / 2,
+  });
+  const node = createCustomNode(numerator, denominator, center, true);
+  if (!node) {
+    return;
+  }
+  customNodes.push(node);
+  nodes.push(node);
+  nodeById.set(node.id, node);
+  customDrag = {
+    nodeId: node.id,
+    offsetX: 0,
+    offsetY: 0,
+    placing: true,
+  };
+  updatePitchInstances();
+  refreshPatternFromActiveNodes();
+  markIsomorphicDirty();
+  draw();
+  schedulePresetUrlUpdate();
+}
+
+function openCustomRatioDialog() {
+  if (!customRatioDialog || typeof customRatioDialog.showModal !== "function") {
+    const numerator = window.prompt("Numerator");
+    if (numerator == null) {
+      return;
+    }
+    const denominator = window.prompt("Denominator");
+    if (denominator == null) {
+      return;
+    }
+    addCustomRatioNode(numerator, denominator);
+    return;
+  }
+  if (customRatioNumerator) {
+    customRatioNumerator.value = "";
+  }
+  if (customRatioDenominator) {
+    customRatioDenominator.value = "";
+  }
+  customRatioDialog.showModal();
+  if (customRatioNumerator) {
+    customRatioNumerator.focus();
+  }
+}
+
+function handleCustomRatioDialogClose() {
+  if (!customRatioDialog || customRatioDialog.returnValue !== "confirm") {
+    return;
+  }
+  const numerator = customRatioNumerator ? customRatioNumerator.value : "";
+  const denominator = customRatioDenominator ? customRatioDenominator.value : "";
+  const num = Number(numerator);
+  const den = Number(denominator);
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) {
+    alert("Please enter a valid numerator and denominator.");
+    return;
+  }
+  addCustomRatioNode(num, den);
+}
+
 function scheduleLfoStopsAtCycleEnd() {
   clearLfoStopTimers();
   const now = performance.now();
@@ -1173,6 +1282,9 @@ function updateNodeRatios() {
   const ratioZ = Number(ratioZSelect.value) || 7;
 
   nodes.forEach((node) => {
+    if (node.isCustom) {
+      return;
+    }
     const baseRatio = buildRatioComponents(
       ratioX,
       ratioY,
@@ -2027,6 +2139,9 @@ function getNearestEtInfo(freq, a4) {
 }
 
 function getNodeRadius(node) {
+  if (node.isCustom) {
+    return 35;
+  }
   return node.active ? 35 : 32;
 }
 
@@ -2145,7 +2260,13 @@ const AXIS_EDGE_COLORS = {
   y: "rgba(239, 68, 68, 0.5)",
   z: "rgba(16, 185, 129, 0.5)",
 };
-const LIGHT_DIR = { x: -0.6, y: -0.8 };
+const BASE_LIGHT_DIR = { x: -0.6, y: -0.8, z: 0 };
+
+function getLightDir2D() {
+  const rotated = projectPointWithAngles(BASE_LIGHT_DIR, view.rotX, view.rotY, true);
+  const length = Math.hypot(rotated.x, rotated.y) || 1;
+  return { x: rotated.x / length, y: rotated.y / length };
+}
 
 function draw3DEdges() {
 
@@ -2220,9 +2341,26 @@ function colorWithAlpha(color, alpha) {
   return color;
 }
 
-function getSphereFill(pos, radius, baseFill, shadowColor, highlightColor) {
-  const lx = pos.x + LIGHT_DIR.x * radius * 0.7;
-  const ly = pos.y + LIGHT_DIR.y * radius * 0.7;
+function getCubeFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir) {
+  const lx = lightDir.x;
+  const ly = lightDir.y;
+  const length = Math.hypot(lx, ly) || 1;
+  const ux = lx / length;
+  const uy = ly / length;
+  const startX = pos.x + ux * radius;
+  const startY = pos.y + uy * radius;
+  const endX = pos.x - ux * radius;
+  const endY = pos.y - uy * radius;
+  const gradient = ctx.createLinearGradient(startX, startY, endX, endY);
+  gradient.addColorStop(0, highlightColor);
+  gradient.addColorStop(0.55, baseFill);
+  gradient.addColorStop(1, shadowColor);
+  return gradient;
+}
+
+function getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir) {
+  const lx = pos.x + lightDir.x * radius * 0.7;
+  const ly = pos.y + lightDir.y * radius * 0.7;
   const gradient = ctx.createRadialGradient(lx, ly, radius * 0.2, pos.x, pos.y, radius);
   gradient.addColorStop(0, highlightColor);
   gradient.addColorStop(0.45, baseFill);
@@ -2283,7 +2421,15 @@ function draw() {
 
   const nodeRenderList = nodes
     .map((node) => ({ node, pos: worldToScreen(node.coordinate) }))
-    .sort((a, b) => a.pos.depth - b.pos.depth);
+    .sort((a, b) => {
+      if (a.node.isCustom && !b.node.isCustom) {
+        return 1;
+      }
+      if (!a.node.isCustom && b.node.isCustom) {
+        return -1;
+      }
+      return a.pos.depth - b.pos.depth;
+    });
   const nowMs = performance.now();
   const nowSec = audioCtx ? audioCtx.currentTime : nowMs / 1000;
   const nodeAmplitudes = getNodeAmplitudeMap(nowSec, nowMs);
@@ -2295,18 +2441,24 @@ function draw() {
   }
   const keyMap = isIsomorphicMode ? isomorphicKeyMap : null;
 
+  const lightDir = getLightDir2D();
   nodeRenderList.forEach(({ node, pos }) => {
     const isHovered = node.id === hoverNodeId;
     const canShowInactive = isInactiveNodeAvailable(node);
     const canInteractInactive = !is3DMode || isAddMode;
     const amplitude = nodeAmplitudes.get(node.id) || 0;
     const brightness = Math.min(1, amplitude);
+    const isSquare = Boolean(node.isCustom);
     const isVisible =
       node.isCenter ||
       node.active ||
+      node.isCustom ||
       brightness > 0.01 ||
       (isHovered && canShowInactive && canInteractInactive);
     let alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
+    if (node.isCustom && !node.active) {
+      alpha = 0.25;
+    }
     if (zModeActive && zModeAnchor) {
       const inZLine = node.gridX === zModeAnchor.x && node.gridY === zModeAnchor.y;
       if (!inZLine) {
@@ -2326,7 +2478,9 @@ function draw() {
     ctx.strokeStyle = themeColors.nodeStroke;
     ctx.lineWidth = 2;
     if (is3DMode) {
-      const inactiveFill = "rgba(255, 255, 255, 0.02)";
+      const inactiveFill = node.isCustom
+        ? "rgba(210, 210, 210, 0.12)"
+        : "rgba(255, 255, 255, 0.02)";
       const shadowColor = "rgba(0, 0, 0, 0.22)";
       const fillAlpha = Math.min(1, brightness);
       const baseFill =
@@ -2334,16 +2488,28 @@ function draw() {
       const highlightColor =
         fillAlpha > 0
           ? colorWithAlpha(themeColors.playFill, 0.35 + 0.65 * fillAlpha)
+          : node.isCustom
+          ? "rgba(220, 220, 220, 0.25)"
           : "rgba(255, 255, 255, 0.35)";
       ctx.shadowColor = shadowColor;
       ctx.shadowBlur = Math.max(6, radius * 0.6);
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 0;
-      ctx.fillStyle = getSphereFill(pos, radius, baseFill, shadowColor, highlightColor);
+      ctx.fillStyle = isSquare
+        ? getCubeFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir)
+        : getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir);
     } else {
-      ctx.fillStyle = brightness > 0 ? themeColors.playFill : "transparent";
+      if (node.isCustom && !node.active && brightness <= 0) {
+        ctx.fillStyle = "rgba(210, 210, 210, 0.2)";
+      } else {
+        ctx.fillStyle = brightness > 0 ? themeColors.playFill : "transparent";
+      }
     }
-    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    if (isSquare) {
+      ctx.rect(pos.x - radius, pos.y - radius, radius * 2, radius * 2);
+    } else {
+      ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    }
     if (is3DMode) {
       ctx.fill();
       ctx.shadowColor = "transparent";
@@ -2737,6 +2903,36 @@ function onPointerDown(event) {
   const hit = hitTestScreen(screenPoint);
   const now = performance.now();
 
+  if (customDrag && customDrag.placing) {
+    const node = nodeById.get(customDrag.nodeId);
+    if (node) {
+      const worldPoint = screenToWorld(screenPoint);
+      node.coordinate.x = worldPoint.x + customDrag.offsetX;
+      node.coordinate.y = worldPoint.y + customDrag.offsetY;
+      node.coordinate.z = 0;
+      draw();
+    }
+    customDrag = null;
+    customDragJustPlaced = true;
+    if (uiHint) {
+      uiHint.hidden = false;
+      uiHint.textContent =
+        "Custom node: Command-drag to move. Option-click to deactivate. Option-click again to delete. Click to activate.\n(click to hide)";
+    }
+    return;
+  }
+
+  if (hit && hit.isCustom && (event.metaKey || event.ctrlKey)) {
+    const worldPoint = screenToWorld(screenPoint);
+    customDrag = {
+      nodeId: hit.id,
+      offsetX: hit.coordinate.x - worldPoint.x,
+      offsetY: hit.coordinate.y - worldPoint.y,
+    };
+    canvas.setPointerCapture(event.pointerId);
+    return;
+  }
+
   if (event.shiftKey && hit) {
     const isDoubleTap = lastLfoTapId === hit.id && now - lastLfoTapTime < 320;
     lastLfoTapId = hit.id;
@@ -2774,6 +2970,19 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
+  view.lastPointer = { x: event.offsetX, y: event.offsetY };
+  if (customDrag) {
+    const node = nodeById.get(customDrag.nodeId);
+    if (node) {
+      const worldPoint = screenToWorld({ x: event.offsetX, y: event.offsetY });
+      node.coordinate.x = worldPoint.x + customDrag.offsetX;
+      node.coordinate.y = worldPoint.y + customDrag.offsetY;
+      node.coordinate.z = 0;
+      draw();
+      schedulePresetUrlUpdate();
+    }
+    return;
+  }
   if (view.rotating) {
     const dx = event.offsetX - view.rotateStart.x;
     const dy = event.offsetY - view.rotateStart.y;
@@ -2807,6 +3016,14 @@ function onPointerMove(event) {
 }
 
 function onPointerUp(event) {
+  if (customDragJustPlaced) {
+    customDragJustPlaced = false;
+    return;
+  }
+  if (customDrag) {
+    customDrag = null;
+    return;
+  }
   const wasRotating = view.rotating;
   let moved = 0;
   if (view.rotating) {
@@ -2867,9 +3084,23 @@ function onPointerUp(event) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const hit = hitTestScreen(screenPoint);
     if (hit) {
-      if (event.altKey && hit.active && !hit.isCenter) {
-        hit.active = false;
-        stopVoicesForNode(hit.id, false);
+      if (event.altKey && !hit.isCenter) {
+        if (hit.isCustom) {
+          if (hit.active) {
+            hit.active = false;
+            stopVoicesForNode(hit.id, false);
+          } else {
+            stopVoicesForNode(hit.id, false);
+            customNodes = customNodes.filter((node) => node.id !== hit.id);
+            nodes = nodes.filter((node) => node.id !== hit.id);
+            nodeById.delete(hit.id);
+          }
+        } else if (hit.active) {
+          hit.active = false;
+          stopVoicesForNode(hit.id, false);
+        } else {
+          return;
+        }
         updatePitchInstances();
         refreshPatternFromActiveNodes();
         updateUiHint();
@@ -2892,7 +3123,7 @@ function onPointerUp(event) {
         schedulePresetUrlUpdate();
         return;
       }
-      if (is3DMode && !isAddMode && !hit.active && !hit.isCenter) {
+      if (is3DMode && !isAddMode && !hit.active && !hit.isCenter && !hit.isCustom) {
         return;
       }
       const baseVoice = hit.baseVoiceId ? findVoiceById(hit.baseVoiceId) : null;
@@ -2933,6 +3164,7 @@ function onPointerUp(event) {
 function onPointerLeave() {
   hoverNodeId = null;
   lfoArmingId = null;
+  customDrag = null;
   view.rotating = false;
   if (view.dragging) {
     view.dragging = false;
@@ -2979,7 +3211,11 @@ function hitTestScreen(screenPoint) {
   let bestDepth = Number.NEGATIVE_INFINITY;
 
   nodes.forEach((node) => {
-    if (!node.active && (!isInactiveNodeAvailable(node) || (is3DMode && !isAddMode))) {
+    if (
+      !node.isCustom &&
+      !node.active &&
+      (!isInactiveNodeAvailable(node) || (is3DMode && !isAddMode))
+    ) {
       return;
     }
     const projected = worldToScreen(node.coordinate);
@@ -2988,7 +3224,12 @@ function hitTestScreen(screenPoint) {
     const distance = Math.hypot(dx, dy);
     const adjustedRadius = radius * (projected.scale || 1);
     if (distance <= adjustedRadius) {
-      if (distance < bestDistance || projected.depth > bestDepth) {
+      const prefersCustom = node.isCustom && (!best || !best.isCustom);
+      if (
+        prefersCustom ||
+        distance < bestDistance ||
+        (!node.isCustom && projected.depth > bestDepth)
+      ) {
         best = node;
         bestDistance = distance;
         bestDepth = projected.depth;
@@ -3956,11 +4197,19 @@ function decodePresetState(encoded) {
 
 function getPresetState() {
   const active = nodes
-    .filter((node) => node.active)
+    .filter((node) => node.active && !node.isCustom)
     .map((node) => [node.exponentX, node.exponentY, node.exponentZ || 0]);
+  const custom = customNodes.map((node) => ({
+    numerator: node.numerator,
+    denominator: node.denominator,
+    x: node.coordinate.x,
+    y: node.coordinate.y,
+    active: Boolean(node.active),
+  }));
   return {
     v: 1,
     active,
+    customNodes: custom,
     mode3d: is3DMode,
     view: {
       zoom: view.zoom,
@@ -4165,6 +4414,24 @@ function applyPresetState(state) {
       activeKeys.add(`${x},${y},${z}`);
     });
   }
+  if (Array.isArray(state.customNodes)) {
+    customNodes = state.customNodes
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const x = Number(entry.x);
+        const y = Number(entry.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          return null;
+        }
+        const node = createCustomNode(entry.numerator, entry.denominator, { x, y }, entry.active);
+        return node;
+      })
+      .filter(Boolean);
+  } else {
+    customNodes = [];
+  }
   rebuildLattice(activeKeys);
 }
 
@@ -4254,10 +4521,16 @@ function applyActiveNodeKeys(keys) {
 
 function rebuildLattice(activeKeys = null) {
   stopAllVoices();
-  nodes = buildLattice();
+  const latticeNodes = buildLattice();
+  customNodes.forEach((node) => {
+    node.gridZ = gridCenterZ;
+    node.exponentZ = 0;
+    node.coordinate.z = 0;
+  });
+  nodes = [...latticeNodes, ...customNodes];
   nodeById = new Map(nodes.map((node) => [node.id, node]));
   applyActiveNodeKeys(activeKeys);
-  edges = buildEdges(nodes, GRID_COLS, GRID_ROWS, gridDepth);
+  edges = buildEdges(latticeNodes, GRID_COLS, GRID_ROWS, gridDepth);
   updatePitchInstances();
   markIsomorphicDirty();
   refreshPatternFromActiveNodes();
@@ -4267,21 +4540,17 @@ function rebuildLattice(activeKeys = null) {
 function resetLattice() {
   stopAllVoices();
   activeKeys.clear();
-  nodes.forEach((node) => {
-    node.active = node.isCenter;
-    node.baseVoiceId = null;
-  });
-  updatePitchInstances();
-  refreshPatternFromActiveNodes();
-  updateUiHint();
+  customNodes = [];
+  fundamentalNoteSelect.value = "60";
+  onFundamentalNoteChange();
   view.zoom = 1;
   view.offsetX = 0;
   view.offsetY = 0;
   view.rotX = 0;
   view.rotY = 0;
   hoverNodeId = null;
-  markIsomorphicDirty();
-  draw();
+  rebuildLattice();
+  updateUiHint();
   schedulePresetUrlUpdate();
 }
 
@@ -4532,6 +4801,16 @@ if (lfoStopButton) {
   lfoStopButton.addEventListener("click", () => {
     scheduleLfoStopsAtCycleEnd();
   });
+}
+if (addCustomRatioButton) {
+  addCustomRatioButton.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openCustomRatioDialog();
+  });
+}
+if (customRatioDialog) {
+  customRatioDialog.addEventListener("close", handleCustomRatioDialogClose);
 }
 if (allNotesOffButton) {
   allNotesOffButton.addEventListener("click", () => {

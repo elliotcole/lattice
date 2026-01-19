@@ -2176,6 +2176,16 @@ function updateFundamentalNotes() {
   fundamentalNoteSelect.value = String(selectedMidi);
 }
 
+function syncFundamentalNoteSelect() {
+  const freq = Number(fundamentalInput.value);
+  if (!Number.isFinite(freq) || freq <= 0) {
+    return;
+  }
+  const a4 = Number(a4Input.value) || 440;
+  const { midi } = getNearestEtInfo(freq, a4);
+  fundamentalNoteSelect.value = String(midi);
+}
+
 function populateWaveformOptions() {
   if (!waveformSelect) {
     return;
@@ -4400,6 +4410,7 @@ function applyPresetState(state) {
   }
 
   updateFundamentalNotes();
+  syncFundamentalNoteSelect();
 
   const activeKeys = new Set();
   if (Array.isArray(state.active)) {
@@ -4666,7 +4677,10 @@ if (uiHint) {
     uiHint.hidden = true;
   });
 }
-fundamentalInput.addEventListener("input", updateNodeFrequencies);
+fundamentalInput.addEventListener("input", () => {
+  syncFundamentalNoteSelect();
+  updateNodeFrequencies();
+});
 ratioXSelect.addEventListener("change", updateNodeRatios);
 ratioYSelect.addEventListener("change", updateNodeRatios);
 if (ratioZSelect) {

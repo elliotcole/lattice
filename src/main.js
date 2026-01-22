@@ -7,6 +7,35 @@ const exportScaleButton = document.getElementById("export-scale");
 const themeSelect = document.getElementById("theme-select");
 const optionsToggle = document.getElementById("options-toggle");
 const optionsPanel = document.getElementById("options-panel");
+const layoutModeToggle = document.getElementById("layout-mode");
+const layoutPanel = document.getElementById("layout-panel");
+const layoutPanelToggle = document.getElementById("layout-panel-toggle");
+const layoutExitButton = document.getElementById("layout-exit");
+const layoutTitleInput = document.getElementById("layout-title");
+const layoutTitleSizeInput = document.getElementById("layout-title-size");
+const layoutTitleSizeReadout = document.getElementById("layout-title-size-readout");
+const layoutTitleMarginInput = document.getElementById("layout-title-margin");
+const layoutTitleMarginReadout = document.getElementById("layout-title-margin-readout");
+const layoutPageSizeSelect = document.getElementById("layout-page-size");
+const layoutOrientationSelect = document.getElementById("layout-orientation");
+const layoutScaleInput = document.getElementById("layout-scale");
+const layoutScaleReadout = document.getElementById("layout-scale-readout");
+const layoutNodeSizeInput = document.getElementById("layout-node-size");
+const layoutNodeSizeReadout = document.getElementById("layout-node-size-readout");
+const layoutRatioTextSizeInput = document.getElementById("layout-ratio-text-size");
+const layoutRatioTextReadout = document.getElementById("layout-ratio-text-readout");
+const layoutNoteTextSizeInput = document.getElementById("layout-note-text-size");
+const layoutNoteTextReadout = document.getElementById("layout-note-text-readout");
+const layoutNodeShapeSelect = document.getElementById("layout-node-shape");
+const layoutFontsButton = document.getElementById("layout-fonts");
+const layoutFontDialog = document.getElementById("layout-font-dialog");
+const layoutTitleFontSelect = document.getElementById("layout-title-font");
+const layoutRatioFontSelect = document.getElementById("layout-ratio-font");
+const layoutNoteFontSelect = document.getElementById("layout-note-font");
+const layoutUnifySizeToggle = document.getElementById("layout-unify-size");
+const layoutResetButton = document.getElementById("layout-reset");
+const exportSvgButton = document.getElementById("export-svg");
+const exportPdfButton = document.getElementById("export-pdf");
 const midiEnable = document.getElementById("midi-enable");
 const midiPortSelect = document.getElementById("midi-port");
 const midiChannelSelect = document.getElementById("midi-channel");
@@ -57,6 +86,12 @@ const patternLengthModeInputs = document.querySelectorAll(
 const envelopeTimeModeInputs = document.querySelectorAll(
   'input[name="envelope-time"]'
 );
+const featureModeInputs = document.querySelectorAll('input[name="feature-mode"]');
+const showHzToggle = document.getElementById("show-hz");
+const showCentsSignToggle = document.getElementById("show-cents-sign");
+const hejiEnabledToggle = document.getElementById("heji-enabled");
+const centsPrecisionInput = document.getElementById("cents-precision");
+const centsPrecisionInputs = document.querySelectorAll('input[name="cents-precision"]');
 const sequencePatternSelect = document.getElementById("sequence-pattern");
 const rhythmPatternSelect = document.getElementById("rhythm-pattern");
 const octavePatternSelect = document.getElementById("octave-pattern");
@@ -79,7 +114,10 @@ const nav3dPanel = document.getElementById("nav-3d");
 const navAddModeToggle = document.getElementById("nav-add-mode");
 const navAxesToggle = document.getElementById("nav-axes");
 const navGridToggle = document.getElementById("nav-grid");
+const navCirclesToggle = document.getElementById("nav-circles");
 const nav3dButtons = nav3dPanel ? nav3dPanel.querySelectorAll("button[data-view], button[data-action]") : [];
+const viewPanelToggle = document.getElementById("view-panel-toggle");
+const viewsPanel = nav3dPanel ? nav3dPanel.querySelector(".nav-3d-panel") : null;
 
 const view = {
   zoom: 1,
@@ -109,12 +147,32 @@ let lfoPresetPlaying = false;
 let midiAccess = null;
 let midiInput = null;
 let midiEnabled = false;
+let rHeld = false;
+let suppressClickAfterRespell = false;
 const midiActiveNotes = new Map();
 let lastLfoTapTime = 0;
 let lastLfoTapId = null;
 const activeKeys = new Map();
 
-const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const noteNamesSharp = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const noteNamesFlat = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+const noteNames = noteNamesSharp;
+const HEJI_STEP_OFFSETS = {
+  3: 7,
+  5: 4,
+  7: 10,
+  11: 5,
+  13: 9,
+  17: 1,
+  19: 3,
+  23: 6,
+  29: 10,
+  31: 0,
+  37: 2,
+  41: 4,
+  43: 5,
+  47: 6,
+};
 const primes = [
   3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73,
   79, 83, 89, 97,
@@ -154,6 +212,11 @@ const KEYBOARD_MAP = {
   "\\": 24,
 };
 const KEYBOARD_BASE_MIDI = 60;
+const HEJI_SUFFIX_Y_OFFSET = -0.52;
+const HEJI_REST_GAP = 0.08;
+const HEJI_REST_GAP_PLAIN = -0.2;
+const CENTS_CHAR = "¢";
+const CENTS_SIZE_DELTA = 3;
 const ISOMORPHIC_ROWS = [
   { keys: "1234567890", yOffset: -2 },
   { keys: "qwertyuiop", yOffset: -1 },
@@ -218,6 +281,87 @@ let customNodes = [];
 let nextCustomNodeId = 100000;
 let customDrag = null;
 let customDragJustPlaced = false;
+let layoutMode = false;
+let layoutDrag = null;
+let layoutLabelDrag = null;
+let layoutPositions = new Map();
+let layoutLabelOffsets = new Map();
+let layoutNodeShapes = new Map();
+let nodeSpellingOverrides = new Map();
+let layoutNodeSize = 35;
+let layoutRatioTextSize = 21;
+let layoutNoteTextSize = 14;
+let layoutNodeShape = "circle";
+let layoutTitle = "";
+let layoutTitleSize = 28;
+let layoutTitleMargin = 32;
+let layoutUnifyNodeSize = true;
+let layoutPageSize = "letter";
+let layoutOrientation = "portrait";
+let layoutPrevState = null;
+let layoutTitleFont = "Lexend";
+let layoutRatioFont = "Georgia";
+let layoutNoteFont = "Georgia";
+let layoutAxisOffsets = {
+  x: { x: 0, y: 0 },
+  y: { x: 0, y: 0 },
+  z: { x: 0, y: 0 },
+};
+let layoutAxisAngles = {
+  x: null,
+  y: null,
+  z: null,
+};
+let layoutAxisDrag = null;
+let layoutAxisEdit = null;
+let layoutAxisEditDrag = null;
+let featureMode = "ratio";
+let showHz = false;
+let showCentsSign = false;
+let hejiEnabled = true;
+let centsPrecision = 0;
+let showCircles = true;
+
+const LAYOUT_PX_PER_IN = 96;
+const LAYOUT_PAGE_SIZES = {
+  letter: { widthIn: 8.5, heightIn: 11 },
+  a4: { widthIn: 8.27, heightIn: 11.69 },
+};
+const LAYOUT_DEFAULTS = {
+  nodeSize: 35,
+  ratioTextSize: 21,
+  noteTextSize: 14,
+  nodeShape: "circle",
+  title: "",
+  titleSize: 28,
+  titleMargin: 32,
+  unifyNodeSize: true,
+  pageSize: "letter",
+  orientation: "portrait",
+  zoom: 1,
+  titleFont: "Lexend",
+  ratioFont: "Georgia",
+  noteFont: "Georgia",
+};
+
+function updateNavModeSections() {
+  if (!nav3dPanel) {
+    return;
+  }
+  nav3dPanel.dataset.mode = is3DMode ? "3d" : "2d";
+  nav3dPanel.querySelectorAll("[data-nav-mode]").forEach((element) => {
+    const mode = element.getAttribute("data-nav-mode");
+    element.hidden = (mode === "3d" && !is3DMode) || (mode === "2d" && is3DMode);
+  });
+}
+
+function updateNavPanelVisibility() {
+  if (!nav3dPanel) {
+    return;
+  }
+  nav3dPanel.hidden = layoutMode;
+  updateNavModeSections();
+}
 
 function markIsomorphicDirty() {
   isomorphicDirty = true;
@@ -1884,7 +2028,7 @@ function drawKeyBanner(pos, radius, label, alpha) {
   const fontSize = 11;
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.font = `${fontSize}px "Courier New", monospace`;
+  ctx.font = `${fontSize}px "Lexend", sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const metrics = ctx.measureText(label);
@@ -2265,6 +2409,906 @@ function screenToWorld(point) {
   };
 }
 
+function ensureLayoutPosition(node) {
+  if (!layoutMode) {
+    return node.coordinate;
+  }
+  const existing = layoutPositions.get(node.id);
+  if (existing) {
+    return existing;
+  }
+  const next = {
+    x: node.coordinate.x,
+    y: node.coordinate.y,
+    z: Number.isFinite(node.coordinate.z) ? node.coordinate.z : 0,
+  };
+  layoutPositions.set(node.id, next);
+  return next;
+}
+
+function getNodeDisplayCoordinate(node) {
+  return layoutMode ? ensureLayoutPosition(node) : node.coordinate;
+}
+
+function getLayoutPageDimensions() {
+  const size =
+    LAYOUT_PAGE_SIZES[layoutPageSize] || LAYOUT_PAGE_SIZES.letter;
+  const portraitWidth = size.widthIn;
+  const portraitHeight = size.heightIn;
+  const isLandscape = layoutOrientation === "landscape";
+  const widthIn = isLandscape ? portraitHeight : portraitWidth;
+  const heightIn = isLandscape ? portraitWidth : portraitHeight;
+  return {
+    widthIn,
+    heightIn,
+    widthPx: widthIn * LAYOUT_PX_PER_IN,
+    heightPx: heightIn * LAYOUT_PX_PER_IN,
+  };
+}
+
+function getLayoutPageRect() {
+  const { widthPx, heightPx } = getLayoutPageDimensions();
+  const left = (canvas.clientWidth - widthPx) / 2;
+  const top = (canvas.clientHeight - heightPx) / 2;
+  return { left, top, width: widthPx, height: heightPx };
+}
+
+function getLayoutNodeShape(node) {
+  return layoutNodeShapes.get(node.id) || layoutNodeShape;
+}
+
+function getNodeNoteLabel(node) {
+  const info = getDisplayNoteInfo(node);
+  const noteText = featureMode === "ratio" ? info.pitchClass : info.name;
+  const wrap = featureMode === "note" ? true : hejiEnabled;
+  const requireHejiDetail = featureMode === "ratio";
+  const centsText = buildCentsReadout(node, {
+    wrap,
+    requireHejiDetail,
+    baseTextForHeji: info.pitchClass,
+  });
+  const hasAccidental = /[#b]/.test(noteText);
+  const hasParen = centsText.startsWith("(");
+  const separator = !hasAccidental && !hasParen ? "" : " ";
+  return `${noteText}${separator}${centsText}`;
+}
+
+function getNodePitchLabel(node) {
+  return getDisplayNoteInfo(node).pitchClass;
+}
+
+function getNoteNamesForNode(node) {
+  if (node && nodeSpellingOverrides.get(node.id) === "flat") {
+    return noteNamesFlat;
+  }
+  return noteNamesSharp;
+}
+
+function formatCents(value) {
+  const precision = Math.min(3, Math.max(0, Number(centsPrecision) || 0));
+  const numeric = Number.isFinite(value) ? value : 0;
+  const factor = Math.pow(10, precision);
+  let rounded = Math.round(numeric * factor) / factor;
+  if (Object.is(rounded, -0)) {
+    rounded = 0;
+  }
+  const text = precision > 0 ? rounded.toFixed(precision) : String(Math.round(rounded));
+  const sign = rounded >= 0 ? "+" : "";
+  const centsSuffix = showCentsSign ? CENTS_CHAR : "";
+  return `${sign}${text}${centsSuffix}`;
+}
+
+function measureTextWidth(text, size, font, context = ctx) {
+  context.save();
+  context.font = `${size}px ${font}`;
+  const width = context.measureText(text).width;
+  context.restore();
+  return width;
+}
+
+function measureTextWidthWithWeight(text, size, font, fontWeight = 400, context = ctx) {
+  context.save();
+  context.font = `${fontWeight} ${size}px ${font}`;
+  const width = context.measureText(text).width;
+  context.restore();
+  return width;
+}
+
+function getCentsCharSize(size) {
+  return Math.max(6, size - CENTS_SIZE_DELTA);
+}
+
+function measureCharWidth(char, size, font, fontWeight = 400, context = ctx) {
+  return measureTextWidthWithWeight(char, size, font, fontWeight, context);
+}
+
+function drawTextWithSmallCent({
+  text,
+  x,
+  y,
+  font,
+  size,
+  fontWeight = 400,
+  align = "left",
+  baseline = "top",
+  hejiAccidentals = false,
+  hejiYOffset = 0,
+  context = ctx,
+  color = themeColors.textSecondary,
+}) {
+  const chars = Array.from(text || "");
+  if (!chars.length) {
+    return;
+  }
+  const widths = chars.map((char) => {
+    const isCent = char === CENTS_CHAR;
+    const isHeji = hejiAccidentals && (char === "v" || char === "e");
+    const charSize = isCent ? getCentsCharSize(size) : size;
+    const charFont = isHeji ? "HEJI2Text" : font;
+    const charWeight = isHeji ? 400 : fontWeight;
+    return measureCharWidth(char, charSize, charFont, charWeight, context);
+  });
+  const totalWidth = widths.reduce((sum, width) => sum + width, 0);
+  let startX = x;
+  if (align === "center") {
+    startX = x - totalWidth / 2;
+  } else if (align === "right") {
+    startX = x - totalWidth;
+  }
+  context.save();
+  context.fillStyle = color;
+  context.textAlign = "left";
+  context.textBaseline = baseline;
+  let cursorX = startX;
+  chars.forEach((char, index) => {
+    const isCent = char === CENTS_CHAR;
+    const isHeji = hejiAccidentals && (char === "v" || char === "e");
+    const charSize = isCent ? getCentsCharSize(size) : size;
+    const charFont = isHeji ? "HEJI2Text" : font;
+    const charWeight = isHeji ? 400 : fontWeight;
+    context.font = `${charWeight} ${charSize}px ${charFont}`;
+    context.fillText(char, cursorX, y + (isHeji ? hejiYOffset : 0));
+    cursorX += widths[index];
+  });
+  context.restore();
+}
+
+function buildSvgTextWithSmallCent({
+  text,
+  x,
+  y,
+  font,
+  size,
+  fontWeight = 400,
+  align = "left",
+  baseline = "hanging",
+  hejiAccidentals = false,
+  color,
+}) {
+  const chars = Array.from(text || "");
+  if (!chars.length) {
+    return "";
+  }
+  const widths = chars.map((char) => {
+    const isCent = char === CENTS_CHAR;
+    const isHeji = hejiAccidentals && (char === "v" || char === "e");
+    const charSize = isCent ? getCentsCharSize(size) : size;
+    const charFont = isHeji ? "HEJI2Text" : font;
+    const charWeight = isHeji ? 400 : fontWeight;
+    return measureCharWidth(char, charSize, charFont, charWeight);
+  });
+  const totalWidth = widths.reduce((sum, width) => sum + width, 0);
+  let startX = x;
+  if (align === "center") {
+    startX = x - totalWidth / 2;
+  } else if (align === "right") {
+    startX = x - totalWidth;
+  }
+  let cursorX = startX;
+  const nodes = [];
+  chars.forEach((char, index) => {
+    const isCent = char === CENTS_CHAR;
+    const isHeji = hejiAccidentals && (char === "v" || char === "e");
+    const charSize = isCent ? getCentsCharSize(size) : size;
+    const charFont = isHeji ? "HEJI2Text" : font;
+    const charWeight = isHeji ? 400 : fontWeight;
+    nodes.push(
+      `<text x="${cursorX}" y="${y}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
+        charFont
+      )}" font-size="${charSize}" font-weight="${charWeight}" fill="${color}">${escapeSvgText(
+        char
+      )}</text>`
+    );
+    cursorX += widths[index];
+  });
+  return nodes.join("\n");
+}
+
+function computeRatioLabelLayout(numerator, denominator, font, baseSize, maxWidth) {
+  const singleLine = `${numerator}:${denominator}`;
+  let size = baseSize;
+  let lines = [singleLine];
+  let lineGap = 0;
+  let width = measureTextWidth(singleLine, size, font);
+  if (width <= maxWidth) {
+    return { lines, size, lineGap };
+  }
+  lines = [String(numerator), String(denominator)];
+  lineGap = Math.round(size * 0.15);
+  const minSize = Math.max(10, Math.round(baseSize * 0.6));
+  const measureTwoLine = () =>
+    Math.max(
+      measureTextWidth(lines[0], size, font),
+      measureTextWidth(lines[1], size, font)
+    );
+  width = measureTwoLine();
+  while (width > maxWidth && size > minSize) {
+    size -= 1;
+    lineGap = Math.round(size * 0.15);
+    width = measureTwoLine();
+  }
+  return { lines, size, lineGap };
+}
+
+function getNearestNoteInfo(node) {
+  if (!node) {
+    return { name: "", pitchClass: "", cents: 0 };
+  }
+  const a4 = Number(a4Input.value) || 440;
+  const freq = Number(node.freq);
+  const nearest = getNearestEtInfo(freq, a4);
+  const preferredNames = getNoteNamesForNode(node);
+  const pitchClass = preferredNames[nearest.midi % 12];
+  const name = `${pitchClass}${Math.floor(nearest.midi / 12) - 1}`;
+  const cents = Number.isFinite(node.cents_from_et) ? node.cents_from_et : nearest.cents;
+  return { ...nearest, pitchClass, name, cents };
+}
+
+function buildCentsReadout(
+  node,
+  { wrap = false, requireHejiDetail = false, baseTextForHeji = "" } = {}
+) {
+  const info = getDisplayNoteInfo(node);
+  if (!hejiEnabled) {
+    const text = formatCents(info.cents);
+    return text;
+  }
+  let hasHejiRule = false;
+  if (requireHejiDetail && baseTextForHeji) {
+    const annotation = getHejiAnnotation(node, baseTextForHeji);
+    hasHejiRule = annotation.suffixParts.some((part) => part.source === "rule");
+  }
+  if (requireHejiDetail && !hasHejiRule) {
+    return formatCents(info.cents);
+  }
+  const mapAccidentals = (text) =>
+    text.replace(/#/g, "v").replace(/b/g, "e");
+  const primaryBase = `${info.pitchClass}${formatCents(info.cents)}`;
+  const primary = wrap ? mapAccidentals(primaryBase) : primaryBase;
+  let text = primary;
+  if (Math.abs(info.cents) > 50) {
+    const nearest = getNearestNoteInfo(node);
+    const fallbackBase = `${nearest.pitchClass}${formatCents(nearest.cents)}`;
+    const fallback = wrap ? mapAccidentals(fallbackBase) : fallbackBase;
+    text = `${primary} / ${fallback}`;
+  }
+  return wrap ? `(${text})` : text;
+}
+
+function getHejiBaseAndDefaults(baseText) {
+  const base = String(baseText || "");
+  const suffixParts = [];
+  const sharpCount = (base.match(/#/g) || []).length;
+  const flatCount = (base.match(/b/g) || []).length;
+  if (sharpCount > 0) {
+    suffixParts.push({ text: "v", expLabel: "", source: "default" });
+  }
+  if (flatCount > 0) {
+    suffixParts.push({ text: "e", expLabel: "", source: "default" });
+  }
+  return { baseText: base.replace(/[#b]/g, ""), suffixParts };
+}
+
+function getDisplayNoteInfo(node) {
+  if (!node) {
+    return { name: "", pitchClass: "", cents: 0 };
+  }
+  const a4 = Number(a4Input.value) || 440;
+  const freq = Number(node.freq);
+  const nearest = getNearestEtInfo(freq, a4);
+  const preferredNames = getNoteNamesForNode(node);
+  const nearestPitchClass = preferredNames[nearest.midi % 12];
+  const nearestName = `${nearestPitchClass}${Math.floor(nearest.midi / 12) - 1}`;
+  const nearestCents = Number.isFinite(node.cents_from_et) ? node.cents_from_et : nearest.cents;
+  if (!hejiEnabled) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
+  if (!Number.isFinite(fundamentalMidi)) {
+    const fallback = getNearestEtInfo(Number(fundamentalInput.value) || 220, a4);
+    fundamentalMidi = fallback.midi;
+  }
+  const basePc = ((fundamentalMidi % 12) + 12) % 12;
+  const ratioX = Number(ratioXSelect.value);
+  const ratioY = Number(ratioYSelect.value);
+  const ratioZ = Number(ratioZSelect.value);
+  const axisRatios = [
+    { ratio: ratioX, exp: Number(node.exponentX) || 0 },
+    { ratio: ratioY, exp: Number(node.exponentY) || 0 },
+    { ratio: ratioZ, exp: Number(node.exponentZ) || 0 },
+  ];
+  const hasHigherPrime = axisRatios.some(
+    (axis) => axis.exp && Number(axis.ratio) >= 53
+  );
+  if (hasHigherPrime) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  let totalOffset = 0;
+  let hasOffsetAxis = false;
+  axisRatios.forEach((axis) => {
+    if (!axis.exp) {
+      return;
+    }
+    const step = HEJI_STEP_OFFSETS[axis.ratio];
+    if (!Number.isFinite(step)) {
+      return;
+    }
+    hasOffsetAxis = true;
+    totalOffset += axis.exp * step;
+  });
+  if (!hasOffsetAxis) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  const rawPc = basePc + totalOffset;
+  const targetPc = ((rawPc % 12) + 12) % 12;
+  const midiFloat = 69 + 12 * Math.log2(freq / a4);
+  const midiBase = Math.round((midiFloat - targetPc) / 12);
+  const midi = targetPc + 12 * midiBase;
+  const etFreq = a4 * Math.pow(2, (midi - 69) / 12);
+  const cents = 1200 * Math.log2(freq / etFreq);
+  const name = `${preferredNames[targetPc]}${Math.floor(midi / 12) - 1}`;
+  return { name, pitchClass: preferredNames[targetPc], cents };
+}
+
+const HEJI_RULES = [
+  {
+    mode: "repeatBaseAccidental",
+    ratio: 5,
+    axis: "any",
+    base: 2,
+    posSingle: { none: "m", sharp: "u", flat: "d" },
+    negSingle: { none: "o", sharp: "w", flat: "f" },
+    posPair: { none: "l", sharp: "t", flat: "c" },
+    negPair: { none: "p", sharp: "x", flat: "g" },
+    replaceAccidental: true,
+    usePairAsSingle: true,
+    useSingleBeyondPair: true,
+    maxSymbols: 2,
+  },
+  {
+    mode: "repeat",
+    ratio: 17,
+    axis: "any",
+    glyphPos: ":",
+    glyphNeg: ";",
+  },
+  {
+    mode: "repeatBase",
+    ratio: 7,
+    axis: "any",
+    glyphPos: "<",
+    glyphNeg: ">",
+    glyphPosPair: ",",
+    glyphNegPair: ".",
+    base: 2,
+  },
+  {
+    mode: "repeat",
+    ratio: 11,
+    axis: "any",
+    glyphPos: "4",
+    glyphNeg: "5",
+  },
+  {
+    mode: "repeat",
+    ratio: 13,
+    axis: "any",
+    glyphPos: "0",
+    glyphNeg: "9",
+  },
+  {
+    mode: "repeat",
+    ratio: 19,
+    axis: "any",
+    glyphPos: "/",
+    glyphNeg: "\\",
+  },
+  {
+    mode: "repeat",
+    ratio: 23,
+    axis: "any",
+    glyphPos: "3",
+    glyphNeg: "6",
+  },
+  {
+    mode: "repeat",
+    ratio: 29,
+    axis: "any",
+    glyphPos: "2",
+    glyphNeg: "7",
+  },
+  {
+    mode: "repeat",
+    ratio: 31,
+    axis: "any",
+    glyphPos: "1",
+    glyphNeg: "8",
+  },
+  {
+    mode: "repeat",
+    ratio: 37,
+    axis: "any",
+    glyphPos: "á",
+    glyphNeg: "à",
+  },
+  {
+    mode: "repeat",
+    ratio: 41,
+    axis: "any",
+    glyphPos: "+",
+    glyphNeg: "-",
+  },
+  {
+    mode: "repeat",
+    ratio: 43,
+    axis: "any",
+    glyphPos: "é",
+    glyphNeg: "è",
+  },
+  {
+    mode: "repeat",
+    ratio: 47,
+    axis: "any",
+    glyphPos: "í",
+    glyphNeg: "ì",
+  },
+];
+
+function hasAccidental(noteName) {
+  return /[#b]/.test(noteName);
+}
+
+function getAccidentalType(noteName) {
+  if (/#/.test(noteName)) {
+    return "sharp";
+  }
+  if (/b/.test(noteName)) {
+    return "flat";
+  }
+  return "none";
+}
+
+function axisMatches(rule, axisState) {
+  if (rule.axis !== "any" && rule.axis !== axisState.axis) {
+    return false;
+  }
+  if (!Number.isFinite(axisState.exponent)) {
+    return false;
+  }
+  if (Number.isFinite(rule.ratio) && axisState.ratio !== rule.ratio) {
+    return false;
+  }
+  if (rule.mode === "repeat" || rule.mode === "repeatBase" || rule.mode === "repeatBaseAccidental") {
+    return axisState.exponent !== 0;
+  }
+  if (rule.exponent === "anyNonZero" && axisState.exponent === 0) {
+    return false;
+  }
+  if (Number.isFinite(rule.exponent) && axisState.exponent !== rule.exponent) {
+    return false;
+  }
+  return true;
+}
+
+function getHejiAnnotation(node, baseText) {
+  if (!node) {
+    return { baseText, suffixParts: [] };
+  }
+  const accidentalType = getAccidentalType(baseText || "");
+  const sharpCount = (baseText.match(/#/g) || []).length;
+  const flatCount = (baseText.match(/b/g) || []).length;
+  const axisStates = [
+    { axis: "x", ratio: Number(ratioXSelect.value), exponent: Number(node.exponentX) },
+    { axis: "y", ratio: Number(ratioYSelect.value), exponent: Number(node.exponentY) },
+    { axis: "z", ratio: Number(ratioZSelect.value), exponent: Number(node.exponentZ) },
+  ];
+  let nextBase = String(baseText).replace(/[#b]/g, "");
+  const suffixParts = [];
+  if (sharpCount > 0) {
+    suffixParts.push({ text: "v", expLabel: "" , source: "default" });
+  }
+  if (flatCount > 0) {
+    suffixParts.push({ text: "e", expLabel: "" , source: "default" });
+  }
+  if (!hejiEnabled) {
+    return { baseText: nextBase, suffixParts };
+  }
+  HEJI_RULES.forEach((rule) => {
+    const expected = rule.accidental ?? "any";
+    if (expected !== "any" && expected !== accidentalType) {
+      return;
+    }
+    const matches = axisStates.some((axisState) => axisMatches(rule, axisState));
+    if (matches) {
+      if (rule.replaceAccidental && (accidentalType === "sharp" || accidentalType === "flat")) {
+        for (let index = suffixParts.length - 1; index >= 0; index -= 1) {
+          if (suffixParts[index].source === "default") {
+            suffixParts.splice(index, 1);
+          }
+        }
+      }
+      if (rule.mode === "repeatBaseAccidental") {
+        const base = Number(rule.base) || 2;
+        const accidentalKey = accidentalType || "none";
+        axisStates.forEach((axisState) => {
+          if (!axisMatches(rule, axisState)) {
+            return;
+          }
+          const exp = Number(axisState.exponent);
+          if (!exp) {
+            return;
+          }
+          const absExp = Math.abs(exp);
+          const pairCount = Math.floor(absExp / base);
+          const remainder = absExp % base;
+          const usePairAsSingle = Boolean(rule.usePairAsSingle);
+          const useSingleBeyondPair = Boolean(rule.useSingleBeyondPair);
+          const maxSymbols = Number(rule.maxSymbols ?? (usePairAsSingle ? 1 : 2));
+          const showExponent = absExp > maxSymbols ? String(absExp) : "";
+          if (exp > 0) {
+            const pairGlyph = rule.posPair?.[accidentalKey] || "";
+            const singleGlyph = rule.posSingle?.[accidentalKey] || "";
+            let glyphs = "";
+            if (useSingleBeyondPair && absExp > base) {
+              glyphs = String(singleGlyph);
+            } else if (usePairAsSingle) {
+              glyphs = absExp >= base ? String(pairGlyph) : String(singleGlyph);
+            } else {
+              glyphs = String(pairGlyph).repeat(pairCount);
+              if (remainder) {
+                glyphs += String(singleGlyph);
+              }
+            }
+            if (glyphs.length > maxSymbols) {
+              glyphs = glyphs.slice(0, maxSymbols);
+            }
+            if (glyphs) {
+              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+            }
+          } else {
+            const pairGlyph = rule.negPair?.[accidentalKey] || "";
+            const singleGlyph = rule.negSingle?.[accidentalKey] || "";
+            let glyphs = "";
+            if (useSingleBeyondPair && absExp > base) {
+              glyphs = String(singleGlyph);
+            } else if (usePairAsSingle) {
+              glyphs = absExp >= base ? String(pairGlyph) : String(singleGlyph);
+            } else {
+              glyphs = String(pairGlyph).repeat(pairCount);
+              if (remainder) {
+                glyphs += String(singleGlyph);
+              }
+            }
+            if (glyphs.length > maxSymbols) {
+              glyphs = glyphs.slice(0, maxSymbols);
+            }
+            if (glyphs) {
+              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+            }
+          }
+        });
+      } else if (rule.mode === "repeatBase") {
+        const base = Number(rule.base) || 2;
+        axisStates.forEach((axisState) => {
+          if (!axisMatches(rule, axisState)) {
+            return;
+          }
+          const exp = Number(axisState.exponent);
+          if (exp === 0) {
+            return;
+          }
+          const absExp = Math.abs(exp);
+          const pairCount = Math.floor(absExp / base);
+          const remainder = absExp % base;
+          const maxSymbols = Number(rule.maxSymbols ?? 2);
+          const showExponent = absExp > maxSymbols ? String(absExp) : "";
+          if (exp > 0) {
+            let glyphs = "";
+            if (rule.glyphPosPair) {
+              glyphs += String(rule.glyphPosPair).repeat(pairCount);
+            }
+            if (rule.glyphPos && remainder) {
+              glyphs += String(rule.glyphPos);
+            }
+            if (glyphs.length > maxSymbols) {
+              glyphs = glyphs.slice(0, maxSymbols);
+            }
+            if (glyphs) {
+              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+            }
+          } else {
+            let glyphs = "";
+            if (rule.glyphNegPair) {
+              glyphs += String(rule.glyphNegPair).repeat(pairCount);
+            }
+            if (rule.glyphNeg && remainder) {
+              glyphs += String(rule.glyphNeg);
+            }
+            if (glyphs.length > maxSymbols) {
+              glyphs = glyphs.slice(0, maxSymbols);
+            }
+            if (glyphs) {
+              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+            }
+          }
+        });
+      } else if (rule.mode === "repeat") {
+        axisStates.forEach((axisState) => {
+          if (!axisMatches(rule, axisState)) {
+            return;
+          }
+          const exp = Number(axisState.exponent);
+          if (exp > 0) {
+            const maxSymbols = Number(rule.maxSymbols ?? 1);
+            const glyphs = String(rule.glyphPos || "").repeat(Math.min(exp, maxSymbols));
+            const showExponent = exp > maxSymbols ? String(exp) : "";
+            if (glyphs) {
+              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+            }
+          } else if (exp < 0) {
+            const absExp = Math.abs(exp);
+            const maxSymbols = Number(rule.maxSymbols ?? 1);
+            const glyphs = String(rule.glyphNeg || "").repeat(Math.min(absExp, maxSymbols));
+            const showExponent = absExp > maxSymbols ? String(absExp) : "";
+            if (glyphs) {
+              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+            }
+          }
+        });
+      } else {
+        if (rule.glyph) {
+          suffixParts.push({ text: rule.glyph, expLabel: "", source: "rule" });
+        }
+      }
+    }
+  });
+  if (suffixParts.length > 1) {
+    const ordered = [];
+    suffixParts.forEach((part) => {
+      if (part.source === "rule") {
+        ordered.push(part);
+      }
+    });
+    suffixParts.forEach((part) => {
+      if (part.source !== "rule") {
+        ordered.push(part);
+      }
+    });
+    return { baseText: nextBase, suffixParts: ordered };
+  }
+  return { baseText: nextBase, suffixParts };
+}
+
+function measureSuffixPartWidth(part, size, charGap, baseWeight) {
+  if (!part || !part.text) {
+    return 0;
+  }
+  const sizeScale = Number.isFinite(part.sizeScale) ? part.sizeScale : 1;
+  const font = part.font || "HEJI2Text";
+  const partCharGap = Number.isFinite(part.charGap) ? part.charGap : charGap;
+  const weight = Number.isFinite(part.fontWeight)
+    ? part.fontWeight
+    : part.font
+    ? baseWeight
+    : 400;
+  const chars = Array.from(part.text);
+  return chars.reduce((sum, char, index) => {
+    const baseSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
+    const charSize = Math.max(6, Math.round(baseSize * sizeScale));
+    const width = measureCharWidth(char, charSize, font, weight);
+    return sum + width + (index > 0 ? partCharGap : 0);
+  }, 0);
+}
+
+function getExponentOffset(size, baseline) {
+  if (baseline === "middle") {
+    return Math.round(size * 0.3);
+  }
+  return size + Math.round(size * 0.2);
+}
+
+function drawHejiInline({
+  x,
+  y,
+  baseText,
+  suffixParts,
+  restText,
+  size,
+  font,
+  align = "left",
+  baseline = "top",
+  hejiYOffset = 0.5,
+  restGapScale = HEJI_REST_GAP,
+  restHejiAccidentals = false,
+  fontWeight = 400,
+  color = themeColors.textSecondary,
+}) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.textAlign = "left";
+  ctx.textBaseline = baseline;
+  ctx.font = `${fontWeight} ${size}px ${font}`;
+  const baseWidth = ctx.measureText(baseText).width;
+  const suffixSpacing = Math.round(size * 0.08);
+  const partGap = Math.round(size * 0.1);
+  const baseSuffixGap = Math.round(size * 0.1);
+  const restGap = Math.round(size * restGapScale);
+  const parts = Array.isArray(suffixParts) ? suffixParts : [];
+  const suffixWidth = parts.reduce((sum, part, index) => {
+    const partWidth = measureSuffixPartWidth(part, size, suffixSpacing, fontWeight);
+    return sum + partWidth + (index > 0 ? partGap : 0);
+  }, 0);
+  const restWidth = restText ? ctx.measureText(restText).width : 0;
+  const totalWidth =
+    baseWidth +
+    (parts.length ? baseSuffixGap + suffixWidth : 0) +
+    (restText ? restGap + restWidth : 0);
+  let startX = x;
+  if (align === "center") {
+    startX = x - totalWidth / 2;
+  } else if (align === "right") {
+    startX = x - totalWidth;
+  }
+  ctx.fillText(baseText, startX, y);
+  let cursorX = startX + baseWidth;
+  if (parts.length) {
+    cursorX += baseSuffixGap;
+    parts.forEach((part, partIndex) => {
+      if (partIndex > 0) {
+        cursorX += partGap;
+      }
+      const partCharGap = Number.isFinite(part.charGap) ? part.charGap : suffixSpacing;
+      const partWidth = measureSuffixPartWidth(part, size, suffixSpacing, fontWeight);
+      const partStartX = cursorX;
+      ctx.save();
+      const partFont = part.font || "HEJI2Text";
+      const partWeight = Number.isFinite(part.fontWeight)
+        ? part.fontWeight
+        : part.font
+        ? fontWeight
+        : 400;
+      const partYOffset =
+        typeof part.yOffset === "number" ? part.yOffset : hejiYOffset;
+      const sizeScale = Number.isFinite(part.sizeScale) ? part.sizeScale : 1;
+      Array.from(part.text).forEach((char, index) => {
+        if (index > 0) {
+          cursorX += partCharGap;
+        }
+        const baseSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
+        const charSize = Math.max(6, Math.round(baseSize * sizeScale));
+        ctx.font = `${partWeight} ${charSize}px ${partFont}`;
+        ctx.fillText(char, cursorX, y + partYOffset);
+        cursorX += measureCharWidth(char, charSize, partFont, partWeight);
+      });
+      ctx.restore();
+      if (part.expLabel) {
+        const expSize = Math.max(8, Math.round(size * 0.55));
+        const expY =
+          y +
+          (typeof part.yOffset === "number" ? part.yOffset : hejiYOffset) +
+          getExponentOffset(size, baseline);
+        ctx.save();
+        ctx.font = `${fontWeight} ${expSize}px ${font}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(part.expLabel, partStartX + partWidth / 2, expY);
+        ctx.restore();
+      }
+    });
+  }
+  if (restText) {
+    cursorX += restGap;
+    const chars = Array.from(restText);
+    const needsInline = restHejiAccidentals || restText.includes(CENTS_CHAR) || /[ve]/.test(restText);
+    if (!needsInline) {
+      ctx.font = `${fontWeight} ${size}px ${font}`;
+      ctx.fillText(restText, cursorX, y);
+    } else {
+      chars.forEach((char) => {
+        const useHeji = char === "v" || char === "e";
+        const isCent = char === CENTS_CHAR;
+        const charSize = isCent ? getCentsCharSize(size) : size;
+        const charFont = useHeji ? "HEJI2Text" : font;
+        const charWeight = useHeji ? 400 : fontWeight;
+        ctx.font = `${charWeight} ${charSize}px ${charFont}`;
+        ctx.fillText(char, cursorX, y + (useHeji ? hejiYOffset : 0));
+        cursorX += measureCharWidth(char, charSize, charFont, charWeight);
+      });
+    }
+  }
+  ctx.restore();
+}
+
+function getLayoutNoteOffset(node, radius, scale = 1) {
+  const override = layoutLabelOffsets.get(node.id);
+  if (override) {
+    return {
+      x: override.x * view.zoom * scale,
+      y: override.y * view.zoom * scale,
+    };
+  }
+  return { x: radius + 6, y: radius - 10 };
+}
+
+function getLayoutNoteLabelPosition(node, pos, radius) {
+  const offset = getLayoutNoteOffset(node, radius, pos.scale || 1);
+  return { x: pos.x + offset.x, y: pos.y + offset.y };
+}
+
+function getLayoutTitleY() {
+  const { top } = getLayoutPageRect();
+  const disableScale = layoutUnifyNodeSize;
+  let maxY = Number.NEGATIVE_INFINITY;
+  edges.forEach(([a, b]) => {
+    if (!a.active || !b.active) {
+      return;
+    }
+    const start = worldToScreen(getNodeDisplayCoordinate(a), disableScale);
+    const end = worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+    const radiusA = layoutNodeSize * (start.scale || 1);
+    const radiusB = layoutNodeSize * (end.scale || 1);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const edgeStart = {
+      x: start.x + ux * radiusA,
+      y: start.y + uy * radiusA,
+    };
+    const edgeEnd = {
+      x: end.x - ux * radiusB,
+      y: end.y - uy * radiusB,
+    };
+    maxY = Math.max(maxY, edgeStart.y, edgeEnd.y);
+  });
+  if (!Number.isFinite(maxY)) {
+    return top + layoutTitleMargin;
+  }
+  return Math.max(top + 10, maxY - layoutTitleMargin);
+}
+
+function syncLayoutFontVars() {
+  document.documentElement.style.setProperty("--font-title", layoutTitleFont);
+  document.documentElement.style.setProperty("--font-ratio", layoutRatioFont);
+  document.documentElement.style.setProperty("--font-note", layoutNoteFont);
+}
+
 const AXIS_EDGE_COLORS = {
   x: "rgba(59, 130, 246, 0.5)",
   y: "rgba(239, 68, 68, 0.5)",
@@ -2378,12 +3422,272 @@ function getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, light
   return gradient;
 }
 
+function drawNodeShapePath(shape, x, y, radius) {
+  if (shape === "square") {
+    ctx.rect(x - radius, y - radius, radius * 2, radius * 2);
+    return;
+  }
+  if (shape === "triangle") {
+    const height = radius * 1.2;
+    ctx.moveTo(x, y - height);
+    ctx.lineTo(x + radius, y + height * 0.6);
+    ctx.lineTo(x - radius, y + height * 0.6);
+    ctx.closePath();
+    return;
+  }
+  if (shape === "diamond") {
+    ctx.moveTo(x, y - radius);
+    ctx.lineTo(x + radius, y);
+    ctx.lineTo(x, y + radius);
+    ctx.lineTo(x - radius, y);
+    ctx.closePath();
+    return;
+  }
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+}
+
+function drawAxisArrow(x1, y1, x2, y2) {
+  const headLength = 10;
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(
+    x2 - headLength * Math.cos(angle - Math.PI / 6),
+    y2 - headLength * Math.sin(angle - Math.PI / 6)
+  );
+  ctx.lineTo(
+    x2 - headLength * Math.cos(angle + Math.PI / 6),
+    y2 - headLength * Math.sin(angle + Math.PI / 6)
+  );
+  ctx.closePath();
+  ctx.fill();
+}
+
+function hasActiveAxis(axis) {
+  const key =
+    axis === "x" ? "exponentX" : axis === "y" ? "exponentY" : "exponentZ";
+  return nodes.some((node) => node.active && Number(node[key]) !== 0);
+}
+
+function nodeHasHighPrime(node) {
+  if (!node) {
+    return false;
+  }
+  const axes = [
+    { ratio: Number(ratioXSelect.value), exp: Number(node.exponentX) || 0 },
+    { ratio: Number(ratioYSelect.value), exp: Number(node.exponentY) || 0 },
+    { ratio: Number(ratioZSelect.value), exp: Number(node.exponentZ) || 0 },
+  ];
+  return axes.some((axis) => axis.exp && axis.ratio >= 53);
+}
+
+function getAxisLegendSettings() {
+  const margin = 36;
+  const fontSize = Math.max(12, Math.round(layoutRatioTextSize * 0.9));
+  const xRatio = Number(ratioXSelect.value) || 3;
+  const yRatio = Number(ratioYSelect.value) || 5;
+  const zRatio = Number(ratioZSelect.value) || 7;
+  const xReduced = reduceToOctave(xRatio, 1);
+  const yReduced = reduceToOctave(yRatio, 1);
+  const zReduced = reduceToOctave(zRatio, 1);
+  const xLabel = `${xReduced.numerator}:${xReduced.denominator}`;
+  const yLabel = `${yReduced.numerator}:${yReduced.denominator}`;
+  const zLabel = `${zReduced.numerator}:${zReduced.denominator}`;
+  const disableScale = layoutUnifyNodeSize;
+  const origin = worldToScreen({ x: 0, y: 0, z: 0 }, disableScale);
+  const xAxisPoint = worldToScreen({ x: GRID_SPACING, y: 0, z: 0 }, disableScale);
+  const yAxisPoint = worldToScreen({ x: 0, y: GRID_SPACING, z: 0 }, disableScale);
+  const zAxisPoint = worldToScreen({ x: 0, y: 0, z: GRID_SPACING }, disableScale);
+  const xVec = { x: xAxisPoint.x - origin.x, y: xAxisPoint.y - origin.y };
+  const yVec = { x: yAxisPoint.x - origin.x, y: yAxisPoint.y - origin.y };
+  const zVec = { x: zAxisPoint.x - origin.x, y: zAxisPoint.y - origin.y };
+  const xLen = Math.hypot(xVec.x, xVec.y) || 1;
+  const yLen = Math.hypot(yVec.x, yVec.y) || 1;
+  const zLen = Math.hypot(zVec.x, zVec.y) || 1;
+  const xDir = { x: xVec.x / xLen, y: xVec.y / xLen };
+  const yDir = { x: yVec.x / yLen, y: yVec.y / yLen };
+  const zDir = { x: zVec.x / zLen, y: zVec.y / zLen };
+  return {
+    margin,
+    fontSize,
+    xLabel,
+    yLabel,
+    zLabel,
+    xDir,
+    yDir,
+    zDir,
+  };
+}
+
+function getAxisLegendAngle(dir) {
+  let angle = Math.atan2(dir.y, dir.x);
+  if (angle > Math.PI / 2) {
+    angle -= Math.PI;
+  } else if (angle < -Math.PI / 2) {
+    angle += Math.PI;
+  }
+  return angle;
+}
+
+function getAxisLegendInfo(axis, settings = getAxisLegendSettings()) {
+  if (!layoutMode || !hasActiveAxis(axis)) {
+    return null;
+  }
+  const { left, top, width, height } = getLayoutPageRect();
+  const offset = layoutAxisOffsets[axis] || { x: 0, y: 0 };
+  let center = { x: left + width / 2, y: top + height - settings.margin };
+  let label = settings.xLabel;
+  let dir = settings.xDir;
+  if (axis === "y") {
+    center = { x: left + width - settings.margin, y: top + height / 2 };
+    label = settings.yLabel;
+    dir = settings.yDir;
+  } else if (axis === "z") {
+    center = { x: left + settings.margin, y: top + height / 2 };
+    label = settings.zLabel;
+    dir = settings.zDir;
+  }
+  center = { x: center.x + offset.x, y: center.y + offset.y };
+  const overrideAngle = layoutAxisAngles[axis];
+  if (Number.isFinite(overrideAngle)) {
+    dir = { x: Math.cos(overrideAngle), y: Math.sin(overrideAngle) };
+  }
+  ctx.save();
+  ctx.font = `${settings.fontSize}px ${layoutRatioFont}`;
+  const labelWidth = ctx.measureText(label).width;
+  ctx.restore();
+  const gap = Math.max(28, labelWidth + 16);
+  const segLen = 20;
+  const gapVec = { x: dir.x * (gap / 2), y: dir.y * (gap / 2) };
+  const segVec = { x: dir.x * segLen, y: dir.y * segLen };
+  return {
+    axis,
+    center,
+    label,
+    dir,
+    gapVec,
+    segVec,
+    fontSize: settings.fontSize,
+    textAngle: getAxisLegendAngle(dir),
+    leftEnd: {
+      x: center.x - gapVec.x - segVec.x,
+      y: center.y - gapVec.y - segVec.y,
+    },
+    rightEnd: {
+      x: center.x + gapVec.x + segVec.x,
+      y: center.y + gapVec.y + segVec.y,
+    },
+  };
+}
+
+function drawLayoutAxisLegend(axis, { showHandles = false } = {}) {
+  const info = getAxisLegendInfo(axis);
+  if (!info) {
+    return;
+  }
+  drawAxisArrow(
+    info.center.x - info.gapVec.x,
+    info.center.y - info.gapVec.y,
+    info.leftEnd.x,
+    info.leftEnd.y
+  );
+  drawAxisArrow(
+    info.center.x + info.gapVec.x,
+    info.center.y + info.gapVec.y,
+    info.rightEnd.x,
+    info.rightEnd.y
+  );
+  ctx.save();
+  ctx.translate(info.center.x, info.center.y);
+  ctx.rotate(info.textAngle);
+  ctx.fillText(info.label, 0, 0);
+  ctx.restore();
+  if (showHandles) {
+    const handleRadius = Math.max(8, Math.round(info.fontSize * 0.55));
+    ctx.save();
+    ctx.fillStyle = themeColors.textSecondary;
+    ctx.beginPath();
+    ctx.arc(info.leftEnd.x, info.leftEnd.y, handleRadius, 0, Math.PI * 2);
+    ctx.arc(info.rightEnd.x, info.rightEnd.y, handleRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawLayoutAxes() {
+  const { fontSize } = getAxisLegendSettings();
+
+  ctx.save();
+  ctx.strokeStyle = themeColors.textSecondary;
+  ctx.fillStyle = themeColors.textSecondary;
+  ctx.lineWidth = 1.5;
+  ctx.font = `${fontSize}px ${layoutRatioFont}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  if (hasActiveAxis("x")) {
+    drawLayoutAxisLegend("x", { showHandles: layoutAxisEdit === "x" });
+  }
+
+  if (hasActiveAxis("y")) {
+    drawLayoutAxisLegend("y", { showHandles: layoutAxisEdit === "y" });
+  }
+
+  if (hasActiveAxis("z")) {
+    drawLayoutAxisLegend("z", { showHandles: layoutAxisEdit === "z" });
+  }
+
+  ctx.restore();
+}
+
+function drawLayoutPage({ drawAxes = true } = {}) {
+  const { left, top, width, height } = getLayoutPageRect();
+  ctx.save();
+  ctx.shadowColor = themeColors.pageShadow;
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 6;
+  ctx.fillStyle = themeColors.page;
+  ctx.fillRect(left, top, width, height);
+  ctx.shadowColor = "transparent";
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = themeColors.pageBorder;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(left, top, width, height);
+
+  if (layoutTitle) {
+    const titleSize = Math.max(12, Math.round(layoutTitleSize));
+    ctx.fillStyle = themeColors.textPrimary;
+    ctx.font = `${titleSize}px ${layoutTitleFont}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    const titleY = getLayoutTitleY();
+    ctx.fillText(layoutTitle, left + width / 2, titleY);
+  }
+
+  if (drawAxes) {
+    drawLayoutAxes();
+  }
+
+  ctx.restore();
+}
+
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!themeColors) {
     refreshThemeColors();
   }
+
+  if (layoutMode) {
+    drawLayoutPage({ drawAxes: !layoutAxisEdit });
+  }
+
+  const disableScale = layoutMode && layoutUnifyNodeSize;
 
   if (is3DMode && showGrid) {
     drawGrid();
@@ -2402,10 +3706,12 @@ function draw() {
       if (!a.active || !b.active) {
         return;
       }
-      const start = worldToScreen(a.coordinate);
-      const end = worldToScreen(b.coordinate);
-      const radiusA = getNodeRadius(a) * (start.scale || 1);
-      const radiusB = getNodeRadius(b) * (end.scale || 1);
+      const start = worldToScreen(getNodeDisplayCoordinate(a), disableScale);
+      const end = worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+      const radiusA =
+        (layoutMode ? layoutNodeSize : getNodeRadius(a)) * (start.scale || 1);
+      const radiusB =
+        (layoutMode ? layoutNodeSize : getNodeRadius(b)) * (end.scale || 1);
       const dx = end.x - start.x;
       const dy = end.y - start.y;
       const dist = Math.hypot(dx, dy);
@@ -2430,7 +3736,10 @@ function draw() {
   }
 
   const nodeRenderList = nodes
-    .map((node) => ({ node, pos: worldToScreen(node.coordinate) }))
+    .map((node) => ({
+      node,
+      pos: worldToScreen(getNodeDisplayCoordinate(node), disableScale),
+    }))
     .sort((a, b) => {
       if (a.node.isCustom && !b.node.isCustom) {
         return 1;
@@ -2458,7 +3767,6 @@ function draw() {
     const canInteractInactive = !is3DMode || isAddMode;
     const amplitude = nodeAmplitudes.get(node.id) || 0;
     const brightness = Math.min(1, amplitude);
-    const isSquare = Boolean(node.isCustom);
     const isVisible =
       node.isCenter ||
       node.active ||
@@ -2480,73 +3788,229 @@ function draw() {
       return;
     }
 
-    const radius = getNodeRadius(node) * (pos.scale || 1);
+    const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
+    const radius = baseRadius * (pos.scale || 1);
+    const layoutShape = layoutMode
+      ? getLayoutNodeShape(node)
+      : node.isCustom
+      ? "square"
+      : "circle";
+    const isSquare = layoutShape === "square";
 
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.beginPath();
-    ctx.strokeStyle = themeColors.nodeStroke;
-    ctx.lineWidth = 2;
-    if (is3DMode) {
-      const inactiveFill = node.isCustom
-        ? "rgba(210, 210, 210, 0.12)"
-        : "rgba(255, 255, 255, 0.02)";
-      const shadowColor = "rgba(0, 0, 0, 0.22)";
-      const fillAlpha = Math.min(1, brightness);
-      const baseFill =
-        fillAlpha > 0 ? colorWithAlpha(themeColors.playFill, fillAlpha) : inactiveFill;
-      const highlightColor =
-        fillAlpha > 0
-          ? colorWithAlpha(themeColors.playFill, 0.35 + 0.65 * fillAlpha)
-          : node.isCustom
-          ? "rgba(220, 220, 220, 0.25)"
-          : "rgba(255, 255, 255, 0.35)";
-      ctx.shadowColor = shadowColor;
-      ctx.shadowBlur = Math.max(6, radius * 0.6);
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 0;
-      ctx.fillStyle = isSquare
-        ? getCubeFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir)
-        : getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir);
-    } else {
-      if (node.isCustom && !node.active && brightness <= 0) {
-        ctx.fillStyle = "rgba(210, 210, 210, 0.2)";
+    if (showCircles) {
+      ctx.beginPath();
+      ctx.strokeStyle = themeColors.nodeStroke;
+      ctx.lineWidth = 2;
+      if (is3DMode) {
+        const inactiveFill = node.isCustom
+          ? "rgba(210, 210, 210, 0.12)"
+          : "rgba(255, 255, 255, 0.02)";
+        const shadowColor = "rgba(0, 0, 0, 0.22)";
+        const fillAlpha = Math.min(1, brightness);
+        const baseFill =
+          fillAlpha > 0 ? colorWithAlpha(themeColors.playFill, fillAlpha) : inactiveFill;
+        const highlightColor =
+          fillAlpha > 0
+            ? colorWithAlpha(themeColors.playFill, 0.35 + 0.65 * fillAlpha)
+            : node.isCustom
+            ? "rgba(220, 220, 220, 0.25)"
+            : "rgba(255, 255, 255, 0.35)";
+        ctx.shadowColor = shadowColor;
+        ctx.shadowBlur = Math.max(6, radius * 0.6);
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.fillStyle = isSquare
+          ? getCubeFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir)
+          : getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir);
+      } else if (layoutMode) {
+        ctx.fillStyle = "transparent";
       } else {
-        ctx.fillStyle = brightness > 0 ? themeColors.playFill : "transparent";
+        if (node.isCustom && !node.active && brightness <= 0) {
+          ctx.fillStyle = "rgba(210, 210, 210, 0.2)";
+        } else {
+          ctx.fillStyle = brightness > 0 ? themeColors.playFill : "transparent";
+        }
       }
+      drawNodeShapePath(layoutShape, pos.x, pos.y, radius);
+      if (is3DMode) {
+        ctx.fill();
+        ctx.shadowColor = "transparent";
+        ctx.shadowBlur = 0;
+      } else if (brightness > 0) {
+        ctx.save();
+        ctx.globalAlpha *= brightness;
+        ctx.fill();
+        ctx.restore();
+      } else {
+        ctx.fill();
+      }
+      ctx.stroke();
     }
-    if (isSquare) {
-      ctx.rect(pos.x - radius, pos.y - radius, radius * 2, radius * 2);
-    } else {
-      ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-    }
-    if (is3DMode) {
-      ctx.fill();
-      ctx.shadowColor = "transparent";
-      ctx.shadowBlur = 0;
-    } else if (brightness > 0) {
-      ctx.save();
-      ctx.globalAlpha *= brightness;
-      ctx.fill();
-      ctx.restore();
-    } else {
-      ctx.fill();
-    }
-    ctx.stroke();
 
     ctx.fillStyle = themeColors.textPrimary;
-    ctx.font = "21px Georgia";
+    const labelSize = layoutMode ? layoutRatioTextSize : 21;
+    const labelFont = layoutMode ? layoutRatioFont : "Georgia";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(`${node.numerator}:${node.denominator}`, pos.x, pos.y);
+    if (featureMode === "note") {
+      if (hejiEnabled && nodeHasHighPrime(node)) {
+        const displayInfo = getDisplayNoteInfo(node);
+        const base = getHejiBaseAndDefaults(displayInfo.pitchClass);
+        const centsText = formatCents(displayInfo.cents);
+        const suffixParts = centsText
+          ? [
+              ...base.suffixParts,
+              {
+                text: centsText,
+                source: "cents",
+                font: labelFont,
+                charGap: 0,
+                sizeScale: 0.67,
+              },
+            ]
+          : base.suffixParts;
+        drawHejiInline({
+          x: pos.x,
+          y: pos.y,
+          baseText: base.baseText,
+          suffixParts,
+          restText: "",
+          size: labelSize,
+          font: labelFont,
+          align: "center",
+          baseline: "middle",
+          color: themeColors.textPrimary,
+        });
+      } else {
+        const annotation = getHejiAnnotation(node, getNodePitchLabel(node));
+        drawHejiInline({
+          x: pos.x,
+          y: pos.y,
+          baseText: annotation.baseText,
+          suffixParts: annotation.suffixParts,
+          restText: "",
+          size: labelSize,
+          font: labelFont,
+          align: "center",
+          baseline: "middle",
+          color: themeColors.textPrimary,
+        });
+      }
+    } else {
+      const maxWidth = radius * 1.6;
+      const layout = computeRatioLabelLayout(
+        node.numerator,
+        node.denominator,
+        labelFont,
+        labelSize,
+        maxWidth
+      );
+      const ratioYOffset = Math.round(layout.size * -0.09);
+      ctx.font = `${layout.size}px ${labelFont}`;
+      if (layout.lines.length === 1) {
+        ctx.fillText(layout.lines[0], pos.x, pos.y + ratioYOffset);
+      } else {
+        const lineOffset = layout.size / 2 + layout.lineGap / 2;
+        const baseY = pos.y + ratioYOffset;
+        const lineWidth = Math.max(
+          measureTextWidth(layout.lines[0], layout.size, labelFont),
+          measureTextWidth(layout.lines[1], layout.size, labelFont)
+        );
+        const lineY = baseY + layout.size * 0.1;
+        ctx.fillText(layout.lines[0], pos.x, baseY - lineOffset);
+        ctx.fillText(layout.lines[1], pos.x, baseY + lineOffset);
+        ctx.save();
+        ctx.strokeStyle = themeColors.textPrimary;
+        ctx.lineWidth = Math.max(1, Math.round(layout.size * 0.06));
+        ctx.beginPath();
+        ctx.moveTo(pos.x - lineWidth / 2, lineY);
+        ctx.lineTo(pos.x + lineWidth / 2, lineY);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
 
-    ctx.font = "11px Georgia";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillStyle = themeColors.textSecondary;
-    const cents = Math.round(node.cents_from_et);
-    const centsLabel = `${cents >= 0 ? "+" : ""}${cents}¢`;
-    ctx.fillText(`${node.note_name} ${centsLabel}`, pos.x + radius + 6, pos.y + radius - 10);
+    const detailSize = layoutMode ? layoutNoteTextSize : 14;
+    const displayInfo = getDisplayNoteInfo(node);
+    if (featureMode === "note") {
+      ctx.font = `200 ${detailSize}px "Lexend", sans-serif`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = themeColors.textSecondary;
+      const ratioText = `${node.numerator}:${node.denominator}`;
+      const centsLabel = buildCentsReadout(node, { wrap: true });
+      const ratioX = pos.x + (radius + 6) * 0.7;
+      const ratioY = pos.y + radius - 10;
+      let lineOffset = 0;
+      ctx.fillText(ratioText, ratioX, ratioY + lineOffset);
+      lineOffset += detailSize + 4;
+      drawTextWithSmallCent({
+        text: centsLabel,
+        x: ratioX,
+        y: ratioY + lineOffset,
+        font: "Lexend, sans-serif",
+        size: detailSize,
+        fontWeight: 200,
+        align: "left",
+        baseline: "top",
+        hejiAccidentals: hejiEnabled,
+        hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
+        context: ctx,
+        color: themeColors.textSecondary,
+      });
+      lineOffset += detailSize + 4;
+      if (showHz && Number.isFinite(node.freq)) {
+        ctx.fillText(`${node.freq.toFixed(2)} Hz`, ratioX, ratioY + lineOffset);
+      }
+    } else {
+      ctx.fillStyle = themeColors.textSecondary;
+      const rawLabelPos = layoutMode
+        ? getLayoutNoteLabelPosition(node, pos, radius)
+        : { x: pos.x + radius + 6, y: pos.y + radius - 10 };
+      const labelOffsetX = rawLabelPos.x - pos.x;
+      const labelPos = {
+        x: pos.x + labelOffsetX * 0.7,
+        y: rawLabelPos.y,
+      };
+      const centsLabel = buildCentsReadout(node, {
+        wrap: hejiEnabled,
+        requireHejiDetail: true,
+        baseTextForHeji: displayInfo.pitchClass,
+      });
+      const hasParen = centsLabel.includes("(");
+      const restGapScale =
+        hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
+      const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
+      const annotation = getHejiAnnotation(node, baseLabel || node.note_name);
+      drawHejiInline({
+        x: labelPos.x,
+        y: labelPos.y,
+        baseText: annotation.baseText,
+        suffixParts: annotation.suffixParts,
+        restText: ` ${centsLabel}`,
+        size: detailSize,
+        font: "Lexend, sans-serif",
+        align: "left",
+        baseline: "top",
+        hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
+        restGapScale,
+        restHejiAccidentals: hejiEnabled && hasParen,
+        fontWeight: 200,
+        color: themeColors.textSecondary,
+      });
+      if (showHz && Number.isFinite(node.freq)) {
+        ctx.save();
+        ctx.font = `200 ${detailSize}px "Lexend", sans-serif`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = themeColors.textSecondary;
+        const hzY = labelPos.y + detailSize + 4;
+        ctx.fillText(`${node.freq.toFixed(2)} Hz`, labelPos.x, hzY);
+        ctx.restore();
+      }
+    }
 
     if (keyMap && node.active) {
       const keyLabel = keyMap.get(node.id);
@@ -2556,7 +4020,7 @@ function draw() {
         } else {
           ctx.save();
           ctx.globalAlpha = alpha;
-          ctx.font = '11px "Courier New", monospace';
+          ctx.font = '11px "Lexend", sans-serif';
           ctx.textAlign = "right";
           ctx.textBaseline = "bottom";
           ctx.fillStyle = themeColors.textSecondary;
@@ -2568,6 +4032,20 @@ function draw() {
 
     ctx.restore();
   });
+
+  if (layoutMode && layoutAxisEdit) {
+    ctx.save();
+    ctx.fillStyle = "rgba(128, 128, 128, 0.25)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = themeColors.textSecondary;
+    ctx.fillStyle = themeColors.textSecondary;
+    ctx.lineWidth = 1.5;
+    ctx.font = `${getAxisLegendSettings().fontSize}px ${layoutRatioFont}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    drawLayoutAxisLegend(layoutAxisEdit, { showHandles: true });
+    ctx.restore();
+  }
 
   updateZModeMessage();
 
@@ -2913,6 +4391,70 @@ function onPointerDown(event) {
   const hit = hitTestScreen(screenPoint);
   const now = performance.now();
 
+  if (rHeld && hit) {
+    const current = nodeSpellingOverrides.get(hit.id);
+    if (current === "flat") {
+      nodeSpellingOverrides.delete(hit.id);
+    } else {
+      const info = getDisplayNoteInfo(hit);
+      if (String(info.pitchClass).includes("#")) {
+        nodeSpellingOverrides.set(hit.id, "flat");
+      }
+    }
+    suppressClickAfterRespell = true;
+    draw();
+    schedulePresetUrlUpdate();
+    return;
+  }
+
+  if (layoutMode) {
+    if (layoutAxisEdit) {
+      const handleHit = hitTestAxisLegendHandle(screenPoint);
+      if (handleHit) {
+        layoutAxisEditDrag = { axis: handleHit.axis };
+        canvas.setPointerCapture(event.pointerId);
+      }
+      return;
+    }
+    const axisHit = hitTestAxisLegend(screenPoint);
+    if (axisHit) {
+      layoutAxisDrag = {
+        axis: axisHit.axis,
+        offsetX: axisHit.center.x - screenPoint.x,
+        offsetY: axisHit.center.y - screenPoint.y,
+      };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+    const labelHit = hitTestNoteLabel(screenPoint);
+    if (labelHit) {
+      layoutLabelDrag = {
+        nodeId: labelHit.node.id,
+        offsetX: labelHit.labelPos.x - screenPoint.x,
+        offsetY: labelHit.labelPos.y - screenPoint.y,
+      };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (hit) {
+      const worldPoint = screenToWorld(screenPoint);
+      const coord = getNodeDisplayCoordinate(hit);
+      layoutDrag = {
+        nodeId: hit.id,
+        offsetX: coord.x - worldPoint.x,
+        offsetY: coord.y - worldPoint.y,
+      };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+    view.dragging = true;
+    view.dragStart = { x: event.offsetX, y: event.offsetY };
+    view.dragOffsetStart = { x: view.offsetX, y: view.offsetY };
+    view.lastPointer = { x: event.offsetX, y: event.offsetY };
+    canvas.setPointerCapture(event.pointerId);
+    return;
+  }
+
   if (customDrag && customDrag.placing) {
     const node = nodeById.get(customDrag.nodeId);
     if (node) {
@@ -2979,8 +4521,112 @@ function onPointerDown(event) {
   canvas.setPointerCapture(event.pointerId);
 }
 
+function onCanvasDoubleClick(event) {
+  if (!layoutMode) {
+    return;
+  }
+  const screenPoint = { x: event.offsetX, y: event.offsetY };
+  const axisHit = hitTestAxisLegend(screenPoint);
+  if (layoutAxisEdit) {
+    if (!axisHit) {
+      layoutAxisEdit = null;
+      layoutAxisEditDrag = null;
+      updateUiHint();
+      draw();
+    } else if (axisHit.axis !== layoutAxisEdit) {
+      layoutAxisEdit = axisHit.axis;
+      layoutAxisEditDrag = null;
+      updateUiHint();
+      draw();
+    }
+    return;
+  }
+  if (axisHit) {
+    layoutAxisEdit = axisHit.axis;
+    layoutAxisEditDrag = null;
+    updateUiHint();
+    draw();
+    return;
+  }
+  const hit = hitTestScreen(screenPoint);
+  if (!hit) {
+    return;
+  }
+  const shapes = ["circle", "square", "triangle", "diamond"];
+  const current = getLayoutNodeShape(hit);
+  const index = shapes.indexOf(current);
+  const next = shapes[(index + 1) % shapes.length];
+  if (next === layoutNodeShape) {
+    layoutNodeShapes.delete(hit.id);
+  } else {
+    layoutNodeShapes.set(hit.id, next);
+  }
+  draw();
+  schedulePresetUrlUpdate();
+}
+
 function onPointerMove(event) {
   view.lastPointer = { x: event.offsetX, y: event.offsetY };
+  if (layoutMode && layoutAxisEditDrag) {
+    const info = getAxisLegendInfo(layoutAxisEditDrag.axis);
+    if (info) {
+      layoutAxisAngles[layoutAxisEditDrag.axis] = Math.atan2(
+        event.offsetY - info.center.y,
+        event.offsetX - info.center.x
+      );
+      draw();
+    }
+    return;
+  }
+  if (layoutMode && layoutAxisDrag) {
+    const { left, top, width, height } = getLayoutPageRect();
+    const { margin } = getAxisLegendSettings();
+    let baseX = left + width / 2;
+    let baseY = top + height - margin;
+    if (layoutAxisDrag.axis === "y") {
+      baseX = left + width - margin;
+      baseY = top + height / 2;
+    } else if (layoutAxisDrag.axis === "z") {
+      baseX = left + margin;
+      baseY = top + height / 2;
+    }
+    layoutAxisOffsets[layoutAxisDrag.axis] = {
+      x: event.offsetX + layoutAxisDrag.offsetX - baseX,
+      y: event.offsetY + layoutAxisDrag.offsetY - baseY,
+    };
+    draw();
+    return;
+  }
+  if (layoutMode && layoutLabelDrag) {
+    const node = nodeById.get(layoutLabelDrag.nodeId);
+    if (node) {
+      const disableScale = layoutUnifyNodeSize;
+      const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+      const labelX = event.offsetX + layoutLabelDrag.offsetX;
+      const labelY = event.offsetY + layoutLabelDrag.offsetY;
+      const scale = pos.scale || 1;
+      layoutLabelOffsets.set(node.id, {
+        x: (labelX - pos.x) / (view.zoom * scale),
+        y: (labelY - pos.y) / (view.zoom * scale),
+      });
+      draw();
+    }
+    return;
+  }
+  if (layoutMode && layoutDrag) {
+    const node = nodeById.get(layoutDrag.nodeId);
+    if (node) {
+      const worldPoint = screenToWorld({ x: event.offsetX, y: event.offsetY });
+      const coord = getNodeDisplayCoordinate(node);
+      layoutPositions.set(node.id, {
+        x: worldPoint.x + layoutDrag.offsetX,
+        y: worldPoint.y + layoutDrag.offsetY,
+        z: Number.isFinite(coord.z) ? coord.z : 0,
+      });
+      draw();
+    }
+    return;
+  }
   if (customDrag) {
     const node = nodeById.get(customDrag.nodeId);
     if (node) {
@@ -3026,8 +4672,34 @@ function onPointerMove(event) {
 }
 
 function onPointerUp(event) {
+  if (suppressClickAfterRespell) {
+    suppressClickAfterRespell = false;
+    return;
+  }
   if (customDragJustPlaced) {
     customDragJustPlaced = false;
+    return;
+  }
+  if (layoutLabelDrag) {
+    layoutLabelDrag = null;
+    return;
+  }
+  if (layoutAxisEditDrag) {
+    layoutAxisEditDrag = null;
+    return;
+  }
+  if (layoutAxisDrag) {
+    layoutAxisDrag = null;
+    return;
+  }
+  if (layoutDrag) {
+    layoutDrag = null;
+    return;
+  }
+  if (layoutMode) {
+    if (view.dragging) {
+      view.dragging = false;
+    }
     return;
   }
   if (customDrag) {
@@ -3175,6 +4847,10 @@ function onPointerLeave() {
   hoverNodeId = null;
   lfoArmingId = null;
   customDrag = null;
+  layoutDrag = null;
+  layoutLabelDrag = null;
+  layoutAxisDrag = null;
+  layoutAxisEditDrag = null;
   view.rotating = false;
   if (view.dragging) {
     view.dragging = false;
@@ -3201,6 +4877,9 @@ function onWheel(event) {
   draw();
   markIsomorphicDirty();
   schedulePresetUrlUpdate();
+  if (layoutMode) {
+    syncLayoutScaleInput();
+  }
 }
 
 function isInactiveNodeAvailable(node) {
@@ -3215,7 +4894,7 @@ function isInactiveNodeAvailable(node) {
 }
 
 function hitTestScreen(screenPoint) {
-  const radius = 36 / view.zoom;
+  const radius = layoutMode ? layoutNodeSize : 36 / view.zoom;
   let best = null;
   let bestDistance = Number.POSITIVE_INFINITY;
   let bestDepth = Number.NEGATIVE_INFINITY;
@@ -3228,7 +4907,10 @@ function hitTestScreen(screenPoint) {
     ) {
       return;
     }
-    const projected = worldToScreen(node.coordinate);
+    const projected = worldToScreen(
+      getNodeDisplayCoordinate(node),
+      layoutMode && layoutUnifyNodeSize
+    );
     const dx = projected.x - screenPoint.x;
     const dy = projected.y - screenPoint.y;
     const distance = Math.hypot(dx, dy);
@@ -3248,6 +4930,109 @@ function hitTestScreen(screenPoint) {
   });
 
   return best;
+}
+
+function hitTestNoteLabel(screenPoint) {
+  if (!layoutMode) {
+    return null;
+  }
+  const disableScale = layoutUnifyNodeSize;
+  let hit = null;
+  nodes.forEach((node) => {
+    if (!(node.isCenter || node.active || node.isCustom)) {
+      return;
+    }
+    const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+    const radius = layoutNodeSize * (pos.scale || 1);
+    const labelPos = getLayoutNoteLabelPosition(node, pos, radius);
+    let width = 0;
+    let height = layoutNoteTextSize;
+    if (featureMode === "ratio") {
+      ctx.save();
+      ctx.font = `${layoutNoteTextSize}px ${layoutNoteFont}`;
+      const metrics = ctx.measureText(getNodeNoteLabel(node));
+      ctx.restore();
+      width = metrics.width;
+    } else {
+      const ratioText = `${node.numerator}:${node.denominator}`;
+      const centsLabel = buildCentsReadout(node, { wrap: true });
+      width = Math.max(
+        measureTextWidthWithWeight(ratioText, layoutNoteTextSize, "Lexend, sans-serif", 200),
+        measureTextWidthWithWeight(centsLabel, layoutNoteTextSize, "Lexend, sans-serif", 200)
+      );
+      height = layoutNoteTextSize * 2 + 4;
+    }
+    if (
+      screenPoint.x >= labelPos.x &&
+      screenPoint.x <= labelPos.x + width &&
+      screenPoint.y >= labelPos.y &&
+      screenPoint.y <= labelPos.y + height
+    ) {
+      hit = { node, labelPos };
+    }
+  });
+  return hit;
+}
+
+function hitTestAxisLegend(screenPoint) {
+  if (!layoutMode) {
+    return null;
+  }
+  const settings = getAxisLegendSettings();
+  const axes = [
+    getAxisLegendInfo("x", settings),
+    getAxisLegendInfo("y", settings),
+    getAxisLegendInfo("z", settings),
+  ];
+  ctx.save();
+  ctx.font = `${settings.fontSize}px ${layoutRatioFont}`;
+  for (const axis of axes) {
+    if (!axis) {
+      continue;
+    }
+    const labelWidth = ctx.measureText(axis.label).width;
+    const halfW = labelWidth / 2 + 12;
+    const halfH = settings.fontSize / 2 + 8;
+    const angle = axis.textAngle;
+    const dx = screenPoint.x - axis.center.x;
+    const dy = screenPoint.y - axis.center.y;
+    const cos = Math.cos(-angle);
+    const sin = Math.sin(-angle);
+    const rx = dx * cos - dy * sin;
+    const ry = dx * sin + dy * cos;
+    if (Math.abs(rx) <= halfW && Math.abs(ry) <= halfH) {
+      ctx.restore();
+      return axis;
+    }
+  }
+  ctx.restore();
+  return null;
+}
+
+function hitTestAxisLegendHandle(screenPoint) {
+  if (!layoutMode || !layoutAxisEdit) {
+    return null;
+  }
+  const info = getAxisLegendInfo(layoutAxisEdit);
+  if (!info) {
+    return null;
+  }
+  const handleRadius = Math.max(8, Math.round(info.fontSize * 0.65));
+  const distLeft = Math.hypot(
+    screenPoint.x - info.leftEnd.x,
+    screenPoint.y - info.leftEnd.y
+  );
+  if (distLeft <= handleRadius) {
+    return { axis: info.axis };
+  }
+  const distRight = Math.hypot(
+    screenPoint.x - info.rightEnd.x,
+    screenPoint.y - info.rightEnd.y
+  );
+  if (distRight <= handleRadius) {
+    return { axis: info.axis };
+  }
+  return null;
 }
 
 function resizeCanvas() {
@@ -3555,7 +5340,7 @@ function drawRatioWheel(canvasEl, options = {}) {
   }
 
   if (showLabels) {
-    const fontSize = Math.max(9, Math.round(width * 0.04));
+    const fontSize = Math.max(9, Math.round(width * 0.03));
     ctx2d.fillStyle = themeColors.wheelText;
     ctx2d.font = `${fontSize}px Georgia`;
     ctx2d.textAlign = "center";
@@ -3566,13 +5351,23 @@ function drawRatioWheel(canvasEl, options = {}) {
 
     angles.forEach((item) => {
       const noteInfo = getNearestEtInfo(fundamental * item.ratio, a4);
-      const centsRounded = Math.round(noteInfo.cents);
-      const centsLabel = `${centsRounded >= 0 ? "+" : ""}${centsRounded}¢`;
-      const label = `${noteInfo.pitchClass} ${centsLabel}`;
-      const labelRadius = radius + fontSize * 1.5;
+      const label = `${noteInfo.pitchClass} ${formatCents(noteInfo.cents)}`;
+      const labelRadius = radius + fontSize * 1.2;
       const lx = cx + Math.cos(item.angle) * labelRadius;
       const ly = cy + Math.sin(item.angle) * labelRadius;
-      ctx2d.fillText(label, lx, ly);
+      drawTextWithSmallCent({
+        text: label,
+        x: lx,
+        y: ly,
+        font: "Georgia",
+        size: fontSize,
+        align: "center",
+        baseline: "middle",
+        hejiAccidentals: hejiEnabled,
+        hejiYOffset: Math.round(fontSize * HEJI_SUFFIX_Y_OFFSET),
+        context: ctx2d,
+        color: themeColors.wheelText,
+      });
     });
   }
 
@@ -3616,18 +5411,27 @@ function updateUiHint() {
   if (!uiHint) {
     return;
   }
+  if (layoutMode) {
+    if (layoutAxisEdit) {
+      uiHint.textContent = "Editing axis legend. Press ESC to exit.\n(click to hide)";
+      return;
+    }
+    uiHint.textContent =
+      "Layout mode: drag nodes to reposition. Drag note labels to move them. Double-click a node to change shape. Drag empty space to pan. Scroll to scale. Hold R and click to respell.\n(click to hide)";
+    return;
+  }
   if (keyboardModeSelect && keyboardModeSelect.value === "piano") {
     uiHint.textContent =
-      "Two octave piano layout, starting on Z (as C) and Y (C an octave higher)\n(click to hide)";
+      "Two octave piano layout, starting on Z (as C) and Y (C an octave higher). Hold R and click to respell.\n(click to hide)";
     return;
   }
   if (!is3DMode) {
     uiHint.textContent =
-      "Drag to pan. Scroll to zoom. Shift-click to add. Option-click to remove. Shift double-click & hold for LFO.\n(click to hide)";
+      "Click to play. Shift double-click & hold to start LFO.\n Shift-click to add. Option-click to remove. Hold R and click to respell.\nDrag to pan. Scroll to zoom.\n(click to hide)";
     return;
   }
   uiHint.textContent =
-    "3D Mode:\nShift-click to add\nOption-click to remove\nZ-click a node to access Z axis for that node\nClick-drag to rotate\nShift double-click & hold for LFO\nArrow keys to pan\nScroll to zoom\n(click to hide)";
+    "3D Mode:\nShift-click to add\nOption-click to remove\nZ-click a node to access Z axis for that node\nClick-drag to rotate\nShift double-click & hold for LFO\nHold R and click to respell\nArrow keys to pan\nScroll to zoom\n(click to hide)";
 }
 
 function updateZModeMessage() {
@@ -3637,6 +5441,9 @@ function updateZModeMessage() {
   if (!zModeActive || !zModeAnchor) {
     zModeMessage.hidden = true;
     zModeMessage.textContent = "";
+    if (uiHint) {
+      uiHint.hidden = false;
+    }
     return;
   }
   const centerX = Math.floor(GRID_COLS / 2);
@@ -3645,6 +5452,9 @@ function updateZModeMessage() {
   const coordY = centerY - zModeAnchor.y;
   zModeMessage.textContent = `Editing Z axis for node [${coordX},${coordY}]: press Escape to return`;
   zModeMessage.hidden = false;
+  if (uiHint) {
+    uiHint.hidden = true;
+  }
 }
 
 function updateAddModeFromShift() {
@@ -3658,15 +5468,219 @@ function updateAddModeFromShift() {
   }
 }
 
+function updateLayoutScaleReadout() {
+  if (!layoutScaleReadout) {
+    return;
+  }
+  const clamped = Math.min(2, Math.max(0.5, view.zoom));
+  layoutScaleReadout.textContent = `${Math.round(clamped * 100)}%`;
+}
+
+function updateLayoutNodeSizeReadout() {
+  if (!layoutNodeSizeReadout) {
+    return;
+  }
+  layoutNodeSizeReadout.textContent = `${Math.round(layoutNodeSize)} px`;
+}
+
+function updateLayoutRatioTextReadout() {
+  if (!layoutRatioTextReadout) {
+    return;
+  }
+  layoutRatioTextReadout.textContent = `${Math.round(layoutRatioTextSize)} px`;
+}
+
+function updateLayoutNoteTextReadout() {
+  if (!layoutNoteTextReadout) {
+    return;
+  }
+  layoutNoteTextReadout.textContent = `${Math.round(layoutNoteTextSize)} px`;
+}
+
+function updateLayoutTitleMarginReadout() {
+  if (!layoutTitleMarginReadout) {
+    return;
+  }
+  layoutTitleMarginReadout.textContent = `${Math.round(layoutTitleMargin)} px`;
+}
+
+function updateLayoutTitleSizeReadout() {
+  if (!layoutTitleSizeReadout) {
+    return;
+  }
+  layoutTitleSizeReadout.textContent = `${Math.round(layoutTitleSize)} px`;
+}
+
+function syncLayoutScaleInput() {
+  if (!layoutScaleInput) {
+    return;
+  }
+  const clamped = Math.min(2, Math.max(0.5, view.zoom));
+  layoutScaleInput.value = clamped.toFixed(2);
+  updateLayoutScaleReadout();
+}
+
+function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
+  layoutPositions.clear();
+  layoutLabelOffsets.clear();
+  layoutNodeShapes.clear();
+  layoutAxisOffsets = {
+    x: { x: 0, y: 0 },
+    y: { x: 0, y: 0 },
+    z: { x: 0, y: 0 },
+  };
+  layoutAxisAngles = {
+    x: null,
+    y: null,
+    z: null,
+  };
+  layoutAxisEdit = null;
+  layoutAxisEditDrag = null;
+  if (resetSettings) {
+    layoutNodeSize = LAYOUT_DEFAULTS.nodeSize;
+    layoutRatioTextSize = LAYOUT_DEFAULTS.ratioTextSize;
+    layoutNoteTextSize = LAYOUT_DEFAULTS.noteTextSize;
+    layoutNodeShape = LAYOUT_DEFAULTS.nodeShape;
+    layoutTitle = LAYOUT_DEFAULTS.title;
+    layoutTitleSize = LAYOUT_DEFAULTS.titleSize;
+    layoutTitleMargin = LAYOUT_DEFAULTS.titleMargin;
+    layoutUnifyNodeSize = LAYOUT_DEFAULTS.unifyNodeSize;
+    layoutPageSize = LAYOUT_DEFAULTS.pageSize;
+    layoutOrientation = LAYOUT_DEFAULTS.orientation;
+    layoutTitleFont = LAYOUT_DEFAULTS.titleFont;
+    layoutRatioFont = LAYOUT_DEFAULTS.ratioFont;
+    layoutNoteFont = LAYOUT_DEFAULTS.noteFont;
+    if (layoutTitleInput) {
+      layoutTitleInput.value = layoutTitle;
+    }
+    if (layoutTitleSizeInput) {
+      layoutTitleSizeInput.value = String(layoutTitleSize);
+    }
+    if (layoutTitleMarginInput) {
+      layoutTitleMarginInput.value = String(layoutTitleMargin);
+    }
+    if (layoutPageSizeSelect) {
+      layoutPageSizeSelect.value = layoutPageSize;
+    }
+    if (layoutOrientationSelect) {
+      layoutOrientationSelect.value = layoutOrientation;
+    }
+    if (layoutNodeSizeInput) {
+      layoutNodeSizeInput.value = String(layoutNodeSize);
+    }
+    if (layoutRatioTextSizeInput) {
+      layoutRatioTextSizeInput.value = String(layoutRatioTextSize);
+    }
+    if (layoutNoteTextSizeInput) {
+      layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
+    }
+    if (layoutTitleFontSelect) {
+      layoutTitleFontSelect.value = layoutTitleFont;
+    }
+    if (layoutRatioFontSelect) {
+      layoutRatioFontSelect.value = layoutRatioFont;
+    }
+    if (layoutNoteFontSelect) {
+      layoutNoteFontSelect.value = layoutNoteFont;
+    }
+    if (layoutNodeShapeSelect) {
+      layoutNodeShapeSelect.value = layoutNodeShape;
+    }
+    if (layoutUnifySizeToggle) {
+      layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
+    }
+    updateLayoutNodeSizeReadout();
+    updateLayoutRatioTextReadout();
+    updateLayoutNoteTextReadout();
+    updateLayoutTitleSizeReadout();
+    updateLayoutTitleMarginReadout();
+    syncLayoutFontVars();
+  }
+  if (resetView) {
+    view.zoom = LAYOUT_DEFAULTS.zoom;
+    view.offsetX = 0;
+    view.offsetY = 0;
+    syncLayoutScaleInput();
+  }
+  draw();
+}
+
+function setLayoutMode(enabled) {
+  if (layoutMode === enabled) {
+    return;
+  }
+  if (enabled) {
+    layoutPrevState = {
+      is3DMode,
+      showAxes,
+      showGrid,
+      zoom: view.zoom,
+      offsetX: view.offsetX,
+      offsetY: view.offsetY,
+      rotX: view.rotX,
+      rotY: view.rotY,
+    };
+  }
+  layoutMode = enabled;
+  if (layoutModeToggle) {
+    layoutModeToggle.checked = enabled;
+  }
+  if (layoutPanel) {
+    layoutPanel.hidden = !enabled;
+  }
+  if (synthPanel) {
+    synthPanel.hidden = enabled;
+  }
+  updateNavPanelVisibility();
+  if (enabled) {
+    if (mode3dCheckbox) {
+      mode3dCheckbox.checked = false;
+    }
+    set3DMode(false);
+    layoutAxisEdit = null;
+    layoutAxisEditDrag = null;
+    nodes.forEach((node) => ensureLayoutPosition(node));
+    syncLayoutScaleInput();
+    updateLayoutNodeSizeReadout();
+    updateLayoutRatioTextReadout();
+    updateLayoutNoteTextReadout();
+    updateLayoutTitleSizeReadout();
+    updateLayoutTitleMarginReadout();
+    draw();
+  } else if (layoutPrevState) {
+    layoutAxisEdit = null;
+    layoutAxisEditDrag = null;
+    showAxes = layoutPrevState.showAxes;
+    showGrid = layoutPrevState.showGrid;
+    if (navAxesToggle) {
+      navAxesToggle.checked = showAxes;
+    }
+    if (navGridToggle) {
+      navGridToggle.checked = showGrid;
+    }
+    view.zoom = layoutPrevState.zoom;
+    view.offsetX = layoutPrevState.offsetX;
+    view.offsetY = layoutPrevState.offsetY;
+    view.rotX = layoutPrevState.rotX;
+    view.rotY = layoutPrevState.rotY;
+    if (mode3dCheckbox) {
+      mode3dCheckbox.checked = layoutPrevState.is3DMode;
+    }
+    set3DMode(layoutPrevState.is3DMode);
+    layoutPrevState = null;
+  } else {
+    draw();
+  }
+  updateUiHint();
+}
+
 function set3DMode(enabled) {
   const activeKeys = captureActiveNodeKeys();
   const had3DNodes = gridDepth > 1;
   is3DMode = enabled;
   isFlattened2D = !enabled && had3DNodes;
   markIsomorphicDirty();
-  if (nav3dPanel) {
-    nav3dPanel.hidden = !enabled;
-  }
+  updateNavPanelVisibility();
   if (ratioZSelect) {
     ratioZSelect.hidden = false;
   }
@@ -3731,6 +5745,23 @@ function applyNavAction(action) {
     view.zoom = Math.min(2.2, view.zoom * 1.1);
   } else if (action === "zoom-out") {
     view.zoom = Math.max(0.5, view.zoom / 1.1);
+  } else if (action === "reset-view") {
+    view.offsetX = 0;
+    view.offsetY = 0;
+    view.zoom = 1;
+    if (is3DMode) {
+      view.rotX = 0;
+      view.rotY = 0;
+    }
+  } else if (action === "fit-view") {
+    if (is3DMode) {
+      applyBestView();
+      schedulePresetUrlUpdate();
+      return;
+    }
+    fitViewToActiveNodes2D();
+    schedulePresetUrlUpdate();
+    return;
   } else if (action === "best-view") {
     applyBestView();
     schedulePresetUrlUpdate();
@@ -3739,6 +5770,58 @@ function applyNavAction(action) {
   draw();
   markIsomorphicDirty();
   schedulePresetUrlUpdate();
+}
+
+function fitViewToActiveNodes2D() {
+  if (is3DMode) {
+    return;
+  }
+  const activeNodes = nodes.filter((node) => node.active);
+  if (!activeNodes.length) {
+    return;
+  }
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  activeNodes.forEach((node) => {
+    const radius = getNodeRadius(node);
+    minX = Math.min(minX, node.coordinate.x - radius);
+    maxX = Math.max(maxX, node.coordinate.x + radius);
+    minY = Math.min(minY, node.coordinate.y - radius);
+    maxY = Math.max(maxY, node.coordinate.y + radius);
+  });
+  const topBar = document.querySelector(".top-bar");
+  const leftNav = document.getElementById("nav-3d");
+  const synthPanel = document.querySelector(".synth-panel");
+  const topBarRect = topBar ? topBar.getBoundingClientRect() : null;
+  const leftNavRect =
+    leftNav && !leftNav.hidden ? leftNav.getBoundingClientRect() : null;
+  const synthRect = synthPanel ? synthPanel.getBoundingClientRect() : null;
+  const safeTop = topBarRect ? topBarRect.height : 0;
+  const safeLeft = leftNavRect ? leftNavRect.width : 0;
+  const safeBottom = synthRect ? synthRect.height : 0;
+  const safeRight = 0;
+  const padding = 80;
+  const labelBuffer = 140;
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const availableWidth = Math.max(
+    1,
+    canvas.clientWidth - safeLeft - safeRight - padding - labelBuffer
+  );
+  const availableHeight = Math.max(1, canvas.clientHeight - safeTop - safeBottom - padding);
+  const zoomX = availableWidth / width;
+  const zoomY = availableHeight / height;
+  view.zoom = Math.min(2.2, Math.max(0.5, Math.min(zoomX, zoomY)));
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const targetCenterX = safeLeft + (canvas.clientWidth - safeLeft - safeRight) / 2;
+  const targetCenterY = safeTop + (canvas.clientHeight - safeTop - safeBottom) / 2;
+  view.offsetX = (targetCenterX - canvas.clientWidth / 2) / view.zoom - centerX;
+  view.offsetY = (targetCenterY - canvas.clientHeight / 2) / view.zoom - centerY;
+  draw();
+  markIsomorphicDirty();
 }
 
 function applyBestView() {
@@ -3896,6 +5979,11 @@ function refreshThemeColors() {
     nodeActive: styles.getPropertyValue("--node-active").trim() || "#c94b3d",
     textPrimary: styles.getPropertyValue("--text-primary").trim() || "#1e1e1e",
     textSecondary: styles.getPropertyValue("--text-secondary").trim() || "#2a2a2a",
+    page: styles.getPropertyValue("--page").trim() || "#ffffff",
+    pageBorder:
+      styles.getPropertyValue("--page-border").trim() || "rgba(16, 19, 22, 0.15)",
+    pageShadow:
+      styles.getPropertyValue("--page-shadow").trim() || "rgba(16, 19, 22, 0.18)",
     lfo: styles.getPropertyValue("--lfo").trim() || "#3b82f6",
     playFill: styles.getPropertyValue("--play-fill").trim() || "#f3d64d",
     looperFill: styles.getPropertyValue("--looper-fill").trim() || "#f1c94a",
@@ -3903,6 +5991,23 @@ function refreshThemeColors() {
     wheelRing: styles.getPropertyValue("--wheel-ring").trim() || "rgba(16, 19, 22, 0.2)",
     wheelText: styles.getPropertyValue("--wheel-text").trim() || "#000000",
   };
+}
+
+function initLayoutFonts() {
+  const styles = getComputedStyle(document.documentElement);
+  layoutTitleFont = styles.getPropertyValue("--font-title").trim() || "Georgia";
+  layoutRatioFont = styles.getPropertyValue("--font-ratio").trim() || "Georgia";
+  layoutNoteFont = styles.getPropertyValue("--font-note").trim() || "Georgia";
+  if (layoutTitleFontSelect) {
+    layoutTitleFontSelect.value = layoutTitleFont;
+  }
+  if (layoutRatioFontSelect) {
+    layoutRatioFontSelect.value = layoutRatioFont;
+  }
+  if (layoutNoteFontSelect) {
+    layoutNoteFontSelect.value = layoutNoteFont;
+  }
+  syncLayoutFontVars();
 }
 
 function applyTheme(theme) {
@@ -4230,13 +6335,37 @@ function getPresetState() {
     },
     axes: showAxes,
     grid: showGrid,
+    circles: showCircles,
     ratios: [
       Number(ratioXSelect.value) || 3,
       Number(ratioYSelect.value) || 5,
       Number(ratioZSelect.value) || 7,
     ],
+    noteSpellings: Array.from(nodeSpellingOverrides.entries()),
     fundamental: Number(fundamentalInput.value) || 220,
     a4: Number(a4Input.value) || 440,
+    layout: {
+      mode: layoutMode,
+      title: layoutTitle,
+      titleSize: layoutTitleSize,
+      nodeSize: layoutNodeSize,
+      ratioTextSize: layoutRatioTextSize,
+      noteTextSize: layoutNoteTextSize,
+      titleMargin: layoutTitleMargin,
+      titleFont: layoutTitleFont,
+      ratioFont: layoutRatioFont,
+      noteFont: layoutNoteFont,
+      nodeShape: layoutNodeShape,
+      unifyNodeSize: layoutUnifyNodeSize,
+      pageSize: layoutPageSize,
+      orientation: layoutOrientation,
+      zoom: view.zoom,
+    },
+    featureMode,
+    showHz,
+    showCentsSign,
+    hejiEnabled,
+    centsPrecision,
     synth: {
       volume: Number(volumeSlider.value),
       lfoDepth: Number(lfoDepthSlider.value),
@@ -4307,6 +6436,12 @@ function applyPresetState(state) {
       navGridToggle.checked = showGrid;
     }
   }
+  if (typeof state.circles === "boolean") {
+    showCircles = state.circles;
+    if (navCirclesToggle) {
+      navCirclesToggle.checked = showCircles;
+    }
+  }
   const viewState = state.view && typeof state.view === "object" ? state.view : null;
   const activeHasZ = Array.isArray(state.active)
     ? state.active.some((entry) => Array.isArray(entry) && Number(entry[2]) !== 0)
@@ -4317,9 +6452,7 @@ function applyPresetState(state) {
   }
   is3DMode = wants3D;
   isFlattened2D = false;
-  if (nav3dPanel) {
-    nav3dPanel.hidden = !wants3D;
-  }
+  updateNavPanelVisibility();
   if (ratioZSelect) {
     ratioZSelect.hidden = false;
   }
@@ -4346,6 +6479,18 @@ function applyPresetState(state) {
     if (Number.isFinite(z) && ratioZSelect) {
       ratioZSelect.value = String(z);
     }
+  }
+  if (Array.isArray(state.noteSpellings)) {
+    nodeSpellingOverrides = new Map();
+    state.noteSpellings.forEach((entry) => {
+      if (!Array.isArray(entry) || entry.length < 2) {
+        return;
+      }
+      const [nodeId, spelling] = entry;
+      if (spelling === "flat") {
+        nodeSpellingOverrides.set(nodeId, "flat");
+      }
+    });
   }
 
   if (state.synth && typeof state.synth === "object") {
@@ -4406,6 +6551,154 @@ function applyPresetState(state) {
     }
     if (Number.isFinite(viewState.rotY)) {
       view.rotY = viewState.rotY;
+    }
+  }
+
+  const layoutState = state.layout && typeof state.layout === "object" ? state.layout : null;
+  if (layoutState) {
+    if (typeof layoutState.title === "string") {
+      layoutTitle = layoutState.title;
+      if (layoutTitleInput) {
+        layoutTitleInput.value = layoutTitle;
+      }
+    }
+    if (Number.isFinite(layoutState.titleSize)) {
+      layoutTitleSize = layoutState.titleSize;
+      if (layoutTitleSizeInput) {
+        layoutTitleSizeInput.value = String(layoutTitleSize);
+      }
+      updateLayoutTitleSizeReadout();
+    }
+    if (
+      Number.isFinite(layoutState.textScale) &&
+      !Number.isFinite(layoutState.ratioTextSize) &&
+      !Number.isFinite(layoutState.noteTextSize)
+    ) {
+      layoutRatioTextSize = Math.max(10, Math.round(21 * layoutState.textScale));
+      layoutNoteTextSize = Math.max(8, Math.round(11 * layoutState.textScale));
+      if (layoutRatioTextSizeInput) {
+        layoutRatioTextSizeInput.value = String(layoutRatioTextSize);
+      }
+      if (layoutNoteTextSizeInput) {
+        layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
+      }
+      updateLayoutRatioTextReadout();
+      updateLayoutNoteTextReadout();
+    }
+    if (Number.isFinite(layoutState.nodeSize)) {
+      layoutNodeSize = layoutState.nodeSize;
+      if (layoutNodeSizeInput) {
+        layoutNodeSizeInput.value = String(layoutNodeSize);
+      }
+      updateLayoutNodeSizeReadout();
+    }
+    if (Number.isFinite(layoutState.ratioTextSize)) {
+      layoutRatioTextSize = layoutState.ratioTextSize;
+      if (layoutRatioTextSizeInput) {
+        layoutRatioTextSizeInput.value = String(layoutRatioTextSize);
+      }
+      updateLayoutRatioTextReadout();
+    }
+    if (Number.isFinite(layoutState.noteTextSize)) {
+      layoutNoteTextSize = layoutState.noteTextSize;
+      if (layoutNoteTextSizeInput) {
+        layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
+      }
+      updateLayoutNoteTextReadout();
+    }
+    if (Number.isFinite(layoutState.titleMargin)) {
+      layoutTitleMargin = layoutState.titleMargin;
+      if (layoutTitleMarginInput) {
+        layoutTitleMarginInput.value = String(layoutTitleMargin);
+      }
+      updateLayoutTitleMarginReadout();
+    }
+    if (typeof layoutState.titleFont === "string") {
+      layoutTitleFont = layoutState.titleFont;
+      if (layoutTitleFontSelect) {
+        layoutTitleFontSelect.value = layoutTitleFont;
+      }
+    }
+    if (typeof layoutState.ratioFont === "string") {
+      layoutRatioFont = layoutState.ratioFont;
+      if (layoutRatioFontSelect) {
+        layoutRatioFontSelect.value = layoutRatioFont;
+      }
+    }
+    if (typeof layoutState.noteFont === "string") {
+      layoutNoteFont = layoutState.noteFont;
+      if (layoutNoteFontSelect) {
+        layoutNoteFontSelect.value = layoutNoteFont;
+      }
+    }
+    syncLayoutFontVars();
+    if (typeof layoutState.nodeShape === "string") {
+      layoutNodeShape = layoutState.nodeShape;
+      if (layoutNodeShapeSelect) {
+        layoutNodeShapeSelect.value = layoutNodeShape;
+      }
+    }
+    if (typeof layoutState.unifyNodeSize === "boolean") {
+      layoutUnifyNodeSize = layoutState.unifyNodeSize;
+      if (layoutUnifySizeToggle) {
+        layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
+      }
+    }
+    if (typeof layoutState.pageSize === "string") {
+      layoutPageSize = layoutState.pageSize;
+      if (layoutPageSizeSelect) {
+        layoutPageSizeSelect.value = layoutPageSize;
+      }
+    }
+    if (typeof layoutState.orientation === "string") {
+      layoutOrientation = layoutState.orientation;
+      if (layoutOrientationSelect) {
+        layoutOrientationSelect.value = layoutOrientation;
+      }
+    }
+    if (Number.isFinite(layoutState.zoom)) {
+      view.zoom = Math.min(2.2, Math.max(0.5, layoutState.zoom));
+      syncLayoutScaleInput();
+    }
+    if (typeof layoutState.mode === "boolean") {
+      setLayoutMode(layoutState.mode);
+    }
+  }
+
+  if (typeof state.featureMode === "string") {
+    featureMode = state.featureMode === "note" ? "note" : "ratio";
+    if (featureModeInputs.length) {
+      featureModeInputs.forEach((input) => {
+        input.checked = input.value === featureMode;
+      });
+    }
+  }
+  if (typeof state.showHz === "boolean") {
+    showHz = state.showHz;
+    if (showHzToggle) {
+      showHzToggle.checked = showHz;
+    }
+  }
+  if (typeof state.showCentsSign === "boolean") {
+    showCentsSign = state.showCentsSign;
+    if (showCentsSignToggle) {
+      showCentsSignToggle.checked = showCentsSign;
+    }
+  }
+  if (typeof state.hejiEnabled === "boolean") {
+    hejiEnabled = state.hejiEnabled;
+    if (hejiEnabledToggle) {
+      hejiEnabledToggle.checked = hejiEnabled;
+    }
+  }
+  if (Number.isFinite(state.centsPrecision)) {
+    centsPrecision = Math.min(3, Math.max(0, Math.round(state.centsPrecision)));
+    if (centsPrecisionInputs.length) {
+      centsPrecisionInputs.forEach((input) => {
+        input.checked = Number(input.value) === centsPrecision;
+      });
+    } else if (centsPrecisionInput) {
+      centsPrecisionInput.value = String(centsPrecision);
     }
   }
 
@@ -4504,6 +6797,488 @@ async function exportToScaleWorkshop() {
   }
 }
 
+function escapeSvgText(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function buildHejiSvgText({
+  x,
+  y,
+  baseText,
+  suffix,
+  restText,
+  font,
+  size,
+  anchor,
+  baseline,
+  color,
+}) {
+  const baseSpan = `<tspan>${escapeSvgText(baseText)}</tspan>`;
+  const suffixSpan = suffix
+    ? `<tspan font-family="HEJI2Text">${escapeSvgText(suffix)}</tspan>`
+    : "";
+  const restSpan = restText ? `<tspan>${escapeSvgText(restText)}</tspan>` : "";
+  return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
+    font
+  )}" font-size="${size}" fill="${color}">${baseSpan}${suffixSpan}${restSpan}</text>`;
+}
+
+function buildHejiSvgInline({
+  x,
+  y,
+  baseText,
+  suffixParts,
+  restText,
+  font,
+  size,
+  align,
+  baseline,
+  hejiYOffset = 0,
+  restGapScale = HEJI_REST_GAP,
+  restHejiAccidentals = false,
+  fontWeight = 400,
+  color,
+}) {
+  const suffixSpacing = Math.round(size * 0.08);
+  const partGap = Math.round(size * 0.1);
+  const baseSuffixGap = Math.round(size * 0.12);
+  const restGap = Math.round(size * restGapScale);
+  const baseWidth = ctx.measureText(baseText).width;
+  const parts = Array.isArray(suffixParts) ? suffixParts : [];
+  const suffixWidth = parts.reduce((sum, part, index) => {
+    const partWidth = measureSuffixPartWidth(part, size, suffixSpacing, fontWeight);
+    return sum + partWidth + (index > 0 ? partGap : 0);
+  }, 0);
+  const restWidth = restText ? ctx.measureText(restText).width : 0;
+  const totalWidth =
+    baseWidth +
+    (parts.length ? baseSuffixGap + suffixWidth : 0) +
+    (restText ? restGap + restWidth : 0);
+  let startX = x;
+  if (align === "center") {
+    startX = x - totalWidth / 2;
+  } else if (align === "right") {
+    startX = x - totalWidth;
+  }
+
+  const nodes = [];
+  nodes.push(
+    `<text x="${startX}" y="${y}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
+      font
+    )}" font-size="${size}" font-weight="${fontWeight}" fill="${color}">${escapeSvgText(
+      baseText
+    )}</text>`
+  );
+
+  let cursorX = startX + baseWidth;
+  if (parts.length) {
+    cursorX += baseSuffixGap;
+    parts.forEach((part, partIndex) => {
+      if (partIndex > 0) {
+        cursorX += partGap;
+      }
+      const partCharGap = Number.isFinite(part.charGap) ? part.charGap : suffixSpacing;
+      const partStartX = cursorX;
+      const partWidth = measureSuffixPartWidth(part, size, suffixSpacing, fontWeight);
+      const partFont = part.font || "HEJI2Text";
+      const partWeight = Number.isFinite(part.fontWeight)
+        ? part.fontWeight
+        : part.font
+        ? fontWeight
+        : 400;
+      const partYOffset =
+        typeof part.yOffset === "number" ? part.yOffset : hejiYOffset;
+      const sizeScale = Number.isFinite(part.sizeScale) ? part.sizeScale : 1;
+      Array.from(part.text).forEach((char, index) => {
+        if (index > 0) {
+          cursorX += partCharGap;
+        }
+        const baseSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
+        const charSize = Math.max(6, Math.round(baseSize * sizeScale));
+        nodes.push(
+          `<text x="${cursorX}" y="${y + partYOffset}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
+            partFont
+          )}" font-size="${charSize}" font-weight="${partWeight}" fill="${color}">${escapeSvgText(
+            char
+          )}</text>`
+        );
+        cursorX += measureCharWidth(char, charSize, partFont, partWeight);
+      });
+      if (part.expLabel) {
+        const expSize = Math.max(8, Math.round(size * 0.55));
+        const expY =
+          y +
+          (typeof part.yOffset === "number" ? part.yOffset : hejiYOffset) +
+          getExponentOffset(size, baseline);
+        nodes.push(
+          `<text x="${partStartX + partWidth / 2}" y="${expY}" text-anchor="middle" dominant-baseline="hanging" font-family="${escapeSvgText(
+            font
+          )}" font-size="${expSize}" font-weight="${fontWeight}" fill="${color}">${escapeSvgText(
+            part.expLabel
+          )}</text>`
+        );
+      }
+    });
+  }
+
+  if (restText) {
+    cursorX += restGap;
+    const chars = Array.from(restText);
+    const needsInline = restHejiAccidentals || restText.includes(CENTS_CHAR) || /[ve]/.test(restText);
+    if (!needsInline) {
+      nodes.push(
+        `<text x="${cursorX}" y="${y}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
+          font
+        )}" font-size="${size}" font-weight="${fontWeight}" fill="${color}">${escapeSvgText(
+          restText
+        )}</text>`
+      );
+    } else {
+      chars.forEach((char) => {
+        const useHeji = char === "v" || char === "e";
+        const isCent = char === CENTS_CHAR;
+        const charSize = isCent ? getCentsCharSize(size) : size;
+        const charFont = useHeji ? "HEJI2Text" : font;
+        const charWeight = useHeji ? "normal" : fontWeight;
+        nodes.push(
+          `<text x="${cursorX}" y="${y + (useHeji ? hejiYOffset : 0)}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
+            charFont
+          )}" font-size="${charSize}" font-weight="${charWeight}" fill="${color}">${escapeSvgText(
+            char
+          )}</text>`
+        );
+        cursorX += measureCharWidth(char, charSize, charFont, useHeji ? 400 : fontWeight);
+      });
+    }
+  }
+
+  return nodes.join("\n");
+}
+
+function buildLayoutSvgString() {
+  if (!layoutMode) {
+    return null;
+  }
+  if (!themeColors) {
+    refreshThemeColors();
+  }
+  const { widthIn, heightIn, widthPx, heightPx } = getLayoutPageDimensions();
+  const { left, top } = getLayoutPageRect();
+  const disableScale = layoutUnifyNodeSize;
+  const labelSize = layoutRatioTextSize;
+  const detailSize = layoutNoteTextSize;
+  const titleSize = Math.max(12, Math.round(layoutTitleSize));
+
+  const parts = [];
+  parts.push(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${widthIn}in" height="${heightIn}in" viewBox="0 0 ${widthPx} ${heightPx}">`
+  );
+  parts.push(`<rect width="100%" height="100%" fill="${themeColors.page}"/>`);
+
+  if (layoutTitle) {
+    const titleY = Math.max(12, getLayoutTitleY() - top);
+    parts.push(
+      `<text x="${widthPx / 2}" y="${titleY}" text-anchor="middle" font-family="${escapeSvgText(
+        layoutTitleFont
+      )}" font-size="${titleSize}" fill="${themeColors.textPrimary}">${escapeSvgText(
+        layoutTitle
+      )}</text>`
+    );
+  }
+
+  edges.forEach(([a, b]) => {
+    if (!a.active || !b.active) {
+      return;
+    }
+    const start = worldToScreen(getNodeDisplayCoordinate(a), disableScale);
+    const end = worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+    const radiusA = layoutNodeSize * (start.scale || 1);
+    const radiusB = layoutNodeSize * (end.scale || 1);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const edgeStart = {
+      x: start.x + ux * radiusA - left,
+      y: start.y + uy * radiusA - top,
+    };
+    const edgeEnd = {
+      x: end.x - ux * radiusB - left,
+      y: end.y - uy * radiusB - top,
+    };
+    parts.push(
+      `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" stroke="${themeColors.edge}" stroke-width="1.5" />`
+    );
+  });
+
+  nodes.forEach((node) => {
+    const isVisible = node.isCenter || node.active || node.isCustom;
+    if (!isVisible) {
+      return;
+    }
+    const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+    const x = pos.x - left;
+    const y = pos.y - top;
+    const radius = layoutNodeSize * (pos.scale || 1);
+    const shape = getLayoutNodeShape(node);
+    const fill = "none";
+    const stroke = themeColors.nodeStroke;
+    if (showCircles) {
+      if (shape === "circle") {
+        parts.push(
+          `<circle cx="${x}" cy="${y}" r="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="2" />`
+        );
+      } else if (shape === "square") {
+        parts.push(
+          `<rect x="${x - radius}" y="${y - radius}" width="${radius * 2}" height="${
+            radius * 2
+          }" fill="${fill}" stroke="${stroke}" stroke-width="2" />`
+        );
+      } else if (shape === "triangle") {
+        const height = radius * 1.2;
+        const points = [
+          `${x},${y - height}`,
+          `${x + radius},${y + height * 0.6}`,
+          `${x - radius},${y + height * 0.6}`,
+        ].join(" ");
+        parts.push(
+          `<polygon points="${points}" fill="${fill}" stroke="${stroke}" stroke-width="2" />`
+        );
+      } else if (shape === "diamond") {
+        const points = [
+          `${x},${y - radius}`,
+          `${x + radius},${y}`,
+          `${x},${y + radius}`,
+          `${x - radius},${y}`,
+        ].join(" ");
+        parts.push(
+          `<polygon points="${points}" fill="${fill}" stroke="${stroke}" stroke-width="2" />`
+        );
+      }
+    }
+
+    if (featureMode === "note") {
+      if (hejiEnabled && nodeHasHighPrime(node)) {
+        const displayInfo = getDisplayNoteInfo(node);
+        const base = getHejiBaseAndDefaults(displayInfo.pitchClass);
+        const centsText = formatCents(displayInfo.cents);
+        const suffixParts = centsText
+          ? [
+              ...base.suffixParts,
+              {
+                text: centsText,
+                source: "cents",
+                font: layoutRatioFont,
+                charGap: 0,
+                sizeScale: 0.67,
+              },
+            ]
+          : base.suffixParts;
+        parts.push(
+          buildHejiSvgInline({
+            x,
+            y,
+            baseText: base.baseText,
+            suffixParts,
+            restText: "",
+            font: layoutRatioFont,
+            size: labelSize,
+            align: "center",
+            baseline: "middle",
+            color: themeColors.textPrimary,
+          })
+        );
+      } else {
+        const annotation = getHejiAnnotation(node, getNodePitchLabel(node));
+        parts.push(
+          buildHejiSvgInline({
+            x,
+            y,
+            baseText: annotation.baseText,
+            suffixParts: annotation.suffixParts,
+            restText: "",
+            font: layoutRatioFont,
+            size: labelSize,
+            align: "center",
+            baseline: "middle",
+            color: themeColors.textPrimary,
+          })
+        );
+      }
+      const centsLabel = buildCentsReadout(node, { wrap: true });
+      const ratioX = x + (radius + 6) * 0.7;
+      const ratioY = y + radius - 10;
+      parts.push(
+        `<text x="${ratioX}" y="${ratioY}" text-anchor="start" dominant-baseline="hanging" font-family="Lexend, sans-serif" font-weight="200" font-size="${detailSize}" fill="${themeColors.textSecondary}">${escapeSvgText(
+          `${node.numerator}:${node.denominator}`
+        )}</text>`
+      );
+      parts.push(
+        buildSvgTextWithSmallCent({
+          text: centsLabel,
+          x: ratioX,
+          y: ratioY + detailSize + 4,
+          font: "Lexend, sans-serif",
+          size: detailSize,
+          fontWeight: 200,
+          align: "left",
+          baseline: "hanging",
+          hejiAccidentals: hejiEnabled,
+          color: themeColors.textSecondary,
+        })
+      );
+    } else {
+      const maxWidth = radius * 1.6;
+      const layout = computeRatioLabelLayout(
+        node.numerator,
+        node.denominator,
+        layoutRatioFont,
+        labelSize,
+        maxWidth
+      );
+      const ratioYOffset = Math.round(layout.size * -0.09);
+      if (layout.lines.length === 1) {
+        parts.push(
+          `<text x="${x}" y="${y + ratioYOffset}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
+            layoutRatioFont
+          )}" font-size="${layout.size}" fill="${themeColors.textPrimary}">${escapeSvgText(
+            layout.lines[0]
+          )}</text>`
+        );
+      } else {
+        const lineOffset = layout.size / 2 + layout.lineGap / 2;
+        const lineY1 = y + ratioYOffset - lineOffset;
+        const lineY2 = y + ratioYOffset + lineOffset;
+        const lineWidth = Math.max(
+          measureTextWidth(layout.lines[0], layout.size, layoutRatioFont),
+          measureTextWidth(layout.lines[1], layout.size, layoutRatioFont)
+        );
+        const lineY = y + ratioYOffset + layout.size * 0.1;
+        parts.push(
+          `<text x="${x}" y="${lineY1}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
+            layoutRatioFont
+          )}" font-size="${layout.size}" fill="${themeColors.textPrimary}">${escapeSvgText(
+            layout.lines[0]
+          )}</text>`
+        );
+        parts.push(
+          `<text x="${x}" y="${lineY2}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
+            layoutRatioFont
+          )}" font-size="${layout.size}" fill="${themeColors.textPrimary}">${escapeSvgText(
+            layout.lines[1]
+          )}</text>`
+        );
+        parts.push(
+          `<line x1="${x - lineWidth / 2}" y1="${lineY}" x2="${x + lineWidth / 2}" y2="${lineY}" stroke="${themeColors.textPrimary}" stroke-width="${Math.max(
+            1,
+            Math.round(layout.size * 0.06)
+          )}" />`
+        );
+      }
+
+      const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
+      const labelOffsetX = rawLabelPos.x - pos.x;
+      const labelX = pos.x + labelOffsetX * 0.7 - left;
+      const labelY = rawLabelPos.y - top;
+      const displayInfo = getDisplayNoteInfo(node);
+      const centsLabel = buildCentsReadout(node, {
+        wrap: hejiEnabled,
+        requireHejiDetail: true,
+        baseTextForHeji: displayInfo.pitchClass,
+      });
+      const hasParen = centsLabel.includes("(");
+      const restGapScale =
+        hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
+      const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
+      const annotation = getHejiAnnotation(node, baseLabel || node.note_name);
+      parts.push(
+        buildHejiSvgInline({
+          x: labelX,
+          y: labelY,
+          baseText: annotation.baseText,
+          suffixParts: annotation.suffixParts,
+          restText: ` ${centsLabel}`,
+          font: "Lexend, sans-serif",
+          size: detailSize,
+          align: "left",
+          baseline: "hanging",
+          hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
+          restGapScale,
+          restHejiAccidentals: hejiEnabled && hasParen,
+          fontWeight: 200,
+          color: themeColors.textSecondary,
+        })
+      );
+    }
+  });
+
+  parts.push("</svg>");
+
+  return parts.join("\n");
+}
+
+function exportLayoutSvg() {
+  const svg = buildLayoutSvgString();
+  if (!svg) {
+    alert("Enable Page Layout mode to export SVG.");
+    return;
+  }
+  const blob = new Blob([svg], {
+    type: "image/svg+xml;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "lattice-layout.svg";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function exportLayoutPdf() {
+  const svg = buildLayoutSvgString();
+  if (!svg) {
+    alert("Enable Page Layout mode to export PDF.");
+    return;
+  }
+  const win = window.open("", "_blank");
+  if (!win) {
+    alert("Pop-up blocked. Allow pop-ups to export PDF.");
+    return;
+  }
+  win.document.open();
+  win.document.write(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Layout PDF</title>
+    <style>
+      body { margin: 0; }
+      svg { width: 100vw; height: 100vh; }
+    </style>
+  </head>
+  <body>
+    ${svg}
+    <script>
+      window.onload = () => {
+        setTimeout(() => window.print(), 200);
+      };
+    </script>
+  </body>
+</html>`);
+  win.document.close();
+}
+
 function captureActiveNodeKeys() {
   const keys = new Set();
   nodes.forEach((node) => {
@@ -4540,6 +7315,9 @@ function rebuildLattice(activeKeys = null) {
   });
   nodes = [...latticeNodes, ...customNodes];
   nodeById = new Map(nodes.map((node) => [node.id, node]));
+  if (layoutMode) {
+    nodes.forEach((node) => ensureLayoutPosition(node));
+  }
   applyActiveNodeKeys(activeKeys);
   edges = buildEdges(latticeNodes, GRID_COLS, GRID_ROWS, gridDepth);
   updatePitchInstances();
@@ -4551,9 +7329,11 @@ function rebuildLattice(activeKeys = null) {
 function resetLattice() {
   stopAllVoices();
   activeKeys.clear();
+  nodeSpellingOverrides.clear();
   customNodes = [];
   fundamentalNoteSelect.value = "60";
   onFundamentalNoteChange();
+  resetLayoutState({ resetSettings: false, resetView: false });
   view.zoom = 1;
   view.offsetX = 0;
   view.offsetY = 0;
@@ -4577,11 +7357,12 @@ if (navAxesToggle) {
 if (navGridToggle) {
   showGrid = navGridToggle.checked;
 }
+if (navCirclesToggle) {
+  showCircles = navCirclesToggle.checked;
+}
 if (mode3dCheckbox) {
   is3DMode = mode3dCheckbox.checked;
-  if (nav3dPanel) {
-    nav3dPanel.hidden = !is3DMode;
-  }
+  updateNavPanelVisibility();
   if (ratioZSelect) {
     ratioZSelect.hidden = false;
   }
@@ -4590,6 +7371,84 @@ updateAddModeFromShift();
 updateUiHint();
 fundamentalNoteSelect.value = "60";
 onFundamentalNoteChange();
+initLayoutFonts();
+setLayoutPanelCollapsed(false);
+setViewsCollapsed(false);
+if (layoutNodeSizeInput) {
+  layoutNodeSizeInput.value = String(layoutNodeSize);
+  updateLayoutNodeSizeReadout();
+}
+if (layoutRatioTextSizeInput) {
+  layoutRatioTextSizeInput.value = String(layoutRatioTextSize);
+  updateLayoutRatioTextReadout();
+}
+if (layoutNoteTextSizeInput) {
+  layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
+  updateLayoutNoteTextReadout();
+}
+if (layoutNodeShapeSelect) {
+  layoutNodeShapeSelect.value = layoutNodeShape;
+}
+if (layoutPageSizeSelect) {
+  layoutPageSizeSelect.value = layoutPageSize;
+}
+if (layoutOrientationSelect) {
+  layoutOrientationSelect.value = layoutOrientation;
+}
+if (layoutTitleInput) {
+  layoutTitleInput.value = layoutTitle;
+}
+if (layoutTitleSizeInput) {
+  layoutTitleSizeInput.value = String(layoutTitleSize);
+  updateLayoutTitleSizeReadout();
+}
+if (layoutTitleMarginInput) {
+  layoutTitleMarginInput.value = String(layoutTitleMargin);
+  updateLayoutTitleMarginReadout();
+}
+if (layoutTitleFontSelect) {
+  layoutTitleFontSelect.value = layoutTitleFont;
+}
+if (layoutRatioFontSelect) {
+  layoutRatioFontSelect.value = layoutRatioFont;
+}
+if (layoutNoteFontSelect) {
+  layoutNoteFontSelect.value = layoutNoteFont;
+}
+if (layoutUnifySizeToggle) {
+  layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
+}
+if (layoutModeToggle) {
+  layoutModeToggle.checked = layoutMode;
+}
+if (layoutPanel) {
+  layoutPanel.hidden = !layoutMode;
+}
+if (featureModeInputs.length) {
+  featureModeInputs.forEach((input) => {
+    input.checked = input.value === featureMode;
+  });
+}
+if (showHzToggle) {
+  showHzToggle.checked = showHz;
+}
+if (showCentsSignToggle) {
+  showCentsSignToggle.checked = showCentsSign;
+}
+if (hejiEnabledToggle) {
+  hejiEnabledToggle.checked = hejiEnabled;
+}
+if (navCirclesToggle) {
+  navCirclesToggle.checked = showCircles;
+}
+if (centsPrecisionInputs.length) {
+  centsPrecisionInputs.forEach((input) => {
+    input.checked = Number(input.value) === centsPrecision;
+  });
+} else if (centsPrecisionInput) {
+  centsPrecisionInput.value = String(centsPrecision);
+}
+syncLayoutScaleInput();
 const presetState = readPresetFromUrl();
 if (presetState) {
   applyPresetState(presetState);
@@ -4609,6 +7468,10 @@ window.addEventListener("hashchange", () => {
 });
 if (mode3dCheckbox) {
   mode3dCheckbox.addEventListener("change", () => {
+    if (layoutMode) {
+      mode3dCheckbox.checked = false;
+      return;
+    }
     set3DMode(mode3dCheckbox.checked);
     schedulePresetUrlUpdate();
   });
@@ -4625,6 +7488,19 @@ if (navGridToggle) {
     showGrid = navGridToggle.checked;
     draw();
     schedulePresetUrlUpdate();
+  });
+}
+if (navCirclesToggle) {
+  navCirclesToggle.addEventListener("change", () => {
+    showCircles = navCirclesToggle.checked;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (viewPanelToggle) {
+  viewPanelToggle.addEventListener("click", () => {
+    const isCollapsed = viewsPanel && viewsPanel.classList.contains("is-collapsed");
+    setViewsCollapsed(!isCollapsed);
   });
 }
 if (nav3dButtons && nav3dButtons.length) {
@@ -4646,6 +7522,232 @@ if (themeSelect) {
 }
 if (optionsToggle) {
   optionsToggle.addEventListener("click", toggleOptionsPanel);
+}
+if (layoutModeToggle) {
+  layoutModeToggle.addEventListener("change", () => {
+    setLayoutMode(layoutModeToggle.checked);
+    schedulePresetUrlUpdate();
+  });
+}
+if (featureModeInputs.length) {
+  featureModeInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      const selected = document.querySelector('input[name="feature-mode"]:checked');
+      featureMode = selected && selected.value === "note" ? "note" : "ratio";
+      draw();
+      schedulePresetUrlUpdate();
+    });
+  });
+}
+if (showHzToggle) {
+  showHzToggle.addEventListener("change", () => {
+    showHz = showHzToggle.checked;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (showCentsSignToggle) {
+  showCentsSignToggle.addEventListener("change", () => {
+    showCentsSign = showCentsSignToggle.checked;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (hejiEnabledToggle) {
+  hejiEnabledToggle.addEventListener("change", () => {
+    hejiEnabled = hejiEnabledToggle.checked;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (centsPrecisionInputs.length) {
+  centsPrecisionInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      const selected = document.querySelector('input[name="cents-precision"]:checked');
+      const next = selected ? Number(selected.value) : 0;
+      centsPrecision = Math.min(2, Math.max(0, Math.round(next)));
+      draw();
+      schedulePresetUrlUpdate();
+    });
+  });
+} else if (centsPrecisionInput) {
+  centsPrecisionInput.addEventListener("change", () => {
+    const next = Math.min(3, Math.max(0, Math.round(Number(centsPrecisionInput.value) || 0)));
+    centsPrecision = next;
+    centsPrecisionInput.value = String(next);
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutExitButton) {
+  layoutExitButton.addEventListener("click", () => {
+    if (layoutModeToggle) {
+      layoutModeToggle.checked = false;
+    }
+    setLayoutMode(false);
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutTitleInput) {
+  layoutTitleInput.addEventListener("input", () => {
+    layoutTitle = layoutTitleInput.value.trim();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutTitleSizeInput) {
+  layoutTitleSizeInput.addEventListener("input", () => {
+    layoutTitleSize = Number(layoutTitleSizeInput.value) || layoutTitleSize;
+    updateLayoutTitleSizeReadout();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutPageSizeSelect) {
+  layoutPageSizeSelect.addEventListener("change", () => {
+    layoutPageSize = layoutPageSizeSelect.value || "letter";
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutOrientationSelect) {
+  layoutOrientationSelect.addEventListener("change", () => {
+    layoutOrientation = layoutOrientationSelect.value || "portrait";
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutScaleInput) {
+  layoutScaleInput.addEventListener("input", () => {
+    view.zoom = Number(layoutScaleInput.value) || 1;
+    updateLayoutScaleReadout();
+    draw();
+    markIsomorphicDirty();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutNodeSizeInput) {
+  layoutNodeSizeInput.addEventListener("input", () => {
+    layoutNodeSize = Number(layoutNodeSizeInput.value) || layoutNodeSize;
+    updateLayoutNodeSizeReadout();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutRatioTextSizeInput) {
+  layoutRatioTextSizeInput.addEventListener("input", () => {
+    layoutRatioTextSize = Number(layoutRatioTextSizeInput.value) || layoutRatioTextSize;
+    updateLayoutRatioTextReadout();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutNoteTextSizeInput) {
+  layoutNoteTextSizeInput.addEventListener("input", () => {
+    layoutNoteTextSize = Number(layoutNoteTextSizeInput.value) || layoutNoteTextSize;
+    updateLayoutNoteTextReadout();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutTitleMarginInput) {
+  layoutTitleMarginInput.addEventListener("input", () => {
+    layoutTitleMargin = Number(layoutTitleMarginInput.value) || layoutTitleMargin;
+    updateLayoutTitleMarginReadout();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutNodeShapeSelect) {
+  layoutNodeShapeSelect.addEventListener("change", () => {
+    layoutNodeShape = layoutNodeShapeSelect.value || "circle";
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+let layoutFontSnapshot = null;
+if (layoutFontsButton && layoutFontDialog) {
+  layoutFontsButton.addEventListener("click", () => {
+    if (typeof layoutFontDialog.showModal === "function") {
+      layoutFontSnapshot = {
+        title: layoutTitleFont,
+        ratio: layoutRatioFont,
+        note: layoutNoteFont,
+      };
+      layoutFontDialog.showModal();
+    }
+  });
+}
+if (layoutPanelToggle) {
+  layoutPanelToggle.addEventListener("click", () => {
+    const isCollapsed = layoutPanel && layoutPanel.classList.contains("is-collapsed");
+    setLayoutPanelCollapsed(!isCollapsed);
+  });
+}
+if (layoutFontDialog) {
+  layoutFontDialog.addEventListener("close", () => {
+    if (layoutFontDialog.returnValue === "cancel" && layoutFontSnapshot) {
+      layoutTitleFont = layoutFontSnapshot.title;
+      layoutRatioFont = layoutFontSnapshot.ratio;
+      layoutNoteFont = layoutFontSnapshot.note;
+      if (layoutTitleFontSelect) {
+        layoutTitleFontSelect.value = layoutTitleFont;
+      }
+      if (layoutRatioFontSelect) {
+        layoutRatioFontSelect.value = layoutRatioFont;
+      }
+      if (layoutNoteFontSelect) {
+        layoutNoteFontSelect.value = layoutNoteFont;
+      }
+    }
+    layoutFontSnapshot = null;
+    syncLayoutFontVars();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutTitleFontSelect) {
+  layoutTitleFontSelect.addEventListener("change", () => {
+    layoutTitleFont = layoutTitleFontSelect.value || layoutTitleFont;
+    syncLayoutFontVars();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutRatioFontSelect) {
+  layoutRatioFontSelect.addEventListener("change", () => {
+    layoutRatioFont = layoutRatioFontSelect.value || layoutRatioFont;
+    syncLayoutFontVars();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutNoteFontSelect) {
+  layoutNoteFontSelect.addEventListener("change", () => {
+    layoutNoteFont = layoutNoteFontSelect.value || layoutNoteFont;
+    syncLayoutFontVars();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutUnifySizeToggle) {
+  layoutUnifySizeToggle.addEventListener("change", () => {
+    layoutUnifyNodeSize = layoutUnifySizeToggle.checked;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutResetButton) {
+  layoutResetButton.addEventListener("click", () => {
+    resetLayoutState();
+    schedulePresetUrlUpdate();
+  });
+}
+if (exportSvgButton) {
+  exportSvgButton.addEventListener("click", exportLayoutSvg);
+}
+if (exportPdfButton) {
+  exportPdfButton.addEventListener("click", exportLayoutPdf);
 }
 if (midiEnable) {
   midiEnable.addEventListener("change", async () => {
@@ -4864,10 +7966,19 @@ updateLfoPlayButton();
 buildPatternStates();
 populateMidiChannels();
 loadPresets();
+if (document.fonts && document.fonts.load) {
+  document.fonts
+    .load('16px "HEJI2Text"', "v")
+    .then(() => {
+      draw();
+    })
+    .catch(() => {});
+}
 canvas.addEventListener("pointerdown", onPointerDown);
 canvas.addEventListener("pointermove", onPointerMove);
 canvas.addEventListener("pointerup", onPointerUp);
 canvas.addEventListener("pointerleave", onPointerLeave);
+canvas.addEventListener("dblclick", onCanvasDoubleClick);
 canvas.addEventListener("wheel", onWheel, { passive: false });
 window.addEventListener("resize", resizeCanvas);
 window.addEventListener("resize", updateRatioWheelPosition);
@@ -4880,6 +7991,9 @@ window.addEventListener("keydown", (event) => {
     shiftHeld = true;
     updateAddModeFromShift();
     draw();
+  }
+  if (event.key.toLowerCase() === "r") {
+    rHeld = true;
   }
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = true;
@@ -4901,6 +8015,13 @@ window.addEventListener("keydown", (event) => {
     draw();
   }
   if (event.key === "Escape") {
+    if (layoutAxisEdit) {
+      layoutAxisEdit = null;
+      layoutAxisEditDrag = null;
+      updateUiHint();
+      draw();
+      return;
+    }
     closeRatioWheelPanel();
     zModeActive = false;
     zModeAnchor = null;
@@ -4914,6 +8035,9 @@ window.addEventListener("keyup", (event) => {
     updateAddModeFromShift();
     draw();
   }
+  if (event.key.toLowerCase() === "r") {
+    rHeld = false;
+  }
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = false;
   }
@@ -4921,3 +8045,26 @@ window.addEventListener("keyup", (event) => {
 
 resizeCanvas();
 updateRatioWheelPosition();
+function setViewsCollapsed(collapsed) {
+  if (!viewsPanel || !viewPanelToggle) {
+    return;
+  }
+  viewsPanel.classList.toggle("is-collapsed", collapsed);
+  viewPanelToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  viewPanelToggle.setAttribute(
+    "aria-label",
+    collapsed ? "Expand view panel" : "Collapse view panel"
+  );
+}
+
+function setLayoutPanelCollapsed(collapsed) {
+  if (!layoutPanel || !layoutPanelToggle) {
+    return;
+  }
+  layoutPanel.classList.toggle("is-collapsed", collapsed);
+  layoutPanelToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  layoutPanelToggle.setAttribute(
+    "aria-label",
+    collapsed ? "Expand page layout panel" : "Collapse page layout panel"
+  );
+}

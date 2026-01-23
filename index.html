@@ -16,8 +16,8 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/index-DYcBpd2-.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-BvTjZXbd.css">
+    <script type="module" crossorigin src="./assets/index-rXC0ZsYM.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-GNP32gXE.css">
   </head>
   <body>
     <canvas id="lattice"></canvas>
@@ -38,6 +38,15 @@
             <input id="fundamental" type="number" min="20" max="2000" step="1" value="261.63" />
           </div>
         </div>
+        <dialog id="fundamental-spelling-dialog" class="custom-ratio-dialog">
+          <div class="dialog-content">
+            <h2>Choose spelling</h2>
+            <div class="dialog-actions fundamental-spelling-actions">
+              <button id="fundamental-spelling-sharp" type="button"></button>
+              <button id="fundamental-spelling-flat" type="button"></button>
+            </div>
+          </div>
+        </dialog>
         
         <div class="control-group ratios-inline">
           <span class="ratios-label">Ratios:</span>
@@ -127,7 +136,6 @@
       </button>
       <div class="layout-content">
       <div class="control-group">
-        <label for="layout-exit">Layout Mode</label>
         <button id="layout-exit" type="button" class="button-full">Exit Layout Mode</button>
       </div>
       <div class="control-group">
@@ -140,11 +148,6 @@
         <span id="layout-title-size-readout" class="control-readout">28 px</span>
       </div>
       <div class="control-group">
-        <label for="layout-title-margin">Title Margin</label>
-        <input id="layout-title-margin" type="range" min="80" max="300" step="1" value="120" />
-        <span id="layout-title-margin-readout" class="control-readout">120 px</span>
-      </div>
-      <div class="control-group">
         <label for="layout-page-size">Page Size</label>
         <select id="layout-page-size">
           <option value="letter">Letter</option>
@@ -155,7 +158,7 @@
         <label for="layout-orientation">Orientation</label>
         <select id="layout-orientation">
           <option value="portrait">Portrait</option>
-          <option value="landscape">Landscape</option>
+          <option value="landscape" selected>Landscape</option>
         </select>
       </div>
       <div class="control-group">
@@ -183,7 +186,6 @@
         <select id="layout-node-shape">
           <option value="circle">Circles</option>
           <option value="square">Squares</option>
-          <option value="triangle">Triangles</option>
           <option value="diamond">Diamonds</option>
         </select>
       </div>
@@ -192,10 +194,9 @@
         <button id="layout-fonts" type="button" class="button-full">Edit Fonts</button>
       </div>
       <div class="control-group">
-        <label for="layout-unify-size">Unify Node Size</label>
         <div class="control-inline">
           <input id="layout-unify-size" type="checkbox" checked />
-          <span>Ignore Depth</span>
+          <span>Unify Node Size</span>
         </div>
       </div>
       <div class="control-group">
@@ -467,6 +468,19 @@
                 <label>
                   <input type="radio" name="feature-mode" value="note" />
                   Note
+                </label>
+              </div>
+            </div>
+            <div class="control-group">
+              <label>Spelling</label>
+              <div class="control-inline">
+                <label>
+                  <input type="radio" name="spelling-mode" value="true" checked />
+                  <span style="font-size:90%">Diatonic</span> 
+                </label>
+                <label>
+                  <input type="radio" name="spelling-mode" value="simple" />
+                  <span style="font-size:90%">Custom</span> 
                 </label>
               </div>
             </div>

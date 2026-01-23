@@ -3457,7 +3457,7 @@ const TRUE_SPELLING_INTERVALS = {
   7: { letter: 6, semitones: 10 },
   11: { letter: 3, semitones: 5 },
   13: { letter: 5, semitones: 9 },
-  17: { letter: 0, semitones: 0, maxSteps: 4 },
+  17: { letter: 0, semitones: 1, maxSteps: 2 },
   19: { letter: 2, semitones: 3 },
   23: { letter: 3, semitones: 6 },
   29: { letter: 6, semitones: 10 },
@@ -3507,7 +3507,7 @@ function accidentalToString(accidental) {
     if (accidental === 2) {
       return "x";
     }
-    return "###";
+    return "#x";
   }
   if (accidental === -1) {
     return "b";
@@ -3623,6 +3623,33 @@ function getTrueSpellingPitchClass(node) {
     { ratio: ratioY, exp: Number(node.exponentY) || 0 },
     { ratio: ratioZ, exp: Number(node.exponentZ) || 0 },
   ];
+  const beyondLimit = axisRatios.some((axis) => {
+    if (!axis.exp) {
+      return false;
+    }
+    const limit = getTrueSpellingLimit(axis.ratio);
+    if (!Number.isFinite(limit)) {
+      return false;
+    }
+    return Math.abs(axis.exp) > limit;
+  });
+  if (beyondLimit) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  const hasUnknownInterval = axisRatios.some(
+    (axis) => axis.exp && !TRUE_SPELLING_INTERVALS[axis.ratio]
+  );
+  if (hasUnknownInterval) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
   const hasHigherPrime = axisRatios.some(
     (axis) => axis.exp && Number(axis.ratio) >= 53
   );

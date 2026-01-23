@@ -2543,9 +2543,6 @@ function getNodePitchLabel(node) {
 }
 
 function getNoteNamesForNode(node) {
-  if (node && nodeSpellingOverrides.get(node.id) === "flat") {
-    return noteNamesFlat;
-  }
   return noteNamesSharp;
 }
 
@@ -2607,7 +2604,7 @@ function drawTextWithSmallCent({
   }
   const widths = chars.map((char) => {
     const isCent = char === CENTS_CHAR;
-    const isHeji = hejiAccidentals && (char === "v" || char === "e");
+    const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
     const charSize = isCent ? getCentsCharSize(size) : size;
     const charFont = isHeji ? "HEJI2Text" : font;
     const charWeight = isHeji ? 400 : fontWeight;
@@ -2627,7 +2624,7 @@ function drawTextWithSmallCent({
   let cursorX = startX;
   chars.forEach((char, index) => {
     const isCent = char === CENTS_CHAR;
-    const isHeji = hejiAccidentals && (char === "v" || char === "e");
+    const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
     const charSize = isCent ? getCentsCharSize(size) : size;
     const charFont = isHeji ? "HEJI2Text" : font;
     const charWeight = isHeji ? 400 : fontWeight;
@@ -2657,7 +2654,7 @@ function buildSvgTextWithSmallCent({
   }
   const widths = chars.map((char) => {
     const isCent = char === CENTS_CHAR;
-    const isHeji = hejiAccidentals && (char === "v" || char === "e");
+    const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
     const charSize = isCent ? getCentsCharSize(size) : size;
     const charFont = isHeji ? "HEJI2Text" : font;
     const charWeight = isHeji ? 400 : fontWeight;
@@ -2674,7 +2671,7 @@ function buildSvgTextWithSmallCent({
   const nodes = [];
   chars.forEach((char, index) => {
     const isCent = char === CENTS_CHAR;
-    const isHeji = hejiAccidentals && (char === "v" || char === "e");
+    const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
     const charSize = isCent ? getCentsCharSize(size) : size;
     const charFont = isHeji ? "HEJI2Text" : font;
     const charWeight = isHeji ? 400 : fontWeight;
@@ -2749,7 +2746,7 @@ function buildCentsReadout(
     return formatCents(info.cents);
   }
   const mapAccidentals = (text) =>
-    text.replace(/#/g, "v").replace(/b/g, "e");
+    text.replace(/#/g, "v").replace(/b/g, "e").replace(/x/g, "V");
   const primaryBase = `${info.pitchClass}${formatCents(info.cents)}`;
   const primary = wrap ? mapAccidentals(primaryBase) : primaryBase;
   let text = primary;
@@ -2767,13 +2764,17 @@ function getHejiBaseAndDefaults(baseText) {
   const suffixParts = [];
   const sharpCount = (base.match(/#/g) || []).length;
   const flatCount = (base.match(/b/g) || []).length;
-  if (sharpCount > 0) {
+  const doubleSharpCount = (base.match(/x/g) || []).length;
+  for (let i = 0; i < sharpCount; i += 1) {
     suffixParts.push({ text: "v", expLabel: "", source: "default" });
   }
-  if (flatCount > 0) {
+  for (let i = 0; i < flatCount; i += 1) {
     suffixParts.push({ text: "e", expLabel: "", source: "default" });
   }
-  return { baseText: base.replace(/[#b]/g, ""), suffixParts };
+  for (let i = 0; i < doubleSharpCount; i += 1) {
+    suffixParts.push({ text: "V", expLabel: "", source: "default" });
+  }
+  return { baseText: base.replace(/[x#b]/g, ""), suffixParts };
 }
 
 function getDisplayNoteInfo(node) {
@@ -2791,9 +2792,14 @@ function getDisplayNoteInfo(node) {
     return getTrueSpellingPitchClass(node);
   }
   if (!hejiEnabled) {
+    const targetPc = nearest.midi % 12;
+    const pitchClass =
+      spellingMode === "simple"
+        ? getManualSpellingForNode(node, targetPc)
+        : nearestPitchClass;
     return {
-      name: nearestName,
-      pitchClass: nearestPitchClass,
+      name: `${pitchClass}${Math.floor(nearest.midi / 12) - 1}`,
+      pitchClass,
       cents: nearestCents,
     };
   }
@@ -2875,8 +2881,13 @@ function getDisplayNoteInfo(node) {
   const midi = targetPc + 12 * midiBase;
   const etFreq = a4 * Math.pow(2, (midi - 69) / 12);
   const cents = 1200 * Math.log2(freq / etFreq);
-  const name = `${preferredNames[targetPc]}${Math.floor(midi / 12) - 1}`;
-  return { name, pitchClass: preferredNames[targetPc], cents };
+  const basePitchClass = preferredNames[targetPc];
+  const pitchClass =
+    spellingMode === "simple"
+      ? getManualSpellingForNode(node, targetPc)
+      : basePitchClass;
+  const name = `${pitchClass}${Math.floor(midi / 12) - 1}`;
+  return { name, pitchClass, cents };
 }
 
 const HEJI_RULES = [
@@ -2988,7 +2999,7 @@ function hasAccidental(noteName) {
 }
 
 function getAccidentalType(noteName) {
-  if (/#/.test(noteName)) {
+  if (/[#x]/.test(noteName)) {
     return "sharp";
   }
   if (/b/.test(noteName)) {
@@ -3026,18 +3037,22 @@ function getHejiAnnotation(node, baseText) {
   const accidentalType = getAccidentalType(baseText || "");
   const sharpCount = (baseText.match(/#/g) || []).length;
   const flatCount = (baseText.match(/b/g) || []).length;
+  const doubleSharpCount = (baseText.match(/x/g) || []).length;
   const axisStates = [
     { axis: "x", ratio: Number(ratioXSelect.value), exponent: Number(node.exponentX) },
     { axis: "y", ratio: Number(ratioYSelect.value), exponent: Number(node.exponentY) },
     { axis: "z", ratio: Number(ratioZSelect.value), exponent: Number(node.exponentZ) },
   ];
-  let nextBase = String(baseText).replace(/[#b]/g, "");
+  let nextBase = String(baseText).replace(/[x#b]/g, "");
   const suffixParts = [];
-  if (sharpCount > 0) {
-    suffixParts.push({ text: "v", expLabel: "" , source: "default" });
+  for (let i = 0; i < sharpCount; i += 1) {
+    suffixParts.push({ text: "v", expLabel: "", source: "default" });
   }
-  if (flatCount > 0) {
-    suffixParts.push({ text: "e", expLabel: "" , source: "default" });
+  for (let i = 0; i < flatCount; i += 1) {
+    suffixParts.push({ text: "e", expLabel: "", source: "default" });
+  }
+  for (let i = 0; i < doubleSharpCount; i += 1) {
+    suffixParts.push({ text: "V", expLabel: "", source: "default" });
   }
   if (!hejiEnabled) {
     return { baseText: nextBase, suffixParts };
@@ -3328,13 +3343,14 @@ function drawHejiInline({
   if (restText) {
     cursorX += restGap;
     const chars = Array.from(restText);
-    const needsInline = restHejiAccidentals || restText.includes(CENTS_CHAR) || /[ve]/.test(restText);
+    const needsInline =
+      restHejiAccidentals || restText.includes(CENTS_CHAR) || /[veV]/.test(restText);
     if (!needsInline) {
       ctx.font = `${fontWeight} ${size}px ${font}`;
       ctx.fillText(restText, cursorX, y);
     } else {
       chars.forEach((char) => {
-        const useHeji = char === "v" || char === "e";
+        const useHeji = char === "v" || char === "e" || char === "V";
         const isCent = char === CENTS_CHAR;
         const charSize = isCent ? getCentsCharSize(size) : size;
         const charFont = useHeji ? "HEJI2Text" : font;
@@ -3506,6 +3522,54 @@ function buildPitchClass(letterIndex, accidental) {
   const letter = LETTERS[mod(letterIndex, LETTERS.length)];
   const clamped = Math.max(-3, Math.min(3, accidental));
   return `${letter}${accidentalToString(clamped)}`;
+}
+
+function getAccidentalForTargetPc(letterIndex, targetPc) {
+  const letter = LETTERS[mod(letterIndex, LETTERS.length)];
+  const natural = LETTER_TO_SEMITONE[letter];
+  let diff = targetPc - natural;
+  if (diff > 6) {
+    diff -= 12;
+  } else if (diff < -6) {
+    diff += 12;
+  }
+  if (Math.abs(diff) > 2) {
+    return null;
+  }
+  return diff;
+}
+
+function getManualSpellingOptions(targetPc) {
+  const basePitchClass = noteNamesSharp[mod(targetPc, 12)];
+  const base = parsePitchClass(basePitchClass);
+  const lowerAccidental = getAccidentalForTargetPc(base.letterIndex - 1, targetPc);
+  const upperAccidental = getAccidentalForTargetPc(base.letterIndex + 1, targetPc);
+  const options = [];
+  if (lowerAccidental != null) {
+    options.push({
+      key: "lower",
+      pitchClass: buildPitchClass(base.letterIndex - 1, lowerAccidental),
+    });
+  }
+  options.push({ key: "base", pitchClass: basePitchClass });
+  if (upperAccidental != null) {
+    options.push({
+      key: "upper",
+      pitchClass: buildPitchClass(base.letterIndex + 1, upperAccidental),
+    });
+  }
+  return options;
+}
+
+function getManualSpellingForNode(node, targetPc) {
+  const options = getManualSpellingOptions(targetPc);
+  const override = nodeSpellingOverrides.get(node.id);
+  const selected = options.find((option) => option.key === override);
+  if (selected) {
+    return selected.pitchClass;
+  }
+  const baseOption = options.find((option) => option.key === "base");
+  return baseOption ? baseOption.pitchClass : noteNamesSharp[mod(targetPc, 12)];
 }
 
 const trueSpellingLimitCache = new Map();
@@ -4691,15 +4755,54 @@ function onPointerDown(event) {
   const hit = hitTestScreen(screenPoint);
   const now = performance.now();
 
-  if (rHeld && hit) {
-    const current = nodeSpellingOverrides.get(hit.id);
-    if (current === "flat") {
+  if (rHeld && hit && spellingMode === "simple") {
+    const a4 = Number(a4Input.value) || 440;
+    const nearest = getNearestEtInfo(Number(hit.freq), a4);
+    let targetPc = nearest.midi % 12;
+    if (hejiEnabled) {
+      const ratioX = Number(ratioXSelect.value);
+      const ratioY = Number(ratioYSelect.value);
+      const ratioZ = Number(ratioZSelect.value);
+      const axisRatios = [
+        { ratio: ratioX, exp: Number(hit.exponentX) || 0 },
+        { ratio: ratioY, exp: Number(hit.exponentY) || 0 },
+        { ratio: ratioZ, exp: Number(hit.exponentZ) || 0 },
+      ];
+      let totalOffset = 0;
+      let hasOffsetAxis = false;
+      axisRatios.forEach((axis) => {
+        if (!axis.exp) {
+          return;
+        }
+        const step = HEJI_STEP_OFFSETS[axis.ratio];
+        if (!Number.isFinite(step)) {
+          return;
+        }
+        hasOffsetAxis = true;
+        totalOffset += axis.exp * step;
+      });
+      if (hasOffsetAxis) {
+        let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
+        if (!Number.isFinite(fundamentalMidi)) {
+          const fallback = getNearestEtInfo(Number(fundamentalInput.value) || 220, a4);
+          fundamentalMidi = fallback.midi;
+        }
+        const basePc = ((fundamentalMidi % 12) + 12) % 12;
+        targetPc = ((basePc + totalOffset) % 12 + 12) % 12;
+      }
+    }
+    const options = getManualSpellingOptions(targetPc);
+    const currentKey = nodeSpellingOverrides.get(hit.id);
+    let currentIndex = options.findIndex((option) => option.key === currentKey);
+    if (currentIndex < 0) {
+      currentIndex = options.findIndex((option) => option.key === "base");
+    }
+    const nextIndex = (currentIndex + 1) % options.length;
+    const nextKey = options[nextIndex].key;
+    if (nextKey === "base") {
       nodeSpellingOverrides.delete(hit.id);
     } else {
-      const info = getDisplayNoteInfo(hit);
-      if (String(info.pitchClass).includes("#")) {
-        nodeSpellingOverrides.set(hit.id, "flat");
-      }
+      nodeSpellingOverrides.set(hit.id, nextKey);
     }
     suppressClickAfterRespell = true;
     draw();
@@ -5778,7 +5881,7 @@ function updateUiHint() {
   if (!is3DMode) {
     if (spellingMode === "simple") {
       uiHint.textContent =
-        "Manual spelling: hold R and click on a node to reverse.\n(click to hide)";
+        "Manual spelling: hold R and click on a node to cycle.\n(click to hide)";
       return;
     }
     uiHint.textContent =
@@ -5787,7 +5890,7 @@ function updateUiHint() {
   }
   if (spellingMode === "simple") {
     uiHint.textContent =
-      "Manual spelling: hold R and click on a node to reverse.\n(click to hide)";
+      "Manual spelling: hold R and click on a node to cycle.\n(click to hide)";
     return;
   }
   uiHint.textContent =
@@ -6854,9 +6957,11 @@ function applyPresetState(state) {
         return;
       }
       const [nodeId, spelling] = entry;
-      if (spelling === "flat") {
-        nodeSpellingOverrides.set(nodeId, "flat");
-      }
+    if (spelling === "flat") {
+      nodeSpellingOverrides.set(nodeId, "upper");
+    } else if (spelling === "lower" || spelling === "upper") {
+      nodeSpellingOverrides.set(nodeId, spelling);
+    }
     });
   }
 
@@ -7318,7 +7423,8 @@ function buildHejiSvgInline({
   if (restText) {
     cursorX += restGap;
     const chars = Array.from(restText);
-    const needsInline = restHejiAccidentals || restText.includes(CENTS_CHAR) || /[ve]/.test(restText);
+    const needsInline =
+      restHejiAccidentals || restText.includes(CENTS_CHAR) || /[veV]/.test(restText);
     if (!needsInline) {
       nodes.push(
         `<text x="${cursorX}" y="${y}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
@@ -7329,7 +7435,7 @@ function buildHejiSvgInline({
       );
     } else {
       chars.forEach((char) => {
-        const useHeji = char === "v" || char === "e";
+        const useHeji = char === "v" || char === "e" || char === "V";
         const isCent = char === CENTS_CHAR;
         const charSize = isCent ? getCentsCharSize(size) : size;
         const charFont = useHeji ? "HEJI2Text" : font;

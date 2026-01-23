@@ -220,6 +220,12 @@ body.theme-dark {
   align-items: center;
 }
 
+.fundamental-spelling-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .control-readout {
   font-size: 11px;
   color: var(--muted-ink);
@@ -505,12 +511,13 @@ button:active {
   position: fixed;
   top: 120px;
   left: 16px;
-  width: min(280px, calc(100% - 32px));
+  width: min(180px, calc(100%));
   z-index: 3;
   display: grid;
   gap: 10px;
   max-height: calc(100vh - 140px);
   overflow: auto;
+  overflow-x: hidden;
 }
 
 .layout-float[hidden] {
@@ -543,6 +550,11 @@ button:active {
   gap: 8px;
 }
 
+.layout-content > * {
+  width: 85%;
+  justify-self: center;
+}
+
 .layout-float.is-collapsed .layout-content {
   display: none;
 }
@@ -552,8 +564,7 @@ button:active {
 }
 
 .layout-header {
-  font-size: 14px;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .layout-float .button-full {
@@ -561,6 +572,63 @@ button:active {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.layout-float label {
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  opacity: 0.7;
+}
+
+.layout-float label[for="layout-unify-size"] {
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.layout-float .control-inline,
+.layout-float .control-inline span,
+.layout-float .control-inline label {
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 1;
+}
+
+.layout-float .control-inline {
+  flex-wrap: wrap;
+}
+
+.layout-float input[type="number"],
+.layout-float select {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.layout-float input[type="range"] {
+  width: 100%;
+}
+
+.layout-float button {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.layout-float .control-inline button {
+  flex: 1 1 72px;
+}
+
+.layout-float .control-readout {
+  font-size: 10px;
+}
+
+.layout-float input,
+.layout-float select,
+.layout-float button {
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .preset-toggle {

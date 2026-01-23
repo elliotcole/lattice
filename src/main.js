@@ -61,6 +61,9 @@ const a4Input = document.getElementById("a4");
 const ratioXSelect = document.getElementById("ratio-x");
 const ratioYSelect = document.getElementById("ratio-y");
 const ratioZSelect = document.getElementById("ratio-z");
+const fundamentalSpellingDialog = document.getElementById("fundamental-spelling-dialog");
+const fundamentalSpellingSharpButton = document.getElementById("fundamental-spelling-sharp");
+const fundamentalSpellingFlatButton = document.getElementById("fundamental-spelling-flat");
 const volumeSlider = document.getElementById("volume");
 const volumeReadout = document.getElementById("volume-readout");
 const lfoDepthSlider = document.getElementById("lfo-depth");
@@ -87,6 +90,7 @@ const envelopeTimeModeInputs = document.querySelectorAll(
   'input[name="envelope-time"]'
 );
 const featureModeInputs = document.querySelectorAll('input[name="feature-mode"]');
+const spellingModeInputs = document.querySelectorAll('input[name="spelling-mode"]');
 const showHzToggle = document.getElementById("show-hz");
 const showCentsSignToggle = document.getElementById("show-cents-sign");
 const hejiEnabledToggle = document.getElementById("heji-enabled");
@@ -295,9 +299,10 @@ let layoutNodeShape = "circle";
 let layoutTitle = "";
 let layoutTitleSize = 28;
 let layoutTitleMargin = 32;
+let layoutTitlePosition = null;
 let layoutUnifyNodeSize = true;
 let layoutPageSize = "letter";
-let layoutOrientation = "portrait";
+let layoutOrientation = "landscape";
 let layoutPrevState = null;
 let layoutTitleFont = "Lexend";
 let layoutRatioFont = "Georgia";
@@ -315,6 +320,9 @@ let layoutAxisAngles = {
 let layoutAxisDrag = null;
 let layoutAxisEdit = null;
 let layoutAxisEditDrag = null;
+let layoutTitleDrag = null;
+let spellingMode = "simple";
+let fundamentalSpelling = "sharp";
 let featureMode = "ratio";
 let showHz = false;
 let showCentsSign = false;
@@ -337,7 +345,7 @@ const LAYOUT_DEFAULTS = {
   titleMargin: 32,
   unifyNodeSize: true,
   pageSize: "letter",
-  orientation: "portrait",
+  orientation: "landscape",
   zoom: 1,
   titleFont: "Lexend",
   ratioFont: "Georgia",
@@ -1419,6 +1427,11 @@ function updateNodeFrequencies() {
 }
 
 function updateNodeRatios() {
+  if (spellingMode === "true") {
+    const activeKeys = captureActiveNodeKeys();
+    rebuildLattice(activeKeys);
+    return;
+  }
   const fundamental = Number(fundamentalInput.value) || 220;
   const a4 = Number(a4Input.value) || 440;
   const ratioX = Number(ratioXSelect.value) || 3;
@@ -2293,6 +2306,53 @@ function midiToNoteName(midi) {
   return `${noteNames[midi % 12]}${Math.floor(midi / 12) - 1}`;
 }
 
+function getFundamentalNoteNames() {
+  return fundamentalSpelling === "flat" ? noteNamesFlat : noteNamesSharp;
+}
+
+function midiToFundamentalNoteName(midi) {
+  const names = getFundamentalNoteNames();
+  return `${names[midi % 12]}${Math.floor(midi / 12) - 1}`;
+}
+
+function getEnharmonicOptions(midi) {
+  const pc = mod(midi, 12);
+  const sharp = noteNamesSharp[pc];
+  const flat = noteNamesFlat[pc];
+  if (sharp === flat) {
+    return null;
+  }
+  return {
+    sharp,
+    flat,
+    sharpLabel: `${sharp}${Math.floor(midi / 12) - 1}`,
+    flatLabel: `${flat}${Math.floor(midi / 12) - 1}`,
+  };
+}
+
+function hideFundamentalSpellingDialog() {
+  if (fundamentalSpellingDialog) {
+    fundamentalSpellingDialog.close();
+  }
+}
+
+function showFundamentalSpellingDialog(midi) {
+  const options = getEnharmonicOptions(midi);
+  if (!options || !fundamentalSpellingDialog) {
+    hideFundamentalSpellingDialog();
+    return;
+  }
+  if (fundamentalSpellingSharpButton) {
+    fundamentalSpellingSharpButton.textContent = options.sharpLabel;
+  }
+  if (fundamentalSpellingFlatButton) {
+    fundamentalSpellingFlatButton.textContent = options.flatLabel;
+  }
+  if (!fundamentalSpellingDialog.open) {
+    fundamentalSpellingDialog.showModal();
+  }
+}
+
 function midiToFrequency(midi, a4) {
   return a4 * Math.pow(2, (midi - 69) / 12);
 }
@@ -2304,7 +2364,7 @@ function populateFundamentalNotes() {
   for (let midi = startMidi; midi <= endMidi; midi += 1) {
     const option = document.createElement("option");
     option.value = String(midi);
-    option.textContent = midiToNoteName(midi);
+    option.textContent = midiToFundamentalNoteName(midi);
     fundamentalNoteSelect.appendChild(option);
   }
 }
@@ -2315,7 +2375,7 @@ function updateFundamentalNotes() {
   Array.from(fundamentalNoteSelect.options).forEach((option) => {
     const midi = Number(option.value);
     const freq = midiToFrequency(midi, a4);
-    option.textContent = `${midiToNoteName(midi)} (${freq.toFixed(2)} Hz)`;
+    option.textContent = `${midiToFundamentalNoteName(midi)} (${freq.toFixed(2)} Hz)`;
   });
   fundamentalNoteSelect.value = String(selectedMidi);
 }
@@ -2355,6 +2415,11 @@ function onFundamentalNoteChange() {
   const freq = midiToFrequency(midi, a4);
   fundamentalInput.value = freq.toFixed(2);
   updateNodeFrequencies();
+  if (spellingMode === "true") {
+    showFundamentalSpellingDialog(midi);
+  } else {
+    hideFundamentalSpellingDialog();
+  }
 }
 
 function projectPoint(point, disableScale = false) {
@@ -2583,6 +2648,7 @@ function buildSvgTextWithSmallCent({
   align = "left",
   baseline = "hanging",
   hejiAccidentals = false,
+  hejiYOffset = 0,
   color,
 }) {
   const chars = Array.from(text || "");
@@ -2612,8 +2678,9 @@ function buildSvgTextWithSmallCent({
     const charSize = isCent ? getCentsCharSize(size) : size;
     const charFont = isHeji ? "HEJI2Text" : font;
     const charWeight = isHeji ? 400 : fontWeight;
+    const charY = y + (isHeji ? hejiYOffset : 0);
     nodes.push(
-      `<text x="${cursorX}" y="${y}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
+      `<text x="${cursorX}" y="${charY}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
         charFont
       )}" font-size="${charSize}" font-weight="${charWeight}" fill="${color}">${escapeSvgText(
         char
@@ -2720,6 +2787,9 @@ function getDisplayNoteInfo(node) {
   const nearestPitchClass = preferredNames[nearest.midi % 12];
   const nearestName = `${nearestPitchClass}${Math.floor(nearest.midi / 12) - 1}`;
   const nearestCents = Number.isFinite(node.cents_from_et) ? node.cents_from_et : nearest.cents;
+  if (spellingMode === "true") {
+    return getTrueSpellingPitchClass(node);
+  }
   if (!hejiEnabled) {
     return {
       name: nearestName,
@@ -2741,6 +2811,33 @@ function getDisplayNoteInfo(node) {
     { ratio: ratioY, exp: Number(node.exponentY) || 0 },
     { ratio: ratioZ, exp: Number(node.exponentZ) || 0 },
   ];
+  const beyondLimit = axisRatios.some((axis) => {
+    if (!axis.exp) {
+      return false;
+    }
+    const limit = getTrueSpellingLimit(axis.ratio);
+    if (!Number.isFinite(limit)) {
+      return false;
+    }
+    return Math.abs(axis.exp) > limit;
+  });
+  if (beyondLimit) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  const hasUnknownInterval = axisRatios.some(
+    (axis) => axis.exp && !TRUE_SPELLING_INTERVALS[axis.ratio]
+  );
+  if (hasUnknownInterval) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
   const hasHigherPrime = axisRatios.some(
     (axis) => axis.exp && Number(axis.ratio) >= 53
   );
@@ -3303,6 +3400,18 @@ function getLayoutTitleY() {
   return Math.max(top + 10, maxY - layoutTitleMargin);
 }
 
+function getLayoutTitlePosition() {
+  const { left, top, width } = getLayoutPageRect();
+  if (
+    layoutTitlePosition &&
+    Number.isFinite(layoutTitlePosition.x) &&
+    Number.isFinite(layoutTitlePosition.y)
+  ) {
+    return { x: left + layoutTitlePosition.x, y: top + layoutTitlePosition.y };
+  }
+  return { x: left + width / 2, y: getLayoutTitleY() };
+}
+
 function syncLayoutFontVars() {
   document.documentElement.style.setProperty("--font-title", layoutTitleFont);
   document.documentElement.style.setProperty("--font-ratio", layoutRatioFont);
@@ -3315,6 +3424,193 @@ const AXIS_EDGE_COLORS = {
   z: "rgba(16, 185, 129, 0.5)",
 };
 const BASE_LIGHT_DIR = { x: -0.6, y: -0.8, z: 0 };
+
+const LETTERS = ["C", "D", "E", "F", "G", "A", "B"];
+const LETTER_TO_SEMITONE = {
+  C: 0,
+  D: 2,
+  E: 4,
+  F: 5,
+  G: 7,
+  A: 9,
+  B: 11,
+};
+const TRUE_SPELLING_INTERVALS = {
+  3: { letter: 4, semitones: 7 },
+  5: { letter: 2, semitones: 4 },
+  7: { letter: 6, semitones: 10 },
+  11: { letter: 3, semitones: 5 },
+  13: { letter: 5, semitones: 9 },
+  17: { letter: 0, semitones: 0, maxSteps: 4 },
+  19: { letter: 2, semitones: 3 },
+  23: { letter: 3, semitones: 6 },
+  29: { letter: 6, semitones: 10 },
+  31: { letter: 0, semitones: 0, maxSteps: 4 },
+  37: { letter: 1, semitones: 2 },
+  41: { letter: 2, semitones: 4 },
+  43: { letter: 3, semitones: 5 },
+  47: { letter: 3, semitones: 6 },
+};
+
+function floorDiv(value, divisor) {
+  return Math.floor(value / divisor);
+}
+
+function mod(value, divisor) {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+function parsePitchClass(pitchClass) {
+  const match = String(pitchClass || "").match(/^([A-G])([#bx]*)$/);
+  if (!match) {
+    return { letterIndex: 0, accidental: 0 };
+  }
+  const letter = match[1];
+  const accidentalText = match[2] || "";
+  let accidental = 0;
+  for (const char of accidentalText) {
+    if (char === "#") {
+      accidental += 1;
+    } else if (char === "b") {
+      accidental -= 1;
+    } else if (char === "x") {
+      accidental += 2;
+    }
+  }
+  return { letterIndex: LETTERS.indexOf(letter), accidental };
+}
+
+function accidentalToString(accidental) {
+  if (!accidental) {
+    return "";
+  }
+  if (accidental > 0) {
+    if (accidental === 1) {
+      return "#";
+    }
+    if (accidental === 2) {
+      return "x";
+    }
+    return "###";
+  }
+  if (accidental === -1) {
+    return "b";
+  }
+  if (accidental === -2) {
+    return "bb";
+  }
+  return "bbb";
+}
+
+function buildPitchClass(letterIndex, accidental) {
+  const letter = LETTERS[mod(letterIndex, LETTERS.length)];
+  const clamped = Math.max(-3, Math.min(3, accidental));
+  return `${letter}${accidentalToString(clamped)}`;
+}
+
+const trueSpellingLimitCache = new Map();
+
+function getTrueSpellingLimit(ratio) {
+  const key = Number(ratio);
+  if (trueSpellingLimitCache.has(key)) {
+    return trueSpellingLimitCache.get(key);
+  }
+  const spec = TRUE_SPELLING_INTERVALS[key];
+  if (!spec) {
+    trueSpellingLimitCache.set(key, null);
+    return null;
+  }
+  if (Number.isFinite(spec.maxSteps)) {
+    trueSpellingLimitCache.set(key, spec.maxSteps);
+    return spec.maxSteps;
+  }
+  const base = { letterIndex: 0, accidental: 0 };
+  let maxSteps = 0;
+  for (let step = 1; step < 30; step += 1) {
+    const letterShift = step * spec.letter;
+    const semitoneShift = step * spec.semitones;
+    const totalLetter = base.letterIndex + letterShift;
+    const octaveShift = floorDiv(totalLetter, 7);
+    const targetLetterIndex = mod(totalLetter, 7);
+    const targetNatural = LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + octaveShift * 12;
+    const totalSemitone = base.accidental + LETTER_TO_SEMITONE[LETTERS[base.letterIndex]] + semitoneShift;
+    const accidental = totalSemitone - targetNatural;
+    if (Math.abs(accidental) > 3) {
+      break;
+    }
+    maxSteps = step;
+  }
+  trueSpellingLimitCache.set(key, maxSteps);
+  return maxSteps;
+}
+
+function getTrueSpellingPitchClass(node) {
+  const a4 = Number(a4Input.value) || 440;
+  const freq = Number(node.freq);
+  const nearest = getNearestEtInfo(freq, a4);
+  const nearestPitchClass = noteNames[nearest.midi % 12];
+  const nearestName = `${nearestPitchClass}${Math.floor(nearest.midi / 12) - 1}`;
+  const nearestCents = Number.isFinite(node.cents_from_et) ? node.cents_from_et : nearest.cents;
+  const ratioX = Number(ratioXSelect.value);
+  const ratioY = Number(ratioYSelect.value);
+  const ratioZ = Number(ratioZSelect.value);
+  const axisRatios = [
+    { ratio: ratioX, exp: Number(node.exponentX) || 0 },
+    { ratio: ratioY, exp: Number(node.exponentY) || 0 },
+    { ratio: ratioZ, exp: Number(node.exponentZ) || 0 },
+  ];
+  const hasHigherPrime = axisRatios.some(
+    (axis) => axis.exp && Number(axis.ratio) >= 53
+  );
+  if (hasHigherPrime) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  let totalLetterShift = 0;
+  let totalSemitoneShift = 0;
+  axisRatios.forEach((axis) => {
+    if (!axis.exp) {
+      return;
+    }
+    const spec = TRUE_SPELLING_INTERVALS[axis.ratio];
+    if (!spec) {
+      return;
+    }
+    totalLetterShift += axis.exp * spec.letter;
+    totalSemitoneShift += axis.exp * spec.semitones;
+  });
+  let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
+  if (!Number.isFinite(fundamentalMidi)) {
+    const fallback = getNearestEtInfo(Number(fundamentalInput.value) || 220, a4);
+    fundamentalMidi = fallback.midi;
+  }
+  const basePitchClass = getFundamentalNoteNames()[mod(fundamentalMidi, 12)];
+  const base = parsePitchClass(basePitchClass);
+  const baseNatural = LETTER_TO_SEMITONE[LETTERS[base.letterIndex]] || 0;
+  const baseSemitone = baseNatural + base.accidental;
+  const totalLetter = base.letterIndex + totalLetterShift;
+  const octaveShift = floorDiv(totalLetter, 7);
+  const targetLetterIndex = mod(totalLetter, 7);
+  const targetNatural =
+    LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + octaveShift * 12;
+  const targetSemitone = baseSemitone + totalSemitoneShift;
+  let accidental = targetSemitone - targetNatural;
+  if (Math.abs(accidental) > 3) {
+    accidental = Math.max(-3, Math.min(3, accidental));
+  }
+  const pitchClass = buildPitchClass(targetLetterIndex, accidental);
+  const targetPc = mod(LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + accidental, 12);
+  const midiFloat = 69 + 12 * Math.log2(freq / a4);
+  const midiBase = Math.round((midiFloat - targetPc) / 12);
+  const midi = targetPc + 12 * midiBase;
+  const name = `${pitchClass}${Math.floor(midi / 12) - 1}`;
+  const etFreq = a4 * Math.pow(2, (midi - 69) / 12);
+  const cents = 1200 * Math.log2(freq / etFreq);
+  return { name, pitchClass, cents };
+}
 
 function getLightDir2D() {
   const rotated = projectPointWithAngles(BASE_LIGHT_DIR, view.rotX, view.rotY, true);
@@ -3665,8 +3961,8 @@ function drawLayoutPage({ drawAxes = true } = {}) {
     ctx.font = `${titleSize}px ${layoutTitleFont}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    const titleY = getLayoutTitleY();
-    ctx.fillText(layoutTitle, left + width / 2, titleY);
+    const titlePos = getLayoutTitlePosition();
+    ctx.fillText(layoutTitle, titlePos.x, titlePos.y);
   }
 
   if (drawAxes) {
@@ -3941,8 +4237,12 @@ function draw() {
       ctx.fillStyle = themeColors.textSecondary;
       const ratioText = `${node.numerator}:${node.denominator}`;
       const centsLabel = buildCentsReadout(node, { wrap: true });
-      const ratioX = pos.x + (radius + 6) * 0.7;
-      const ratioY = pos.y + radius - 10;
+      const rawLabelPos = layoutMode
+        ? getLayoutNoteLabelPosition(node, pos, radius)
+        : { x: pos.x + radius + 6, y: pos.y + radius - 10 };
+      const labelOffsetX = rawLabelPos.x - pos.x;
+      const ratioX = pos.x + labelOffsetX * 0.7;
+      const ratioY = rawLabelPos.y;
       let lineOffset = 0;
       ctx.fillText(ratioText, ratioX, ratioY + lineOffset);
       lineOffset += detailSize + 4;
@@ -4012,7 +4312,7 @@ function draw() {
       }
     }
 
-    if (keyMap && node.active) {
+    if (keyMap && node.active && !layoutMode) {
       const keyLabel = keyMap.get(node.id);
       if (keyLabel) {
         if (is3DMode) {
@@ -4416,6 +4716,16 @@ function onPointerDown(event) {
       }
       return;
     }
+    const titleHit = hitTestLayoutTitle(screenPoint);
+    if (titleHit) {
+      event.preventDefault();
+      layoutTitleDrag = {
+        offsetX: titleHit.pos.x - screenPoint.x,
+        offsetY: titleHit.pos.y - screenPoint.y,
+      };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
     const axisHit = hitTestAxisLegend(screenPoint);
     if (axisHit) {
       layoutAxisDrag = {
@@ -4552,7 +4862,7 @@ function onCanvasDoubleClick(event) {
   if (!hit) {
     return;
   }
-  const shapes = ["circle", "square", "triangle", "diamond"];
+  const shapes = ["circle", "square", "diamond"];
   const current = getLayoutNodeShape(hit);
   const index = shapes.indexOf(current);
   const next = shapes[(index + 1) % shapes.length];
@@ -4576,6 +4886,15 @@ function onPointerMove(event) {
       );
       draw();
     }
+    return;
+  }
+  if (layoutMode && layoutTitleDrag) {
+    const { left, top, width } = getLayoutPageRect();
+    layoutTitlePosition = {
+      x: event.shiftKey ? width / 2 : event.offsetX + layoutTitleDrag.offsetX - left,
+      y: event.offsetY + layoutTitleDrag.offsetY - top,
+    };
+    draw();
     return;
   }
   if (layoutMode && layoutAxisDrag) {
@@ -4682,6 +5001,10 @@ function onPointerUp(event) {
   }
   if (layoutLabelDrag) {
     layoutLabelDrag = null;
+    return;
+  }
+  if (layoutTitleDrag) {
+    layoutTitleDrag = null;
     return;
   }
   if (layoutAxisEditDrag) {
@@ -4851,6 +5174,7 @@ function onPointerLeave() {
   layoutLabelDrag = null;
   layoutAxisDrag = null;
   layoutAxisEditDrag = null;
+  layoutTitleDrag = null;
   view.rotating = false;
   if (view.dragging) {
     view.dragging = false;
@@ -4972,6 +5296,32 @@ function hitTestNoteLabel(screenPoint) {
     }
   });
   return hit;
+}
+
+function hitTestLayoutTitle(screenPoint) {
+  if (!layoutMode || !layoutTitle) {
+    return null;
+  }
+  const titleSize = Math.max(12, Math.round(layoutTitleSize));
+  ctx.save();
+  ctx.font = `${titleSize}px ${layoutTitleFont}`;
+  const width = ctx.measureText(layoutTitle).width;
+  ctx.restore();
+  const pos = getLayoutTitlePosition();
+  const height = titleSize;
+  const left = pos.x - width / 2;
+  const right = pos.x + width / 2;
+  const top = pos.y;
+  const bottom = pos.y + height;
+  if (
+    screenPoint.x >= left &&
+    screenPoint.x <= right &&
+    screenPoint.y >= top &&
+    screenPoint.y <= bottom
+  ) {
+    return { pos };
+  }
+  return null;
 }
 
 function hitTestAxisLegend(screenPoint) {
@@ -5426,8 +5776,18 @@ function updateUiHint() {
     return;
   }
   if (!is3DMode) {
+    if (spellingMode === "simple") {
+      uiHint.textContent =
+        "Manual spelling: hold R and click on a node to reverse.\n(click to hide)";
+      return;
+    }
     uiHint.textContent =
       "Click to play. Shift double-click & hold to start LFO.\n Shift-click to add. Option-click to remove. Hold R and click to respell.\nDrag to pan. Scroll to zoom.\n(click to hide)";
+    return;
+  }
+  if (spellingMode === "simple") {
+    uiHint.textContent =
+      "Manual spelling: hold R and click on a node to reverse.\n(click to hide)";
     return;
   }
   uiHint.textContent =
@@ -5524,6 +5884,7 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
   layoutPositions.clear();
   layoutLabelOffsets.clear();
   layoutNodeShapes.clear();
+  layoutTitlePosition = null;
   layoutAxisOffsets = {
     x: { x: 0, y: 0 },
     y: { x: 0, y: 0 },
@@ -6344,6 +6705,7 @@ function getPresetState() {
     noteSpellings: Array.from(nodeSpellingOverrides.entries()),
     fundamental: Number(fundamentalInput.value) || 220,
     a4: Number(a4Input.value) || 440,
+    fundamentalSpelling,
     layout: {
       mode: layoutMode,
       title: layoutTitle,
@@ -6352,6 +6714,7 @@ function getPresetState() {
       ratioTextSize: layoutRatioTextSize,
       noteTextSize: layoutNoteTextSize,
       titleMargin: layoutTitleMargin,
+      titlePosition: layoutTitlePosition,
       titleFont: layoutTitleFont,
       ratioFont: layoutRatioFont,
       noteFont: layoutNoteFont,
@@ -6362,6 +6725,7 @@ function getPresetState() {
       zoom: view.zoom,
     },
     featureMode,
+    spellingMode,
     showHz,
     showCentsSign,
     hejiEnabled,
@@ -6467,6 +6831,9 @@ function applyPresetState(state) {
   }
   if (Number.isFinite(state.a4)) {
     a4Input.value = String(state.a4);
+  }
+  if (typeof state.fundamentalSpelling === "string") {
+    fundamentalSpelling = state.fundamentalSpelling === "flat" ? "flat" : "sharp";
   }
   if (Array.isArray(state.ratios)) {
     const [x, y, z] = state.ratios;
@@ -6613,6 +6980,18 @@ function applyPresetState(state) {
       }
       updateLayoutTitleMarginReadout();
     }
+    if (
+      layoutState.titlePosition &&
+      Number.isFinite(layoutState.titlePosition.x) &&
+      Number.isFinite(layoutState.titlePosition.y)
+    ) {
+      layoutTitlePosition = {
+        x: layoutState.titlePosition.x,
+        y: layoutState.titlePosition.y,
+      };
+    } else {
+      layoutTitlePosition = null;
+    }
     if (typeof layoutState.titleFont === "string") {
       layoutTitleFont = layoutState.titleFont;
       if (layoutTitleFontSelect) {
@@ -6670,6 +7049,14 @@ function applyPresetState(state) {
     if (featureModeInputs.length) {
       featureModeInputs.forEach((input) => {
         input.checked = input.value === featureMode;
+      });
+    }
+  }
+  if (typeof state.spellingMode === "string") {
+    spellingMode = state.spellingMode === "true" ? "true" : "simple";
+    if (spellingModeInputs.length) {
+      spellingModeInputs.forEach((input) => {
+        input.checked = input.value === spellingMode;
       });
     }
   }
@@ -6838,7 +7225,7 @@ function buildHejiSvgInline({
   size,
   align,
   baseline,
-  hejiYOffset = 0,
+  hejiYOffset = 0.5,
   restGapScale = HEJI_REST_GAP,
   restHejiAccidentals = false,
   fontWeight = 400,
@@ -6846,15 +7233,17 @@ function buildHejiSvgInline({
 }) {
   const suffixSpacing = Math.round(size * 0.08);
   const partGap = Math.round(size * 0.1);
-  const baseSuffixGap = Math.round(size * 0.12);
+  const baseSuffixGap = Math.round(size * 0.1);
   const restGap = Math.round(size * restGapScale);
-  const baseWidth = ctx.measureText(baseText).width;
+  const baseWidth = measureTextWidthWithWeight(baseText, size, font, fontWeight);
   const parts = Array.isArray(suffixParts) ? suffixParts : [];
   const suffixWidth = parts.reduce((sum, part, index) => {
     const partWidth = measureSuffixPartWidth(part, size, suffixSpacing, fontWeight);
     return sum + partWidth + (index > 0 ? partGap : 0);
   }, 0);
-  const restWidth = restText ? ctx.measureText(restText).width : 0;
+  const restWidth = restText
+    ? measureTextWidthWithWeight(restText, size, font, fontWeight)
+    : 0;
   const totalWidth =
     baseWidth +
     (parts.length ? baseSuffixGap + suffixWidth : 0) +
@@ -6960,6 +7349,23 @@ function buildHejiSvgInline({
   return nodes.join("\n");
 }
 
+const LEXEND_FONT_URL =
+  "https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&display=swap";
+
+function getHejiFontUrl() {
+  try {
+    return new URL("./src/HEJI2Text.otf", window.location.href).href;
+  } catch (error) {
+    return "./src/HEJI2Text.otf";
+  }
+}
+
+function getExportFontCss() {
+  const hejiFontUrl = getHejiFontUrl();
+  return `@import url("${LEXEND_FONT_URL}");
+@font-face { font-family: "HEJI2Text"; src: url("${hejiFontUrl}") format("opentype"); font-display: swap; }`;
+}
+
 function buildLayoutSvgString() {
   if (!layoutMode) {
     return null;
@@ -6978,18 +7384,82 @@ function buildLayoutSvgString() {
   parts.push(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${widthIn}in" height="${heightIn}in" viewBox="0 0 ${widthPx} ${heightPx}">`
   );
+  parts.push(`<defs><style><![CDATA[${getExportFontCss()}]]></style></defs>`);
   parts.push(`<rect width="100%" height="100%" fill="${themeColors.page}"/>`);
 
   if (layoutTitle) {
-    const titleY = Math.max(12, getLayoutTitleY() - top);
+    const titlePos = getLayoutTitlePosition();
+    const titleX = layoutTitlePosition
+      ? layoutTitlePosition.x
+      : widthPx / 2;
+    const titleY = layoutTitlePosition
+      ? layoutTitlePosition.y
+      : Math.max(12, titlePos.y - top);
     parts.push(
-      `<text x="${widthPx / 2}" y="${titleY}" text-anchor="middle" font-family="${escapeSvgText(
+      `<text x="${titleX}" y="${titleY}" text-anchor="middle" font-family="${escapeSvgText(
         layoutTitleFont
       )}" font-size="${titleSize}" fill="${themeColors.textPrimary}">${escapeSvgText(
         layoutTitle
       )}</text>`
     );
   }
+
+  const axisSettings = getAxisLegendSettings();
+  const axisColor = themeColors.textSecondary;
+  const axisStroke = 1.5;
+  const axisDefs = [
+    getAxisLegendInfo("x", axisSettings),
+    getAxisLegendInfo("y", axisSettings),
+    getAxisLegendInfo("z", axisSettings),
+  ];
+  axisDefs.forEach((info) => {
+    if (!info) {
+      return;
+    }
+    const centerX = info.center.x - left;
+    const centerY = info.center.y - top;
+    const leftStart = {
+      x: centerX - info.gapVec.x,
+      y: centerY - info.gapVec.y,
+    };
+    const leftEnd = {
+      x: info.leftEnd.x - left,
+      y: info.leftEnd.y - top,
+    };
+    const rightStart = {
+      x: centerX + info.gapVec.x,
+      y: centerY + info.gapVec.y,
+    };
+    const rightEnd = {
+      x: info.rightEnd.x - left,
+      y: info.rightEnd.y - top,
+    };
+    const buildArrow = (x1, y1, x2, y2) => {
+      const headLength = 10;
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      const p1 = `${x2},${y2}`;
+      const p2 = `${x2 - headLength * Math.cos(angle - Math.PI / 6)},${y2 -
+        headLength * Math.sin(angle - Math.PI / 6)}`;
+      const p3 = `${x2 - headLength * Math.cos(angle + Math.PI / 6)},${y2 -
+        headLength * Math.sin(angle + Math.PI / 6)}`;
+      parts.push(
+        `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${axisColor}" stroke-width="${axisStroke}" />`
+      );
+      parts.push(
+        `<polygon points="${p1} ${p2} ${p3}" fill="${axisColor}" />`
+      );
+    };
+    buildArrow(leftStart.x, leftStart.y, leftEnd.x, leftEnd.y);
+    buildArrow(rightStart.x, rightStart.y, rightEnd.x, rightEnd.y);
+    const rotation = (info.textAngle * 180) / Math.PI;
+    parts.push(
+      `<text x="${centerX}" y="${centerY}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
+        layoutRatioFont
+      )}" font-size="${axisSettings.fontSize}" fill="${axisColor}" transform="rotate(${rotation} ${centerX} ${centerY})">${escapeSvgText(
+        info.label
+      )}</text>`
+    );
+  });
 
   edges.forEach(([a, b]) => {
     if (!a.active || !b.active) {
@@ -7115,8 +7585,10 @@ function buildLayoutSvgString() {
         );
       }
       const centsLabel = buildCentsReadout(node, { wrap: true });
-      const ratioX = x + (radius + 6) * 0.7;
-      const ratioY = y + radius - 10;
+      const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
+      const labelOffsetX = rawLabelPos.x - pos.x;
+      const ratioX = pos.x + labelOffsetX * 0.7 - left;
+      const ratioY = rawLabelPos.y - top;
       parts.push(
         `<text x="${ratioX}" y="${ratioY}" text-anchor="start" dominant-baseline="hanging" font-family="Lexend, sans-serif" font-weight="200" font-size="${detailSize}" fill="${themeColors.textSecondary}">${escapeSvgText(
           `${node.numerator}:${node.denominator}`
@@ -7133,6 +7605,7 @@ function buildLayoutSvgString() {
           align: "left",
           baseline: "hanging",
           hejiAccidentals: hejiEnabled,
+          hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
           color: themeColors.textSecondary,
         })
       );
@@ -7251,27 +7724,45 @@ function exportLayoutPdf() {
     alert("Enable Page Layout mode to export PDF.");
     return;
   }
+  const { widthPx, heightPx } = getLayoutPageDimensions();
   const win = window.open("", "_blank");
   if (!win) {
     alert("Pop-up blocked. Allow pop-ups to export PDF.");
     return;
   }
+  const hejiFontUrl = getHejiFontUrl();
   win.document.open();
   win.document.write(`<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <title>Layout PDF</title>
+    <link rel="stylesheet" href="${LEXEND_FONT_URL}">
     <style>
-      body { margin: 0; }
-      svg { width: 100vw; height: 100vh; }
+      @page { size: ${Math.round(widthPx)}px ${Math.round(heightPx)}px; margin: 0; }
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
+      body { display: flex; align-items: center; justify-content: center; }
+      svg { width: ${Math.round(widthPx)}px; height: ${Math.round(heightPx)}px; display: block; }
+      @font-face {
+        font-family: "HEJI2Text";
+        src: url("${hejiFontUrl}") format("opentype");
+        font-display: swap;
+      }
     </style>
   </head>
   <body>
     ${svg}
     <script>
       window.onload = () => {
-        setTimeout(() => window.print(), 200);
+        const waitForFonts = document.fonts
+          ? Promise.all([
+              document.fonts.load('16px "HEJI2Text"'),
+              document.fonts.load('16px "Lexend"')
+            ])
+          : Promise.resolve();
+        waitForFonts.finally(() => {
+          setTimeout(() => window.print(), 200);
+        });
       };
     </script>
   </body>
@@ -7429,6 +7920,11 @@ if (featureModeInputs.length) {
     input.checked = input.value === featureMode;
   });
 }
+if (spellingModeInputs.length) {
+  spellingModeInputs.forEach((input) => {
+    input.checked = input.value === spellingMode;
+  });
+}
 if (showHzToggle) {
   showHzToggle.checked = showHz;
 }
@@ -7538,6 +8034,32 @@ if (featureModeInputs.length) {
       schedulePresetUrlUpdate();
     });
   });
+}
+if (spellingModeInputs.length) {
+  spellingModeInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      const selected = document.querySelector('input[name="spelling-mode"]:checked');
+      spellingMode = selected && selected.value === "true" ? "true" : "simple";
+      updateUiHint();
+      if (spellingMode !== "true") {
+        hideFundamentalSpellingDialog();
+      } else if (fundamentalNoteSelect) {
+        showFundamentalSpellingDialog(Number(fundamentalNoteSelect.value));
+      }
+      draw();
+      schedulePresetUrlUpdate();
+    });
+  });
+}
+function applyFundamentalSpelling(nextSpelling) {
+  if (spellingMode !== "true") {
+    return;
+  }
+  fundamentalSpelling = nextSpelling === "flat" ? "flat" : "sharp";
+  updateFundamentalNotes();
+  draw();
+  schedulePresetUrlUpdate();
+  hideFundamentalSpellingDialog();
 }
 if (showHzToggle) {
   showHzToggle.addEventListener("change", () => {
@@ -7733,6 +8255,7 @@ if (layoutNoteFontSelect) {
 if (layoutUnifySizeToggle) {
   layoutUnifySizeToggle.addEventListener("change", () => {
     layoutUnifyNodeSize = layoutUnifySizeToggle.checked;
+    layoutAxisAngles = { x: null, y: null, z: null };
     draw();
     schedulePresetUrlUpdate();
   });
@@ -7793,6 +8316,18 @@ a4Input.addEventListener("input", () => {
   updateNodeFrequencies();
 });
 fundamentalNoteSelect.addEventListener("change", onFundamentalNoteChange);
+if (fundamentalSpellingSharpButton) {
+  fundamentalSpellingSharpButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    applyFundamentalSpelling("sharp");
+  });
+}
+if (fundamentalSpellingFlatButton) {
+  fundamentalSpellingFlatButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    applyFundamentalSpelling("flat");
+  });
+}
 volumeSlider.addEventListener("input", () => {
   updateVolume();
   schedulePresetUrlUpdate();

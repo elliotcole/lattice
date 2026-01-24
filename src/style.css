@@ -16,6 +16,7 @@
   --font-title: "Georgia";
   --font-ratio: "Georgia";
   --font-note: "Georgia";
+  --font-triangle-label: "Georgia";
   --page: #ffffff;
   --page-border: rgba(16, 19, 22, 0.15);
   --page-shadow: rgba(16, 19, 22, 0.18);
@@ -115,6 +116,11 @@ body.theme-dark {
 
 .creator {
   margin: 0 0 6px 15px;
+}
+
+.creator a,
+.creator a:visited {
+  color: inherit;
 }
 
 .panel {
@@ -323,7 +329,7 @@ button:active {
 
 .nav-3d {
   position: fixed;
-  top: 160px;
+  top: 100px;
   left: 18px;
   width: 180px;
   z-index: 9;
@@ -509,7 +515,7 @@ button:active {
 
 .layout-float {
   position: fixed;
-  top: 120px;
+  top: 100px;
   left: 16px;
   width: min(180px, calc(100%));
   z-index: 3;

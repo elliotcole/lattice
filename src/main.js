@@ -20,18 +20,22 @@ const layoutPageSizeSelect = document.getElementById("layout-page-size");
 const layoutOrientationSelect = document.getElementById("layout-orientation");
 const layoutScaleInput = document.getElementById("layout-scale");
 const layoutScaleReadout = document.getElementById("layout-scale-readout");
+const layoutLockPositionToggle = document.getElementById("layout-lock-position");
 const layoutNodeSizeInput = document.getElementById("layout-node-size");
 const layoutNodeSizeReadout = document.getElementById("layout-node-size-readout");
 const layoutRatioTextSizeInput = document.getElementById("layout-ratio-text-size");
 const layoutRatioTextReadout = document.getElementById("layout-ratio-text-readout");
 const layoutNoteTextSizeInput = document.getElementById("layout-note-text-size");
 const layoutNoteTextReadout = document.getElementById("layout-note-text-readout");
+const layoutTriangleLabelSizeInput = document.getElementById("layout-triangle-label-size");
+const layoutTriangleLabelReadout = document.getElementById("layout-triangle-label-readout");
 const layoutNodeShapeSelect = document.getElementById("layout-node-shape");
 const layoutFontsButton = document.getElementById("layout-fonts");
 const layoutFontDialog = document.getElementById("layout-font-dialog");
 const layoutTitleFontSelect = document.getElementById("layout-title-font");
 const layoutRatioFontSelect = document.getElementById("layout-ratio-font");
 const layoutNoteFontSelect = document.getElementById("layout-note-font");
+const layoutTriangleLabelFontSelect = document.getElementById("layout-triangle-label-font");
 const layoutUnifySizeToggle = document.getElementById("layout-unify-size");
 const layoutResetButton = document.getElementById("layout-reset");
 const exportSvgButton = document.getElementById("export-svg");
@@ -107,6 +111,8 @@ const lfoStopButton = document.getElementById("lfo-stop");
 const allNotesOffButton = document.getElementById("all-notes-off");
 const addCustomRatioButton = document.getElementById("add-custom-ratio");
 const customRatioDialog = document.getElementById("custom-ratio-dialog");
+const triangleLabelDialog = document.getElementById("triangle-label-dialog");
+const triangleLabelInput = document.getElementById("triangle-label-input");
 const customRatioNumerator = document.getElementById("custom-ratio-numerator");
 const customRatioDenominator = document.getElementById("custom-ratio-denominator");
 const attackReadout = document.getElementById("attack-readout");
@@ -137,6 +143,9 @@ const view = {
   rotX: 0,
   rotY: 0,
 };
+let bestViewCandidates = [];
+let bestViewIndex = 0;
+let bestViewSignature = "";
 
 let audioCtx = null;
 let masterGain = null;
@@ -152,11 +161,193 @@ let midiAccess = null;
 let midiInput = null;
 let midiEnabled = false;
 let rHeld = false;
+let tHeld = false;
 let suppressClickAfterRespell = false;
 const midiActiveNotes = new Map();
 let lastLfoTapTime = 0;
 let lastLfoTapId = null;
 const activeKeys = new Map();
+const triangleDiagonals = new Map();
+let triangleHover = null;
+let triangleLabelTargetKey = null;
+let triangleLabelTargetTri = null;
+const TRIANGLE_DIAGONAL_HIT_DISTANCE = 10;
+const TRIANGLE_TRI_IDS = new Set(["abd", "acd", "abc", "bcd"]);
+const triangleLabels = new Map();
+const TRIANGLE_TRI_TO_DIAG = {
+  abd: "backslash",
+  acd: "backslash",
+  abc: "slash",
+  bcd: "slash",
+};
+let layoutLabelHitboxVisible = false;
+
+function clearTriangleLabelsForCell(entry) {
+  TRIANGLE_TRI_IDS.forEach((tri) => {
+    triangleLabels.delete(triangleLabelKey({ ...entry, tri }));
+  });
+}
+
+function computeTriangleLabelLayout(text, font, baseSize, points) {
+  if (!text || !points || points.length < 3) {
+    return { size: baseSize };
+  }
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  points.forEach((point) => {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  });
+  const boxWidth = maxX - minX;
+  const boxHeight = maxY - minY;
+  const maxWidth = Math.max(8, Math.min(boxWidth, boxHeight) * 0.75);
+  let size = baseSize;
+  const minSize = Math.max(2, Math.round(baseSize * 0.25));
+  let width = measureTextWidth(text, size, font);
+  while (width > maxWidth && size > minSize) {
+    size -= 4;
+    width = measureTextWidth(text, size, font);
+  }
+  return { size };
+}
+
+function getLayoutNoteLabelHitbox(node, pos, radius) {
+  const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
+  const labelOffsetX = rawLabelPos.x - pos.x;
+  const labelPos = {
+    x: pos.x + labelOffsetX * 0.7,
+    y: rawLabelPos.y,
+  };
+  let width = 0;
+  let height = layoutNoteTextSize;
+  if (featureMode === "ratio") {
+    ctx.save();
+    ctx.font = `${layoutNoteTextSize}px ${layoutNoteFont}`;
+    const metrics = ctx.measureText(getNodeNoteLabel(node));
+    ctx.restore();
+    width = metrics.width;
+  } else {
+    const ratioText = `${node.numerator}:${node.denominator}`;
+    const displayInfo = getCachedDisplayInfo(node);
+    const centsLabel = getCachedCentsReadout(node, { wrap: true }, displayInfo);
+    width = Math.max(
+      measureTextWidthWithWeight(ratioText, layoutNoteTextSize, "Lexend, sans-serif", 200),
+      measureTextWidthWithWeight(centsLabel, layoutNoteTextSize, "Lexend, sans-serif", 200)
+    );
+    height = layoutNoteTextSize * 2 + 4;
+  }
+  const padding = Math.max(4, Math.round(layoutNoteTextSize * 0.25));
+  return {
+    left: labelPos.x - padding,
+    top: labelPos.y - padding,
+    width: width + padding * 2,
+    height: height + padding * 2,
+    labelPos,
+  };
+}
+
+function serializeLayoutLabelOffsets() {
+  return Array.from(layoutLabelOffsets.entries())
+    .map(([id, offset]) => {
+      const node = nodeById.get(id);
+      if (!node) {
+        return null;
+      }
+      if (node.isCustom) {
+        const customIndex = customNodes.findIndex((item) => item.id === id);
+        if (customIndex < 0) {
+          return null;
+        }
+        return { customIndex, x: offset.x, y: offset.y };
+      }
+      return {
+        exponents: [node.exponentX, node.exponentY, node.exponentZ || 0],
+        x: offset.x,
+        y: offset.y,
+      };
+    })
+    .filter(Boolean);
+}
+
+function applyLayoutLabelOffsets(entries) {
+  layoutLabelOffsets.clear();
+  if (!Array.isArray(entries)) {
+    return;
+  }
+  const exponentMap = new Map();
+  nodes.forEach((node) => {
+    if (!node.isCustom) {
+      exponentMap.set(
+        `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`,
+        node
+      );
+    }
+  });
+  entries.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const x = Number(entry.x);
+    const y = Number(entry.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return;
+    }
+    if (Number.isFinite(entry.customIndex)) {
+      const customNode = customNodes[entry.customIndex];
+      if (customNode) {
+        layoutLabelOffsets.set(customNode.id, { x, y });
+      }
+      return;
+    }
+    if (Array.isArray(entry.exponents) && entry.exponents.length >= 2) {
+      const [expX, expY, expZ = 0] = entry.exponents.map(Number);
+      const node = exponentMap.get(`${expX},${expY},${expZ}`);
+      if (node) {
+        layoutLabelOffsets.set(node.id, { x, y });
+      }
+      return;
+    }
+    const id = Number(entry.id);
+    if (Number.isFinite(id)) {
+      const node = nodeById.get(id);
+      if (node) {
+        layoutLabelOffsets.set(node.id, { x, y });
+      }
+    }
+  });
+}
+
+function updateDragLock(drag, event) {
+  if (!event.shiftKey) {
+    drag.lockAxis = null;
+    drag.lockOriginX = event.offsetX;
+    drag.lockOriginY = event.offsetY;
+    return null;
+  }
+  if (!drag.lockAxis) {
+    const dx = event.offsetX - drag.lockOriginX;
+    const dy = event.offsetY - drag.lockOriginY;
+    if (Math.abs(dx) < 2 && Math.abs(dy) < 2) {
+      return null;
+    }
+    drag.lockAxis = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
+  }
+  return drag.lockAxis;
+}
+
+function syncLayoutViewFromCurrent() {
+  layoutView = {
+    zoom: view.zoom,
+    offsetX: view.offsetX,
+    offsetY: view.offsetY,
+    rotX: view.rotX,
+    rotY: view.rotY,
+  };
+}
 
 const noteNamesSharp = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const noteNamesFlat = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
@@ -255,6 +446,7 @@ let gridDepth = 1;
 let gridCenterZ = 0;
 let zModeActive = false;
 let zModeAnchor = null;
+let wasZModeActive = false;
 let zKeyHeld = false;
 let isAddMode = false;
 let shiftHeld = false;
@@ -290,11 +482,13 @@ let layoutDrag = null;
 let layoutLabelDrag = null;
 let layoutPositions = new Map();
 let layoutLabelOffsets = new Map();
+let pendingLayoutLabelOffsets = null;
 let layoutNodeShapes = new Map();
 let nodeSpellingOverrides = new Map();
 let layoutNodeSize = 35;
 let layoutRatioTextSize = 21;
 let layoutNoteTextSize = 14;
+let layoutTriangleLabelTextSize = 20;
 let layoutNodeShape = "circle";
 let layoutTitle = "";
 let layoutTitleSize = 28;
@@ -303,10 +497,13 @@ let layoutTitlePosition = null;
 let layoutUnifyNodeSize = true;
 let layoutPageSize = "letter";
 let layoutOrientation = "landscape";
+let layoutLockPosition = true;
+let layoutView = { zoom: 1, offsetX: 0, offsetY: 0, rotX: 0, rotY: 0 };
 let layoutPrevState = null;
 let layoutTitleFont = "Lexend";
 let layoutRatioFont = "Georgia";
 let layoutNoteFont = "Georgia";
+let layoutTriangleLabelFont = "Georgia";
 let layoutAxisOffsets = {
   x: { x: 0, y: 0 },
   y: { x: 0, y: 0 },
@@ -322,6 +519,7 @@ let layoutAxisEdit = null;
 let layoutAxisEditDrag = null;
 let layoutTitleDrag = null;
 let spellingMode = "simple";
+let spellingHintActive = false;
 let fundamentalSpelling = "sharp";
 let featureMode = "ratio";
 let showHz = false;
@@ -329,6 +527,11 @@ let showCentsSign = false;
 let hejiEnabled = true;
 let centsPrecision = 0;
 let showCircles = true;
+const labelCache = new Map();
+let labelCacheKey = "";
+let labelCacheDataVersion = 0;
+const textWidthCache = new Map();
+let drawPending = false;
 
 const LAYOUT_PX_PER_IN = 96;
 const LAYOUT_PAGE_SIZES = {
@@ -339,6 +542,7 @@ const LAYOUT_DEFAULTS = {
   nodeSize: 35,
   ratioTextSize: 21,
   noteTextSize: 14,
+  triangleLabelTextSize: 20,
   nodeShape: "circle",
   title: "",
   titleSize: 28,
@@ -347,9 +551,12 @@ const LAYOUT_DEFAULTS = {
   pageSize: "letter",
   orientation: "landscape",
   zoom: 1,
+  lockPosition: true,
+  view: { zoom: 1, offsetX: 0, offsetY: 0, rotX: 0, rotY: 0 },
   titleFont: "Lexend",
   ratioFont: "Georgia",
   noteFont: "Georgia",
+  triangleLabelFont: "Georgia",
 };
 
 function updateNavModeSections() {
@@ -1420,6 +1627,7 @@ function updateNodeFrequencies() {
     node.note_name = etInfo.name;
     node.pitch_class = etInfo.pitchClass;
   });
+  bumpLabelDataVersion();
   updatePitchInstances();
   updateVoiceFrequencies();
   draw();
@@ -1460,6 +1668,7 @@ function updateNodeRatios() {
     node.pitch_class = etInfo.pitchClass;
   });
 
+  bumpLabelDataVersion();
   updatePitchInstances();
   updateVoiceFrequencies();
   draw();
@@ -2132,11 +2341,6 @@ function ensureIsomorphicMaps() {
 }
 
 function handleKeyDown(event) {
-  const mode = getKeyboardMode();
-  if (mode === "off") {
-    return;
-  }
-
   const tag = event.target.tagName;
   if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
     return;
@@ -2523,15 +2727,19 @@ function getLayoutNodeShape(node) {
 }
 
 function getNodeNoteLabel(node) {
-  const info = getDisplayNoteInfo(node);
+  const info = getCachedDisplayInfo(node);
   const noteText = featureMode === "ratio" ? info.pitchClass : info.name;
   const wrap = featureMode === "note" ? true : hejiEnabled;
   const requireHejiDetail = featureMode === "ratio";
-  const centsText = buildCentsReadout(node, {
-    wrap,
-    requireHejiDetail,
-    baseTextForHeji: info.pitchClass,
-  });
+  const centsText = getCachedCentsReadout(
+    node,
+    {
+      wrap,
+      requireHejiDetail,
+      baseTextForHeji: info.pitchClass,
+    },
+    info
+  );
   const hasAccidental = /[#b]/.test(noteText);
   const hasParen = centsText.startsWith("(");
   const separator = !hasAccidental && !hasParen ? "" : " ";
@@ -2539,7 +2747,7 @@ function getNodeNoteLabel(node) {
 }
 
 function getNodePitchLabel(node) {
-  return getDisplayNoteInfo(node).pitchClass;
+  return getCachedDisplayInfo(node).pitchClass;
 }
 
 function getNoteNamesForNode(node) {
@@ -2561,18 +2769,22 @@ function formatCents(value) {
 }
 
 function measureTextWidth(text, size, font, context = ctx) {
-  context.save();
-  context.font = `${size}px ${font}`;
-  const width = context.measureText(text).width;
-  context.restore();
-  return width;
+  return measureTextWidthWithWeight(text, size, font, 400, context);
 }
 
 function measureTextWidthWithWeight(text, size, font, fontWeight = 400, context = ctx) {
+  const canCache = context === ctx;
+  const cacheKey = canCache ? `${font}|${fontWeight}|${size}|${text}` : "";
+  if (canCache && textWidthCache.has(cacheKey)) {
+    return textWidthCache.get(cacheKey);
+  }
   context.save();
   context.font = `${fontWeight} ${size}px ${font}`;
   const width = context.measureText(text).width;
   context.restore();
+  if (canCache) {
+    textWidthCache.set(cacheKey, width);
+  }
   return width;
 }
 
@@ -2714,6 +2926,84 @@ function computeRatioLabelLayout(numerator, denominator, font, baseSize, maxWidt
   return { lines, size, lineGap };
 }
 
+function getLabelCacheKey() {
+  return [
+    featureMode,
+    hejiEnabled ? "heji" : "no-heji",
+    spellingMode,
+    centsPrecision,
+    showCentsSign ? "cents" : "no-cents",
+    showHz ? "hz" : "no-hz",
+    fundamentalSpelling,
+  ].join("|");
+}
+
+function invalidateLabelCache({ clearTextWidths = false } = {}) {
+  labelCache.clear();
+  labelCacheKey = "";
+  if (clearTextWidths) {
+    textWidthCache.clear();
+  }
+}
+
+function bumpLabelDataVersion() {
+  labelCacheDataVersion += 1;
+  labelCache.clear();
+}
+
+function getNodeLabelCacheEntry(node) {
+  const key = getLabelCacheKey();
+  let entry = labelCache.get(node.id);
+  if (!entry || entry.key !== key || entry.version !== labelCacheDataVersion) {
+    entry = {
+      key,
+      version: labelCacheDataVersion,
+      displayInfo: null,
+      cents: new Map(),
+      annotations: new Map(),
+    };
+    labelCache.set(node.id, entry);
+  }
+  return entry;
+}
+
+function getCachedDisplayInfo(node) {
+  const entry = getNodeLabelCacheEntry(node);
+  if (!entry.displayInfo) {
+    entry.displayInfo = getDisplayNoteInfo(node);
+  }
+  return entry.displayInfo;
+}
+
+function getCentsCacheKey(options) {
+  const wrap = options && options.wrap ? "w1" : "w0";
+  const detail = options && options.requireHejiDetail ? "d1" : "d0";
+  const baseText = options && options.baseTextForHeji ? options.baseTextForHeji : "";
+  return `${wrap}|${detail}|${baseText}`;
+}
+
+function getCachedCentsReadout(node, options, displayInfo) {
+  const entry = getNodeLabelCacheEntry(node);
+  const cacheKey = getCentsCacheKey(options);
+  if (entry.cents.has(cacheKey)) {
+    return entry.cents.get(cacheKey);
+  }
+  const text = buildCentsReadout(node, { ...options, displayInfo });
+  entry.cents.set(cacheKey, text);
+  return text;
+}
+
+function getCachedHejiAnnotation(node, baseText) {
+  const entry = getNodeLabelCacheEntry(node);
+  const cacheKey = String(baseText || "");
+  if (entry.annotations.has(cacheKey)) {
+    return entry.annotations.get(cacheKey);
+  }
+  const annotation = getHejiAnnotation(node, baseText);
+  entry.annotations.set(cacheKey, annotation);
+  return annotation;
+}
+
 function getNearestNoteInfo(node) {
   if (!node) {
     return { name: "", pitchClass: "", cents: 0 };
@@ -2730,9 +3020,14 @@ function getNearestNoteInfo(node) {
 
 function buildCentsReadout(
   node,
-  { wrap = false, requireHejiDetail = false, baseTextForHeji = "" } = {}
+  {
+    wrap = false,
+    requireHejiDetail = false,
+    baseTextForHeji = "",
+    displayInfo = null,
+  } = {}
 ) {
-  const info = getDisplayNoteInfo(node);
+  const info = displayInfo || getDisplayNoteInfo(node);
   if (!hejiEnabled) {
     const text = formatCents(info.cents);
     return text;
@@ -2747,16 +3042,20 @@ function buildCentsReadout(
   }
   const mapAccidentals = (text) =>
     text.replace(/#/g, "v").replace(/b/g, "e").replace(/x/g, "V");
-  const primaryBase = `${info.pitchClass}${formatCents(info.cents)}`;
-  const primary = wrap ? mapAccidentals(primaryBase) : primaryBase;
-  let text = primary;
-  if (Math.abs(info.cents) > 50) {
+  const includePitchClass = Math.abs(info.cents) > 50;
+  if (includePitchClass) {
     const nearest = getNearestNoteInfo(node);
     const fallbackBase = `${nearest.pitchClass}${formatCents(nearest.cents)}`;
-    const fallback = wrap ? mapAccidentals(fallbackBase) : fallbackBase;
-    text = `${primary} / ${fallback}`;
+    if (wrap) {
+      const primary = formatCents(info.cents);
+      const fallback = mapAccidentals(fallbackBase);
+      return `${primary} (${fallback})`;
+    }
+    const primary = `${info.pitchClass}${formatCents(info.cents)}`;
+    return `${primary} / ${fallbackBase}`;
   }
-  return wrap ? `(${text})` : text;
+  const primary = formatCents(info.cents);
+  return wrap ? mapAccidentals(primary) : primary;
 }
 
 function getHejiBaseAndDefaults(baseText) {
@@ -2896,10 +3195,10 @@ const HEJI_RULES = [
     ratio: 5,
     axis: "any",
     base: 2,
-    posSingle: { none: "m", sharp: "u", flat: "d" },
-    negSingle: { none: "o", sharp: "w", flat: "f" },
-    posPair: { none: "l", sharp: "t", flat: "c" },
-    negPair: { none: "p", sharp: "x", flat: "g" },
+    posSingle: { none: "m", sharp: "u", doubleSharp: "U", flat: "d", doubleFlat: "D" },
+    negSingle: { none: "o", sharp: "w", doubleSharp: "W", flat: "f", doubleFlat: "F" },
+    posPair: { none: "l", sharp: "t", doubleSharp: "T", flat: "c", doubleFlat: "C" },
+    negPair: { none: "p", sharp: "x", doubleSharp: "X", flat: "g", doubleFlat: "G" },
     replaceAccidental: true,
     usePairAsSingle: true,
     useSingleBeyondPair: true,
@@ -3065,15 +3364,33 @@ function getHejiAnnotation(node, baseText) {
     const matches = axisStates.some((axisState) => axisMatches(rule, axisState));
     if (matches) {
       if (rule.replaceAccidental && (accidentalType === "sharp" || accidentalType === "flat")) {
+        const keepSharps = doubleSharpCount > 0 ? sharpCount : 0;
+        const keepFlats = flatCount > 2 ? flatCount - 2 : 0;
+        let keptSharps = 0;
+        let keptFlats = 0;
         for (let index = suffixParts.length - 1; index >= 0; index -= 1) {
           if (suffixParts[index].source === "default") {
+            const part = suffixParts[index];
+            if (part.text === "v" && keptSharps < keepSharps) {
+              keptSharps += 1;
+              continue;
+            }
+            if (part.text === "e" && keptFlats < keepFlats) {
+              keptFlats += 1;
+              continue;
+            }
             suffixParts.splice(index, 1);
           }
         }
       }
       if (rule.mode === "repeatBaseAccidental") {
         const base = Number(rule.base) || 2;
-        const accidentalKey = accidentalType || "none";
+        const accidentalKey =
+          doubleSharpCount > 0
+            ? "doubleSharp"
+            : flatCount > 1
+              ? "doubleFlat"
+              : accidentalType || "none";
         axisStates.forEach((axisState) => {
           if (!axisMatches(rule, axisState)) {
             return;
@@ -3432,6 +3749,7 @@ function syncLayoutFontVars() {
   document.documentElement.style.setProperty("--font-title", layoutTitleFont);
   document.documentElement.style.setProperty("--font-ratio", layoutRatioFont);
   document.documentElement.style.setProperty("--font-note", layoutNoteFont);
+  document.documentElement.style.setProperty("--font-triangle-label", layoutTriangleLabelFont);
 }
 
 const AXIS_EDGE_COLORS = {
@@ -3709,16 +4027,559 @@ function getLightDir2D() {
   return { x: rotated.x / length, y: rotated.y / length };
 }
 
-function draw3DEdges() {
+function pointInTriangle(point, a, b, c) {
+  const area =
+    (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+  const area1 =
+    (b.x - point.x) * (c.y - point.y) - (c.x - point.x) * (b.y - point.y);
+  const area2 =
+    (c.x - point.x) * (a.y - point.y) - (a.x - point.x) * (c.y - point.y);
+  const area3 =
+    (a.x - point.x) * (b.y - point.y) - (b.x - point.x) * (a.y - point.y);
+  const hasNeg = area1 < 0 || area2 < 0 || area3 < 0;
+  const hasPos = area1 > 0 || area2 > 0 || area3 > 0;
+  if (area === 0) {
+    return false;
+  }
+  return !(hasNeg && hasPos);
+}
 
+function distanceToSegment(point, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (!lenSq) {
+    return Math.hypot(point.x - a.x, point.y - a.y);
+  }
+  let t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const projX = a.x + t * dx;
+  const projY = a.y + t * dy;
+  return Math.hypot(point.x - projX, point.y - projY);
+}
+
+function getTriangleDiagonalHit(screenPoint, entry, gridMap, disableScale) {
+  const { a, b, c, d } = getTriangleCellNodes(entry, gridMap);
+  let best = null;
+  let bestDist = Number.POSITIVE_INFINITY;
+  const check = (startNode, endNode, diag) => {
+    if (!startNode || !endNode) {
+      return;
+    }
+    const start = worldToScreen(getNodeDisplayCoordinate(startNode), disableScale);
+    const end = worldToScreen(getNodeDisplayCoordinate(endNode), disableScale);
+    const radiusA = (layoutMode ? layoutNodeSize : getNodeRadius(startNode)) * (start.scale || 1);
+    const radiusB = (layoutMode ? layoutNodeSize : getNodeRadius(endNode)) * (end.scale || 1);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const edgeStart = {
+      x: start.x + ux * radiusA,
+      y: start.y + uy * radiusA,
+    };
+    const edgeEnd = {
+      x: end.x - ux * radiusB,
+      y: end.y - uy * radiusB,
+    };
+    const hitDist = distanceToSegment(screenPoint, edgeStart, edgeEnd);
+    if (hitDist < bestDist) {
+      bestDist = hitDist;
+      best = diag;
+    }
+  };
+  check(a, d, "backslash");
+  check(b, c, "slash");
+  return bestDist <= TRIANGLE_DIAGONAL_HIT_DISTANCE ? best : null;
+}
+
+function triangleLabelKey(entry) {
+  return `${entry.plane}:${entry.x},${entry.y},${entry.z}:${entry.tri}`;
+}
+
+function normalizeTriangleLabelEntry(entry) {
+  return {
+    plane: entry.plane,
+    x: entry.x,
+    y: entry.y,
+    z: entry.z,
+    tri: entry.tri,
+    label: entry.label ? String(entry.label) : "",
+  };
+}
+
+function openTriangleLabelDialog(value) {
+  if (!triangleLabelDialog || !triangleLabelInput) {
+    return;
+  }
+  triangleLabelInput.value = value || "";
+  if (typeof triangleLabelDialog.showModal === "function") {
+    triangleLabelDialog.showModal();
+  }
+  requestAnimationFrame(() => {
+    triangleLabelInput.focus();
+    triangleLabelInput.select();
+  });
+}
+
+function triangleKey(entry) {
+  return `${entry.plane}:${entry.x},${entry.y},${entry.z}:${entry.diag}`;
+}
+
+function triangleCellKeys(entry) {
+  const base = `${entry.plane}:${entry.x},${entry.y},${entry.z}:`;
+  return {
+    backslash: `${base}backslash`,
+    slash: `${base}slash`,
+  };
+}
+
+function normalizeTriangleEntry(entry) {
+  return {
+    plane: entry.plane,
+    x: entry.x,
+    y: entry.y,
+    z: entry.z,
+    diag: entry.diag,
+    tri: entry.tri,
+    label: entry.label ? String(entry.label) : "",
+  };
+}
+
+function getTriangleDiagonalNodes(entry, gridMap) {
+  if (entry.plane === "xy") {
+    if (entry.diag === "backslash") {
+      return {
+        a: gridMap.get(`${entry.x},${entry.y},${entry.z}`),
+        b: gridMap.get(`${entry.x + 1},${entry.y + 1},${entry.z}`),
+      };
+    }
+    return {
+      a: gridMap.get(`${entry.x + 1},${entry.y},${entry.z}`),
+      b: gridMap.get(`${entry.x},${entry.y + 1},${entry.z}`),
+    };
+  }
+  if (entry.plane === "xz") {
+    const yFixed = entry.y;
+    if (entry.diag === "backslash") {
+      return {
+        a: gridMap.get(`${entry.x},${yFixed},${entry.z}`),
+        b: gridMap.get(`${entry.x + 1},${yFixed},${entry.z + 1}`),
+      };
+    }
+    return {
+      a: gridMap.get(`${entry.x + 1},${yFixed},${entry.z}`),
+      b: gridMap.get(`${entry.x},${yFixed},${entry.z + 1}`),
+    };
+  }
+  if (entry.plane === "yz") {
+    const xFixed = entry.x;
+    if (entry.diag === "backslash") {
+      return {
+        a: gridMap.get(`${xFixed},${entry.y},${entry.z}`),
+        b: gridMap.get(`${xFixed},${entry.y + 1},${entry.z + 1}`),
+      };
+    }
+    return {
+      a: gridMap.get(`${xFixed},${entry.y + 1},${entry.z}`),
+      b: gridMap.get(`${xFixed},${entry.y},${entry.z + 1}`),
+    };
+  }
+  return { a: null, b: null };
+}
+
+function getTriangleCellNodes(entry, gridMap) {
+  if (entry.plane === "xy") {
+    return {
+      a: gridMap.get(`${entry.x},${entry.y},${entry.z}`),
+      b: gridMap.get(`${entry.x + 1},${entry.y},${entry.z}`),
+      c: gridMap.get(`${entry.x},${entry.y + 1},${entry.z}`),
+      d: gridMap.get(`${entry.x + 1},${entry.y + 1},${entry.z}`),
+    };
+  }
+  if (entry.plane === "xz") {
+    return {
+      a: gridMap.get(`${entry.x},${entry.y},${entry.z}`),
+      b: gridMap.get(`${entry.x + 1},${entry.y},${entry.z}`),
+      c: gridMap.get(`${entry.x},${entry.y},${entry.z + 1}`),
+      d: gridMap.get(`${entry.x + 1},${entry.y},${entry.z + 1}`),
+    };
+  }
+  if (entry.plane === "yz") {
+    return {
+      a: gridMap.get(`${entry.x},${entry.y},${entry.z}`),
+      b: gridMap.get(`${entry.x},${entry.y + 1},${entry.z}`),
+      c: gridMap.get(`${entry.x},${entry.y},${entry.z + 1}`),
+      d: gridMap.get(`${entry.x},${entry.y + 1},${entry.z + 1}`),
+    };
+  }
+  return { a: null, b: null, c: null, d: null };
+}
+
+function getTriangleLabelPoints(tri, nodes) {
+  if (!nodes) {
+    return null;
+  }
+  const { a, b, c, d } = nodes;
+  if (tri === "abd") {
+    return a && b && d ? [a, b, d] : null;
+  }
+  if (tri === "acd") {
+    return a && c && d ? [a, c, d] : null;
+  }
+  if (tri === "abc") {
+    return a && b && c ? [a, b, c] : null;
+  }
+  if (tri === "bcd") {
+    return b && c && d ? [b, c, d] : null;
+  }
+  return null;
+}
+
+function drawTriangleDiagonals(nodePosMap, disableScale = false) {
+  if (!triangleDiagonals.size) {
+    return;
+  }
+  const gridMap = new Map();
+  nodes.forEach((node) => {
+    if (node.active && !node.isCustom) {
+      gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
+    }
+  });
+  ctx.save();
+  ctx.strokeStyle = themeColors.edge;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 4]);
+  triangleDiagonals.forEach((entry) => {
+    const { a, b } = getTriangleDiagonalNodes(entry, gridMap);
+    if (!a || !b) {
+      return;
+    }
+    const startEntry = nodePosMap && nodePosMap.get(a.id);
+    const endEntry = nodePosMap && nodePosMap.get(b.id);
+    const start = startEntry
+      ? startEntry.pos
+      : worldToScreen(getNodeDisplayCoordinate(a), disableScale);
+    const end = endEntry
+      ? endEntry.pos
+      : worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+    const radiusA = startEntry
+      ? startEntry.radius
+      : (layoutMode ? layoutNodeSize : getNodeRadius(a)) * (start.scale || 1);
+    const radiusB = endEntry
+      ? endEntry.radius
+      : (layoutMode ? layoutNodeSize : getNodeRadius(b)) * (end.scale || 1);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const edgeStart = {
+      x: start.x + ux * radiusA,
+      y: start.y + uy * radiusA,
+    };
+    const edgeEnd = {
+      x: end.x - ux * radiusB,
+      y: end.y - uy * radiusB,
+    };
+    ctx.beginPath();
+    ctx.moveTo(edgeStart.x, edgeStart.y);
+    ctx.lineTo(edgeEnd.x, edgeEnd.y);
+    ctx.stroke();
+
+  });
+  ctx.restore();
+}
+
+function drawTriangleLabels(nodePosMap, disableScale = false) {
+  if (!triangleLabels.size) {
+    return;
+  }
+  const gridMap = new Map();
+  nodes.forEach((node) => {
+    if (node.active && !node.isCustom) {
+      gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
+    }
+  });
+  triangleLabels.forEach((entry) => {
+    if (!entry.label) {
+      return;
+    }
+    const diag = TRIANGLE_TRI_TO_DIAG[entry.tri];
+    if (!diag || !triangleDiagonals.has(triangleKey({ ...entry, diag }))) {
+      return;
+    }
+    const cellNodes = getTriangleCellNodes(entry, gridMap);
+    const labelNodes = getTriangleLabelPoints(entry.tri, cellNodes);
+    if (!labelNodes) {
+      return;
+    }
+    const points = labelNodes.map((node) => {
+      const projected = nodePosMap && nodePosMap.get(node.id)
+        ? nodePosMap.get(node.id).pos
+        : worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+      return projected;
+    });
+    const cx = (points[0].x + points[1].x + points[2].x) / 3;
+    const cy = (points[0].y + points[1].y + points[2].y) / 3;
+    const baseSize = layoutMode
+      ? Math.max(12, Math.round(layoutTriangleLabelTextSize))
+      : 18;
+    const layout = computeTriangleLabelLayout(entry.label, layoutTriangleLabelFont, baseSize, points);
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.fillStyle = themeColors.textSecondary;
+    ctx.font = `400 ${layout.size}px ${layoutTriangleLabelFont}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(entry.label, cx, cy);
+    ctx.restore();
+  });
+}
+
+function drawTriangleHover(nodePosMap, disableScale = false) {
+  if (!triangleHover || !tHeld) {
+    return;
+  }
+  const gridMap = new Map();
+  nodes.forEach((node) => {
+    if (!node.isCustom) {
+      gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
+    }
+  });
+  const { a, b, c, d } = getTriangleCellNodes(triangleHover, gridMap);
+  if (!a || !b || !c || !d) {
+    return;
+  }
+  const projA =
+    nodePosMap && nodePosMap.get(a.id)
+      ? nodePosMap.get(a.id).pos
+      : worldToScreen(getNodeDisplayCoordinate(a), disableScale);
+  const projB =
+    nodePosMap && nodePosMap.get(b.id)
+      ? nodePosMap.get(b.id).pos
+      : worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+  const projC =
+    nodePosMap && nodePosMap.get(c.id)
+      ? nodePosMap.get(c.id).pos
+      : worldToScreen(getNodeDisplayCoordinate(c), disableScale);
+  const projD =
+    nodePosMap && nodePosMap.get(d.id)
+      ? nodePosMap.get(d.id).pos
+      : worldToScreen(getNodeDisplayCoordinate(d), disableScale);
+
+  const keys = triangleCellKeys(triangleHover);
+  const existingDiag = triangleDiagonals.has(keys.backslash)
+    ? "backslash"
+    : triangleDiagonals.has(keys.slash)
+    ? "slash"
+    : null;
+  let triPoints = null;
+  if (existingDiag === "backslash") {
+    const inABD = pointInTriangle(triangleHover.screen || { x: 0, y: 0 }, projA, projB, projD);
+    triPoints = inABD ? [projA, projB, projD] : [projA, projC, projD];
+  } else if (existingDiag === "slash") {
+    const inABC = pointInTriangle(triangleHover.screen || { x: 0, y: 0 }, projA, projB, projC);
+    triPoints = inABC ? [projA, projB, projC] : [projB, projC, projD];
+  } else if (triangleHover.tri === "abd") {
+    triPoints = [projA, projB, projD];
+  } else if (triangleHover.tri === "acd") {
+    triPoints = [projA, projC, projD];
+  } else if (triangleHover.tri === "abc") {
+    triPoints = [projA, projB, projC];
+  } else if (triangleHover.tri === "bcd") {
+    triPoints = [projB, projC, projD];
+  }
+  if (!triPoints) {
+    return;
+  }
+  ctx.save();
+  ctx.fillStyle = "rgba(120, 120, 120, 0.15)";
+  ctx.beginPath();
+  ctx.moveTo(triPoints[0].x, triPoints[0].y);
+  ctx.lineTo(triPoints[1].x, triPoints[1].y);
+  ctx.lineTo(triPoints[2].x, triPoints[2].y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+}
+
+function pruneTriangleDiagonals() {
+  if (!triangleDiagonals.size) {
+    return;
+  }
+  const gridMap = new Map();
+  nodes.forEach((node) => {
+    if (node.active && !node.isCustom) {
+      gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
+    }
+  });
+  triangleDiagonals.forEach((entry, key) => {
+    const { a, b } = getTriangleDiagonalNodes(entry, gridMap);
+    if (!a || !b) {
+      triangleDiagonals.delete(key);
+    }
+  });
+}
+
+function findTriangleHit(screenPoint) {
+  const activeMap = new Map();
+  const allMap = new Map();
+  nodes.forEach((node) => {
+    if (node.isCustom) {
+      return;
+    }
+    allMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
+    if (node.active) {
+      activeMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
+    }
+  });
+  if (!activeMap.size) {
+    return null;
+  }
+  const disableScale = layoutMode && layoutUnifyNodeSize;
+  let best = null;
+  let bestDist = Number.POSITIVE_INFINITY;
+  const updateBest = (entry, center) => {
+    const dist = Math.hypot(screenPoint.x - center.x, screenPoint.y - center.y);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = entry;
+    }
+  };
+  const evaluateCell = (entryBase, aAll, bAll, cAll, dAll, a, b, c, d) => {
+    if (!aAll || !bAll || !cAll || !dAll) {
+      return;
+    }
+    const keys = triangleCellKeys(entryBase);
+    const hasBackslash = triangleDiagonals.has(keys.backslash);
+    const hasSlash = triangleDiagonals.has(keys.slash);
+    const activeDiag = hasBackslash ? "backslash" : hasSlash ? "slash" : null;
+    const pA = worldToScreen(getNodeDisplayCoordinate(aAll), disableScale);
+    const pB = worldToScreen(getNodeDisplayCoordinate(bAll), disableScale);
+    const pC = worldToScreen(getNodeDisplayCoordinate(cAll), disableScale);
+    const pD = worldToScreen(getNodeDisplayCoordinate(dAll), disableScale);
+    const inABD = activeDiag === "slash"
+      ? false
+      : pointInTriangle(screenPoint, pA, pB, pD);
+    const inACD = activeDiag === "slash"
+      ? false
+      : pointInTriangle(screenPoint, pA, pC, pD);
+    const inABC = activeDiag === "backslash"
+      ? false
+      : pointInTriangle(screenPoint, pA, pB, pC);
+    const inBCD = activeDiag === "backslash"
+      ? false
+      : pointInTriangle(screenPoint, pB, pC, pD);
+    const inAny = inABD || inACD || inABC || inBCD;
+    if (!inAny) {
+      return;
+    }
+    const backslashOk = (a && b && d) || (a && c && d);
+    const slashOk = (a && b && c) || (b && c && d);
+    const both = backslashOk && slashOk;
+    if (inABD && a && b && d) {
+      updateBest(
+        { ...entryBase, diag: "backslash", both, tri: "abd" },
+        { x: (pA.x + pD.x) / 2, y: (pA.y + pD.y) / 2 }
+      );
+    }
+    if (inACD && a && c && d) {
+      updateBest(
+        { ...entryBase, diag: "backslash", both, tri: "acd" },
+        { x: (pA.x + pD.x) / 2, y: (pA.y + pD.y) / 2 }
+      );
+    }
+    if (inABC && a && b && c) {
+      updateBest(
+        { ...entryBase, diag: "slash", both, tri: "abc" },
+        { x: (pB.x + pC.x) / 2, y: (pB.y + pC.y) / 2 }
+      );
+    }
+    if (inBCD && b && c && d) {
+      updateBest(
+        { ...entryBase, diag: "slash", both, tri: "bcd" },
+        { x: (pB.x + pC.x) / 2, y: (pB.y + pC.y) / 2 }
+      );
+    }
+  };
+  for (let z = 0; z < gridDepth; z += 1) {
+    for (let y = 0; y < GRID_ROWS - 1; y += 1) {
+      for (let x = 0; x < GRID_COLS - 1; x += 1) {
+        evaluateCell(
+          { plane: "xy", x, y, z },
+          allMap.get(`${x},${y},${z}`),
+          allMap.get(`${x + 1},${y},${z}`),
+          allMap.get(`${x},${y + 1},${z}`),
+          allMap.get(`${x + 1},${y + 1},${z}`),
+          activeMap.get(`${x},${y},${z}`),
+          activeMap.get(`${x + 1},${y},${z}`),
+          activeMap.get(`${x},${y + 1},${z}`),
+          activeMap.get(`${x + 1},${y + 1},${z}`)
+        );
+      }
+    }
+  }
+  if (zModeActive && zModeAnchor) {
+    const fixedY = zModeAnchor.y;
+    const fixedX = zModeAnchor.x;
+    for (let z = 0; z < gridDepth - 1; z += 1) {
+      for (let x = 0; x < GRID_COLS - 1; x += 1) {
+        evaluateCell(
+          { plane: "xz", x, y: fixedY, z },
+          allMap.get(`${x},${fixedY},${z}`),
+          allMap.get(`${x + 1},${fixedY},${z}`),
+          allMap.get(`${x},${fixedY},${z + 1}`),
+          allMap.get(`${x + 1},${fixedY},${z + 1}`),
+          activeMap.get(`${x},${fixedY},${z}`),
+          activeMap.get(`${x + 1},${fixedY},${z}`),
+          activeMap.get(`${x},${fixedY},${z + 1}`),
+          activeMap.get(`${x + 1},${fixedY},${z + 1}`)
+        );
+      }
+    }
+    for (let z = 0; z < gridDepth - 1; z += 1) {
+      for (let y = 0; y < GRID_ROWS - 1; y += 1) {
+        evaluateCell(
+          { plane: "yz", x: fixedX, y, z },
+          allMap.get(`${fixedX},${y},${z}`),
+          allMap.get(`${fixedX},${y + 1},${z}`),
+          allMap.get(`${fixedX},${y},${z + 1}`),
+          allMap.get(`${fixedX},${y + 1},${z + 1}`),
+          activeMap.get(`${fixedX},${y},${z}`),
+          activeMap.get(`${fixedX},${y + 1},${z}`),
+          activeMap.get(`${fixedX},${y},${z + 1}`),
+          activeMap.get(`${fixedX},${y + 1},${z + 1}`)
+        );
+      }
+    }
+  }
+  return best;
+}
+
+function draw3DEdges(nodePosMap) {
   edges.forEach(([a, b]) => {
     if (!a.active || !b.active) {
       return;
     }
-    const start = worldToScreen(a.coordinate);
-    const end = worldToScreen(b.coordinate);
-    const radiusA = getNodeRadius(a) * (start.scale || 1);
-    const radiusB = getNodeRadius(b) * (end.scale || 1);
+    const startEntry = nodePosMap && nodePosMap.get(a.id);
+    const endEntry = nodePosMap && nodePosMap.get(b.id);
+    const start = startEntry ? startEntry.pos : worldToScreen(a.coordinate);
+    const end = endEntry ? endEntry.pos : worldToScreen(b.coordinate);
+    const radiusA = startEntry
+      ? startEntry.radius
+      : getNodeRadius(a) * (start.scale || 1);
+    const radiusB = endEntry
+      ? endEntry.radius
+      : getNodeRadius(b) * (end.scale || 1);
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const dist = Math.hypot(dx, dy);
@@ -4063,6 +4924,17 @@ function drawLayoutPage({ drawAxes = true } = {}) {
   ctx.restore();
 }
 
+function scheduleDraw() {
+  if (drawPending) {
+    return;
+  }
+  drawPending = true;
+  requestAnimationFrame(() => {
+    drawPending = false;
+    draw();
+  });
+}
+
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -4075,6 +4947,25 @@ function draw() {
   }
 
   const disableScale = layoutMode && layoutUnifyNodeSize;
+  const nodeRenderList = nodes
+    .map((node) => ({
+      node,
+      pos: worldToScreen(getNodeDisplayCoordinate(node), disableScale),
+    }))
+    .sort((a, b) => {
+      if (a.node.isCustom && !b.node.isCustom) {
+        return 1;
+      }
+      if (!a.node.isCustom && b.node.isCustom) {
+        return -1;
+      }
+      return a.pos.depth - b.pos.depth;
+    });
+  const nodePosMap = new Map();
+  nodeRenderList.forEach(({ node, pos }) => {
+    const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
+    nodePosMap.set(node.id, { pos, radius: baseRadius * (pos.scale || 1) });
+  });
 
   if (is3DMode && showGrid) {
     drawGrid();
@@ -4085,7 +4976,7 @@ function draw() {
   }
 
   if (is3DMode) {
-    draw3DEdges();
+    draw3DEdges(nodePosMap);
   } else {
     ctx.strokeStyle = themeColors.edge;
     ctx.lineWidth = 1.5;
@@ -4093,12 +4984,20 @@ function draw() {
       if (!a.active || !b.active) {
         return;
       }
-      const start = worldToScreen(getNodeDisplayCoordinate(a), disableScale);
-      const end = worldToScreen(getNodeDisplayCoordinate(b), disableScale);
-      const radiusA =
-        (layoutMode ? layoutNodeSize : getNodeRadius(a)) * (start.scale || 1);
-      const radiusB =
-        (layoutMode ? layoutNodeSize : getNodeRadius(b)) * (end.scale || 1);
+      const startEntry = nodePosMap.get(a.id);
+      const endEntry = nodePosMap.get(b.id);
+      const start = startEntry
+        ? startEntry.pos
+        : worldToScreen(getNodeDisplayCoordinate(a), disableScale);
+      const end = endEntry
+        ? endEntry.pos
+        : worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+      const radiusA = startEntry
+        ? startEntry.radius
+        : (layoutMode ? layoutNodeSize : getNodeRadius(a)) * (start.scale || 1);
+      const radiusB = endEntry
+        ? endEntry.radius
+        : (layoutMode ? layoutNodeSize : getNodeRadius(b)) * (end.scale || 1);
       const dx = end.x - start.x;
       const dy = end.y - start.y;
       const dist = Math.hypot(dx, dy);
@@ -4121,21 +5020,10 @@ function draw() {
       ctx.stroke();
     });
   }
+  drawTriangleDiagonals(nodePosMap, disableScale);
+  drawTriangleLabels(nodePosMap, disableScale);
+  drawTriangleHover(nodePosMap, disableScale);
 
-  const nodeRenderList = nodes
-    .map((node) => ({
-      node,
-      pos: worldToScreen(getNodeDisplayCoordinate(node), disableScale),
-    }))
-    .sort((a, b) => {
-      if (a.node.isCustom && !b.node.isCustom) {
-        return 1;
-      }
-      if (!a.node.isCustom && b.node.isCustom) {
-        return -1;
-      }
-      return a.pos.depth - b.pos.depth;
-    });
   const nowMs = performance.now();
   const nowSec = audioCtx ? audioCtx.currentTime : nowMs / 1000;
   const nodeAmplitudes = getNodeAmplitudeMap(nowSec, nowMs);
@@ -4146,7 +5034,7 @@ function draw() {
     ensureIsomorphicMaps();
   }
   const keyMap = isIsomorphicMode ? isomorphicKeyMap : null;
-
+  const reducedEffects = view.rotating;
   const lightDir = getLightDir2D();
   nodeRenderList.forEach(({ node, pos }) => {
     const isHovered = node.id === hoverNodeId;
@@ -4204,13 +5092,21 @@ function draw() {
             : node.isCustom
             ? "rgba(220, 220, 220, 0.25)"
             : "rgba(255, 255, 255, 0.35)";
-        ctx.shadowColor = shadowColor;
-        ctx.shadowBlur = Math.max(6, radius * 0.6);
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-        ctx.fillStyle = isSquare
-          ? getCubeFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir)
-          : getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir);
+        if (reducedEffects) {
+          ctx.shadowColor = "transparent";
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+          ctx.fillStyle = baseFill;
+        } else {
+          ctx.shadowColor = shadowColor;
+          ctx.shadowBlur = Math.max(6, radius * 0.6);
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+          ctx.fillStyle = isSquare
+            ? getCubeFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir)
+            : getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir);
+        }
       } else if (layoutMode) {
         ctx.fillStyle = "transparent";
       } else {
@@ -4243,7 +5139,7 @@ function draw() {
     ctx.textBaseline = "middle";
     if (featureMode === "note") {
       if (hejiEnabled && nodeHasHighPrime(node)) {
-        const displayInfo = getDisplayNoteInfo(node);
+        const displayInfo = getCachedDisplayInfo(node);
         const base = getHejiBaseAndDefaults(displayInfo.pitchClass);
         const centsText = formatCents(displayInfo.cents);
         const suffixParts = centsText
@@ -4271,7 +5167,7 @@ function draw() {
           color: themeColors.textPrimary,
         });
       } else {
-        const annotation = getHejiAnnotation(node, getNodePitchLabel(node));
+        const annotation = getCachedHejiAnnotation(node, getNodePitchLabel(node));
         drawHejiInline({
           x: pos.x,
           y: pos.y,
@@ -4320,14 +5216,14 @@ function draw() {
     }
 
     const detailSize = layoutMode ? layoutNoteTextSize : 14;
-    const displayInfo = getDisplayNoteInfo(node);
+    const displayInfo = getCachedDisplayInfo(node);
     if (featureMode === "note") {
       ctx.font = `200 ${detailSize}px "Lexend", sans-serif`;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.fillStyle = themeColors.textSecondary;
       const ratioText = `${node.numerator}:${node.denominator}`;
-      const centsLabel = buildCentsReadout(node, { wrap: true });
+      const centsLabel = getCachedCentsReadout(node, { wrap: true }, displayInfo);
       const rawLabelPos = layoutMode
         ? getLayoutNoteLabelPosition(node, pos, radius)
         : { x: pos.x + radius + 6, y: pos.y + radius - 10 };
@@ -4365,16 +5261,20 @@ function draw() {
         x: pos.x + labelOffsetX * 0.7,
         y: rawLabelPos.y,
       };
-      const centsLabel = buildCentsReadout(node, {
-        wrap: hejiEnabled,
-        requireHejiDetail: true,
-        baseTextForHeji: displayInfo.pitchClass,
-      });
+      const centsLabel = getCachedCentsReadout(
+        node,
+        {
+          wrap: hejiEnabled,
+          requireHejiDetail: true,
+          baseTextForHeji: displayInfo.pitchClass,
+        },
+        displayInfo
+      );
       const hasParen = centsLabel.includes("(");
       const restGapScale =
         hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
       const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
-      const annotation = getHejiAnnotation(node, baseLabel || node.note_name);
+      const annotation = getCachedHejiAnnotation(node, baseLabel || node.note_name);
       drawHejiInline({
         x: labelPos.x,
         y: labelPos.y,
@@ -4401,6 +5301,17 @@ function draw() {
         ctx.fillText(`${node.freq.toFixed(2)} Hz`, labelPos.x, hzY);
         ctx.restore();
       }
+    }
+
+    if (layoutMode && layoutLabelHitboxVisible) {
+      const hitbox = getLayoutNoteLabelHitbox(node, pos, radius);
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 80, 80, 0.8)";
+      ctx.fillStyle = "rgba(255, 80, 80, 0.12)";
+      ctx.lineWidth = 1;
+      ctx.fillRect(hitbox.left, hitbox.top, hitbox.width, hitbox.height);
+      ctx.strokeRect(hitbox.left, hitbox.top, hitbox.width, hitbox.height);
+      ctx.restore();
     }
 
     if (keyMap && node.active && !layoutMode) {
@@ -4779,6 +5690,10 @@ function onPointerDown(event) {
   closeTopMenus();
   closeBottomMenus();
   const screenPoint = { x: event.offsetX, y: event.offsetY };
+  if (layoutMode && layoutLabelHitboxVisible && !hitTestNoteLabel(screenPoint)) {
+    layoutLabelHitboxVisible = false;
+    draw();
+  }
   const hit = hitTestScreen(screenPoint);
   const now = performance.now();
 
@@ -4826,14 +5741,80 @@ function onPointerDown(event) {
     }
     const nextIndex = (currentIndex + 1) % options.length;
     const nextKey = options[nextIndex].key;
-    if (nextKey === "base") {
-      nodeSpellingOverrides.delete(hit.id);
-    } else {
-      nodeSpellingOverrides.set(hit.id, nextKey);
+      if (nextKey === "base") {
+        nodeSpellingOverrides.delete(hit.id);
+      } else {
+        nodeSpellingOverrides.set(hit.id, nextKey);
+      }
+      invalidateLabelCache();
+      suppressClickAfterRespell = true;
+      draw();
+      schedulePresetUrlUpdate();
+      return;
+  }
+  if (tHeld) {
+    const triangle = findTriangleHit(screenPoint);
+    if (triangle) {
+      const keys = triangleCellKeys(triangle);
+      const disableScale = layoutMode && layoutUnifyNodeSize;
+      const gridMap = new Map();
+      nodes.forEach((node) => {
+        if (node.active && !node.isCustom) {
+          gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
+        }
+      });
+      const hasBackslash = triangleDiagonals.has(keys.backslash);
+      const hasSlash = triangleDiagonals.has(keys.slash);
+      const hasLine = hasBackslash || hasSlash;
+      const activeDiag = hasBackslash ? "backslash" : hasSlash ? "slash" : null;
+      const diagHit = activeDiag
+        ? getTriangleDiagonalHit(screenPoint, triangle, gridMap, disableScale)
+        : null;
+      const lineHit = diagHit && diagHit === activeDiag;
+      if (hasLine && lineHit) {
+        if (triangle.both) {
+          if (hasBackslash && !hasSlash) {
+            triangleDiagonals.delete(keys.backslash);
+            const nextEntry = normalizeTriangleEntry({ ...triangle, diag: "slash", tri: "abc" });
+            triangleDiagonals.set(keys.slash, nextEntry);
+            clearTriangleLabelsForCell(triangle);
+          } else if (hasSlash && !hasBackslash) {
+            triangleDiagonals.delete(keys.slash);
+            clearTriangleLabelsForCell(triangle);
+          }
+        } else {
+          const key = triangleKey(triangle);
+          if (triangleDiagonals.has(key)) {
+            triangleDiagonals.delete(key);
+            clearTriangleLabelsForCell(triangle);
+          }
+        }
+      } else if (!hasLine) {
+        const nextEntry = normalizeTriangleEntry(triangle);
+        triangleDiagonals.set(triangleKey(nextEntry), nextEntry);
+      } else if (triangle.tri && triangleLabelDialog && triangleLabelInput) {
+        const activeDiag = hasBackslash ? "backslash" : "slash";
+        if (TRIANGLE_TRI_TO_DIAG[triangle.tri] !== activeDiag) {
+          schedulePresetUrlUpdate();
+          draw();
+          return;
+        }
+        const targetEntry = {
+          plane: triangle.plane,
+          x: triangle.x,
+          y: triangle.y,
+          z: triangle.z,
+          tri: triangle.tri,
+        };
+        const targetKey = triangleLabelKey(targetEntry);
+        const entry = triangleLabels.get(targetKey);
+        triangleLabelTargetKey = targetKey;
+        triangleLabelTargetTri = triangle.tri;
+        openTriangleLabelDialog(entry && entry.label ? entry.label : "");
+      }
+      schedulePresetUrlUpdate();
+      draw();
     }
-    suppressClickAfterRespell = true;
-    draw();
-    schedulePresetUrlUpdate();
     return;
   }
 
@@ -4849,9 +5830,14 @@ function onPointerDown(event) {
     const titleHit = hitTestLayoutTitle(screenPoint);
     if (titleHit) {
       event.preventDefault();
+      const { left, top } = getLayoutPageRect();
       layoutTitleDrag = {
         offsetX: titleHit.pos.x - screenPoint.x,
         offsetY: titleHit.pos.y - screenPoint.y,
+        startPos: { x: titleHit.pos.x - left, y: titleHit.pos.y - top },
+        lockAxis: null,
+        lockOriginX: event.offsetX,
+        lockOriginY: event.offsetY,
       };
       canvas.setPointerCapture(event.pointerId);
       return;
@@ -4862,6 +5848,10 @@ function onPointerDown(event) {
         axis: axisHit.axis,
         offsetX: axisHit.center.x - screenPoint.x,
         offsetY: axisHit.center.y - screenPoint.y,
+        startOffset: { ...layoutAxisOffsets[axisHit.axis] },
+        lockAxis: null,
+        lockOriginX: event.offsetX,
+        lockOriginY: event.offsetY,
       };
       canvas.setPointerCapture(event.pointerId);
       return;
@@ -4872,6 +5862,11 @@ function onPointerDown(event) {
         nodeId: labelHit.node.id,
         offsetX: labelHit.labelPos.x - screenPoint.x,
         offsetY: labelHit.labelPos.y - screenPoint.y,
+        startLabelX: labelHit.labelPos.x,
+        startLabelY: labelHit.labelPos.y,
+        lockAxis: null,
+        lockOriginX: event.offsetX,
+        lockOriginY: event.offsetY,
       };
       canvas.setPointerCapture(event.pointerId);
       return;
@@ -4883,6 +5878,10 @@ function onPointerDown(event) {
         nodeId: hit.id,
         offsetX: coord.x - worldPoint.x,
         offsetY: coord.y - worldPoint.y,
+        startCoord: { x: coord.x, y: coord.y },
+        lockAxis: null,
+        lockOriginX: event.offsetX,
+        lockOriginY: event.offsetY,
       };
       canvas.setPointerCapture(event.pointerId);
       return;
@@ -4966,6 +5965,12 @@ function onCanvasDoubleClick(event) {
     return;
   }
   const screenPoint = { x: event.offsetX, y: event.offsetY };
+  const labelHit = hitTestNoteLabel(screenPoint);
+  if (labelHit) {
+    layoutLabelHitboxVisible = true;
+    draw();
+    return;
+  }
   const axisHit = hitTestAxisLegend(screenPoint);
   if (layoutAxisEdit) {
     if (!axisHit) {
@@ -5014,17 +6019,31 @@ function onPointerMove(event) {
         event.offsetY - info.center.y,
         event.offsetX - info.center.x
       );
-      draw();
+      scheduleDraw();
     }
     return;
   }
   if (layoutMode && layoutTitleDrag) {
     const { left, top, width } = getLayoutPageRect();
-    layoutTitlePosition = {
-      x: event.shiftKey ? width / 2 : event.offsetX + layoutTitleDrag.offsetX - left,
+    const lockAxis = updateDragLock(layoutTitleDrag, event);
+    const nextPos = {
+      x: event.offsetX + layoutTitleDrag.offsetX - left,
       y: event.offsetY + layoutTitleDrag.offsetY - top,
     };
-    draw();
+    if (lockAxis === "x") {
+      nextPos.y = layoutTitleDrag.startPos.y;
+    } else if (lockAxis === "y") {
+      nextPos.x = layoutTitleDrag.startPos.x;
+    }
+    if (!event.shiftKey) {
+      layoutTitleDrag.startPos = { ...nextPos };
+    }
+    if (event.shiftKey && lockAxis === "x") {
+      layoutTitlePosition = { x: width / 2, y: nextPos.y };
+    } else {
+      layoutTitlePosition = nextPos;
+    }
+    scheduleDraw();
     return;
   }
   if (layoutMode && layoutAxisDrag) {
@@ -5039,11 +6058,21 @@ function onPointerMove(event) {
       baseX = left + margin;
       baseY = top + height / 2;
     }
-    layoutAxisOffsets[layoutAxisDrag.axis] = {
+    const lockAxis = updateDragLock(layoutAxisDrag, event);
+    const nextOffset = {
       x: event.offsetX + layoutAxisDrag.offsetX - baseX,
       y: event.offsetY + layoutAxisDrag.offsetY - baseY,
     };
-    draw();
+    if (lockAxis === "x") {
+      nextOffset.y = layoutAxisDrag.startOffset.y;
+    } else if (lockAxis === "y") {
+      nextOffset.x = layoutAxisDrag.startOffset.x;
+    }
+    if (!event.shiftKey) {
+      layoutAxisDrag.startOffset = { ...nextOffset };
+    }
+    layoutAxisOffsets[layoutAxisDrag.axis] = nextOffset;
+    scheduleDraw();
     return;
   }
   if (layoutMode && layoutLabelDrag) {
@@ -5051,14 +6080,24 @@ function onPointerMove(event) {
     if (node) {
       const disableScale = layoutUnifyNodeSize;
       const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
-      const labelX = event.offsetX + layoutLabelDrag.offsetX;
-      const labelY = event.offsetY + layoutLabelDrag.offsetY;
+      const lockAxis = updateDragLock(layoutLabelDrag, event);
+      let labelX = event.offsetX + layoutLabelDrag.offsetX;
+      let labelY = event.offsetY + layoutLabelDrag.offsetY;
+      if (lockAxis === "x") {
+        labelY = layoutLabelDrag.startLabelY;
+      } else if (lockAxis === "y") {
+        labelX = layoutLabelDrag.startLabelX;
+      }
+      if (!event.shiftKey) {
+        layoutLabelDrag.startLabelX = labelX;
+        layoutLabelDrag.startLabelY = labelY;
+      }
       const scale = pos.scale || 1;
       layoutLabelOffsets.set(node.id, {
         x: (labelX - pos.x) / (view.zoom * scale),
         y: (labelY - pos.y) / (view.zoom * scale),
       });
-      draw();
+      scheduleDraw();
     }
     return;
   }
@@ -5067,12 +6106,22 @@ function onPointerMove(event) {
     if (node) {
       const worldPoint = screenToWorld({ x: event.offsetX, y: event.offsetY });
       const coord = getNodeDisplayCoordinate(node);
-      layoutPositions.set(node.id, {
+      const lockAxis = updateDragLock(layoutDrag, event);
+      const nextCoord = {
         x: worldPoint.x + layoutDrag.offsetX,
         y: worldPoint.y + layoutDrag.offsetY,
         z: Number.isFinite(coord.z) ? coord.z : 0,
-      });
-      draw();
+      };
+      if (lockAxis === "x") {
+        nextCoord.y = layoutDrag.startCoord.y;
+      } else if (lockAxis === "y") {
+        nextCoord.x = layoutDrag.startCoord.x;
+      }
+      if (!event.shiftKey) {
+        layoutDrag.startCoord = { x: nextCoord.x, y: nextCoord.y };
+      }
+      layoutPositions.set(node.id, nextCoord);
+      scheduleDraw();
     }
     return;
   }
@@ -5083,7 +6132,7 @@ function onPointerMove(event) {
       node.coordinate.x = worldPoint.x + customDrag.offsetX;
       node.coordinate.y = worldPoint.y + customDrag.offsetY;
       node.coordinate.z = 0;
-      draw();
+      scheduleDraw();
       schedulePresetUrlUpdate();
     }
     return;
@@ -5094,9 +6143,24 @@ function onPointerMove(event) {
     view.rotY = view.rotateAnglesStart.y + dx * 0.005;
     view.rotX = view.rotateAnglesStart.x + dy * 0.005;
     view.rotX = Math.max(-1.2, Math.min(1.2, view.rotX));
-    draw();
+    scheduleDraw();
     markIsomorphicDirty();
     schedulePresetUrlUpdate();
+    return;
+  }
+  if (tHeld && !view.dragging && !view.rotating) {
+    const screen = { x: event.offsetX, y: event.offsetY };
+    const nextTriangle = findTriangleHit(screen);
+    const nextKey = nextTriangle
+      ? `${triangleKey(nextTriangle)}:${nextTriangle.tri || ""}`
+      : "";
+    const currentKey = triangleHover
+      ? `${triangleKey(triangleHover)}:${triangleHover.tri || ""}`
+      : "";
+    if (nextKey !== currentKey) {
+      triangleHover = nextTriangle ? { ...nextTriangle, screen } : null;
+      scheduleDraw();
+    }
     return;
   }
   if (!view.dragging) {
@@ -5105,7 +6169,7 @@ function onPointerMove(event) {
     const nextHoverId = hit ? hit.id : null;
     if (nextHoverId !== hoverNodeId) {
       hoverNodeId = nextHoverId;
-      draw();
+      scheduleDraw();
     }
     return;
   }
@@ -5115,7 +6179,7 @@ function onPointerMove(event) {
   view.offsetX = view.dragOffsetStart.x + dx;
   view.offsetY = view.dragOffsetStart.y + dy;
   view.lastPointer = { x: event.offsetX, y: event.offsetY };
-  draw();
+  scheduleDraw();
   markIsomorphicDirty();
   schedulePresetUrlUpdate();
 }
@@ -5131,18 +6195,22 @@ function onPointerUp(event) {
   }
   if (layoutLabelDrag) {
     layoutLabelDrag = null;
+    schedulePresetUrlUpdate();
     return;
   }
   if (layoutTitleDrag) {
     layoutTitleDrag = null;
+    schedulePresetUrlUpdate();
     return;
   }
   if (layoutAxisEditDrag) {
     layoutAxisEditDrag = null;
+    schedulePresetUrlUpdate();
     return;
   }
   if (layoutAxisDrag) {
     layoutAxisDrag = null;
+    schedulePresetUrlUpdate();
     return;
   }
   if (layoutDrag) {
@@ -5224,15 +6292,18 @@ function onPointerUp(event) {
           if (hit.active) {
             hit.active = false;
             stopVoicesForNode(hit.id, false);
+            pruneTriangleDiagonals();
           } else {
             stopVoicesForNode(hit.id, false);
             customNodes = customNodes.filter((node) => node.id !== hit.id);
             nodes = nodes.filter((node) => node.id !== hit.id);
             nodeById.delete(hit.id);
+            pruneTriangleDiagonals();
           }
         } else if (hit.active) {
           hit.active = false;
           stopVoicesForNode(hit.id, false);
+          pruneTriangleDiagonals();
         } else {
           return;
         }
@@ -5294,6 +6365,9 @@ function onPointerUp(event) {
     }
     draw();
   }
+  if (moved >= 4 || wasRotating) {
+    scheduleDraw();
+  }
 }
 
 function onPointerLeave() {
@@ -5305,11 +6379,12 @@ function onPointerLeave() {
   layoutAxisDrag = null;
   layoutAxisEditDrag = null;
   layoutTitleDrag = null;
+  triangleHover = null;
   view.rotating = false;
   if (view.dragging) {
     view.dragging = false;
   }
-  draw();
+  scheduleDraw();
 }
 
 function onWheel(event) {
@@ -5317,7 +6392,7 @@ function onWheel(event) {
   const zoomDelta = event.deltaY > 0 ? 0.92 : 1.08;
   if (is3DMode) {
     view.zoom = Math.min(2.2, Math.max(0.5, view.zoom * zoomDelta));
-    draw();
+    scheduleDraw();
     markIsomorphicDirty();
     schedulePresetUrlUpdate();
     return;
@@ -5328,7 +6403,7 @@ function onWheel(event) {
 
   view.offsetX += before.x - after.x;
   view.offsetY += before.y - after.y;
-  draw();
+  scheduleDraw();
   markIsomorphicDirty();
   schedulePresetUrlUpdate();
   if (layoutMode) {
@@ -5398,31 +6473,18 @@ function hitTestNoteLabel(screenPoint) {
     }
     const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
     const radius = layoutNodeSize * (pos.scale || 1);
-    const labelPos = getLayoutNoteLabelPosition(node, pos, radius);
-    let width = 0;
-    let height = layoutNoteTextSize;
-    if (featureMode === "ratio") {
-      ctx.save();
-      ctx.font = `${layoutNoteTextSize}px ${layoutNoteFont}`;
-      const metrics = ctx.measureText(getNodeNoteLabel(node));
-      ctx.restore();
-      width = metrics.width;
-    } else {
-      const ratioText = `${node.numerator}:${node.denominator}`;
-      const centsLabel = buildCentsReadout(node, { wrap: true });
-      width = Math.max(
-        measureTextWidthWithWeight(ratioText, layoutNoteTextSize, "Lexend, sans-serif", 200),
-        measureTextWidthWithWeight(centsLabel, layoutNoteTextSize, "Lexend, sans-serif", 200)
-      );
-      height = layoutNoteTextSize * 2 + 4;
-    }
+    const hitbox = getLayoutNoteLabelHitbox(node, pos, radius);
+    const left = hitbox.left;
+    const right = hitbox.left + hitbox.width;
+    const top = hitbox.top;
+    const bottom = hitbox.top + hitbox.height;
     if (
-      screenPoint.x >= labelPos.x &&
-      screenPoint.x <= labelPos.x + width &&
-      screenPoint.y >= labelPos.y &&
-      screenPoint.y <= labelPos.y + height
+      screenPoint.x >= left &&
+      screenPoint.x <= right &&
+      screenPoint.y >= top &&
+      screenPoint.y <= bottom
     ) {
-      hit = { node, labelPos };
+      hit = { node, labelPos: hitbox.labelPos };
     }
   });
   return hit;
@@ -5879,6 +6941,18 @@ function drawRatioWheel(canvasEl, options = {}) {
 }
 
 function updateRatioWheels() {
+  if (
+    view.dragging ||
+    view.rotating ||
+    layoutDrag ||
+    layoutLabelDrag ||
+    layoutTitleDrag ||
+    layoutAxisDrag ||
+    layoutAxisEditDrag ||
+    customDrag
+  ) {
+    return;
+  }
   if (ratioWheelPanel && !ratioWheelPanel.hidden) {
     drawRatioWheel(ratioWheelLarge);
   }
@@ -5896,8 +6970,22 @@ function updateUiHint() {
       uiHint.textContent = "Editing axis legend. Press ESC to exit.\n(click to hide)";
       return;
     }
+    if (tHeld) {
+      uiHint.textContent =
+        "Creating triangles (T)\nClick to add a diagonal, click again to label.\nClick line to rotate or remove.\n(click to hide)";
+      return;
+    }
+  }
+  if (spellingHintActive) {
     uiHint.textContent =
-      "Layout mode: drag nodes to reposition. Drag note labels to move them. Double-click a node to change shape. Drag empty space to pan. Scroll to scale. Hold R and click to respell.\n(click to hide)";
+      spellingMode === "true"
+        ? "Diatonic spellings up to 3 sharps / flats, after which nearest enharmonic equivalents are used.\n(click to hide)"
+        : "Manual spelling: hold R and click on a node to cycle.\n(click to hide)";
+    return;
+  }
+  if (layoutMode) {
+    uiHint.textContent =
+      "Layout mode: drag nodes to reposition. Drag note labels to move them. Double-click a node to change shape. Drag empty space to reposition. Scroll to scale. Hold R and click to respell.\n(click to hide)";
     return;
   }
   if (keyboardModeSelect && keyboardModeSelect.value === "piano") {
@@ -5906,22 +6994,16 @@ function updateUiHint() {
     return;
   }
   if (!is3DMode) {
-    if (spellingMode === "simple") {
-      uiHint.textContent =
-        "Manual spelling: hold R and click on a node to cycle.\n(click to hide)";
-      return;
-    }
     uiHint.textContent =
-      "Click to play. Shift double-click & hold to start LFO.\n Shift-click to add. Option-click to remove. Hold R and click to respell.\nDrag to pan. Scroll to zoom.\n(click to hide)";
-    return;
-  }
-  if (spellingMode === "simple") {
-    uiHint.textContent =
-      "Manual spelling: hold R and click on a node to cycle.\n(click to hide)";
+      "Click to play. Shift double-click & hold to start LFO.\n Shift-click to add. Option-click to remove. Hold R and click to respell.\nDrag to pan. Scroll to zoom.\nHold T to label triangles.\n(click to hide)";
     return;
   }
   uiHint.textContent =
-    "3D Mode:\nShift-click to add\nOption-click to remove\nZ-click a node to access Z axis for that node\nClick-drag to rotate\nShift double-click & hold for LFO\nHold R and click to respell\nArrow keys to pan\nScroll to zoom\n(click to hide)";
+    "3D Mode:\nShift-click to add\nOption-click to remove\nZ-click a node to access Z axis for that node\nClick-drag to rotate\nShift double-click & hold for LFO\nHold R and click to respell\nHold T to label triangles\nArrow keys to pan\nScroll to zoom\n(click to hide)";
+}
+
+function resetUiHintToDefault() {
+  spellingHintActive = false;
 }
 
 function updateZModeMessage() {
@@ -5929,6 +7011,11 @@ function updateZModeMessage() {
     return;
   }
   if (!zModeActive || !zModeAnchor) {
+    if (wasZModeActive) {
+      resetUiHintToDefault();
+      wasZModeActive = false;
+      updateUiHint();
+    }
     zModeMessage.hidden = true;
     zModeMessage.textContent = "";
     if (uiHint) {
@@ -5945,6 +7032,7 @@ function updateZModeMessage() {
   if (uiHint) {
     uiHint.hidden = true;
   }
+  wasZModeActive = true;
 }
 
 function updateAddModeFromShift() {
@@ -5955,6 +7043,9 @@ function updateAddModeFromShift() {
   }
   if (navAddModeToggle) {
     navAddModeToggle.checked = isAddMode;
+  }
+  if (tHeld) {
+    updateUiHint();
   }
 }
 
@@ -5985,6 +7076,13 @@ function updateLayoutNoteTextReadout() {
     return;
   }
   layoutNoteTextReadout.textContent = `${Math.round(layoutNoteTextSize)} px`;
+}
+
+function updateLayoutTriangleLabelReadout() {
+  if (!layoutTriangleLabelReadout) {
+    return;
+  }
+  layoutTriangleLabelReadout.textContent = `${Math.round(layoutTriangleLabelTextSize)} px`;
 }
 
 function updateLayoutTitleMarginReadout() {
@@ -6031,6 +7129,7 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     layoutNodeSize = LAYOUT_DEFAULTS.nodeSize;
     layoutRatioTextSize = LAYOUT_DEFAULTS.ratioTextSize;
     layoutNoteTextSize = LAYOUT_DEFAULTS.noteTextSize;
+    layoutTriangleLabelTextSize = LAYOUT_DEFAULTS.triangleLabelTextSize;
     layoutNodeShape = LAYOUT_DEFAULTS.nodeShape;
     layoutTitle = LAYOUT_DEFAULTS.title;
     layoutTitleSize = LAYOUT_DEFAULTS.titleSize;
@@ -6038,9 +7137,12 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     layoutUnifyNodeSize = LAYOUT_DEFAULTS.unifyNodeSize;
     layoutPageSize = LAYOUT_DEFAULTS.pageSize;
     layoutOrientation = LAYOUT_DEFAULTS.orientation;
+    layoutLockPosition = LAYOUT_DEFAULTS.lockPosition;
+    layoutView = { ...LAYOUT_DEFAULTS.view };
     layoutTitleFont = LAYOUT_DEFAULTS.titleFont;
     layoutRatioFont = LAYOUT_DEFAULTS.ratioFont;
     layoutNoteFont = LAYOUT_DEFAULTS.noteFont;
+    layoutTriangleLabelFont = LAYOUT_DEFAULTS.triangleLabelFont;
     if (layoutTitleInput) {
       layoutTitleInput.value = layoutTitle;
     }
@@ -6056,6 +7158,9 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     if (layoutOrientationSelect) {
       layoutOrientationSelect.value = layoutOrientation;
     }
+    if (layoutLockPositionToggle) {
+      layoutLockPositionToggle.checked = layoutLockPosition;
+    }
     if (layoutNodeSizeInput) {
       layoutNodeSizeInput.value = String(layoutNodeSize);
     }
@@ -6064,6 +7169,9 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     }
     if (layoutNoteTextSizeInput) {
       layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
+    }
+    if (layoutTriangleLabelSizeInput) {
+      layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
     }
     if (layoutTitleFontSelect) {
       layoutTitleFontSelect.value = layoutTitleFont;
@@ -6074,6 +7182,9 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     if (layoutNoteFontSelect) {
       layoutNoteFontSelect.value = layoutNoteFont;
     }
+    if (layoutTriangleLabelFontSelect) {
+      layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
+    }
     if (layoutNodeShapeSelect) {
       layoutNodeShapeSelect.value = layoutNodeShape;
     }
@@ -6083,6 +7194,7 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     updateLayoutNodeSizeReadout();
     updateLayoutRatioTextReadout();
     updateLayoutNoteTextReadout();
+    updateLayoutTriangleLabelReadout();
     updateLayoutTitleSizeReadout();
     updateLayoutTitleMarginReadout();
     syncLayoutFontVars();
@@ -6100,6 +7212,7 @@ function setLayoutMode(enabled) {
   if (layoutMode === enabled) {
     return;
   }
+  resetUiHintToDefault();
   if (enabled) {
     layoutPrevState = {
       is3DMode,
@@ -6128,13 +7241,29 @@ function setLayoutMode(enabled) {
       mode3dCheckbox.checked = false;
     }
     set3DMode(false);
+    if (layoutLockPosition) {
+      view.zoom = layoutView.zoom;
+      view.offsetX = layoutView.offsetX;
+      view.offsetY = layoutView.offsetY;
+      view.rotX = layoutView.rotX;
+      view.rotY = layoutView.rotY;
+      syncLayoutScaleInput();
+    } else {
+      layoutView = {
+        zoom: view.zoom,
+        offsetX: view.offsetX,
+        offsetY: view.offsetY,
+        rotX: view.rotX,
+        rotY: view.rotY,
+      };
+    }
     layoutAxisEdit = null;
     layoutAxisEditDrag = null;
     nodes.forEach((node) => ensureLayoutPosition(node));
-    syncLayoutScaleInput();
     updateLayoutNodeSizeReadout();
     updateLayoutRatioTextReadout();
     updateLayoutNoteTextReadout();
+    updateLayoutTriangleLabelReadout();
     updateLayoutTitleSizeReadout();
     updateLayoutTitleMarginReadout();
     draw();
@@ -6149,11 +7278,14 @@ function setLayoutMode(enabled) {
     if (navGridToggle) {
       navGridToggle.checked = showGrid;
     }
-    view.zoom = layoutPrevState.zoom;
-    view.offsetX = layoutPrevState.offsetX;
-    view.offsetY = layoutPrevState.offsetY;
-    view.rotX = layoutPrevState.rotX;
-    view.rotY = layoutPrevState.rotY;
+    if (layoutLockPosition) {
+      syncLayoutViewFromCurrent();
+      view.zoom = layoutPrevState.zoom;
+      view.offsetX = layoutPrevState.offsetX;
+      view.offsetY = layoutPrevState.offsetY;
+      view.rotX = layoutPrevState.rotX;
+      view.rotY = layoutPrevState.rotY;
+    }
     if (mode3dCheckbox) {
       mode3dCheckbox.checked = layoutPrevState.is3DMode;
     }
@@ -6166,6 +7298,7 @@ function setLayoutMode(enabled) {
 }
 
 function set3DMode(enabled) {
+  resetUiHintToDefault();
   const activeKeys = captureActiveNodeKeys();
   const had3DNodes = gridDepth > 1;
   is3DMode = enabled;
@@ -6246,7 +7379,7 @@ function applyNavAction(action) {
     }
   } else if (action === "fit-view") {
     if (is3DMode) {
-      applyBestView();
+      applyBestView({ cycle: true });
       schedulePresetUrlUpdate();
       return;
     }
@@ -6254,13 +7387,28 @@ function applyNavAction(action) {
     schedulePresetUrlUpdate();
     return;
   } else if (action === "best-view") {
-    applyBestView();
+    applyBestView({ cycle: true });
     schedulePresetUrlUpdate();
     return;
   }
   draw();
   markIsomorphicDirty();
   schedulePresetUrlUpdate();
+}
+
+function getViewSafeInsets() {
+  const topBar = document.querySelector(".top-bar");
+  const leftNav = document.getElementById("nav-3d");
+  const synthPanel = document.querySelector(".synth-panel");
+  const topBarRect = topBar ? topBar.getBoundingClientRect() : null;
+  const leftNavRect = leftNav && !leftNav.hidden ? leftNav.getBoundingClientRect() : null;
+  const synthRect = synthPanel ? synthPanel.getBoundingClientRect() : null;
+  return {
+    safeTop: topBarRect ? topBarRect.height : 0,
+    safeLeft: leftNavRect ? leftNavRect.width : 0,
+    safeBottom: synthRect ? synthRect.height : 0,
+    safeRight: 0,
+  };
 }
 
 function fitViewToActiveNodes2D() {
@@ -6282,17 +7430,7 @@ function fitViewToActiveNodes2D() {
     minY = Math.min(minY, node.coordinate.y - radius);
     maxY = Math.max(maxY, node.coordinate.y + radius);
   });
-  const topBar = document.querySelector(".top-bar");
-  const leftNav = document.getElementById("nav-3d");
-  const synthPanel = document.querySelector(".synth-panel");
-  const topBarRect = topBar ? topBar.getBoundingClientRect() : null;
-  const leftNavRect =
-    leftNav && !leftNav.hidden ? leftNav.getBoundingClientRect() : null;
-  const synthRect = synthPanel ? synthPanel.getBoundingClientRect() : null;
-  const safeTop = topBarRect ? topBarRect.height : 0;
-  const safeLeft = leftNavRect ? leftNavRect.width : 0;
-  const safeBottom = synthRect ? synthRect.height : 0;
-  const safeRight = 0;
+  const { safeTop, safeLeft, safeBottom, safeRight } = getViewSafeInsets();
   const padding = 80;
   const labelBuffer = 140;
   const width = Math.max(1, maxX - minX);
@@ -6315,41 +7453,40 @@ function fitViewToActiveNodes2D() {
   markIsomorphicDirty();
 }
 
-function applyBestView() {
-  if (!is3DMode) {
-    return;
-  }
-  const activeNodes = nodes.filter((node) => node.active);
-  if (!activeNodes.length) {
-    return;
-  }
+function getActiveNodesSignature(activeNodes) {
+  return activeNodes
+    .map((node) => `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`)
+    .sort()
+    .join("|");
+}
 
+function computeBestViewCandidates(activeNodes) {
   const yawSteps = [];
-  for (let yaw = -Math.PI; yaw <= Math.PI; yaw += Math.PI / 6) {
+  for (let yaw = -Math.PI; yaw < Math.PI; yaw += Math.PI / 6) {
     yawSteps.push(yaw);
   }
   const pitchSteps = [];
   for (let pitch = -0.9; pitch <= 0.9; pitch += Math.PI / 9) {
     pitchSteps.push(pitch);
   }
-
-  const preferredRotX = -0.6;
-  const preferredRotY = 0.7;
-  const orientationWeight = 50;
-  const angleDistance = (a, b) => {
-    const diff = Math.atan2(Math.sin(a - b), Math.cos(a - b));
-    return Math.abs(diff);
-  };
-
-  let best = { score: Number.POSITIVE_INFINITY, rotX: view.rotX, rotY: view.rotY };
-
+  const minAngleDelta = (3 * Math.PI) / 180;
+  const maxViews = 6;
+  const candidates = [];
   pitchSteps.forEach((rotX) => {
     yawSteps.forEach((rotY) => {
       let score = 0;
+      let minX = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
       for (let i = 0; i < activeNodes.length; i += 1) {
         const nodeA = activeNodes[i];
         const projA = projectPointWithAngles(nodeA.coordinate, rotX, rotY);
         const radiusA = getNodeRadius(nodeA) * projA.scale;
+        minX = Math.min(minX, projA.x - radiusA);
+        maxX = Math.max(maxX, projA.x + radiusA);
+        minY = Math.min(minY, projA.y - radiusA);
+        maxY = Math.max(maxY, projA.y + radiusA);
         for (let j = i + 1; j < activeNodes.length; j += 1) {
           const nodeB = activeNodes[j];
           const projB = projectPointWithAngles(nodeB.coordinate, rotX, rotY);
@@ -6363,60 +7500,88 @@ function applyBestView() {
           }
         }
       }
-      const orientationPenalty =
-        orientationWeight *
-        (Math.pow(rotX - preferredRotX, 2) +
-          Math.pow(angleDistance(rotY, preferredRotY), 2));
-      score += orientationPenalty;
-      if (score < best.score) {
-        best = { score, rotX, rotY };
-      }
+      const spread = Math.max(1, maxX - minX) * Math.max(1, maxY - minY);
+      const areaPenalty = spread * 0.0001;
+      candidates.push({
+        rotX,
+        rotY,
+        score: score + areaPenalty,
+        bounds: { minX, maxX, minY, maxY },
+      });
     });
   });
-
-  view.rotX = best.rotX;
-  view.rotY = best.rotY;
-
-  let minX = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-  activeNodes.forEach((node) => {
-    const proj = projectPointWithAngles(node.coordinate, view.rotX, view.rotY);
-    const radius = getNodeRadius(node) * proj.scale;
-    minX = Math.min(minX, proj.x - radius);
-    maxX = Math.max(maxX, proj.x + radius);
-    minY = Math.min(minY, proj.y - radius);
-    maxY = Math.max(maxY, proj.y + radius);
+  candidates.sort((a, b) => a.score - b.score);
+  const filtered = [];
+  const angleDistance = (a, b) => {
+    const diff = Math.atan2(Math.sin(a - b), Math.cos(a - b));
+    return Math.abs(diff);
+  };
+  candidates.forEach((candidate) => {
+    if (filtered.length >= maxViews) {
+      return;
+    }
+    const tooClose = filtered.some(
+      (existing) =>
+        Math.abs(candidate.rotX - existing.rotX) < minAngleDelta &&
+        angleDistance(candidate.rotY, existing.rotY) < minAngleDelta
+    );
+    if (!tooClose) {
+      filtered.push(candidate);
+    }
   });
+  return filtered.length ? filtered : candidates.slice(0, maxViews);
+}
 
-  const topBar = document.querySelector(".top-bar");
-  const leftNav = document.getElementById("nav-3d");
-  const synthPanel = document.querySelector(".synth-panel");
-  const topBarRect = topBar ? topBar.getBoundingClientRect() : null;
-  const leftNavRect =
-    leftNav && !leftNav.hidden ? leftNav.getBoundingClientRect() : null;
-  const synthRect = synthPanel ? synthPanel.getBoundingClientRect() : null;
-  const safeTop = topBarRect ? topBarRect.height : 0;
-  const safeLeft = leftNavRect ? leftNavRect.width : 0;
-  const safeBottom = synthRect ? synthRect.height : 0;
-  const safeRight = 0;
-
+function fitViewToProjectedBounds(bounds, { extraLeft = 0 } = {}) {
+  const { safeTop, safeLeft, safeBottom, safeRight } = getViewSafeInsets();
   const padding = 80;
-  const width = Math.max(1, maxX - minX);
-  const height = Math.max(1, maxY - minY);
-  const availableWidth = Math.max(1, canvas.clientWidth - safeLeft - safeRight - padding);
-  const availableHeight = Math.max(1, canvas.clientHeight - safeTop - safeBottom - padding);
+  const leftPadding = safeLeft + extraLeft;
+  const width = Math.max(1, bounds.maxX - bounds.minX);
+  const height = Math.max(1, bounds.maxY - bounds.minY);
+  const availableWidth = Math.max(
+    1,
+    canvas.clientWidth - leftPadding - safeRight - padding
+  );
+  const availableHeight = Math.max(
+    1,
+    canvas.clientHeight - safeTop - safeBottom - padding
+  );
   const zoomX = availableWidth / width;
   const zoomY = availableHeight / height;
   view.zoom = Math.min(2.2, Math.max(0.5, Math.min(zoomX, zoomY)));
-
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-  const targetCenterX = safeLeft + (canvas.clientWidth - safeLeft - safeRight) / 2;
-  const targetCenterY = safeTop + (canvas.clientHeight - safeTop - safeBottom) / 2;
+  const centerX = (bounds.minX + bounds.maxX) / 2;
+  const centerY = (bounds.minY + bounds.maxY) / 2;
+  const targetCenterX =
+    leftPadding + (canvas.clientWidth - leftPadding - safeRight) / 2;
+  const targetCenterY =
+    safeTop + (canvas.clientHeight - safeTop - safeBottom) / 2;
   view.offsetX = (targetCenterX - canvas.clientWidth / 2) / view.zoom - centerX;
   view.offsetY = (targetCenterY - canvas.clientHeight / 2) / view.zoom - centerY;
+}
+
+function applyBestView({ cycle = false } = {}) {
+  if (!is3DMode) {
+    return;
+  }
+  const activeNodes = nodes.filter((node) => node.active);
+  if (!activeNodes.length) {
+    return;
+  }
+  const signature = getActiveNodesSignature(activeNodes);
+  if (!cycle || signature !== bestViewSignature || !bestViewCandidates.length) {
+    bestViewCandidates = computeBestViewCandidates(activeNodes);
+    bestViewSignature = signature;
+    bestViewIndex = 0;
+  } else {
+    bestViewIndex = (bestViewIndex + 1) % bestViewCandidates.length;
+  }
+  const choice = bestViewCandidates[bestViewIndex] || bestViewCandidates[0];
+  if (!choice) {
+    return;
+  }
+  view.rotX = choice.rotX;
+  view.rotY = choice.rotY;
+  fitViewToProjectedBounds(choice.bounds, { extraLeft: 40 });
   draw();
   markIsomorphicDirty();
   schedulePresetUrlUpdate();
@@ -6489,6 +7654,8 @@ function initLayoutFonts() {
   layoutTitleFont = styles.getPropertyValue("--font-title").trim() || "Georgia";
   layoutRatioFont = styles.getPropertyValue("--font-ratio").trim() || "Georgia";
   layoutNoteFont = styles.getPropertyValue("--font-note").trim() || "Georgia";
+  layoutTriangleLabelFont =
+    styles.getPropertyValue("--font-triangle-label").trim() || "Georgia";
   if (layoutTitleFontSelect) {
     layoutTitleFontSelect.value = layoutTitleFont;
   }
@@ -6497,6 +7664,9 @@ function initLayoutFonts() {
   }
   if (layoutNoteFontSelect) {
     layoutNoteFontSelect.value = layoutNoteFont;
+  }
+  if (layoutTriangleLabelFontSelect) {
+    layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
   }
   syncLayoutFontVars();
 }
@@ -6812,6 +7982,16 @@ function getPresetState() {
     y: node.coordinate.y,
     active: Boolean(node.active),
   }));
+  const layoutViewState =
+    layoutLockPosition && !layoutMode
+      ? layoutView
+      : {
+          zoom: view.zoom,
+          offsetX: view.offsetX,
+          offsetY: view.offsetY,
+          rotX: view.rotX,
+          rotY: view.rotY,
+        };
   return {
     v: 1,
     active,
@@ -6833,6 +8013,22 @@ function getPresetState() {
       Number(ratioZSelect.value) || 7,
     ],
     noteSpellings: Array.from(nodeSpellingOverrides.entries()),
+    triangles: Array.from(triangleDiagonals.values()).map((entry) => ({
+      plane: entry.plane,
+      x: entry.x,
+      y: entry.y,
+      z: entry.z,
+      diag: entry.diag,
+      tri: entry.tri,
+    })),
+    triangleLabels: Array.from(triangleLabels.values()).map((entry) => ({
+      plane: entry.plane,
+      x: entry.x,
+      y: entry.y,
+      z: entry.z,
+      tri: entry.tri,
+      label: entry.label || "",
+    })),
     fundamental: Number(fundamentalInput.value) || 220,
     a4: Number(a4Input.value) || 440,
     fundamentalSpelling,
@@ -6843,16 +8039,23 @@ function getPresetState() {
       nodeSize: layoutNodeSize,
       ratioTextSize: layoutRatioTextSize,
       noteTextSize: layoutNoteTextSize,
+      triangleLabelTextSize: layoutTriangleLabelTextSize,
       titleMargin: layoutTitleMargin,
       titlePosition: layoutTitlePosition,
+      labelOffsets: serializeLayoutLabelOffsets(),
+      axisOffsets: layoutAxisOffsets,
+      axisAngles: layoutAxisAngles,
+      lockPosition: layoutLockPosition,
+      view: layoutViewState,
       titleFont: layoutTitleFont,
       ratioFont: layoutRatioFont,
       noteFont: layoutNoteFont,
+      triangleLabelFont: layoutTriangleLabelFont,
       nodeShape: layoutNodeShape,
       unifyNodeSize: layoutUnifyNodeSize,
       pageSize: layoutPageSize,
       orientation: layoutOrientation,
-      zoom: view.zoom,
+      zoom: layoutViewState.zoom,
     },
     featureMode,
     spellingMode,
@@ -7055,6 +8258,9 @@ function applyPresetState(state) {
 
   const layoutState = state.layout && typeof state.layout === "object" ? state.layout : null;
   if (layoutState) {
+    pendingLayoutLabelOffsets = Array.isArray(layoutState.labelOffsets)
+      ? layoutState.labelOffsets
+      : null;
     if (typeof layoutState.title === "string") {
       layoutTitle = layoutState.title;
       if (layoutTitleInput) {
@@ -7075,14 +8281,22 @@ function applyPresetState(state) {
     ) {
       layoutRatioTextSize = Math.max(10, Math.round(21 * layoutState.textScale));
       layoutNoteTextSize = Math.max(8, Math.round(11 * layoutState.textScale));
+      layoutTriangleLabelTextSize = Math.max(
+        10,
+        Math.round(LAYOUT_DEFAULTS.triangleLabelTextSize * layoutState.textScale)
+      );
       if (layoutRatioTextSizeInput) {
         layoutRatioTextSizeInput.value = String(layoutRatioTextSize);
       }
       if (layoutNoteTextSizeInput) {
         layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
       }
+      if (layoutTriangleLabelSizeInput) {
+        layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
+      }
       updateLayoutRatioTextReadout();
       updateLayoutNoteTextReadout();
+      updateLayoutTriangleLabelReadout();
     }
     if (Number.isFinite(layoutState.nodeSize)) {
       layoutNodeSize = layoutState.nodeSize;
@@ -7105,6 +8319,19 @@ function applyPresetState(state) {
       }
       updateLayoutNoteTextReadout();
     }
+    if (Number.isFinite(layoutState.triangleLabelTextSize)) {
+      layoutTriangleLabelTextSize = layoutState.triangleLabelTextSize;
+      if (layoutTriangleLabelSizeInput) {
+        layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
+      }
+      updateLayoutTriangleLabelReadout();
+    } else {
+      layoutTriangleLabelTextSize = Math.max(10, Math.round(layoutNoteTextSize + 6));
+      if (layoutTriangleLabelSizeInput) {
+        layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
+      }
+      updateLayoutTriangleLabelReadout();
+    }
     if (Number.isFinite(layoutState.titleMargin)) {
       layoutTitleMargin = layoutState.titleMargin;
       if (layoutTitleMarginInput) {
@@ -7124,6 +8351,20 @@ function applyPresetState(state) {
     } else {
       layoutTitlePosition = null;
     }
+    if (layoutState.axisOffsets && typeof layoutState.axisOffsets === "object") {
+      ["x", "y", "z"].forEach((axis) => {
+        const offset = layoutState.axisOffsets[axis];
+        if (offset && Number.isFinite(offset.x) && Number.isFinite(offset.y)) {
+          layoutAxisOffsets[axis] = { x: offset.x, y: offset.y };
+        }
+      });
+    }
+    if (layoutState.axisAngles && typeof layoutState.axisAngles === "object") {
+      ["x", "y", "z"].forEach((axis) => {
+        const angle = layoutState.axisAngles[axis];
+        layoutAxisAngles[axis] = Number.isFinite(angle) ? angle : null;
+      });
+    }
     if (typeof layoutState.titleFont === "string") {
       layoutTitleFont = layoutState.titleFont;
       if (layoutTitleFontSelect) {
@@ -7140,6 +8381,12 @@ function applyPresetState(state) {
       layoutNoteFont = layoutState.noteFont;
       if (layoutNoteFontSelect) {
         layoutNoteFontSelect.value = layoutNoteFont;
+      }
+    }
+    if (typeof layoutState.triangleLabelFont === "string") {
+      layoutTriangleLabelFont = layoutState.triangleLabelFont;
+      if (layoutTriangleLabelFontSelect) {
+        layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
       }
     }
     syncLayoutFontVars();
@@ -7167,9 +8414,36 @@ function applyPresetState(state) {
         layoutOrientationSelect.value = layoutOrientation;
       }
     }
+    if (typeof layoutState.lockPosition === "boolean") {
+      layoutLockPosition = layoutState.lockPosition;
+      if (layoutLockPositionToggle) {
+        layoutLockPositionToggle.checked = layoutLockPosition;
+      }
+    }
+    if (layoutState.view && typeof layoutState.view === "object") {
+      const nextZoom = Number(layoutState.view.zoom);
+      const nextOffsetX = Number(layoutState.view.offsetX);
+      const nextOffsetY = Number(layoutState.view.offsetY);
+      const nextRotX = Number(layoutState.view.rotX);
+      const nextRotY = Number(layoutState.view.rotY);
+      layoutView = {
+        zoom: Number.isFinite(nextZoom) ? nextZoom : layoutView.zoom,
+        offsetX: Number.isFinite(nextOffsetX) ? nextOffsetX : layoutView.offsetX,
+        offsetY: Number.isFinite(nextOffsetY) ? nextOffsetY : layoutView.offsetY,
+        rotX: Number.isFinite(nextRotX) ? nextRotX : layoutView.rotX,
+        rotY: Number.isFinite(nextRotY) ? nextRotY : layoutView.rotY,
+      };
+    } else if (Number.isFinite(layoutState.zoom)) {
+      layoutView = {
+        ...layoutView,
+        zoom: Math.min(2.2, Math.max(0.5, layoutState.zoom)),
+      };
+    }
     if (Number.isFinite(layoutState.zoom)) {
-      view.zoom = Math.min(2.2, Math.max(0.5, layoutState.zoom));
-      syncLayoutScaleInput();
+      if (layoutMode && layoutLockPosition) {
+        view.zoom = Math.min(2.2, Math.max(0.5, layoutState.zoom));
+        syncLayoutScaleInput();
+      }
     }
     if (typeof layoutState.mode === "boolean") {
       setLayoutMode(layoutState.mode);
@@ -7220,7 +8494,78 @@ function applyPresetState(state) {
       centsPrecisionInput.value = String(centsPrecision);
     }
   }
+  triangleDiagonals.clear();
+  triangleLabels.clear();
+  if (Array.isArray(state.triangles)) {
+    state.triangles.forEach((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return;
+      }
+      const plane = entry.plane;
+      const diag = entry.diag;
+      if (plane !== "xy" && plane !== "xz" && plane !== "yz") {
+        return;
+      }
+      if (diag !== "backslash" && diag !== "slash") {
+        return;
+      }
+      const x = Number(entry.x);
+      const y = Number(entry.y);
+      const z = Number(entry.z);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        return;
+      }
+      const tri = typeof entry.tri === "string" ? entry.tri : "";
+      const label = typeof entry.label === "string" ? entry.label : "";
+      const normalized = { plane, x, y, z, diag, tri };
+      triangleDiagonals.set(triangleKey(normalized), normalized);
+      if (label) {
+        const labelTri = TRIANGLE_TRI_IDS.has(tri)
+          ? tri
+          : diag === "backslash"
+          ? "abd"
+          : "abc";
+        const labelEntry = normalizeTriangleLabelEntry({
+          plane,
+          x,
+          y,
+          z,
+          tri: labelTri,
+          label,
+        });
+        triangleLabels.set(triangleLabelKey(labelEntry), labelEntry);
+      }
+    });
+  }
+  if (Array.isArray(state.triangleLabels)) {
+    state.triangleLabels.forEach((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return;
+      }
+      const plane = entry.plane;
+      if (plane !== "xy" && plane !== "xz" && plane !== "yz") {
+        return;
+      }
+      const tri = typeof entry.tri === "string" ? entry.tri : "";
+      if (!TRIANGLE_TRI_IDS.has(tri)) {
+        return;
+      }
+      const x = Number(entry.x);
+      const y = Number(entry.y);
+      const z = Number(entry.z);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        return;
+      }
+      const label = typeof entry.label === "string" ? entry.label : "";
+      if (!label) {
+        return;
+      }
+      const normalized = normalizeTriangleLabelEntry({ plane, x, y, z, tri, label });
+      triangleLabels.set(triangleLabelKey(normalized), normalized);
+    });
+  }
 
+  invalidateLabelCache();
   updateFundamentalNotes();
   syncFundamentalNoteSelect();
 
@@ -7256,6 +8601,11 @@ function applyPresetState(state) {
     customNodes = [];
   }
   rebuildLattice(activeKeys);
+  if (pendingLayoutLabelOffsets) {
+    applyLayoutLabelOffsets(pendingLayoutLabelOffsets);
+    pendingLayoutLabelOffsets = null;
+    draw();
+  }
 }
 
 function formatActiveRatiosForScaleWorkshop() {
@@ -7623,6 +8973,86 @@ function buildLayoutSvgString() {
     );
   });
 
+  if (triangleDiagonals.size) {
+    const gridMap = new Map();
+    nodes.forEach((node) => {
+      if (node.active && !node.isCustom) {
+        gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
+      }
+    });
+    triangleDiagonals.forEach((entry) => {
+      const { a, b } = getTriangleDiagonalNodes(entry, gridMap);
+      if (!a || !b) {
+        return;
+      }
+      const start = worldToScreen(getNodeDisplayCoordinate(a), disableScale);
+      const end = worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+      const radiusA = layoutNodeSize * (start.scale || 1);
+      const radiusB = layoutNodeSize * (end.scale || 1);
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      if (!dist) {
+        return;
+      }
+      const ux = dx / dist;
+      const uy = dy / dist;
+      const edgeStart = {
+        x: start.x + ux * radiusA - left,
+        y: start.y + uy * radiusA - top,
+      };
+      const edgeEnd = {
+        x: end.x - ux * radiusB - left,
+        y: end.y - uy * radiusB - top,
+      };
+      parts.push(
+        `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" stroke="${themeColors.edge}" stroke-width="1.5" stroke-dasharray="6 4" />`
+      );
+    });
+  }
+  if (triangleLabels.size) {
+    const gridMap = new Map();
+    nodes.forEach((node) => {
+      if (node.active && !node.isCustom) {
+        gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
+      }
+    });
+    triangleLabels.forEach((entry) => {
+      if (!entry.label) {
+        return;
+      }
+      const diag = TRIANGLE_TRI_TO_DIAG[entry.tri];
+      if (!diag || !triangleDiagonals.has(triangleKey({ ...entry, diag }))) {
+        return;
+      }
+      const cellNodes = getTriangleCellNodes(entry, gridMap);
+      const labelNodes = getTriangleLabelPoints(entry.tri, cellNodes);
+      if (!labelNodes) {
+        return;
+      }
+      const points = labelNodes.map((node) => {
+        const proj = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+        return { x: proj.x - left, y: proj.y - top };
+      });
+      const cx = (points[0].x + points[1].x + points[2].x) / 3;
+      const cy = (points[0].y + points[1].y + points[2].y) / 3;
+      const baseSize = Math.max(12, Math.round(layoutTriangleLabelTextSize));
+      const layout = computeTriangleLabelLayout(
+        entry.label,
+        layoutTriangleLabelFont,
+        baseSize,
+        points
+      );
+      parts.push(
+        `<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
+          layoutTriangleLabelFont
+        )}" font-size="${layout.size}" fill="${themeColors.textSecondary}">${escapeSvgText(
+          entry.label
+        )}</text>`
+      );
+    });
+  }
+
   nodes.forEach((node) => {
     const isVisible = node.isCenter || node.active || node.isCustom;
     if (!isVisible) {
@@ -7942,7 +9372,9 @@ function rebuildLattice(activeKeys = null) {
   if (layoutMode) {
     nodes.forEach((node) => ensureLayoutPosition(node));
   }
+  bumpLabelDataVersion();
   applyActiveNodeKeys(activeKeys);
+  pruneTriangleDiagonals();
   edges = buildEdges(latticeNodes, GRID_COLS, GRID_ROWS, gridDepth);
   updatePitchInstances();
   markIsomorphicDirty();
@@ -7954,6 +9386,8 @@ function resetLattice() {
   stopAllVoices();
   activeKeys.clear();
   nodeSpellingOverrides.clear();
+  triangleDiagonals.clear();
+  triangleLabels.clear();
   customNodes = [];
   fundamentalNoteSelect.value = "60";
   onFundamentalNoteChange();
@@ -8010,6 +9444,13 @@ if (layoutNoteTextSizeInput) {
   layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
   updateLayoutNoteTextReadout();
 }
+if (layoutTriangleLabelSizeInput) {
+  layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
+  updateLayoutTriangleLabelReadout();
+}
+if (layoutLockPositionToggle) {
+  layoutLockPositionToggle.checked = layoutLockPosition;
+}
 if (layoutNodeShapeSelect) {
   layoutNodeShapeSelect.value = layoutNodeShape;
 }
@@ -8038,6 +9479,9 @@ if (layoutRatioFontSelect) {
 }
 if (layoutNoteFontSelect) {
   layoutNoteFontSelect.value = layoutNoteFont;
+}
+if (layoutTriangleLabelFontSelect) {
+  layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
 }
 if (layoutUnifySizeToggle) {
   layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
@@ -8163,6 +9607,7 @@ if (featureModeInputs.length) {
     input.addEventListener("change", () => {
       const selected = document.querySelector('input[name="feature-mode"]:checked');
       featureMode = selected && selected.value === "note" ? "note" : "ratio";
+      invalidateLabelCache();
       draw();
       schedulePresetUrlUpdate();
     });
@@ -8173,12 +9618,14 @@ if (spellingModeInputs.length) {
     input.addEventListener("change", () => {
       const selected = document.querySelector('input[name="spelling-mode"]:checked');
       spellingMode = selected && selected.value === "true" ? "true" : "simple";
+      spellingHintActive = true;
       updateUiHint();
       if (spellingMode !== "true") {
         hideFundamentalSpellingDialog();
       } else if (fundamentalNoteSelect) {
         showFundamentalSpellingDialog(Number(fundamentalNoteSelect.value));
       }
+      invalidateLabelCache();
       draw();
       schedulePresetUrlUpdate();
     });
@@ -8189,6 +9636,7 @@ function applyFundamentalSpelling(nextSpelling) {
     return;
   }
   fundamentalSpelling = nextSpelling === "flat" ? "flat" : "sharp";
+  invalidateLabelCache();
   updateFundamentalNotes();
   draw();
   schedulePresetUrlUpdate();
@@ -8197,6 +9645,7 @@ function applyFundamentalSpelling(nextSpelling) {
 if (showHzToggle) {
   showHzToggle.addEventListener("change", () => {
     showHz = showHzToggle.checked;
+    invalidateLabelCache();
     draw();
     schedulePresetUrlUpdate();
   });
@@ -8204,6 +9653,7 @@ if (showHzToggle) {
 if (showCentsSignToggle) {
   showCentsSignToggle.addEventListener("change", () => {
     showCentsSign = showCentsSignToggle.checked;
+    invalidateLabelCache();
     draw();
     schedulePresetUrlUpdate();
   });
@@ -8211,6 +9661,7 @@ if (showCentsSignToggle) {
 if (hejiEnabledToggle) {
   hejiEnabledToggle.addEventListener("change", () => {
     hejiEnabled = hejiEnabledToggle.checked;
+    invalidateLabelCache();
     draw();
     schedulePresetUrlUpdate();
   });
@@ -8221,6 +9672,7 @@ if (centsPrecisionInputs.length) {
       const selected = document.querySelector('input[name="cents-precision"]:checked');
       const next = selected ? Number(selected.value) : 0;
       centsPrecision = Math.min(2, Math.max(0, Math.round(next)));
+      invalidateLabelCache();
       draw();
       schedulePresetUrlUpdate();
     });
@@ -8230,6 +9682,7 @@ if (centsPrecisionInputs.length) {
     const next = Math.min(3, Math.max(0, Math.round(Number(centsPrecisionInput.value) || 0)));
     centsPrecision = next;
     centsPrecisionInput.value = String(next);
+    invalidateLabelCache();
     draw();
     schedulePresetUrlUpdate();
   });
@@ -8275,9 +9728,39 @@ if (layoutOrientationSelect) {
 if (layoutScaleInput) {
   layoutScaleInput.addEventListener("input", () => {
     view.zoom = Number(layoutScaleInput.value) || 1;
+    if (layoutLockPosition && layoutMode) {
+      layoutView = { ...layoutView, zoom: view.zoom };
+    }
     updateLayoutScaleReadout();
     draw();
     markIsomorphicDirty();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutLockPositionToggle) {
+  layoutLockPositionToggle.addEventListener("change", () => {
+    layoutLockPosition = layoutLockPositionToggle.checked;
+    if (layoutLockPosition) {
+      syncLayoutViewFromCurrent();
+    } else {
+      if (layoutMode && layoutPrevState) {
+        view.zoom = layoutPrevState.zoom;
+        view.offsetX = layoutPrevState.offsetX;
+        view.offsetY = layoutPrevState.offsetY;
+        view.rotX = layoutPrevState.rotX;
+        view.rotY = layoutPrevState.rotY;
+        syncLayoutScaleInput();
+        markIsomorphicDirty();
+        draw();
+      }
+      layoutView = {
+        zoom: view.zoom,
+        offsetX: view.offsetX,
+        offsetY: view.offsetY,
+        rotX: view.rotX,
+        rotY: view.rotY,
+      };
+    }
     schedulePresetUrlUpdate();
   });
 }
@@ -8305,6 +9788,15 @@ if (layoutNoteTextSizeInput) {
     schedulePresetUrlUpdate();
   });
 }
+if (layoutTriangleLabelSizeInput) {
+  layoutTriangleLabelSizeInput.addEventListener("input", () => {
+    layoutTriangleLabelTextSize =
+      Number(layoutTriangleLabelSizeInput.value) || layoutTriangleLabelTextSize;
+    updateLayoutTriangleLabelReadout();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
 if (layoutTitleMarginInput) {
   layoutTitleMarginInput.addEventListener("input", () => {
     layoutTitleMargin = Number(layoutTitleMarginInput.value) || layoutTitleMargin;
@@ -8328,6 +9820,7 @@ if (layoutFontsButton && layoutFontDialog) {
         title: layoutTitleFont,
         ratio: layoutRatioFont,
         note: layoutNoteFont,
+        triangleLabel: layoutTriangleLabelFont,
       };
       layoutFontDialog.showModal();
     }
@@ -8339,12 +9832,13 @@ if (layoutPanelToggle) {
     setLayoutPanelCollapsed(!isCollapsed);
   });
 }
-if (layoutFontDialog) {
+  if (layoutFontDialog) {
   layoutFontDialog.addEventListener("close", () => {
     if (layoutFontDialog.returnValue === "cancel" && layoutFontSnapshot) {
       layoutTitleFont = layoutFontSnapshot.title;
       layoutRatioFont = layoutFontSnapshot.ratio;
       layoutNoteFont = layoutFontSnapshot.note;
+      layoutTriangleLabelFont = layoutFontSnapshot.triangleLabel;
       if (layoutTitleFontSelect) {
         layoutTitleFontSelect.value = layoutTitleFont;
       }
@@ -8354,9 +9848,13 @@ if (layoutFontDialog) {
       if (layoutNoteFontSelect) {
         layoutNoteFontSelect.value = layoutNoteFont;
       }
+      if (layoutTriangleLabelFontSelect) {
+        layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
+      }
     }
     layoutFontSnapshot = null;
     syncLayoutFontVars();
+    invalidateLabelCache({ clearTextWidths: true });
     draw();
     schedulePresetUrlUpdate();
   });
@@ -8365,6 +9863,7 @@ if (layoutTitleFontSelect) {
   layoutTitleFontSelect.addEventListener("change", () => {
     layoutTitleFont = layoutTitleFontSelect.value || layoutTitleFont;
     syncLayoutFontVars();
+    invalidateLabelCache({ clearTextWidths: true });
     draw();
     schedulePresetUrlUpdate();
   });
@@ -8373,6 +9872,7 @@ if (layoutRatioFontSelect) {
   layoutRatioFontSelect.addEventListener("change", () => {
     layoutRatioFont = layoutRatioFontSelect.value || layoutRatioFont;
     syncLayoutFontVars();
+    invalidateLabelCache({ clearTextWidths: true });
     draw();
     schedulePresetUrlUpdate();
   });
@@ -8381,6 +9881,16 @@ if (layoutNoteFontSelect) {
   layoutNoteFontSelect.addEventListener("change", () => {
     layoutNoteFont = layoutNoteFontSelect.value || layoutNoteFont;
     syncLayoutFontVars();
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutTriangleLabelFontSelect) {
+  layoutTriangleLabelFontSelect.addEventListener("change", () => {
+    layoutTriangleLabelFont = layoutTriangleLabelFontSelect.value || layoutTriangleLabelFont;
+    syncLayoutFontVars();
+    invalidateLabelCache({ clearTextWidths: true });
     draw();
     schedulePresetUrlUpdate();
   });
@@ -8492,7 +10002,12 @@ waveformSelect.addEventListener("change", () => {
   });
   schedulePresetUrlUpdate();
 });
-keyboardModeSelect.addEventListener("change", updateUiHint);
+keyboardModeSelect.addEventListener("change", () => {
+  if (keyboardModeSelect.value === "off") {
+    resetUiHintToDefault();
+  }
+  updateUiHint();
+});
 keyboardModeSelect.addEventListener("change", () => {
   markIsomorphicDirty();
   draw();
@@ -8642,6 +10157,16 @@ if (document.fonts && document.fonts.load) {
     })
     .catch(() => {});
 }
+if (triangleLabelDialog && triangleLabelInput) {
+  triangleLabelInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    const value = triangleLabelInput.value.trim();
+    triangleLabelDialog.close(value ? "ok" : "none");
+  });
+}
 canvas.addEventListener("pointerdown", onPointerDown);
 canvas.addEventListener("pointermove", onPointerMove);
 canvas.addEventListener("pointerup", onPointerUp);
@@ -8659,6 +10184,46 @@ window.addEventListener("keydown", (event) => {
     shiftHeld = true;
     updateAddModeFromShift();
     draw();
+  }
+  if (event.key.toLowerCase() === "t") {
+    tHeld = true;
+    updateUiHint();
+  }
+  if (triangleLabelDialog) {
+    triangleLabelDialog.addEventListener("close", () => {
+      if (!triangleLabelTargetKey || !triangleLabelTargetTri) {
+        return;
+      }
+      const result = triangleLabelDialog.returnValue;
+      const entry = triangleLabels.get(triangleLabelTargetKey);
+      const parts = triangleLabelTargetKey.split(":");
+      const coords = parts[1] ? parts[1].split(",") : [];
+      const baseEntry = {
+        plane: parts[0],
+        x: Number(coords[0]),
+        y: Number(coords[1]),
+        z: Number(coords[2]),
+        tri: triangleLabelTargetTri,
+        label: "",
+      };
+      if (result === "none") {
+        if (entry) {
+          triangleLabels.delete(triangleLabelTargetKey);
+        }
+      } else if (triangleLabelInput) {
+        const nextEntry = entry ? { ...entry } : baseEntry;
+        nextEntry.label = triangleLabelInput.value.trim();
+        if (nextEntry.label) {
+          triangleLabels.set(triangleLabelTargetKey, normalizeTriangleLabelEntry(nextEntry));
+        } else if (entry) {
+          triangleLabels.delete(triangleLabelTargetKey);
+        }
+      }
+      triangleLabelTargetKey = null;
+      triangleLabelTargetTri = null;
+      schedulePresetUrlUpdate();
+      draw();
+    });
   }
   if (event.key.toLowerCase() === "r") {
     rHeld = true;
@@ -8705,6 +10270,12 @@ window.addEventListener("keyup", (event) => {
   }
   if (event.key.toLowerCase() === "r") {
     rHeld = false;
+  }
+  if (event.key.toLowerCase() === "t") {
+    tHeld = false;
+    triangleHover = null;
+    updateUiHint();
+    scheduleDraw();
   }
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = false;

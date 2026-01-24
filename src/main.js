@@ -98,6 +98,7 @@ const spellingModeInputs = document.querySelectorAll('input[name="spelling-mode"
 const showHzToggle = document.getElementById("show-hz");
 const showCentsSignToggle = document.getElementById("show-cents-sign");
 const hejiEnabledToggle = document.getElementById("heji-enabled");
+const enharmonicsEnabledToggle = document.getElementById("enharmonics-enabled");
 const centsPrecisionInput = document.getElementById("cents-precision");
 const centsPrecisionInputs = document.querySelectorAll('input[name="cents-precision"]');
 const sequencePatternSelect = document.getElementById("sequence-pattern");
@@ -135,6 +136,8 @@ const view = {
   offsetY: 0,
   dragging: false,
   rotating: false,
+  reducedEffects: false,
+  interactionStart: { x: 0, y: 0, time: 0 },
   dragStart: { x: 0, y: 0 },
   dragOffsetStart: { x: 0, y: 0 },
   rotateStart: { x: 0, y: 0 },
@@ -233,7 +236,11 @@ function getLayoutNoteLabelHitbox(node, pos, radius) {
   } else {
     const ratioText = `${node.numerator}:${node.denominator}`;
     const displayInfo = getCachedDisplayInfo(node);
-    const centsLabel = getCachedCentsReadout(node, { wrap: true }, displayInfo);
+    const centsLabel = getCachedCentsReadout(
+      node,
+      { wrap: enharmonicsEnabled },
+      displayInfo
+    );
     width = Math.max(
       measureTextWidthWithWeight(ratioText, layoutNoteTextSize, "Lexend, sans-serif", 200),
       measureTextWidthWithWeight(centsLabel, layoutNoteTextSize, "Lexend, sans-serif", 200)
@@ -525,6 +532,7 @@ let featureMode = "ratio";
 let showHz = false;
 let showCentsSign = false;
 let hejiEnabled = true;
+let enharmonicsEnabled = true;
 let centsPrecision = 0;
 let showCircles = true;
 const labelCache = new Map();
@@ -2346,6 +2354,11 @@ function handleKeyDown(event) {
     return;
   }
 
+  const mode = getKeyboardMode();
+  if (mode === "off") {
+    return;
+  }
+
   const key = event.key.toLowerCase();
   if (activeKeys.has(key)) {
     return;
@@ -2729,7 +2742,7 @@ function getLayoutNodeShape(node) {
 function getNodeNoteLabel(node) {
   const info = getCachedDisplayInfo(node);
   const noteText = featureMode === "ratio" ? info.pitchClass : info.name;
-  const wrap = featureMode === "note" ? true : hejiEnabled;
+  const wrap = enharmonicsEnabled;
   const requireHejiDetail = featureMode === "ratio";
   const centsText = getCachedCentsReadout(
     node,
@@ -2930,6 +2943,7 @@ function getLabelCacheKey() {
   return [
     featureMode,
     hejiEnabled ? "heji" : "no-heji",
+    enharmonicsEnabled ? "enharmonics" : "no-enharmonics",
     spellingMode,
     centsPrecision,
     showCentsSign ? "cents" : "no-cents",
@@ -3028,7 +3042,7 @@ function buildCentsReadout(
   } = {}
 ) {
   const info = displayInfo || getDisplayNoteInfo(node);
-  if (!hejiEnabled) {
+  if (!hejiEnabled && !enharmonicsEnabled) {
     const text = formatCents(info.cents);
     return text;
   }
@@ -3037,22 +3051,36 @@ function buildCentsReadout(
     const annotation = getHejiAnnotation(node, baseTextForHeji);
     hasHejiRule = annotation.suffixParts.some((part) => part.source === "rule");
   }
-  if (requireHejiDetail && !hasHejiRule) {
+  if (requireHejiDetail && !hasHejiRule && !enharmonicsEnabled) {
     return formatCents(info.cents);
   }
   const mapAccidentals = (text) =>
-    text.replace(/#/g, "v").replace(/b/g, "e").replace(/x/g, "V");
+    hejiEnabled ? text.replace(/#/g, "v").replace(/b/g, "e").replace(/x/g, "V") : text;
+  const baseText = baseTextForHeji || info.pitchClass || "";
+  const sharpCount = (baseText.match(/#/g) || []).length;
+  const doubleSharpCount = (baseText.match(/x/g) || []).length;
+  const flatCount = (baseText.match(/b/g) || []).length;
+  const hasHeavyAccidentals = sharpCount + doubleSharpCount * 2 >= 2 || flatCount >= 2;
   const includePitchClass = Math.abs(info.cents) > 50;
-  if (includePitchClass) {
+  const shouldAnnotate = enharmonicsEnabled && (includePitchClass || hasHeavyAccidentals);
+  if (shouldAnnotate) {
     const nearest = getNearestNoteInfo(node);
-    const fallbackBase = `${nearest.pitchClass}${formatCents(nearest.cents)}`;
+    const targetPc = nearest.midi % 12;
+    const preferredFallback = getPreferredEnharmonicPitchClass(
+      baseText,
+      targetPc,
+      nearest.pitchClass
+    );
+    const fallbackBase = `${preferredFallback}${formatCents(nearest.cents)}`;
     if (wrap) {
       const primary = formatCents(info.cents);
-      const fallback = mapAccidentals(fallbackBase);
-      return `${primary} (${fallback})`;
+      const fallback = includePitchClass ? fallbackBase : preferredFallback;
+      const mappedFallback = mapAccidentals(fallback);
+      return `${primary} (${mappedFallback})`;
     }
     const primary = `${info.pitchClass}${formatCents(info.cents)}`;
-    return `${primary} / ${fallbackBase}`;
+    const fallback = includePitchClass ? fallbackBase : preferredFallback;
+    return `${primary} / ${fallback}`;
   }
   const primary = formatCents(info.cents);
   return wrap ? mapAccidentals(primary) : primary;
@@ -3879,6 +3907,104 @@ function getManualSpellingOptions(targetPc) {
   return options;
 }
 
+function isExcludedEnharmonicSpelling(pitchClass) {
+  return /^(E#|Fb|B#|Cb)$/.test(pitchClass);
+}
+
+function getSimplestEnharmonicPitchClass(targetPc, fallbackPitchClass) {
+  const options = getManualSpellingOptions(targetPc)
+    .map((option) => {
+      const parsed = parsePitchClass(option.pitchClass);
+      return {
+        ...option,
+        accidental: parsed.accidental,
+      };
+    })
+    .filter(
+      (option) =>
+        Math.abs(option.accidental) <= 1 &&
+        !isExcludedEnharmonicSpelling(option.pitchClass)
+    );
+  if (!options.length) {
+    return fallbackPitchClass;
+  }
+  options.sort((a, b) => {
+    const absA = Math.abs(a.accidental);
+    const absB = Math.abs(b.accidental);
+    if (absA !== absB) {
+      return absA - absB;
+    }
+    if (a.accidental === 0 && b.accidental !== 0) {
+      return -1;
+    }
+    if (b.accidental === 0 && a.accidental !== 0) {
+      return 1;
+    }
+    const rank = { base: 0, lower: 1, upper: 2 };
+    return (rank[a.key] ?? 0) - (rank[b.key] ?? 0);
+  });
+  return options[0].pitchClass;
+}
+
+function getPreferredEnharmonicPitchClass(baseText, targetPc, fallbackPitchClass) {
+  if (!baseText) {
+    return getSimplestEnharmonicPitchClass(targetPc, fallbackPitchClass);
+  }
+  const parsed = parsePitchClass(baseText);
+  if (!Number.isFinite(parsed.letterIndex)) {
+    return fallbackPitchClass;
+  }
+  const baseAccidental = parsed.accidental || 0;
+  const adjacents = [
+    { dir: -1, letterIndex: parsed.letterIndex - 1 },
+    { dir: 1, letterIndex: parsed.letterIndex + 1 },
+  ];
+  const options = [];
+  adjacents.forEach(({ dir, letterIndex }) => {
+    const accidental = getAccidentalForTargetPc(letterIndex, targetPc);
+    if (accidental == null) {
+      return;
+    }
+    if (Math.abs(accidental) > 1) {
+      return;
+    }
+    const candidate = buildPitchClass(letterIndex, accidental);
+    if (isExcludedEnharmonicSpelling(candidate)) {
+      return;
+    }
+    options.push({ letterIndex, accidental, dir });
+  });
+  if (!options.length) {
+    return getSimplestEnharmonicPitchClass(targetPc, fallbackPitchClass);
+  }
+  options.sort((a, b) => {
+    const absA = Math.abs(a.accidental);
+    const absB = Math.abs(b.accidental);
+    if (absA !== absB) {
+      return absA - absB;
+    }
+    if (baseAccidental !== 0) {
+      const sign = Math.sign(baseAccidental);
+      const aMatch = Math.sign(a.accidental) === sign ? 0 : 1;
+      const bMatch = Math.sign(b.accidental) === sign ? 0 : 1;
+      if (aMatch !== bMatch) {
+        return aMatch - bMatch;
+      }
+      if (sign < 0) {
+        return a.dir - b.dir;
+      }
+      return b.dir - a.dir;
+    }
+    return a.dir - b.dir;
+  });
+  const best = options[0];
+  const bestPitchClass = buildPitchClass(best.letterIndex, best.accidental);
+  if (isExcludedEnharmonicSpelling(bestPitchClass)) {
+    return getSimplestEnharmonicPitchClass(targetPc, fallbackPitchClass);
+  }
+  return bestPitchClass;
+}
+
 function getManualSpellingForNode(node, targetPc) {
   const options = getManualSpellingOptions(targetPc);
   const override = nodeSpellingOverrides.get(node.id);
@@ -4008,7 +4134,11 @@ function getTrueSpellingPitchClass(node) {
   const targetSemitone = baseSemitone + totalSemitoneShift;
   let accidental = targetSemitone - targetNatural;
   if (Math.abs(accidental) > 3) {
-    accidental = Math.max(-3, Math.min(3, accidental));
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
   }
   const pitchClass = buildPitchClass(targetLetterIndex, accidental);
   const targetPc = mod(LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + accidental, 12);
@@ -4025,6 +4155,19 @@ function getLightDir2D() {
   const rotated = projectPointWithAngles(BASE_LIGHT_DIR, view.rotX, view.rotY, true);
   const length = Math.hypot(rotated.x, rotated.y) || 1;
   return { x: rotated.x / length, y: rotated.y / length };
+}
+
+function updateReducedEffects(event) {
+  if (!is3DMode || (!view.dragging && !view.rotating) || view.reducedEffects) {
+    return;
+  }
+  const now = performance.now();
+  const dx = event.offsetX - view.interactionStart.x;
+  const dy = event.offsetY - view.interactionStart.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance >= 6 || now - view.interactionStart.time >= 120) {
+    view.reducedEffects = true;
+  }
 }
 
 function pointInTriangle(point, a, b, c) {
@@ -5034,7 +5177,7 @@ function draw() {
     ensureIsomorphicMaps();
   }
   const keyMap = isIsomorphicMode ? isomorphicKeyMap : null;
-  const reducedEffects = view.rotating;
+  const reducedEffects = is3DMode && view.reducedEffects;
   const lightDir = getLightDir2D();
   nodeRenderList.forEach(({ node, pos }) => {
     const isHovered = node.id === hoverNodeId;
@@ -5223,7 +5366,11 @@ function draw() {
       ctx.textBaseline = "top";
       ctx.fillStyle = themeColors.textSecondary;
       const ratioText = `${node.numerator}:${node.denominator}`;
-      const centsLabel = getCachedCentsReadout(node, { wrap: true }, displayInfo);
+      const centsLabel = getCachedCentsReadout(
+        node,
+        { wrap: enharmonicsEnabled },
+        displayInfo
+      );
       const rawLabelPos = layoutMode
         ? getLayoutNoteLabelPosition(node, pos, radius)
         : { x: pos.x + radius + 6, y: pos.y + radius - 10 };
@@ -5264,7 +5411,7 @@ function draw() {
       const centsLabel = getCachedCentsReadout(
         node,
         {
-          wrap: hejiEnabled,
+          wrap: enharmonicsEnabled,
           requireHejiDetail: true,
           baseTextForHeji: displayInfo.pitchClass,
         },
@@ -5948,6 +6095,12 @@ function onPointerDown(event) {
       view.rotateStart = { x: event.offsetX, y: event.offsetY };
       view.rotateAnglesStart = { x: view.rotX, y: view.rotY };
     }
+    view.reducedEffects = false;
+    view.interactionStart = {
+      x: event.offsetX,
+      y: event.offsetY,
+      time: performance.now(),
+    };
     view.lastPointer = { x: event.offsetX, y: event.offsetY };
     canvas.setPointerCapture(event.pointerId);
     return;
@@ -6138,6 +6291,7 @@ function onPointerMove(event) {
     return;
   }
   if (view.rotating) {
+    updateReducedEffects(event);
     const dx = event.offsetX - view.rotateStart.x;
     const dy = event.offsetY - view.rotateStart.y;
     view.rotY = view.rotateAnglesStart.y + dx * 0.005;
@@ -6172,6 +6326,10 @@ function onPointerMove(event) {
       scheduleDraw();
     }
     return;
+  }
+
+  if (is3DMode && view.dragging) {
+    updateReducedEffects(event);
   }
 
   const dx = (event.offsetX - view.dragStart.x) / view.zoom;
@@ -6221,6 +6379,7 @@ function onPointerUp(event) {
     if (view.dragging) {
       view.dragging = false;
     }
+    view.reducedEffects = false;
     return;
   }
   if (customDrag) {
@@ -6282,6 +6441,7 @@ function onPointerUp(event) {
     view.dragging = false;
     markIsomorphicDirty();
   }
+  view.reducedEffects = false;
 
   if (moved < 4) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
@@ -6384,6 +6544,7 @@ function onPointerLeave() {
   if (view.dragging) {
     view.dragging = false;
   }
+  view.reducedEffects = false;
   scheduleDraw();
 }
 
@@ -8062,6 +8223,7 @@ function getPresetState() {
     showHz,
     showCentsSign,
     hejiEnabled,
+    enharmonicsEnabled,
     centsPrecision,
     synth: {
       volume: Number(volumeSlider.value),
@@ -8482,6 +8644,12 @@ function applyPresetState(state) {
     hejiEnabled = state.hejiEnabled;
     if (hejiEnabledToggle) {
       hejiEnabledToggle.checked = hejiEnabled;
+    }
+  }
+  if (typeof state.enharmonicsEnabled === "boolean") {
+    enharmonicsEnabled = state.enharmonicsEnabled;
+    if (enharmonicsEnabledToggle) {
+      enharmonicsEnabledToggle.checked = enharmonicsEnabled;
     }
   }
   if (Number.isFinite(state.centsPrecision)) {
@@ -9147,7 +9315,7 @@ function buildLayoutSvgString() {
           })
         );
       }
-      const centsLabel = buildCentsReadout(node, { wrap: true });
+      const centsLabel = buildCentsReadout(node, { wrap: enharmonicsEnabled });
       const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
       const labelOffsetX = rawLabelPos.x - pos.x;
       const ratioX = pos.x + labelOffsetX * 0.7 - left;
@@ -9227,7 +9395,7 @@ function buildLayoutSvgString() {
       const labelY = rawLabelPos.y - top;
       const displayInfo = getDisplayNoteInfo(node);
       const centsLabel = buildCentsReadout(node, {
-        wrap: hejiEnabled,
+        wrap: enharmonicsEnabled,
         requireHejiDetail: true,
         baseTextForHeji: displayInfo.pitchClass,
       });
@@ -9511,6 +9679,9 @@ if (showCentsSignToggle) {
 if (hejiEnabledToggle) {
   hejiEnabledToggle.checked = hejiEnabled;
 }
+if (enharmonicsEnabledToggle) {
+  enharmonicsEnabledToggle.checked = enharmonicsEnabled;
+}
 if (navCirclesToggle) {
   navCirclesToggle.checked = showCircles;
 }
@@ -9661,6 +9832,14 @@ if (showCentsSignToggle) {
 if (hejiEnabledToggle) {
   hejiEnabledToggle.addEventListener("change", () => {
     hejiEnabled = hejiEnabledToggle.checked;
+    invalidateLabelCache();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (enharmonicsEnabledToggle) {
+  enharmonicsEnabledToggle.addEventListener("change", () => {
+    enharmonicsEnabled = enharmonicsEnabledToggle.checked;
     invalidateLabelCache();
     draw();
     schedulePresetUrlUpdate();

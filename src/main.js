@@ -12,8 +12,9 @@ const layoutPanel = document.getElementById("layout-panel");
 const layoutPanelToggle = document.getElementById("layout-panel-toggle");
 const layoutExitButton = document.getElementById("layout-exit");
 const layoutTitleInput = document.getElementById("layout-title");
+const layoutCreatorInput = document.getElementById("layout-creator");
 const layoutTitleSizeInput = document.getElementById("layout-title-size");
-const layoutTitleSizeReadout = document.getElementById("layout-title-size-readout");
+const layoutCreatorSizeInput = document.getElementById("layout-creator-size");
 const layoutTitleMarginInput = document.getElementById("layout-title-margin");
 const layoutTitleMarginReadout = document.getElementById("layout-title-margin-readout");
 const layoutPageSizeSelect = document.getElementById("layout-page-size");
@@ -29,6 +30,8 @@ const layoutNoteTextSizeInput = document.getElementById("layout-note-text-size")
 const layoutNoteTextReadout = document.getElementById("layout-note-text-readout");
 const layoutTriangleLabelSizeInput = document.getElementById("layout-triangle-label-size");
 const layoutTriangleLabelReadout = document.getElementById("layout-triangle-label-readout");
+const layoutCustomLabelSizeInput = document.getElementById("layout-custom-label-size");
+const layoutCustomSizeGroup = document.getElementById("layout-custom-size-group");
 const layoutNodeShapeSelect = document.getElementById("layout-node-shape");
 const layoutFontsButton = document.getElementById("layout-fonts");
 const layoutFontDialog = document.getElementById("layout-font-dialog");
@@ -36,6 +39,8 @@ const layoutTitleFontSelect = document.getElementById("layout-title-font");
 const layoutRatioFontSelect = document.getElementById("layout-ratio-font");
 const layoutNoteFontSelect = document.getElementById("layout-note-font");
 const layoutTriangleLabelFontSelect = document.getElementById("layout-triangle-label-font");
+const layoutCustomFontSelect = document.getElementById("layout-custom-font");
+const layoutCustomFontGroup = document.getElementById("layout-custom-font-group");
 const layoutUnifySizeToggle = document.getElementById("layout-unify-size");
 const layoutResetButton = document.getElementById("layout-reset");
 const exportSvgButton = document.getElementById("export-svg");
@@ -59,6 +64,8 @@ const ratioWheelLarge = document.getElementById("ratio-wheel-large");
 const ratioWheelMini = document.getElementById("ratio-wheel-mini");
 const uiHint = document.getElementById("ui-hint");
 const zModeMessage = document.getElementById("z-mode-message");
+const showHelpToggle = document.getElementById("show-help");
+const keyboardHelp = document.getElementById("keyboard-help");
 const fundamentalInput = document.getElementById("fundamental");
 const fundamentalNoteSelect = document.getElementById("fundamental-note");
 const a4Input = document.getElementById("a4");
@@ -93,14 +100,13 @@ const patternLengthModeInputs = document.querySelectorAll(
 const envelopeTimeModeInputs = document.querySelectorAll(
   'input[name="envelope-time"]'
 );
-const featureModeInputs = document.querySelectorAll('input[name="feature-mode"]');
-const spellingModeInputs = document.querySelectorAll('input[name="spelling-mode"]');
+const featureModeButtons = document.querySelectorAll("[data-feature-mode]");
+const spellingModeButtons = document.querySelectorAll("[data-spelling-mode]");
 const showHzToggle = document.getElementById("show-hz");
 const showCentsSignToggle = document.getElementById("show-cents-sign");
 const hejiEnabledToggle = document.getElementById("heji-enabled");
 const enharmonicsEnabledToggle = document.getElementById("enharmonics-enabled");
-const centsPrecisionInput = document.getElementById("cents-precision");
-const centsPrecisionInputs = document.querySelectorAll('input[name="cents-precision"]');
+const centsPrecisionButtons = document.querySelectorAll("[data-cents-precision]");
 const sequencePatternSelect = document.getElementById("sequence-pattern");
 const rhythmPatternSelect = document.getElementById("rhythm-pattern");
 const octavePatternSelect = document.getElementById("octave-pattern");
@@ -114,6 +120,8 @@ const addCustomRatioButton = document.getElementById("add-custom-ratio");
 const customRatioDialog = document.getElementById("custom-ratio-dialog");
 const triangleLabelDialog = document.getElementById("triangle-label-dialog");
 const triangleLabelInput = document.getElementById("triangle-label-input");
+const layoutCustomLabelDialog = document.getElementById("layout-custom-label-dialog");
+const layoutCustomLabelInput = document.getElementById("layout-custom-label-input");
 const customRatioNumerator = document.getElementById("custom-ratio-numerator");
 const customRatioDenominator = document.getElementById("custom-ratio-denominator");
 const attackReadout = document.getElementById("attack-readout");
@@ -121,6 +129,7 @@ const decayReadout = document.getElementById("decay-readout");
 const sustainReadout = document.getElementById("sustain-readout");
 const releaseReadout = document.getElementById("release-readout");
 const mode3dCheckbox = document.getElementById("mode-3d");
+const mode2dRadio = document.getElementById("mode-2d");
 const nav3dPanel = document.getElementById("nav-3d");
 const navAddModeToggle = document.getElementById("nav-add-mode");
 const navAxesToggle = document.getElementById("nav-axes");
@@ -129,6 +138,8 @@ const navCirclesToggle = document.getElementById("nav-circles");
 const nav3dButtons = nav3dPanel ? nav3dPanel.querySelectorAll("button[data-view], button[data-action]") : [];
 const viewPanelToggle = document.getElementById("view-panel-toggle");
 const viewsPanel = nav3dPanel ? nav3dPanel.querySelector(".nav-3d-panel") : null;
+const viewModeInputs = document.querySelectorAll('input[name="view-mode"]');
+const viewModeButtons = document.querySelectorAll("[data-view-mode]");
 
 const view = {
   zoom: 1,
@@ -165,6 +176,7 @@ let midiInput = null;
 let midiEnabled = false;
 let rHeld = false;
 let tHeld = false;
+let lHeld = false;
 let suppressClickAfterRespell = false;
 const midiActiveNotes = new Map();
 let lastLfoTapTime = 0;
@@ -496,11 +508,15 @@ let layoutNodeSize = 35;
 let layoutRatioTextSize = 21;
 let layoutNoteTextSize = 14;
 let layoutTriangleLabelTextSize = 20;
+let layoutCustomLabelTextSize = 18;
 let layoutNodeShape = "circle";
 let layoutTitle = "";
+let layoutCreator = "";
 let layoutTitleSize = 28;
+let layoutCreatorSize = 18;
 let layoutTitleMargin = 32;
 let layoutTitlePosition = null;
+let layoutCreatorPosition = null;
 let layoutUnifyNodeSize = true;
 let layoutPageSize = "letter";
 let layoutOrientation = "landscape";
@@ -511,6 +527,11 @@ let layoutTitleFont = "Lexend";
 let layoutRatioFont = "Georgia";
 let layoutNoteFont = "Georgia";
 let layoutTriangleLabelFont = "Georgia";
+let layoutCustomLabelFont = "Georgia";
+let layoutCustomLabels = [];
+let layoutCustomLabelPending = null;
+let layoutCustomLabelId = 1;
+let layoutCustomLabelEditId = null;
 let layoutAxisOffsets = {
   x: { x: 0, y: 0 },
   y: { x: 0, y: 0 },
@@ -525,6 +546,8 @@ let layoutAxisDrag = null;
 let layoutAxisEdit = null;
 let layoutAxisEditDrag = null;
 let layoutTitleDrag = null;
+let layoutCreatorDrag = null;
+let layoutCustomLabelDrag = null;
 const layoutUndoStack = [];
 const LAYOUT_UNDO_LIMIT = 50;
 let layoutWheelUndoTimer = null;
@@ -538,6 +561,10 @@ let hejiEnabled = true;
 let enharmonicsEnabled = true;
 let centsPrecision = 0;
 let showCircles = true;
+let showHelpEnabled = true;
+let uiHintDismissed = false;
+let uiHintKey = "";
+let keyboardHelpTimer = null;
 const labelCache = new Map();
 let labelCacheKey = "";
 let labelCacheDataVersion = 0;
@@ -554,9 +581,12 @@ const LAYOUT_DEFAULTS = {
   ratioTextSize: 21,
   noteTextSize: 14,
   triangleLabelTextSize: 20,
+  customLabelTextSize: 18,
   nodeShape: "circle",
   title: "",
+  creator: "",
   titleSize: 28,
+  creatorSize: 18,
   titleMargin: 32,
   unifyNodeSize: true,
   pageSize: "letter",
@@ -568,6 +598,7 @@ const LAYOUT_DEFAULTS = {
   ratioFont: "Georgia",
   noteFont: "Georgia",
   triangleLabelFont: "Georgia",
+  customLabelFont: "Georgia",
 };
 
 function updateNavModeSections() {
@@ -587,6 +618,55 @@ function updateNavPanelVisibility() {
   }
   nav3dPanel.hidden = layoutMode;
   updateNavModeSections();
+}
+
+function syncViewModeControls() {
+  const mode = layoutMode ? "layout" : is3DMode ? "3d" : "2d";
+  if (viewModeInputs.length) {
+    viewModeInputs.forEach((input) => {
+      input.checked = input.value === mode;
+    });
+  }
+  if (viewModeButtons.length) {
+    viewModeButtons.forEach((button) => {
+      const isActive = button.dataset.viewMode === mode;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+  }
+}
+
+function syncSpellingModeControls() {
+  if (!spellingModeButtons.length) {
+    return;
+  }
+  spellingModeButtons.forEach((button) => {
+    const isActive = button.dataset.spellingMode === spellingMode;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function syncFeatureModeControls() {
+  if (!featureModeButtons.length) {
+    return;
+  }
+  featureModeButtons.forEach((button) => {
+    const isActive = button.dataset.featureMode === featureMode;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function syncCentsPrecisionControls() {
+  if (!centsPrecisionButtons.length) {
+    return;
+  }
+  centsPrecisionButtons.forEach((button) => {
+    const isActive = Number(button.dataset.centsPrecision) === centsPrecision;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
 }
 
 function markIsomorphicDirty() {
@@ -2356,6 +2436,9 @@ function handleKeyDown(event) {
   if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
     return;
   }
+  if (layoutMode) {
+    return;
+  }
 
   const key = event.key.toLowerCase();
   if (layoutMode && (event.metaKey || event.ctrlKey) && key === "z") {
@@ -2416,6 +2499,9 @@ function handleKeyDown(event) {
 }
 
 function handleKeyUp(event) {
+  if (layoutMode) {
+    return;
+  }
   const mode = getKeyboardMode();
   if (mode === "off") {
     return;
@@ -2776,7 +2862,7 @@ function getNoteNamesForNode(node) {
 }
 
 function formatCents(value) {
-  const precision = Math.min(3, Math.max(0, Number(centsPrecision) || 0));
+  const precision = Math.min(2, Math.max(0, Number(centsPrecision) || 0));
   const numeric = Number.isFinite(value) ? value : 0;
   const factor = Math.pow(10, precision);
   let rounded = Math.round(numeric * factor) / factor;
@@ -3778,7 +3864,56 @@ function getLayoutTitlePosition() {
   ) {
     return { x: left + layoutTitlePosition.x, y: top + layoutTitlePosition.y };
   }
-  return { x: left + width / 2, y: getLayoutTitleY() };
+  return { x: left + width / 2, y: top + 100 };
+}
+
+function getLayoutCreatorSize() {
+  return Math.max(8, Math.round(layoutCreatorSize));
+}
+
+function getLayoutCreatorPosition() {
+  const { left, top, width } = getLayoutPageRect();
+  if (
+    layoutCreatorPosition &&
+    Number.isFinite(layoutCreatorPosition.x) &&
+    Number.isFinite(layoutCreatorPosition.y)
+  ) {
+    return { x: left + layoutCreatorPosition.x, y: top + layoutCreatorPosition.y };
+  }
+  const creatorSize = getLayoutCreatorSize();
+  const textWidth = layoutCreator
+    ? measureTextWidth(layoutCreator, creatorSize, layoutTitleFont)
+    : 0;
+  const x = left + width - 100 - textWidth / 2;
+  return { x, y: top + 150 };
+}
+
+function getLayoutCustomLabelPosition(entry) {
+  const { left, top } = getLayoutPageRect();
+  if (!entry || !entry.position) {
+    return { x: left, y: top };
+  }
+  return { x: left + entry.position.x, y: top + entry.position.y };
+}
+
+function drawLayoutCustomLabels() {
+  if (!layoutCustomLabels.length) {
+    return;
+  }
+  const size = Math.max(8, Math.round(layoutCustomLabelTextSize));
+  ctx.save();
+  ctx.fillStyle = themeColors.textSecondary;
+  ctx.font = `${size}px ${layoutCustomLabelFont}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  layoutCustomLabels.forEach((entry) => {
+    if (!entry.text || !entry.position) {
+      return;
+    }
+    const pos = getLayoutCustomLabelPosition(entry);
+    ctx.fillText(entry.text, pos.x, pos.y);
+  });
+  ctx.restore();
 }
 
 function syncLayoutFontVars() {
@@ -3786,6 +3921,7 @@ function syncLayoutFontVars() {
   document.documentElement.style.setProperty("--font-ratio", layoutRatioFont);
   document.documentElement.style.setProperty("--font-note", layoutNoteFont);
   document.documentElement.style.setProperty("--font-triangle-label", layoutTriangleLabelFont);
+  document.documentElement.style.setProperty("--font-custom-label", layoutCustomLabelFont);
 }
 
 const AXIS_EDGE_COLORS = {
@@ -4277,6 +4413,20 @@ function openTriangleLabelDialog(value) {
   });
 }
 
+function openLayoutCustomLabelDialog(value = "") {
+  if (!layoutCustomLabelDialog || !layoutCustomLabelInput) {
+    return;
+  }
+  layoutCustomLabelInput.value = value;
+  if (typeof layoutCustomLabelDialog.showModal === "function") {
+    layoutCustomLabelDialog.showModal();
+  }
+  requestAnimationFrame(() => {
+    layoutCustomLabelInput.focus();
+    layoutCustomLabelInput.select();
+  });
+}
+
 function triangleKey(entry) {
   return `${entry.plane}:${entry.x},${entry.y},${entry.z}:${entry.diag}`;
 }
@@ -4299,6 +4449,44 @@ function normalizeTriangleEntry(entry) {
     tri: entry.tri,
     label: entry.label ? String(entry.label) : "",
   };
+}
+
+function remapTrianglesForGridCenter(oldCenterZ, newCenterZ) {
+  if (oldCenterZ === newCenterZ) {
+    return;
+  }
+  const shift = newCenterZ - oldCenterZ;
+  const maxZ = gridDepth - 1;
+  if (triangleDiagonals.size) {
+    const nextDiagonals = new Map();
+    triangleDiagonals.forEach((entry) => {
+      const z = entry.z + shift;
+      if (!Number.isFinite(z) || z < 0 || z > maxZ) {
+        return;
+      }
+      const next = { ...entry, z };
+      nextDiagonals.set(triangleKey(next), next);
+    });
+    triangleDiagonals.clear();
+    nextDiagonals.forEach((value, key) => {
+      triangleDiagonals.set(key, value);
+    });
+  }
+  if (triangleLabels.size) {
+    const nextLabels = new Map();
+    triangleLabels.forEach((entry) => {
+      const z = entry.z + shift;
+      if (!Number.isFinite(z) || z < 0 || z > maxZ) {
+        return;
+      }
+      const next = { ...entry, z };
+      nextLabels.set(triangleLabelKey(next), next);
+    });
+    triangleLabels.clear();
+    nextLabels.forEach((value, key) => {
+      triangleLabels.set(key, value);
+    });
+  }
 }
 
 function getTriangleDiagonalNodes(entry, gridMap) {
@@ -5067,10 +5255,21 @@ function drawLayoutPage({ drawAxes = true } = {}) {
     const titlePos = getLayoutTitlePosition();
     ctx.fillText(layoutTitle, titlePos.x, titlePos.y);
   }
+  if (layoutCreator) {
+    const creatorSize = getLayoutCreatorSize();
+    ctx.fillStyle = themeColors.textSecondary;
+    ctx.font = `${creatorSize}px ${layoutTitleFont}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    const creatorPos = getLayoutCreatorPosition();
+    ctx.fillText(layoutCreator, creatorPos.x, creatorPos.y);
+  }
 
   if (drawAxes) {
     drawLayoutAxes();
   }
+
+  drawLayoutCustomLabels();
 
   ctx.restore();
 }
@@ -5221,11 +5420,12 @@ function draw() {
       : node.isCustom
       ? "square"
       : "circle";
+    const showNodeShape = !layoutMode || layoutShape !== "none";
     const isSquare = layoutShape === "square";
 
     ctx.save();
     ctx.globalAlpha = alpha;
-    if (showCircles) {
+    if (showNodeShape && showCircles) {
       ctx.beginPath();
       ctx.strokeStyle = themeColors.nodeStroke;
       ctx.lineWidth = 2;
@@ -5974,6 +6174,17 @@ function onPointerDown(event) {
   }
 
   if (layoutMode) {
+    if (lHeld) {
+      if (layoutCustomLabelDialog && !layoutCustomLabelDialog.open) {
+        const { left, top } = getLayoutPageRect();
+        layoutCustomLabelPending = {
+          x: screenPoint.x - left,
+          y: screenPoint.y - top,
+        };
+        openLayoutCustomLabelDialog();
+      }
+      return;
+    }
     if (layoutAxisEdit) {
       const handleHit = hitTestAxisLegendHandle(screenPoint);
       if (handleHit) {
@@ -5981,6 +6192,23 @@ function onPointerDown(event) {
         layoutAxisEditDrag = { axis: handleHit.axis };
         canvas.setPointerCapture(event.pointerId);
       }
+      return;
+    }
+    const customLabelHit = hitTestLayoutCustomLabel(screenPoint);
+    if (customLabelHit) {
+      event.preventDefault();
+      pushLayoutUndoState();
+      const { left, top } = getLayoutPageRect();
+      layoutCustomLabelDrag = {
+        id: customLabelHit.entry.id,
+        offsetX: customLabelHit.pos.x - screenPoint.x,
+        offsetY: customLabelHit.pos.y - screenPoint.y,
+        startPos: { x: customLabelHit.pos.x - left, y: customLabelHit.pos.y - top },
+        lockAxis: null,
+        lockOriginX: event.offsetX,
+        lockOriginY: event.offsetY,
+      };
+      canvas.setPointerCapture(event.pointerId);
       return;
     }
     const titleHit = hitTestLayoutTitle(screenPoint);
@@ -5992,6 +6220,22 @@ function onPointerDown(event) {
         offsetX: titleHit.pos.x - screenPoint.x,
         offsetY: titleHit.pos.y - screenPoint.y,
         startPos: { x: titleHit.pos.x - left, y: titleHit.pos.y - top },
+        lockAxis: null,
+        lockOriginX: event.offsetX,
+        lockOriginY: event.offsetY,
+      };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+    const creatorHit = hitTestLayoutCreator(screenPoint);
+    if (creatorHit) {
+      event.preventDefault();
+      pushLayoutUndoState();
+      const { left, top } = getLayoutPageRect();
+      layoutCreatorDrag = {
+        offsetX: creatorHit.pos.x - screenPoint.x,
+        offsetY: creatorHit.pos.y - screenPoint.y,
+        startPos: { x: creatorHit.pos.x - left, y: creatorHit.pos.y - top },
         lockAxis: null,
         lockOriginX: event.offsetX,
         lockOriginY: event.offsetY,
@@ -6067,9 +6311,12 @@ function onPointerDown(event) {
     customDrag = null;
     customDragJustPlaced = true;
     if (uiHint) {
-      uiHint.hidden = false;
-      uiHint.textContent =
-        "Custom node: Command-drag to move. Option-click to deactivate. Option-click again to delete. Click to activate.\n(click to hide)";
+      if (showHelpEnabled && !uiHintDismissed) {
+        uiHint.hidden = false;
+        uiHintKey = "custom-node";
+        uiHint.textContent =
+          "Custom node: Command-drag to move. Option-click to deactivate. Option-click again to delete. Click to activate.\n(click to hide)";
+      }
     }
     return;
   }
@@ -6132,6 +6379,12 @@ function onCanvasDoubleClick(event) {
     return;
   }
   const screenPoint = { x: event.offsetX, y: event.offsetY };
+  const customLabelHit = hitTestLayoutCustomLabel(screenPoint);
+  if (customLabelHit) {
+    layoutCustomLabelEditId = customLabelHit.entry.id;
+    openLayoutCustomLabelDialog(customLabelHit.entry.text || "");
+    return;
+  }
   const labelHit = hitTestNoteLabel(screenPoint);
   if (labelHit) {
     layoutLabelHitboxVisible = true;
@@ -6164,7 +6417,7 @@ function onCanvasDoubleClick(event) {
   if (!hit) {
     return;
   }
-  const shapes = ["circle", "square", "diamond"];
+  const shapes = ["circle", "square", "diamond", "none"];
   const current = getLayoutNodeShape(hit);
   const index = shapes.indexOf(current);
   const next = shapes[(index + 1) % shapes.length];
@@ -6206,10 +6459,47 @@ function onPointerMove(event) {
     if (!event.shiftKey) {
       layoutTitleDrag.startPos = { ...nextPos };
     }
-    if (event.shiftKey && lockAxis === "x") {
-      layoutTitlePosition = { x: width / 2, y: nextPos.y };
-    } else {
-      layoutTitlePosition = nextPos;
+    layoutTitlePosition = nextPos;
+    scheduleDraw();
+    return;
+  }
+  if (layoutMode && layoutCreatorDrag) {
+    const { left, top, width } = getLayoutPageRect();
+    const lockAxis = updateDragLock(layoutCreatorDrag, event);
+    const nextPos = {
+      x: event.offsetX + layoutCreatorDrag.offsetX - left,
+      y: event.offsetY + layoutCreatorDrag.offsetY - top,
+    };
+    if (lockAxis === "x") {
+      nextPos.y = layoutCreatorDrag.startPos.y;
+    } else if (lockAxis === "y") {
+      nextPos.x = layoutCreatorDrag.startPos.x;
+    }
+    if (!event.shiftKey) {
+      layoutCreatorDrag.startPos = { ...nextPos };
+    }
+    layoutCreatorPosition = nextPos;
+    scheduleDraw();
+    return;
+  }
+  if (layoutMode && layoutCustomLabelDrag) {
+    const { left, top } = getLayoutPageRect();
+    const lockAxis = updateDragLock(layoutCustomLabelDrag, event);
+    const nextPos = {
+      x: event.offsetX + layoutCustomLabelDrag.offsetX - left,
+      y: event.offsetY + layoutCustomLabelDrag.offsetY - top,
+    };
+    if (lockAxis === "x") {
+      nextPos.y = layoutCustomLabelDrag.startPos.y;
+    } else if (lockAxis === "y") {
+      nextPos.x = layoutCustomLabelDrag.startPos.x;
+    }
+    if (!event.shiftKey) {
+      layoutCustomLabelDrag.startPos = { ...nextPos };
+    }
+    const entry = layoutCustomLabels.find((label) => label.id === layoutCustomLabelDrag.id);
+    if (entry) {
+      entry.position = nextPos;
     }
     scheduleDraw();
     return;
@@ -6373,6 +6663,16 @@ function onPointerUp(event) {
   }
   if (layoutTitleDrag) {
     layoutTitleDrag = null;
+    schedulePresetUrlUpdate();
+    return;
+  }
+  if (layoutCreatorDrag) {
+    layoutCreatorDrag = null;
+    schedulePresetUrlUpdate();
+    return;
+  }
+  if (layoutCustomLabelDrag) {
+    layoutCustomLabelDrag = null;
     schedulePresetUrlUpdate();
     return;
   }
@@ -6554,6 +6854,8 @@ function onPointerLeave() {
   layoutAxisDrag = null;
   layoutAxisEditDrag = null;
   layoutTitleDrag = null;
+  layoutCreatorDrag = null;
+  layoutCustomLabelDrag = null;
   triangleHover = null;
   view.rotating = false;
   if (view.dragging) {
@@ -6608,6 +6910,9 @@ function hitTestScreen(screenPoint) {
   let bestDepth = Number.NEGATIVE_INFINITY;
 
   nodes.forEach((node) => {
+    if (layoutMode && !node.isCustom && !node.isCenter && !node.active) {
+      return;
+    }
     if (
       !node.isCustom &&
       !node.active &&
@@ -6692,6 +6997,66 @@ function hitTestLayoutTitle(screenPoint) {
   ) {
     return { pos };
   }
+  return null;
+}
+
+function hitTestLayoutCreator(screenPoint) {
+  if (!layoutMode || !layoutCreator) {
+    return null;
+  }
+  const creatorSize = getLayoutCreatorSize();
+  ctx.save();
+  ctx.font = `${creatorSize}px ${layoutTitleFont}`;
+  const width = ctx.measureText(layoutCreator).width;
+  ctx.restore();
+  const pos = getLayoutCreatorPosition();
+  const height = creatorSize;
+  const left = pos.x - width / 2;
+  const right = pos.x + width / 2;
+  const top = pos.y;
+  const bottom = pos.y + height;
+  if (
+    screenPoint.x >= left &&
+    screenPoint.x <= right &&
+    screenPoint.y >= top &&
+    screenPoint.y <= bottom
+  ) {
+    return { pos };
+  }
+  return null;
+}
+
+function hitTestLayoutCustomLabel(screenPoint) {
+  if (!layoutMode || !layoutCustomLabels.length) {
+    return null;
+  }
+  const size = Math.max(8, Math.round(layoutCustomLabelTextSize));
+  ctx.save();
+  ctx.font = `${size}px ${layoutCustomLabelFont}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  for (let i = layoutCustomLabels.length - 1; i >= 0; i -= 1) {
+    const entry = layoutCustomLabels[i];
+    if (!entry.text || !entry.position) {
+      continue;
+    }
+    const width = ctx.measureText(entry.text).width;
+    const pos = getLayoutCustomLabelPosition(entry);
+    const left = pos.x - width / 2;
+    const right = pos.x + width / 2;
+    const top = pos.y;
+    const bottom = pos.y + size;
+    if (
+      screenPoint.x >= left &&
+      screenPoint.x <= right &&
+      screenPoint.y >= top &&
+      screenPoint.y <= bottom
+    ) {
+      ctx.restore();
+      return { entry, index: i, pos };
+    }
+  }
+  ctx.restore();
   return null;
 }
 
@@ -7126,6 +7491,8 @@ function updateRatioWheels() {
     layoutDrag ||
     layoutLabelDrag ||
     layoutTitleDrag ||
+    layoutCreatorDrag ||
+    layoutCustomLabelDrag ||
     layoutAxisDrag ||
     layoutAxisEditDrag ||
     customDrag
@@ -7140,10 +7507,39 @@ function updateRatioWheels() {
   }
 }
 
+function getUiHintKey() {
+  if (layoutMode) {
+    if (layoutAxisEdit) {
+      return "layout-axis-edit";
+    }
+    if (tHeld) {
+      return "layout-triangle";
+    }
+    return "layout";
+  }
+  if (spellingHintActive) {
+    return spellingMode === "true" ? "spelling-true" : "spelling-simple";
+  }
+  if (!is3DMode) {
+    return "mode-2d";
+  }
+  return "mode-3d";
+}
+
 function updateUiHint() {
   if (!uiHint) {
     return;
   }
+  const nextKey = getUiHintKey();
+  if (nextKey !== uiHintKey) {
+    uiHintKey = nextKey;
+    uiHintDismissed = false;
+  }
+  if (!showHelpEnabled || uiHintDismissed || (zModeActive && zModeAnchor)) {
+    uiHint.hidden = true;
+    return;
+  }
+  uiHint.hidden = false;
   if (layoutMode) {
     if (layoutAxisEdit) {
       uiHint.textContent = "Editing axis legend. Press ESC to exit.\n(click to hide)";
@@ -7164,14 +7560,10 @@ function updateUiHint() {
   }
   if (layoutMode) {
     uiHint.textContent =
-      "Layout mode: drag nodes to reposition. Drag note labels to move them. Double-click a node to change shape. Drag empty space to reposition. Scroll to scale. Hold R and click to respell.\n(click to hide)";
+      "Layout mode: Drag to adjust positions. \nHold Shift to lock moves to 1 direction.\nHold L and click to add custom text.\nDouble-click a node to change its shape.\nDouble-click an axis legend to adjust angle.\n(click to hide)";
     return;
   }
-  if (keyboardModeSelect && keyboardModeSelect.value === "piano") {
-    uiHint.textContent =
-      "Two octave piano layout, starting on Z (as C) and Y (C an octave higher). Hold R and click to respell.\n(click to hide)";
-    return;
-  }
+
   if (!is3DMode) {
     uiHint.textContent =
       "Click to play. Shift double-click & hold to start LFO.\n Shift-click to add. Option-click to remove. Hold R and click to respell.\nDrag to pan. Scroll to zoom.\nHold T to label triangles.\n(click to hide)";
@@ -7183,6 +7575,21 @@ function updateUiHint() {
 
 function resetUiHintToDefault() {
   spellingHintActive = false;
+}
+
+function showKeyboardModeHelp(message) {
+  if (!keyboardHelp) {
+    return;
+  }
+  keyboardHelp.textContent = message;
+  keyboardHelp.classList.add("is-visible");
+  if (keyboardHelpTimer) {
+    clearTimeout(keyboardHelpTimer);
+  }
+  keyboardHelpTimer = setTimeout(() => {
+    keyboardHelp.classList.remove("is-visible");
+    keyboardHelpTimer = null;
+  }, 5000);
 }
 
 function updateZModeMessage() {
@@ -7198,7 +7605,11 @@ function updateZModeMessage() {
     zModeMessage.hidden = true;
     zModeMessage.textContent = "";
     if (uiHint) {
-      uiHint.hidden = false;
+      if (showHelpEnabled) {
+        updateUiHint();
+      } else {
+        uiHint.hidden = true;
+      }
     }
     return;
   }
@@ -7271,11 +7682,44 @@ function updateLayoutTitleMarginReadout() {
   layoutTitleMarginReadout.textContent = `${Math.round(layoutTitleMargin)} px`;
 }
 
-function updateLayoutTitleSizeReadout() {
-  if (!layoutTitleSizeReadout) {
+function setLayoutTitleSize(next) {
+  if (!Number.isFinite(next)) {
     return;
   }
-  layoutTitleSizeReadout.textContent = `${Math.round(layoutTitleSize)} px`;
+  layoutTitleSize = Math.min(96, Math.max(10, Math.round(next)));
+  if (layoutTitleSizeInput) {
+    layoutTitleSizeInput.value = String(layoutTitleSize);
+  }
+}
+
+function setLayoutCreatorSize(next) {
+  if (!Number.isFinite(next)) {
+    return;
+  }
+  layoutCreatorSize = Math.min(72, Math.max(8, Math.round(next)));
+  if (layoutCreatorSizeInput) {
+    layoutCreatorSizeInput.value = String(layoutCreatorSize);
+  }
+}
+
+function setLayoutCustomLabelSize(next) {
+  if (!Number.isFinite(next)) {
+    return;
+  }
+  layoutCustomLabelTextSize = Math.min(36, Math.max(8, Math.round(next)));
+  if (layoutCustomLabelSizeInput) {
+    layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
+  }
+}
+
+function updateLayoutCustomLabelControls() {
+  const hasCustom = layoutCustomLabels.length > 0;
+  if (layoutCustomSizeGroup) {
+    layoutCustomSizeGroup.hidden = !hasCustom;
+  }
+  if (layoutCustomFontGroup) {
+    layoutCustomFontGroup.hidden = !hasCustom;
+  }
 }
 
 function syncLayoutScaleInput() {
@@ -7311,18 +7755,27 @@ function captureLayoutUndoState() {
     },
     layoutAxisAngles: { ...layoutAxisAngles },
     layoutTitlePosition: layoutTitlePosition ? { ...layoutTitlePosition } : null,
+    layoutCreatorPosition: layoutCreatorPosition ? { ...layoutCreatorPosition } : null,
+    layoutCustomLabels: layoutCustomLabels.map((entry) => ({
+      ...entry,
+      position: entry.position ? { ...entry.position } : null,
+    })),
     layoutNodeSize,
     layoutRatioTextSize,
     layoutNoteTextSize,
     layoutTriangleLabelTextSize,
+    layoutCustomLabelTextSize,
     layoutNodeShape,
     layoutTitle,
+    layoutCreator,
     layoutTitleSize,
+    layoutCreatorSize,
     layoutTitleMargin,
     layoutTitleFont,
     layoutRatioFont,
     layoutNoteFont,
     layoutTriangleLabelFont,
+    layoutCustomLabelFont,
     layoutUnifyNodeSize,
     layoutPageSize,
     layoutOrientation,
@@ -7368,18 +7821,34 @@ function applyLayoutUndoState(state) {
   };
   layoutAxisAngles = { ...state.layoutAxisAngles };
   layoutTitlePosition = state.layoutTitlePosition ? { ...state.layoutTitlePosition } : null;
+  layoutCreatorPosition = state.layoutCreatorPosition ? { ...state.layoutCreatorPosition } : null;
+  layoutCustomLabels = Array.isArray(state.layoutCustomLabels)
+    ? state.layoutCustomLabels.map((entry) => ({
+        ...entry,
+        position: entry.position ? { ...entry.position } : null,
+      }))
+    : [];
+  const maxCustomId = layoutCustomLabels.reduce(
+    (max, entry) => (Number.isFinite(entry.id) ? Math.max(max, entry.id) : max),
+    0
+  );
+  layoutCustomLabelId = maxCustomId + 1;
   layoutNodeSize = state.layoutNodeSize;
   layoutRatioTextSize = state.layoutRatioTextSize;
   layoutNoteTextSize = state.layoutNoteTextSize;
   layoutTriangleLabelTextSize = state.layoutTriangleLabelTextSize;
+  layoutCustomLabelTextSize = state.layoutCustomLabelTextSize ?? layoutCustomLabelTextSize;
   layoutNodeShape = state.layoutNodeShape;
   layoutTitle = state.layoutTitle;
+  layoutCreator = state.layoutCreator;
   layoutTitleSize = state.layoutTitleSize;
+  layoutCreatorSize = state.layoutCreatorSize ?? layoutCreatorSize;
   layoutTitleMargin = state.layoutTitleMargin;
   layoutTitleFont = state.layoutTitleFont;
   layoutRatioFont = state.layoutRatioFont;
   layoutNoteFont = state.layoutNoteFont;
   layoutTriangleLabelFont = state.layoutTriangleLabelFont;
+  layoutCustomLabelFont = state.layoutCustomLabelFont ?? layoutCustomLabelFont;
   layoutUnifyNodeSize = state.layoutUnifyNodeSize;
   layoutPageSize = state.layoutPageSize;
   layoutOrientation = state.layoutOrientation;
@@ -7396,8 +7865,14 @@ function applyLayoutUndoState(state) {
   if (layoutTitleInput) {
     layoutTitleInput.value = layoutTitle;
   }
+  if (layoutCreatorInput) {
+    layoutCreatorInput.value = layoutCreator;
+  }
   if (layoutTitleSizeInput) {
     layoutTitleSizeInput.value = String(layoutTitleSize);
+  }
+  if (layoutCreatorSizeInput) {
+    layoutCreatorSizeInput.value = String(layoutCreatorSize);
   }
   if (layoutTitleMarginInput) {
     layoutTitleMarginInput.value = String(layoutTitleMargin);
@@ -7413,6 +7888,9 @@ function applyLayoutUndoState(state) {
   }
   if (layoutTriangleLabelSizeInput) {
     layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
+  }
+  if (layoutCustomLabelSizeInput) {
+    layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
   }
   if (layoutNodeShapeSelect) {
     layoutNodeShapeSelect.value = layoutNodeShape;
@@ -7435,16 +7913,19 @@ function applyLayoutUndoState(state) {
   if (layoutTriangleLabelFontSelect) {
     layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
   }
+  if (layoutCustomFontSelect) {
+    layoutCustomFontSelect.value = layoutCustomLabelFont;
+  }
   if (layoutUnifySizeToggle) {
     layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
   }
+  updateLayoutCustomLabelControls();
   syncLayoutFontVars();
   syncLayoutScaleInput();
   updateLayoutNodeSizeReadout();
   updateLayoutRatioTextReadout();
   updateLayoutNoteTextReadout();
   updateLayoutTriangleLabelReadout();
-  updateLayoutTitleSizeReadout();
   updateLayoutTitleMarginReadout();
   invalidateLabelCache({ clearTextWidths: true });
   draw();
@@ -7464,7 +7945,10 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
   layoutPositions.clear();
   layoutLabelOffsets.clear();
   layoutNodeShapes.clear();
+  layoutCustomLabels = [];
+  layoutCustomLabelId = 1;
   layoutTitlePosition = null;
+  layoutCreatorPosition = null;
   layoutAxisOffsets = {
     x: { x: 0, y: 0 },
     y: { x: 0, y: 0 },
@@ -7482,9 +7966,12 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     layoutRatioTextSize = LAYOUT_DEFAULTS.ratioTextSize;
     layoutNoteTextSize = LAYOUT_DEFAULTS.noteTextSize;
     layoutTriangleLabelTextSize = LAYOUT_DEFAULTS.triangleLabelTextSize;
+    layoutCustomLabelTextSize = LAYOUT_DEFAULTS.customLabelTextSize;
     layoutNodeShape = LAYOUT_DEFAULTS.nodeShape;
     layoutTitle = LAYOUT_DEFAULTS.title;
+    layoutCreator = LAYOUT_DEFAULTS.creator;
     layoutTitleSize = LAYOUT_DEFAULTS.titleSize;
+    layoutCreatorSize = LAYOUT_DEFAULTS.creatorSize;
     layoutTitleMargin = LAYOUT_DEFAULTS.titleMargin;
     layoutUnifyNodeSize = LAYOUT_DEFAULTS.unifyNodeSize;
     layoutPageSize = LAYOUT_DEFAULTS.pageSize;
@@ -7495,11 +7982,18 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     layoutRatioFont = LAYOUT_DEFAULTS.ratioFont;
     layoutNoteFont = LAYOUT_DEFAULTS.noteFont;
     layoutTriangleLabelFont = LAYOUT_DEFAULTS.triangleLabelFont;
+    layoutCustomLabelFont = LAYOUT_DEFAULTS.customLabelFont;
     if (layoutTitleInput) {
       layoutTitleInput.value = layoutTitle;
     }
+    if (layoutCreatorInput) {
+      layoutCreatorInput.value = layoutCreator;
+    }
     if (layoutTitleSizeInput) {
       layoutTitleSizeInput.value = String(layoutTitleSize);
+    }
+    if (layoutCreatorSizeInput) {
+      layoutCreatorSizeInput.value = String(layoutCreatorSize);
     }
     if (layoutTitleMarginInput) {
       layoutTitleMarginInput.value = String(layoutTitleMargin);
@@ -7525,6 +8019,9 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     if (layoutTriangleLabelSizeInput) {
       layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
     }
+    if (layoutCustomLabelSizeInput) {
+      layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
+    }
     if (layoutTitleFontSelect) {
       layoutTitleFontSelect.value = layoutTitleFont;
     }
@@ -7537,6 +8034,9 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     if (layoutTriangleLabelFontSelect) {
       layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
     }
+    if (layoutCustomFontSelect) {
+      layoutCustomFontSelect.value = layoutCustomLabelFont;
+    }
     if (layoutNodeShapeSelect) {
       layoutNodeShapeSelect.value = layoutNodeShape;
     }
@@ -7547,9 +8047,9 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     updateLayoutRatioTextReadout();
     updateLayoutNoteTextReadout();
     updateLayoutTriangleLabelReadout();
-    updateLayoutTitleSizeReadout();
     updateLayoutTitleMarginReadout();
     syncLayoutFontVars();
+    updateLayoutCustomLabelControls();
   }
   if (resetView) {
     view.zoom = LAYOUT_DEFAULTS.zoom;
@@ -7564,6 +8064,8 @@ function setLayoutMode(enabled) {
   if (layoutMode === enabled) {
     return;
   }
+  uiHintKey = "";
+  uiHintDismissed = false;
   resetUiHintToDefault();
   if (enabled) {
     layoutPrevState = {
@@ -7581,6 +8083,7 @@ function setLayoutMode(enabled) {
   if (layoutModeToggle) {
     layoutModeToggle.checked = enabled;
   }
+  syncViewModeControls();
   if (layoutPanel) {
     layoutPanel.hidden = !enabled;
   }
@@ -7616,8 +8119,8 @@ function setLayoutMode(enabled) {
     updateLayoutRatioTextReadout();
     updateLayoutNoteTextReadout();
     updateLayoutTriangleLabelReadout();
-    updateLayoutTitleSizeReadout();
     updateLayoutTitleMarginReadout();
+    updateLayoutCustomLabelControls();
     draw();
   } else if (layoutPrevState) {
     layoutAxisEdit = null;
@@ -7650,6 +8153,8 @@ function setLayoutMode(enabled) {
 }
 
 function set3DMode(enabled) {
+  uiHintKey = "";
+  uiHintDismissed = false;
   resetUiHintToDefault();
   const activeKeys = captureActiveNodeKeys();
   const had3DNodes = gridDepth > 1;
@@ -7657,6 +8162,7 @@ function set3DMode(enabled) {
   isFlattened2D = !enabled && had3DNodes;
   markIsomorphicDirty();
   updateNavPanelVisibility();
+  syncViewModeControls();
   if (ratioZSelect) {
     ratioZSelect.hidden = false;
   }
@@ -7664,7 +8170,7 @@ function set3DMode(enabled) {
     zModeActive = false;
     zModeAnchor = null;
   }
-  if (enabled && uiHint) {
+  if (enabled && uiHint && showHelpEnabled && !uiHintDismissed) {
     uiHint.hidden = false;
   }
   updateAddModeFromShift();
@@ -8008,6 +8514,8 @@ function initLayoutFonts() {
   layoutNoteFont = styles.getPropertyValue("--font-note").trim() || "Georgia";
   layoutTriangleLabelFont =
     styles.getPropertyValue("--font-triangle-label").trim() || "Georgia";
+  layoutCustomLabelFont =
+    styles.getPropertyValue("--font-custom-label").trim() || "Georgia";
   if (layoutTitleFontSelect) {
     layoutTitleFontSelect.value = layoutTitleFont;
   }
@@ -8019,6 +8527,9 @@ function initLayoutFonts() {
   }
   if (layoutTriangleLabelFontSelect) {
     layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
+  }
+  if (layoutCustomFontSelect) {
+    layoutCustomFontSelect.value = layoutCustomLabelFont;
   }
   syncLayoutFontVars();
 }
@@ -8370,6 +8881,7 @@ function getPresetState() {
       x: entry.x,
       y: entry.y,
       z: entry.z,
+      expZ: gridCenterZ - entry.z,
       diag: entry.diag,
       tri: entry.tri,
     })),
@@ -8378,6 +8890,7 @@ function getPresetState() {
       x: entry.x,
       y: entry.y,
       z: entry.z,
+      expZ: gridCenterZ - entry.z,
       tri: entry.tri,
       label: entry.label || "",
     })),
@@ -8387,13 +8900,22 @@ function getPresetState() {
     layout: {
       mode: layoutMode,
       title: layoutTitle,
+      creator: layoutCreator,
       titleSize: layoutTitleSize,
+      creatorSize: layoutCreatorSize,
       nodeSize: layoutNodeSize,
       ratioTextSize: layoutRatioTextSize,
       noteTextSize: layoutNoteTextSize,
       triangleLabelTextSize: layoutTriangleLabelTextSize,
+      customLabelTextSize: layoutCustomLabelTextSize,
       titleMargin: layoutTitleMargin,
       titlePosition: layoutTitlePosition,
+      creatorPosition: layoutCreatorPosition,
+      customLabels: layoutCustomLabels.map((entry) => ({
+        id: entry.id,
+        text: entry.text,
+        position: entry.position ? { ...entry.position } : null,
+      })),
       labelOffsets: serializeLayoutLabelOffsets(),
       axisOffsets: layoutAxisOffsets,
       axisAngles: layoutAxisAngles,
@@ -8403,6 +8925,7 @@ function getPresetState() {
       ratioFont: layoutRatioFont,
       noteFont: layoutNoteFont,
       triangleLabelFont: layoutTriangleLabelFont,
+      customLabelFont: layoutCustomLabelFont,
       nodeShape: layoutNodeShape,
       unifyNodeSize: layoutUnifyNodeSize,
       pageSize: layoutPageSize,
@@ -8497,12 +9020,15 @@ function applyPresetState(state) {
     ? state.active.some((entry) => Array.isArray(entry) && Number(entry[2]) !== 0)
     : false;
   const wants3D = Boolean(state.mode3d) || activeHasZ;
+  const targetDepth = wants3D ? GRID_DEPTH : 1;
+  const targetCenterZ = Math.floor(targetDepth / 2);
   if (mode3dCheckbox) {
     mode3dCheckbox.checked = wants3D;
   }
   is3DMode = wants3D;
   isFlattened2D = false;
   updateNavPanelVisibility();
+  syncViewModeControls();
   if (ratioZSelect) {
     ratioZSelect.hidden = false;
   }
@@ -8620,12 +9146,23 @@ function applyPresetState(state) {
         layoutTitleInput.value = layoutTitle;
       }
     }
+    if (typeof layoutState.creator === "string") {
+      layoutCreator = layoutState.creator;
+      if (layoutCreatorInput) {
+        layoutCreatorInput.value = layoutCreator;
+      }
+    }
     if (Number.isFinite(layoutState.titleSize)) {
       layoutTitleSize = layoutState.titleSize;
       if (layoutTitleSizeInput) {
         layoutTitleSizeInput.value = String(layoutTitleSize);
       }
-      updateLayoutTitleSizeReadout();
+    }
+    if (Number.isFinite(layoutState.creatorSize)) {
+      layoutCreatorSize = layoutState.creatorSize;
+      if (layoutCreatorSizeInput) {
+        layoutCreatorSizeInput.value = String(layoutCreatorSize);
+      }
     }
     if (
       Number.isFinite(layoutState.textScale) &&
@@ -8685,6 +9222,15 @@ function applyPresetState(state) {
       }
       updateLayoutTriangleLabelReadout();
     }
+    if (Number.isFinite(layoutState.customLabelTextSize)) {
+      layoutCustomLabelTextSize = Math.min(
+        36,
+        Math.max(8, Math.round(layoutState.customLabelTextSize))
+      );
+      if (layoutCustomLabelSizeInput) {
+        layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
+      }
+    }
     if (Number.isFinite(layoutState.titleMargin)) {
       layoutTitleMargin = layoutState.titleMargin;
       if (layoutTitleMarginInput) {
@@ -8703,6 +9249,18 @@ function applyPresetState(state) {
       };
     } else {
       layoutTitlePosition = null;
+    }
+    if (
+      layoutState.creatorPosition &&
+      Number.isFinite(layoutState.creatorPosition.x) &&
+      Number.isFinite(layoutState.creatorPosition.y)
+    ) {
+      layoutCreatorPosition = {
+        x: layoutState.creatorPosition.x,
+        y: layoutState.creatorPosition.y,
+      };
+    } else {
+      layoutCreatorPosition = null;
     }
     if (layoutState.axisOffsets && typeof layoutState.axisOffsets === "object") {
       ["x", "y", "z"].forEach((axis) => {
@@ -8742,6 +9300,32 @@ function applyPresetState(state) {
         layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
       }
     }
+    if (typeof layoutState.customLabelFont === "string") {
+      layoutCustomLabelFont = layoutState.customLabelFont;
+      if (layoutCustomFontSelect) {
+        layoutCustomFontSelect.value = layoutCustomLabelFont;
+      }
+    }
+    if (Array.isArray(layoutState.customLabels)) {
+      layoutCustomLabels = layoutState.customLabels
+        .map((entry) => ({
+          id: Number(entry.id),
+          text: entry.text ? String(entry.text) : "",
+          position: entry.position && Number.isFinite(entry.position.x) && Number.isFinite(entry.position.y)
+            ? { x: entry.position.x, y: entry.position.y }
+            : null,
+        }))
+        .filter((entry) => entry.text && entry.position);
+      const maxId = layoutCustomLabels.reduce(
+        (max, entry) => (Number.isFinite(entry.id) ? Math.max(max, entry.id) : max),
+        0
+      );
+      layoutCustomLabelId = maxId + 1;
+    } else {
+      layoutCustomLabels = [];
+      layoutCustomLabelId = 1;
+    }
+    updateLayoutCustomLabelControls();
     syncLayoutFontVars();
     if (typeof layoutState.nodeShape === "string") {
       layoutNodeShape = layoutState.nodeShape;
@@ -8805,19 +9389,11 @@ function applyPresetState(state) {
 
   if (typeof state.featureMode === "string") {
     featureMode = state.featureMode === "note" ? "note" : "ratio";
-    if (featureModeInputs.length) {
-      featureModeInputs.forEach((input) => {
-        input.checked = input.value === featureMode;
-      });
-    }
+    syncFeatureModeControls();
   }
   if (typeof state.spellingMode === "string") {
     spellingMode = state.spellingMode === "true" ? "true" : "simple";
-    if (spellingModeInputs.length) {
-      spellingModeInputs.forEach((input) => {
-        input.checked = input.value === spellingMode;
-      });
-    }
+    syncSpellingModeControls();
   }
   if (typeof state.showHz === "boolean") {
     showHz = state.showHz;
@@ -8844,14 +9420,8 @@ function applyPresetState(state) {
     }
   }
   if (Number.isFinite(state.centsPrecision)) {
-    centsPrecision = Math.min(3, Math.max(0, Math.round(state.centsPrecision)));
-    if (centsPrecisionInputs.length) {
-      centsPrecisionInputs.forEach((input) => {
-        input.checked = Number(input.value) === centsPrecision;
-      });
-    } else if (centsPrecisionInput) {
-      centsPrecisionInput.value = String(centsPrecision);
-    }
+    centsPrecision = Math.min(2, Math.max(0, Math.round(state.centsPrecision)));
+    syncCentsPrecisionControls();
   }
   triangleDiagonals.clear();
   triangleLabels.clear();
@@ -8870,8 +9440,14 @@ function applyPresetState(state) {
       }
       const x = Number(entry.x);
       const y = Number(entry.y);
-      const z = Number(entry.z);
+      const expZ = Number(entry.expZ);
+      const z = Number.isFinite(expZ)
+        ? targetCenterZ - expZ
+        : Number(entry.z);
       if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        return;
+      }
+      if (z < 0 || z >= targetDepth) {
         return;
       }
       const tri = typeof entry.tri === "string" ? entry.tri : "";
@@ -8911,8 +9487,14 @@ function applyPresetState(state) {
       }
       const x = Number(entry.x);
       const y = Number(entry.y);
-      const z = Number(entry.z);
+      const expZ = Number(entry.expZ);
+      const z = Number.isFinite(expZ)
+        ? targetCenterZ - expZ
+        : Number(entry.z);
       if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        return;
+      }
+      if (z < 0 || z >= targetDepth) {
         return;
       }
       const label = typeof entry.label === "string" ? entry.label : "";
@@ -8959,7 +9541,7 @@ function applyPresetState(state) {
   } else {
     customNodes = [];
   }
-  rebuildLattice(activeKeys);
+  rebuildLattice(activeKeys, { remapTriangles: false });
   if (pendingLayoutLabelOffsets) {
     applyLayoutLabelOffsets(pendingLayoutLabelOffsets);
     pendingLayoutLabelOffsets = null;
@@ -9221,6 +9803,7 @@ function buildLayoutSvgString() {
   const labelSize = layoutRatioTextSize;
   const detailSize = layoutNoteTextSize;
   const titleSize = Math.max(12, Math.round(layoutTitleSize));
+  const creatorSize = getLayoutCreatorSize();
 
   const parts = [];
   parts.push(
@@ -9242,6 +9825,22 @@ function buildLayoutSvgString() {
         layoutTitleFont
       )}" font-size="${titleSize}" fill="${themeColors.textPrimary}">${escapeSvgText(
         layoutTitle
+      )}</text>`
+    );
+  }
+  if (layoutCreator) {
+    const creatorPos = getLayoutCreatorPosition();
+    const creatorX = layoutCreatorPosition
+      ? layoutCreatorPosition.x
+      : widthPx / 2;
+    const creatorY = layoutCreatorPosition
+      ? layoutCreatorPosition.y
+      : Math.max(12, creatorPos.y - top);
+    parts.push(
+      `<text x="${creatorX}" y="${creatorY}" text-anchor="middle" font-family="${escapeSvgText(
+        layoutTitleFont
+      )}" font-size="${creatorSize}" fill="${themeColors.textSecondary}">${escapeSvgText(
+        layoutCreator
       )}</text>`
     );
   }
@@ -9302,6 +9901,24 @@ function buildLayoutSvgString() {
       )}</text>`
     );
   });
+
+  if (layoutCustomLabels.length) {
+    const customSize = Math.max(8, Math.round(layoutCustomLabelTextSize));
+    layoutCustomLabels.forEach((entry) => {
+      if (!entry.text || !entry.position) {
+        return;
+      }
+      const x = entry.position.x;
+      const y = entry.position.y;
+      parts.push(
+        `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="hanging" font-family="${escapeSvgText(
+          layoutCustomLabelFont
+        )}" font-size="${customSize}" fill="${themeColors.textSecondary}">${escapeSvgText(
+          entry.text
+        )}</text>`
+      );
+    });
+  }
 
   edges.forEach(([a, b]) => {
     if (!a.active || !b.active) {
@@ -9718,8 +10335,9 @@ function applyActiveNodeKeys(keys) {
   markIsomorphicDirty();
 }
 
-function rebuildLattice(activeKeys = null) {
+function rebuildLattice(activeKeys = null, { remapTriangles = true } = {}) {
   stopAllVoices();
+  const prevCenterZ = gridCenterZ;
   const latticeNodes = buildLattice();
   customNodes.forEach((node) => {
     node.gridZ = gridCenterZ;
@@ -9727,6 +10345,9 @@ function rebuildLattice(activeKeys = null) {
     node.coordinate.z = 0;
   });
   nodes = [...latticeNodes, ...customNodes];
+  if (remapTriangles) {
+    remapTrianglesForGridCenter(prevCenterZ, gridCenterZ);
+  }
   nodeById = new Map(nodes.map((node) => [node.id, node]));
   if (layoutMode) {
     nodes.forEach((node) => ensureLayoutPosition(node));
@@ -9747,10 +10368,11 @@ function resetLattice() {
   nodeSpellingOverrides.clear();
   triangleDiagonals.clear();
   triangleLabels.clear();
+  layoutUndoStack.length = 0;
   customNodes = [];
   fundamentalNoteSelect.value = "60";
   onFundamentalNoteChange();
-  resetLayoutState({ resetSettings: false, resetView: false });
+  resetLayoutState();
   view.zoom = 1;
   view.offsetX = 0;
   view.offsetY = 0;
@@ -9807,6 +10429,9 @@ if (layoutTriangleLabelSizeInput) {
   layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
   updateLayoutTriangleLabelReadout();
 }
+if (layoutCustomLabelSizeInput) {
+  layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
+}
 if (layoutLockPositionToggle) {
   layoutLockPositionToggle.checked = layoutLockPosition;
 }
@@ -9822,10 +10447,16 @@ if (layoutOrientationSelect) {
 if (layoutTitleInput) {
   layoutTitleInput.value = layoutTitle;
 }
+if (layoutCreatorInput) {
+  layoutCreatorInput.value = layoutCreator;
+}
 if (layoutTitleSizeInput) {
   layoutTitleSizeInput.value = String(layoutTitleSize);
-  updateLayoutTitleSizeReadout();
 }
+if (layoutCreatorSizeInput) {
+  layoutCreatorSizeInput.value = String(layoutCreatorSize);
+}
+updateLayoutCustomLabelControls();
 if (layoutTitleMarginInput) {
   layoutTitleMarginInput.value = String(layoutTitleMargin);
   updateLayoutTitleMarginReadout();
@@ -9848,19 +10479,12 @@ if (layoutUnifySizeToggle) {
 if (layoutModeToggle) {
   layoutModeToggle.checked = layoutMode;
 }
+syncViewModeControls();
 if (layoutPanel) {
   layoutPanel.hidden = !layoutMode;
 }
-if (featureModeInputs.length) {
-  featureModeInputs.forEach((input) => {
-    input.checked = input.value === featureMode;
-  });
-}
-if (spellingModeInputs.length) {
-  spellingModeInputs.forEach((input) => {
-    input.checked = input.value === spellingMode;
-  });
-}
+syncFeatureModeControls();
+syncSpellingModeControls();
 if (showHzToggle) {
   showHzToggle.checked = showHz;
 }
@@ -9876,13 +10500,7 @@ if (enharmonicsEnabledToggle) {
 if (navCirclesToggle) {
   navCirclesToggle.checked = showCircles;
 }
-if (centsPrecisionInputs.length) {
-  centsPrecisionInputs.forEach((input) => {
-    input.checked = Number(input.value) === centsPrecision;
-  });
-} else if (centsPrecisionInput) {
-  centsPrecisionInput.value = String(centsPrecision);
-}
+syncCentsPrecisionControls();
 syncLayoutScaleInput();
 const presetState = readPresetFromUrl();
 if (presetState) {
@@ -9901,7 +10519,7 @@ window.addEventListener("hashchange", () => {
     applyPresetState(presetState);
   }
 });
-if (mode3dCheckbox) {
+if (mode3dCheckbox && !viewModeInputs.length && !viewModeButtons.length) {
   mode3dCheckbox.addEventListener("change", () => {
     if (layoutMode) {
       mode3dCheckbox.checked = false;
@@ -9958,29 +10576,79 @@ if (themeSelect) {
 if (optionsToggle) {
   optionsToggle.addEventListener("click", toggleOptionsPanel);
 }
-if (layoutModeToggle) {
+if (layoutModeToggle && !viewModeInputs.length && !viewModeButtons.length) {
   layoutModeToggle.addEventListener("change", () => {
     setLayoutMode(layoutModeToggle.checked);
     schedulePresetUrlUpdate();
   });
 }
-if (featureModeInputs.length) {
-  featureModeInputs.forEach((input) => {
+if (viewModeInputs.length) {
+  viewModeInputs.forEach((input) => {
     input.addEventListener("change", () => {
-      const selected = document.querySelector('input[name="feature-mode"]:checked');
-      featureMode = selected && selected.value === "note" ? "note" : "ratio";
+      if (!input.checked) {
+        return;
+      }
+      const nextMode = input.value;
+      uiHintKey = "";
+      uiHintDismissed = false;
+      if (nextMode === "layout") {
+        setLayoutMode(true);
+      } else {
+        if (layoutMode) {
+          setLayoutMode(false);
+        }
+        set3DMode(nextMode === "3d");
+      }
+      schedulePresetUrlUpdate();
+    });
+  });
+}
+if (viewModeButtons.length) {
+  viewModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextMode = button.dataset.viewMode;
+      if (!nextMode) {
+        return;
+      }
+      uiHintKey = "";
+      uiHintDismissed = false;
+      if (nextMode === "layout") {
+        setLayoutMode(true);
+      } else {
+        if (layoutMode) {
+          setLayoutMode(false);
+        }
+        set3DMode(nextMode === "3d");
+      }
+      schedulePresetUrlUpdate();
+    });
+  });
+}
+if (featureModeButtons.length) {
+  featureModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextMode = button.dataset.featureMode;
+      if (!nextMode) {
+        return;
+      }
+      featureMode = nextMode === "note" ? "note" : "ratio";
+      syncFeatureModeControls();
       invalidateLabelCache();
       draw();
       schedulePresetUrlUpdate();
     });
   });
 }
-if (spellingModeInputs.length) {
-  spellingModeInputs.forEach((input) => {
-    input.addEventListener("change", () => {
-      const selected = document.querySelector('input[name="spelling-mode"]:checked');
-      spellingMode = selected && selected.value === "true" ? "true" : "simple";
+if (spellingModeButtons.length) {
+  spellingModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextMode = button.dataset.spellingMode;
+      if (!nextMode) {
+        return;
+      }
+      spellingMode = nextMode === "true" ? "true" : "simple";
       spellingHintActive = true;
+      syncSpellingModeControls();
       updateUiHint();
       if (spellingMode !== "true") {
         hideFundamentalSpellingDialog();
@@ -10036,25 +10704,33 @@ if (enharmonicsEnabledToggle) {
     schedulePresetUrlUpdate();
   });
 }
-if (centsPrecisionInputs.length) {
-  centsPrecisionInputs.forEach((input) => {
-    input.addEventListener("change", () => {
-      const selected = document.querySelector('input[name="cents-precision"]:checked');
-      const next = selected ? Number(selected.value) : 0;
+if (showHelpToggle) {
+  showHelpToggle.checked = showHelpEnabled;
+  showHelpToggle.addEventListener("change", () => {
+    showHelpEnabled = showHelpToggle.checked;
+    if (!showHelpEnabled) {
+      if (uiHint) {
+        uiHint.hidden = true;
+      }
+      return;
+    }
+    uiHintDismissed = false;
+    updateUiHint();
+  });
+}
+if (centsPrecisionButtons.length) {
+  centsPrecisionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const next = Number(button.dataset.centsPrecision);
+      if (!Number.isFinite(next)) {
+        return;
+      }
       centsPrecision = Math.min(2, Math.max(0, Math.round(next)));
+      syncCentsPrecisionControls();
       invalidateLabelCache();
       draw();
       schedulePresetUrlUpdate();
     });
-  });
-} else if (centsPrecisionInput) {
-  centsPrecisionInput.addEventListener("change", () => {
-    const next = Math.min(3, Math.max(0, Math.round(Number(centsPrecisionInput.value) || 0)));
-    centsPrecision = next;
-    centsPrecisionInput.value = String(next);
-    invalidateLabelCache();
-    draw();
-    schedulePresetUrlUpdate();
   });
 }
 if (layoutExitButton) {
@@ -10074,11 +10750,26 @@ if (layoutTitleInput) {
     schedulePresetUrlUpdate();
   });
 }
+if (layoutCreatorInput) {
+  layoutCreatorInput.addEventListener("input", () => {
+    pushLayoutUndoState();
+    layoutCreator = layoutCreatorInput.value.trim();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
 if (layoutTitleSizeInput) {
   layoutTitleSizeInput.addEventListener("input", () => {
     pushLayoutUndoState();
-    layoutTitleSize = Number(layoutTitleSizeInput.value) || layoutTitleSize;
-    updateLayoutTitleSizeReadout();
+    setLayoutTitleSize(Number(layoutTitleSizeInput.value));
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutCreatorSizeInput) {
+  layoutCreatorSizeInput.addEventListener("input", () => {
+    pushLayoutUndoState();
+    setLayoutCreatorSize(Number(layoutCreatorSizeInput.value));
     draw();
     schedulePresetUrlUpdate();
   });
@@ -10177,6 +10868,14 @@ if (layoutTriangleLabelSizeInput) {
     schedulePresetUrlUpdate();
   });
 }
+if (layoutCustomLabelSizeInput) {
+  layoutCustomLabelSizeInput.addEventListener("input", () => {
+    pushLayoutUndoState();
+    setLayoutCustomLabelSize(Number(layoutCustomLabelSizeInput.value));
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
 if (layoutTitleMarginInput) {
   layoutTitleMarginInput.addEventListener("input", () => {
     pushLayoutUndoState();
@@ -10189,7 +10888,8 @@ if (layoutTitleMarginInput) {
 if (layoutNodeShapeSelect) {
   layoutNodeShapeSelect.addEventListener("change", () => {
     pushLayoutUndoState();
-    layoutNodeShape = layoutNodeShapeSelect.value || "circle";
+    const nextShape = layoutNodeShapeSelect.value;
+    layoutNodeShape = nextShape || "circle";
     draw();
     schedulePresetUrlUpdate();
   });
@@ -10203,6 +10903,7 @@ if (layoutFontsButton && layoutFontDialog) {
         ratio: layoutRatioFont,
         note: layoutNoteFont,
         triangleLabel: layoutTriangleLabelFont,
+        customLabel: layoutCustomLabelFont,
       };
       layoutFontDialog.showModal();
     }
@@ -10221,6 +10922,7 @@ if (layoutPanelToggle) {
       layoutRatioFont = layoutFontSnapshot.ratio;
       layoutNoteFont = layoutFontSnapshot.note;
       layoutTriangleLabelFont = layoutFontSnapshot.triangleLabel;
+      layoutCustomLabelFont = layoutFontSnapshot.customLabel;
       if (layoutTitleFontSelect) {
         layoutTitleFontSelect.value = layoutTitleFont;
       }
@@ -10232,6 +10934,9 @@ if (layoutPanelToggle) {
       }
       if (layoutTriangleLabelFontSelect) {
         layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
+      }
+      if (layoutCustomFontSelect) {
+        layoutCustomFontSelect.value = layoutCustomLabelFont;
       }
     }
     layoutFontSnapshot = null;
@@ -10265,6 +10970,16 @@ if (layoutNoteFontSelect) {
   layoutNoteFontSelect.addEventListener("change", () => {
     pushLayoutUndoState();
     layoutNoteFont = layoutNoteFontSelect.value || layoutNoteFont;
+    syncLayoutFontVars();
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutCustomFontSelect) {
+  layoutCustomFontSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutCustomLabelFont = layoutCustomFontSelect.value || layoutCustomLabelFont;
     syncLayoutFontVars();
     invalidateLabelCache({ clearTextWidths: true });
     draw();
@@ -10330,6 +11045,7 @@ if (presetToggle) {
 }
 if (uiHint) {
   uiHint.addEventListener("click", () => {
+    uiHintDismissed = true;
     uiHint.hidden = true;
   });
 }
@@ -10393,6 +11109,9 @@ waveformSelect.addEventListener("change", () => {
 keyboardModeSelect.addEventListener("change", () => {
   if (keyboardModeSelect.value === "off") {
     resetUiHintToDefault();
+  }
+  if (keyboardModeSelect.value === "piano") {
+    showKeyboardModeHelp("2 octave layout with C mapped to Z and Y");
   }
   updateUiHint();
 });
@@ -10555,6 +11274,55 @@ if (triangleLabelDialog && triangleLabelInput) {
     triangleLabelDialog.close(value ? "ok" : "none");
   });
 }
+if (layoutCustomLabelDialog && layoutCustomLabelInput) {
+  layoutCustomLabelInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    layoutCustomLabelDialog.close("confirm");
+  });
+  layoutCustomLabelDialog.addEventListener("click", (event) => {
+    if (event.target === layoutCustomLabelDialog) {
+      layoutCustomLabelDialog.close("confirm");
+    }
+  });
+  layoutCustomLabelDialog.addEventListener("close", () => {
+    const text = layoutCustomLabelInput.value.trim();
+    if (layoutCustomLabelEditId != null) {
+      const index = layoutCustomLabels.findIndex((entry) => entry.id === layoutCustomLabelEditId);
+      if (index !== -1) {
+        pushLayoutUndoState();
+        if (text) {
+          layoutCustomLabels[index] = { ...layoutCustomLabels[index], text };
+        } else {
+          layoutCustomLabels.splice(index, 1);
+        }
+        updateLayoutCustomLabelControls();
+      }
+      layoutCustomLabelEditId = null;
+      layoutCustomLabelPending = null;
+      schedulePresetUrlUpdate();
+      draw();
+      return;
+    }
+    if (!layoutCustomLabelPending) {
+      return;
+    }
+    if (layoutCustomLabelDialog.returnValue === "confirm" && text) {
+      pushLayoutUndoState();
+      layoutCustomLabels.push({
+        id: layoutCustomLabelId++,
+        text,
+        position: { ...layoutCustomLabelPending },
+      });
+      updateLayoutCustomLabelControls();
+    }
+    layoutCustomLabelPending = null;
+    schedulePresetUrlUpdate();
+    draw();
+  });
+}
 canvas.addEventListener("pointerdown", onPointerDown);
 canvas.addEventListener("pointermove", onPointerMove);
 canvas.addEventListener("pointerup", onPointerUp);
@@ -10579,6 +11347,9 @@ window.addEventListener("keydown", (event) => {
   if (event.key.toLowerCase() === "t") {
     tHeld = true;
     updateUiHint();
+  }
+  if (event.key.toLowerCase() === "l") {
+    lHeld = true;
   }
   if (triangleLabelDialog) {
     triangleLabelDialog.addEventListener("close", () => {
@@ -10667,6 +11438,9 @@ window.addEventListener("keyup", (event) => {
     triangleHover = null;
     updateUiHint();
     scheduleDraw();
+  }
+  if (event.key.toLowerCase() === "l") {
+    lHeld = false;
   }
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = false;

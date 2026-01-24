@@ -26,6 +26,9 @@
   --wheel-line: #000000;
   --wheel-ring: #000000;
   --wheel-text: #000000;
+  --left-panel-width: 180px;
+  --left-panel-left: 16px;
+  --left-panel-inner: 86%;
 }
 
 @font-face {
@@ -191,6 +194,13 @@ body.theme-dark {
   gap: 6px;
 }
 
+.control-group-inline {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 0;
+}
+
 .ratios-inline {
   display: inline-flex;
   align-items: center;
@@ -330,8 +340,8 @@ button:active {
 .nav-3d {
   position: fixed;
   top: 100px;
-  left: 18px;
-  width: 180px;
+  left: var(--left-panel-left);
+  width: var(--left-panel-width);
   z-index: 9;
 }
 
@@ -352,6 +362,7 @@ button:active {
   gap: 12px;
   max-height: calc(100vh - 140px);
   overflow: auto;
+  --panel-inner-width: var(--left-panel-inner);
 }
 
 .nav-3d-header {
@@ -377,6 +388,18 @@ button:active {
 .nav-3d-content {
   display: grid;
   gap: 12px;
+}
+
+.nav-3d-content > * {
+  width: var(--panel-inner-width);
+  justify-self: center;
+}
+
+.nav-3d-content .control-group,
+.nav-3d-content .control-inline,
+.nav-3d-content .nav-3d-buttons {
+  width: 100%;
+  min-width: 0;
 }
 
 .nav-3d-panel.is-collapsed .nav-3d-content {
@@ -411,10 +434,10 @@ button:active {
 }
 
 .nav-3d-subtitle {
-  font-size: 11px;
-  letter-spacing: 0.3px;
+  font-size: 10px;
+  letter-spacing: 0.2px;
   text-transform: uppercase;
-  opacity: 0.65;
+  opacity: 0.55;
 }
 
 .nav-3d button {
@@ -426,11 +449,93 @@ button:active {
   font-size: 12px;
 }
 
+.nav-3d-view-modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+}
+
+.nav-3d-toggle-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0;
+}
+
+.nav-3d-toggle-buttons-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.nav-3d-view-modes button {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  font-size: 12px;
+  border-radius: 0;
+}
+
+.nav-3d-toggle-buttons button {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  font-size: 12px;
+  border-radius: 0;
+}
+
+.nav-3d-view-modes button:first-child {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+
+.nav-3d-view-modes button:last-child {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
+.nav-3d-view-modes button + button {
+  margin-left: -1px;
+}
+
+.nav-3d-toggle-buttons button:first-child {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+
+.nav-3d-toggle-buttons button:last-child {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
+.nav-3d-toggle-buttons button + button {
+  margin-left: -1px;
+}
+
+.nav-3d-view-modes button.is-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  position: relative;
+  z-index: 1;
+}
+
+.nav-3d-toggle-buttons button.is-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  position: relative;
+  z-index: 1;
+}
+
 .nav-3d-toggle {
   display: flex;
   gap: 6px;
   align-items: center;
   font-size: 13px;
+}
+
+.nav-3d-toggle-small {
+  font-size: 12px;
 }
 
 .ratio-wheel-button {
@@ -516,8 +621,9 @@ button:active {
 .layout-float {
   position: fixed;
   top: 100px;
-  left: 16px;
-  width: min(180px, calc(100%));
+  left: var(--left-panel-left);
+  width: min(var(--left-panel-width), calc(100%));
+  --panel-inner-width: var(--left-panel-inner);
   z-index: 3;
   display: grid;
   gap: 10px;
@@ -557,7 +663,7 @@ button:active {
 }
 
 .layout-content > * {
-  width: 85%;
+  width: var(--panel-inner-width);
   justify-self: center;
 }
 
@@ -711,6 +817,32 @@ button:active {
 .synth-group {
   display: grid;
   gap: 6px;
+}
+
+.synth-group:has(#keyboard-help) {
+  position: relative;
+}
+
+.keyboard-help {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  max-width: 220px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 11px;
+  line-height: 1.2;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.keyboard-help.is-visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .synth-group.is-disabled {

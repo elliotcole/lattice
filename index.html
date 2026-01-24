@@ -99,6 +99,20 @@
                   <option value="dark">Dark Mode</option>
                 </select>
               </div>
+              <div class="control-group">
+                <div class="control-inline">
+                  <input id="show-help" type="checkbox" checked />
+                  <label for="show-help">Show help</label>
+                </div>
+              </div>
+              <div class="control-group control-group-inline">
+                <label>¢ Decimals</label>
+                <div class="nav-3d-buttons nav-3d-toggle-buttons nav-3d-toggle-buttons-3">
+                  <button type="button" data-cents-precision="0">0</button>
+                  <button type="button" data-cents-precision="1">1</button>
+                  <button type="button" data-cents-precision="2">2</button>
+                </div>
+              </div>
              
               <div class="control-group">
                 <label for="midi-enable">MIDI Input</label>
@@ -134,92 +148,92 @@
         <span class="layout-chevron">▾</span>
       </button>
       <div class="layout-content">
-      <div class="control-group">
-        <button id="layout-exit" type="button" class="button-full">Exit Layout Mode</button>
-      </div>
-      <div class="control-group">
-        <div class="control-inline">
-          <input id="layout-lock-position" type="checkbox" checked />
-          <span>Separate Layout</span>
+        <div class="control-group">
+          <div class="nav-3d-buttons nav-3d-view-modes">
+            <button type="button" data-view-mode="2d">2D</button>
+            <button type="button" data-view-mode="3d">3D</button>
+            <button type="button" data-view-mode="layout">Print</button>
+          </div>
         </div>
-      </div>
-      <div class="control-group">
-        <label for="layout-title">Title</label>
-        <input id="layout-title" type="text" placeholder="Tuning Lattice" />
-      </div>
-      <div class="control-group">
-        <label for="layout-title-size">Title Size</label>
-        <input id="layout-title-size" type="range" min="12" max="64" step="1" value="28" />
-        <span id="layout-title-size-readout" class="control-readout">28 px</span>
-      </div>
-      <div class="control-group">
-        <label for="layout-page-size">Page Size</label>
-        <select id="layout-page-size">
-          <option value="letter">Letter</option>
-          <option value="a4">A4</option>
-        </select>
-      </div>
-      <div class="control-group">
-        <label for="layout-orientation">Orientation</label>
-        <select id="layout-orientation">
-          <option value="portrait">Portrait</option>
-          <option value="landscape" selected>Landscape</option>
-        </select>
-      </div>
-      <div class="control-group">
-        <label for="layout-scale">Overall Size</label>
-        <input id="layout-scale" type="range" min="0.5" max="2" step="0.01" value="1" />
-        <span id="layout-scale-readout" class="control-readout">100%</span>
-      </div>
-      <div class="control-group">
-        <label for="layout-node-size">Node Size</label>
-        <input id="layout-node-size" type="range" min="18" max="70" step="1" value="35" />
-        <span id="layout-node-size-readout" class="control-readout">35 px</span>
-      </div>
-      <div class="control-group">
-        <label for="layout-ratio-text-size">Ratio Text Size</label>
-        <input id="layout-ratio-text-size" type="range" min="10" max="36" step="1" value="21" />
-        <span id="layout-ratio-text-readout" class="control-readout">21 px</span>
-      </div>
-      <div class="control-group">
-        <label for="layout-note-text-size">Note/Cent Text Size</label>
-        <input id="layout-note-text-size" type="range" min="8" max="24" step="1" value="11" />
-        <span id="layout-note-text-readout" class="control-readout">11 px</span>
-      </div>
-      <div class="control-group">
-        <label for="layout-triangle-label-size">Triangle Label Size</label>
-        <input id="layout-triangle-label-size" type="range" min="8" max="36" step="1" value="20" />
-        <span id="layout-triangle-label-readout" class="control-readout">20 px</span>
-      </div>
-      <div class="control-group">
-        <label for="layout-node-shape">Default Shape</label>
-        <select id="layout-node-shape">
-          <option value="circle">Circles</option>
-          <option value="square">Squares</option>
-          <option value="diamond">Diamonds</option>
-        </select>
-      </div>
-      <div class="control-group">
-        <label for="layout-fonts">Fonts</label>
-        <button id="layout-fonts" type="button" class="button-full">Edit Fonts</button>
-      </div>
-      <div class="control-group">
-        <div class="control-inline">
-          <input id="layout-unify-size" type="checkbox" checked />
-          <span>Unify Node Size</span>
+        <div class="control-group">
+          <label for="layout-page-size">Page Size</label>
+          <select id="layout-page-size">
+            <option value="letter">Letter</option>
+            <option value="a4">A4</option>
+          </select>
         </div>
-      </div>
-      <div class="control-group">
-        <label for="layout-reset">Reset Layout</label>
-        <button id="layout-reset" type="button" class="button-full">Reset Layout</button>
-      </div>
-      <div class="control-group">
-        <label for="export-svg">Export</label>
-        <div class="control-inline">
-          <button id="export-svg" type="button">SVG</button>
-          <button id="export-pdf" type="button">PDF</button>
+        <div class="control-group">
+          <label for="layout-orientation">Orientation</label>
+          <select id="layout-orientation">
+            <option value="portrait">Portrait</option>
+            <option value="landscape" selected>Landscape</option>
+          </select>
         </div>
-      </div>
+        <div class="control-group">
+          <div class="control-inline">
+            <input id="layout-lock-position" type="checkbox" checked />
+            <span>Separate Layout</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <input id="layout-title" type="text" placeholder="Title" aria-label="Title" />
+        </div>
+        <div class="control-group control-group-inline">
+          <label for="layout-title-size">Size</label>
+          <input id="layout-title-size" type="range" min="10" max="96" step="1" value="28" />
+        </div>
+        <div class="control-group">
+          <input id="layout-creator" type="text" placeholder="Creator" aria-label="Creator" />
+        </div>
+        <div class="control-group control-group-inline">
+          <label for="layout-creator-size">Size</label>
+          <input id="layout-creator-size" type="range" min="8" max="72" step="1" value="18" />
+        </div>
+        <div class="control-group">
+          <button id="layout-fonts" type="button" class="button-full">Edit Fonts</button>
+        </div>
+        <div class="nav-3d-title">Size</div>
+        <div class="control-group">
+          <div class="control-inline">
+            <input id="layout-unify-size" type="checkbox" checked />
+            <span>Unify Node Size</span>
+          </div>
+        </div>
+        <div class="control-group control-group-inline">
+          <label for="layout-scale">Space</label>
+          <input id="layout-scale" type="range" min="0.5" max="2" step="0.01" value="1" />
+        </div>
+        <div class="control-group control-group-inline">
+          <label for="layout-node-size">Node</label>
+          <input id="layout-node-size" type="range" min="18" max="70" step="1" value="35" />
+        </div>
+        <div class="control-group control-group-inline">
+          <label for="layout-ratio-text-size">Text</label>
+          <input id="layout-ratio-text-size" type="range" min="10" max="36" step="1" value="21" />
+        </div>
+        <div class="control-group control-group-inline">
+          <label for="layout-note-text-size">Label</label>
+          <input id="layout-note-text-size" type="range" min="8" max="24" step="1" value="11" />
+        </div>
+        <div class="control-group control-group-inline">
+          <label for="layout-triangle-label-size">Chord</label>
+          <input id="layout-triangle-label-size" type="range" min="8" max="36" step="1" value="20" />
+        </div>
+        <div id="layout-custom-size-group" class="control-group control-group-inline" hidden>
+          <label for="layout-custom-label-size">Custom</label>
+          <input id="layout-custom-label-size" type="range" min="8" max="36" step="1" value="18" />
+        </div>
+        <div class="nav-3d-title">Export</div>
+        <div class="control-group">
+          <div class="control-inline">
+            <button id="export-svg" type="button">SVG</button>
+            <button id="export-pdf" type="button">PDF</button>
+          </div>
+        </div>
+        <div class="nav-3d-title">Reset</div>
+        <div class="control-group">
+          <button id="layout-reset" type="button" class="button-full">Reset Layout</button>
+        </div>
       </div>
     </aside>
 
@@ -242,6 +256,7 @@
           <option value="iso">Isomorphic</option>
           <option value="iso-fuzzy">Isomorphic (fuzzy)</option>
         </select>
+        <div id="keyboard-help" class="keyboard-help" aria-live="polite"></div>
       </div>
       <div class="synth-group">
         <label for="waveform">Waveform</label>
@@ -417,14 +432,11 @@
         </button>
         <div class="nav-3d-content">
           <div class="nav-3d-section">
-            <label class="nav-3d-toggle">
-              <input id="mode-3d" type="checkbox" />
-              <span>3D Mode</span>
-            </label>
-            <label class="nav-3d-toggle">
-              <input id="layout-mode" type="checkbox" />
-              <span>Page Layout</span>
-            </label>
+            <div class="nav-3d-buttons nav-3d-view-modes">
+              <button type="button" data-view-mode="2d">2D</button>
+              <button type="button" data-view-mode="3d">3D</button>
+              <button type="button" data-view-mode="layout">Print</button>
+            </div>
           </div>
           <div class="nav-3d-section">
             <div class="nav-3d-title">Orientation</div>
@@ -468,32 +480,21 @@
             </div>
           </div>
           <div class="nav-3d-section">
-            <div class="nav-3d-title">View Options</div>
-            <div class="control-group">
-              <div class="control-inline">
-                <label>
-                  <input type="radio" name="feature-mode" value="ratio" checked />
-                  Ratio
-                </label>
-                <label>
-                  <input type="radio" name="feature-mode" value="note" />
-                  Note
-                </label>
-              </div>
+            <div class="nav-3d-title">Feature</div>
+            <div class="nav-3d-buttons nav-3d-toggle-buttons">
+              <button type="button" data-feature-mode="ratio">Ratio</button>
+              <button type="button" data-feature-mode="note">Note</button>
             </div>
-            <div class="control-group">
-              <label>Spelling</label>
-              <div class="control-inline">
-                <label>
-                  <input type="radio" name="spelling-mode" value="true" checked />
-                  <span style="font-size:90%">Diatonic</span> 
-                </label>
-                <label>
-                  <input type="radio" name="spelling-mode" value="simple" />
-                  <span style="font-size:90%">Custom</span> 
-                </label>
-              </div>
+          </div>
+          <div class="nav-3d-section">
+            <div class="nav-3d-title">Spelling</div>
+            <div class="nav-3d-buttons nav-3d-toggle-buttons">
+              <button type="button" data-spelling-mode="true">Diatonic</button>
+              <button type="button" data-spelling-mode="simple">Custom</button>
             </div>
+          </div>
+          <div class="nav-3d-section">
+            <div class="nav-3d-title">Show</div>
             <div class="control-group">
               <div class="control-inline">
                 <input id="heji-enabled" type="checkbox" checked />
@@ -512,30 +513,19 @@
                 <label for="show-hz">Hz</label>
               </div>
             </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="nav-circles" type="checkbox" checked />
+                <label for="nav-circles">Circles</label>
+              </div>
+            </div>
             <div class="control-group" style="display:none">
               <div class="control-inline">
                 <input id="show-cents-sign" type="checkbox" />
                 <label for="show-cents-sign">¢</label>
               </div>
             </div>
-            <div class="control-group">
-              <label>Cents Decimals</label>
-              <div class="control-inline">
-                <label>
-                  <input type="radio" name="cents-precision" value="0" checked />
-                  0
-                </label>
-                <label>
-                  <input type="radio" name="cents-precision" value="1" />
-                  1
-                </label>
-                <label>
-                  <input type="radio" name="cents-precision" value="2" />
-                  2
-                </label>
-              </div>
-            </div>
-            <div class="control-group">
+            <div class="control-group" data-nav-mode="3d">
               <label class="nav-3d-toggle" data-nav-mode="3d">
                 <input id="nav-axes" type="checkbox" checked />
                 <span>Axes</span>
@@ -543,10 +533,6 @@
               <label class="nav-3d-toggle" data-nav-mode="3d">
                 <input id="nav-grid" type="checkbox" checked />
                 <span>Grid</span>
-              </label>
-              <label class="nav-3d-toggle">
-                <input id="nav-circles" type="checkbox" checked />
-                <span>Circles</span>
               </label>
             </div>
           </div>
@@ -623,9 +609,34 @@
             <option value="Arial">Arial</option>
           </select>
         </label>
+        <label id="layout-custom-font-group" hidden>
+          Custom Text Font
+          <select id="layout-custom-font">
+            <option value="Georgia">Georgia</option>
+            <option value="Garamond">Garamond</option>
+            <option value="Palatino">Palatino</option>
+            <option value="Times New Roman">Times New Roman</option>
+            <option value="Lexend">Lexend</option>
+            <option value="Helvetica">Helvetica</option>
+            <option value="Arial">Arial</option>
+          </select>
+        </label>
         <menu class="dialog-actions">
           <button type="submit" value="cancel">Cancel</button>
           <button type="submit" value="confirm">Done</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="layout-custom-label-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form">
+        <div class="dialog-title">Custom Label</div>
+        <label>
+          Text:
+          <input type="text" id="layout-custom-label-input" maxlength="60" />
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="confirm">OK</button>
         </menu>
       </form>
     </dialog>

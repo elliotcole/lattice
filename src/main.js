@@ -525,6 +525,9 @@ let layoutAxisDrag = null;
 let layoutAxisEdit = null;
 let layoutAxisEditDrag = null;
 let layoutTitleDrag = null;
+const layoutUndoStack = [];
+const LAYOUT_UNDO_LIMIT = 50;
+let layoutWheelUndoTimer = null;
 let spellingMode = "simple";
 let spellingHintActive = false;
 let fundamentalSpelling = "sharp";
@@ -2354,12 +2357,17 @@ function handleKeyDown(event) {
     return;
   }
 
+  const key = event.key.toLowerCase();
+  if (layoutMode && (event.metaKey || event.ctrlKey) && key === "z") {
+    event.preventDefault();
+    undoLayoutChange();
+    return;
+  }
+
   const mode = getKeyboardMode();
   if (mode === "off") {
     return;
   }
-
-  const key = event.key.toLowerCase();
   if (activeKeys.has(key)) {
     return;
   }
@@ -5969,6 +5977,7 @@ function onPointerDown(event) {
     if (layoutAxisEdit) {
       const handleHit = hitTestAxisLegendHandle(screenPoint);
       if (handleHit) {
+        pushLayoutUndoState();
         layoutAxisEditDrag = { axis: handleHit.axis };
         canvas.setPointerCapture(event.pointerId);
       }
@@ -5977,6 +5986,7 @@ function onPointerDown(event) {
     const titleHit = hitTestLayoutTitle(screenPoint);
     if (titleHit) {
       event.preventDefault();
+      pushLayoutUndoState();
       const { left, top } = getLayoutPageRect();
       layoutTitleDrag = {
         offsetX: titleHit.pos.x - screenPoint.x,
@@ -5991,6 +6001,7 @@ function onPointerDown(event) {
     }
     const axisHit = hitTestAxisLegend(screenPoint);
     if (axisHit) {
+      pushLayoutUndoState();
       layoutAxisDrag = {
         axis: axisHit.axis,
         offsetX: axisHit.center.x - screenPoint.x,
@@ -6005,6 +6016,7 @@ function onPointerDown(event) {
     }
     const labelHit = hitTestNoteLabel(screenPoint);
     if (labelHit) {
+      pushLayoutUndoState();
       layoutLabelDrag = {
         nodeId: labelHit.node.id,
         offsetX: labelHit.labelPos.x - screenPoint.x,
@@ -6021,6 +6033,7 @@ function onPointerDown(event) {
     if (hit) {
       const worldPoint = screenToWorld(screenPoint);
       const coord = getNodeDisplayCoordinate(hit);
+      pushLayoutUndoState();
       layoutDrag = {
         nodeId: hit.id,
         offsetX: coord.x - worldPoint.x,
@@ -6034,6 +6047,7 @@ function onPointerDown(event) {
       return;
     }
     view.dragging = true;
+    pushLayoutUndoState();
     view.dragStart = { x: event.offsetX, y: event.offsetY };
     view.dragOffsetStart = { x: view.offsetX, y: view.offsetY };
     view.lastPointer = { x: event.offsetX, y: event.offsetY };
@@ -6154,6 +6168,7 @@ function onCanvasDoubleClick(event) {
   const current = getLayoutNodeShape(hit);
   const index = shapes.indexOf(current);
   const next = shapes[(index + 1) % shapes.length];
+  pushLayoutUndoState();
   if (next === layoutNodeShape) {
     layoutNodeShapes.delete(hit.id);
   } else {
@@ -6550,6 +6565,9 @@ function onPointerLeave() {
 
 function onWheel(event) {
   event.preventDefault();
+  if (layoutMode) {
+    pushLayoutUndoStateForWheel();
+  }
   const zoomDelta = event.deltaY > 0 ? 0.92 : 1.08;
   if (is3DMode) {
     view.zoom = Math.min(2.2, Math.max(0.5, view.zoom * zoomDelta));
@@ -7267,6 +7285,179 @@ function syncLayoutScaleInput() {
   const clamped = Math.min(2, Math.max(0.5, view.zoom));
   layoutScaleInput.value = clamped.toFixed(2);
   updateLayoutScaleReadout();
+}
+
+function captureLayoutUndoState() {
+  return {
+    view: {
+      zoom: view.zoom,
+      offsetX: view.offsetX,
+      offsetY: view.offsetY,
+      rotX: view.rotX,
+      rotY: view.rotY,
+    },
+    layoutView: { ...layoutView },
+    layoutPositions: new Map(
+      Array.from(layoutPositions.entries()).map(([id, coord]) => [id, { ...coord }])
+    ),
+    layoutLabelOffsets: new Map(
+      Array.from(layoutLabelOffsets.entries()).map(([id, offset]) => [id, { ...offset }])
+    ),
+    layoutNodeShapes: new Map(layoutNodeShapes),
+    layoutAxisOffsets: {
+      x: { ...layoutAxisOffsets.x },
+      y: { ...layoutAxisOffsets.y },
+      z: { ...layoutAxisOffsets.z },
+    },
+    layoutAxisAngles: { ...layoutAxisAngles },
+    layoutTitlePosition: layoutTitlePosition ? { ...layoutTitlePosition } : null,
+    layoutNodeSize,
+    layoutRatioTextSize,
+    layoutNoteTextSize,
+    layoutTriangleLabelTextSize,
+    layoutNodeShape,
+    layoutTitle,
+    layoutTitleSize,
+    layoutTitleMargin,
+    layoutTitleFont,
+    layoutRatioFont,
+    layoutNoteFont,
+    layoutTriangleLabelFont,
+    layoutUnifyNodeSize,
+    layoutPageSize,
+    layoutOrientation,
+    layoutLockPosition,
+  };
+}
+
+function pushLayoutUndoState() {
+  if (!layoutMode) {
+    return;
+  }
+  layoutUndoStack.push(captureLayoutUndoState());
+  if (layoutUndoStack.length > LAYOUT_UNDO_LIMIT) {
+    layoutUndoStack.shift();
+  }
+}
+
+function pushLayoutUndoStateForWheel() {
+  if (!layoutMode || layoutWheelUndoTimer) {
+    return;
+  }
+  pushLayoutUndoState();
+  layoutWheelUndoTimer = setTimeout(() => {
+    layoutWheelUndoTimer = null;
+  }, 200);
+}
+
+function applyLayoutUndoState(state) {
+  if (!state) {
+    return;
+  }
+  layoutPositions = new Map(
+    Array.from(state.layoutPositions.entries()).map(([id, coord]) => [id, { ...coord }])
+  );
+  layoutLabelOffsets = new Map(
+    Array.from(state.layoutLabelOffsets.entries()).map(([id, offset]) => [id, { ...offset }])
+  );
+  layoutNodeShapes = new Map(state.layoutNodeShapes);
+  layoutAxisOffsets = {
+    x: { ...state.layoutAxisOffsets.x },
+    y: { ...state.layoutAxisOffsets.y },
+    z: { ...state.layoutAxisOffsets.z },
+  };
+  layoutAxisAngles = { ...state.layoutAxisAngles };
+  layoutTitlePosition = state.layoutTitlePosition ? { ...state.layoutTitlePosition } : null;
+  layoutNodeSize = state.layoutNodeSize;
+  layoutRatioTextSize = state.layoutRatioTextSize;
+  layoutNoteTextSize = state.layoutNoteTextSize;
+  layoutTriangleLabelTextSize = state.layoutTriangleLabelTextSize;
+  layoutNodeShape = state.layoutNodeShape;
+  layoutTitle = state.layoutTitle;
+  layoutTitleSize = state.layoutTitleSize;
+  layoutTitleMargin = state.layoutTitleMargin;
+  layoutTitleFont = state.layoutTitleFont;
+  layoutRatioFont = state.layoutRatioFont;
+  layoutNoteFont = state.layoutNoteFont;
+  layoutTriangleLabelFont = state.layoutTriangleLabelFont;
+  layoutUnifyNodeSize = state.layoutUnifyNodeSize;
+  layoutPageSize = state.layoutPageSize;
+  layoutOrientation = state.layoutOrientation;
+  layoutLockPosition = state.layoutLockPosition;
+  if (layoutLockPositionToggle) {
+    layoutLockPositionToggle.checked = layoutLockPosition;
+  }
+  layoutView = layoutLockPosition ? { ...state.view } : { ...state.layoutView };
+  view.zoom = state.view.zoom;
+  view.offsetX = state.view.offsetX;
+  view.offsetY = state.view.offsetY;
+  view.rotX = state.view.rotX;
+  view.rotY = state.view.rotY;
+  if (layoutTitleInput) {
+    layoutTitleInput.value = layoutTitle;
+  }
+  if (layoutTitleSizeInput) {
+    layoutTitleSizeInput.value = String(layoutTitleSize);
+  }
+  if (layoutTitleMarginInput) {
+    layoutTitleMarginInput.value = String(layoutTitleMargin);
+  }
+  if (layoutNodeSizeInput) {
+    layoutNodeSizeInput.value = String(layoutNodeSize);
+  }
+  if (layoutRatioTextSizeInput) {
+    layoutRatioTextSizeInput.value = String(layoutRatioTextSize);
+  }
+  if (layoutNoteTextSizeInput) {
+    layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
+  }
+  if (layoutTriangleLabelSizeInput) {
+    layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
+  }
+  if (layoutNodeShapeSelect) {
+    layoutNodeShapeSelect.value = layoutNodeShape;
+  }
+  if (layoutPageSizeSelect) {
+    layoutPageSizeSelect.value = layoutPageSize;
+  }
+  if (layoutOrientationSelect) {
+    layoutOrientationSelect.value = layoutOrientation;
+  }
+  if (layoutTitleFontSelect) {
+    layoutTitleFontSelect.value = layoutTitleFont;
+  }
+  if (layoutRatioFontSelect) {
+    layoutRatioFontSelect.value = layoutRatioFont;
+  }
+  if (layoutNoteFontSelect) {
+    layoutNoteFontSelect.value = layoutNoteFont;
+  }
+  if (layoutTriangleLabelFontSelect) {
+    layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
+  }
+  if (layoutUnifySizeToggle) {
+    layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
+  }
+  syncLayoutFontVars();
+  syncLayoutScaleInput();
+  updateLayoutNodeSizeReadout();
+  updateLayoutRatioTextReadout();
+  updateLayoutNoteTextReadout();
+  updateLayoutTriangleLabelReadout();
+  updateLayoutTitleSizeReadout();
+  updateLayoutTitleMarginReadout();
+  invalidateLabelCache({ clearTextWidths: true });
+  draw();
+  markIsomorphicDirty();
+  schedulePresetUrlUpdate();
+}
+
+function undoLayoutChange() {
+  if (!layoutMode || !layoutUndoStack.length) {
+    return;
+  }
+  const state = layoutUndoStack.pop();
+  applyLayoutUndoState(state);
 }
 
 function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
@@ -9877,6 +10068,7 @@ if (layoutExitButton) {
 }
 if (layoutTitleInput) {
   layoutTitleInput.addEventListener("input", () => {
+    pushLayoutUndoState();
     layoutTitle = layoutTitleInput.value.trim();
     draw();
     schedulePresetUrlUpdate();
@@ -9884,6 +10076,7 @@ if (layoutTitleInput) {
 }
 if (layoutTitleSizeInput) {
   layoutTitleSizeInput.addEventListener("input", () => {
+    pushLayoutUndoState();
     layoutTitleSize = Number(layoutTitleSizeInput.value) || layoutTitleSize;
     updateLayoutTitleSizeReadout();
     draw();
@@ -9892,6 +10085,7 @@ if (layoutTitleSizeInput) {
 }
 if (layoutPageSizeSelect) {
   layoutPageSizeSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
     layoutPageSize = layoutPageSizeSelect.value || "letter";
     draw();
     schedulePresetUrlUpdate();
@@ -9899,6 +10093,7 @@ if (layoutPageSizeSelect) {
 }
 if (layoutOrientationSelect) {
   layoutOrientationSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
     layoutOrientation = layoutOrientationSelect.value || "portrait";
     draw();
     schedulePresetUrlUpdate();
@@ -9906,6 +10101,7 @@ if (layoutOrientationSelect) {
 }
 if (layoutScaleInput) {
   layoutScaleInput.addEventListener("input", () => {
+    pushLayoutUndoState();
     view.zoom = Number(layoutScaleInput.value) || 1;
     if (layoutLockPosition && layoutMode) {
       layoutView = { ...layoutView, zoom: view.zoom };
@@ -9918,6 +10114,7 @@ if (layoutScaleInput) {
 }
 if (layoutLockPositionToggle) {
   layoutLockPositionToggle.addEventListener("change", () => {
+    pushLayoutUndoState();
     layoutLockPosition = layoutLockPositionToggle.checked;
     if (layoutLockPosition) {
       syncLayoutViewFromCurrent();
@@ -9945,6 +10142,7 @@ if (layoutLockPositionToggle) {
 }
 if (layoutNodeSizeInput) {
   layoutNodeSizeInput.addEventListener("input", () => {
+    pushLayoutUndoState();
     layoutNodeSize = Number(layoutNodeSizeInput.value) || layoutNodeSize;
     updateLayoutNodeSizeReadout();
     draw();
@@ -9953,6 +10151,7 @@ if (layoutNodeSizeInput) {
 }
 if (layoutRatioTextSizeInput) {
   layoutRatioTextSizeInput.addEventListener("input", () => {
+    pushLayoutUndoState();
     layoutRatioTextSize = Number(layoutRatioTextSizeInput.value) || layoutRatioTextSize;
     updateLayoutRatioTextReadout();
     draw();
@@ -9961,6 +10160,7 @@ if (layoutRatioTextSizeInput) {
 }
 if (layoutNoteTextSizeInput) {
   layoutNoteTextSizeInput.addEventListener("input", () => {
+    pushLayoutUndoState();
     layoutNoteTextSize = Number(layoutNoteTextSizeInput.value) || layoutNoteTextSize;
     updateLayoutNoteTextReadout();
     draw();
@@ -9969,6 +10169,7 @@ if (layoutNoteTextSizeInput) {
 }
 if (layoutTriangleLabelSizeInput) {
   layoutTriangleLabelSizeInput.addEventListener("input", () => {
+    pushLayoutUndoState();
     layoutTriangleLabelTextSize =
       Number(layoutTriangleLabelSizeInput.value) || layoutTriangleLabelTextSize;
     updateLayoutTriangleLabelReadout();
@@ -9978,6 +10179,7 @@ if (layoutTriangleLabelSizeInput) {
 }
 if (layoutTitleMarginInput) {
   layoutTitleMarginInput.addEventListener("input", () => {
+    pushLayoutUndoState();
     layoutTitleMargin = Number(layoutTitleMarginInput.value) || layoutTitleMargin;
     updateLayoutTitleMarginReadout();
     draw();
@@ -9986,6 +10188,7 @@ if (layoutTitleMarginInput) {
 }
 if (layoutNodeShapeSelect) {
   layoutNodeShapeSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
     layoutNodeShape = layoutNodeShapeSelect.value || "circle";
     draw();
     schedulePresetUrlUpdate();
@@ -10040,6 +10243,7 @@ if (layoutPanelToggle) {
 }
 if (layoutTitleFontSelect) {
   layoutTitleFontSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
     layoutTitleFont = layoutTitleFontSelect.value || layoutTitleFont;
     syncLayoutFontVars();
     invalidateLabelCache({ clearTextWidths: true });
@@ -10049,6 +10253,7 @@ if (layoutTitleFontSelect) {
 }
 if (layoutRatioFontSelect) {
   layoutRatioFontSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
     layoutRatioFont = layoutRatioFontSelect.value || layoutRatioFont;
     syncLayoutFontVars();
     invalidateLabelCache({ clearTextWidths: true });
@@ -10058,6 +10263,7 @@ if (layoutRatioFontSelect) {
 }
 if (layoutNoteFontSelect) {
   layoutNoteFontSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
     layoutNoteFont = layoutNoteFontSelect.value || layoutNoteFont;
     syncLayoutFontVars();
     invalidateLabelCache({ clearTextWidths: true });
@@ -10067,6 +10273,7 @@ if (layoutNoteFontSelect) {
 }
 if (layoutTriangleLabelFontSelect) {
   layoutTriangleLabelFontSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
     layoutTriangleLabelFont = layoutTriangleLabelFontSelect.value || layoutTriangleLabelFont;
     syncLayoutFontVars();
     invalidateLabelCache({ clearTextWidths: true });
@@ -10076,6 +10283,7 @@ if (layoutTriangleLabelFontSelect) {
 }
 if (layoutUnifySizeToggle) {
   layoutUnifySizeToggle.addEventListener("change", () => {
+    pushLayoutUndoState();
     layoutUnifyNodeSize = layoutUnifySizeToggle.checked;
     layoutAxisAngles = { x: null, y: null, z: null };
     draw();
@@ -10084,6 +10292,7 @@ if (layoutUnifySizeToggle) {
 }
 if (layoutResetButton) {
   layoutResetButton.addEventListener("click", () => {
+    pushLayoutUndoState();
     resetLayoutState();
     schedulePresetUrlUpdate();
   });
@@ -10359,6 +10568,9 @@ window.addEventListener("keydown", enableAudioFromGesture);
 window.addEventListener("keydown", handleKeyDown);
 window.addEventListener("keyup", handleKeyUp);
 window.addEventListener("keydown", (event) => {
+  if (event.metaKey || event.ctrlKey) {
+    return;
+  }
   if (event.key === "Shift") {
     shiftHeld = true;
     updateAddModeFromShift();

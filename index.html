@@ -16,8 +16,8 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/index-CXDIR2eK.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-GNP32gXE.css">
+    <script type="module" crossorigin src="./assets/index-B1iUT8zW.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CYmAIvQB.css">
   </head>
   <body>
     <canvas id="lattice"></canvas>
@@ -139,6 +139,12 @@
         <button id="layout-exit" type="button" class="button-full">Exit Layout Mode</button>
       </div>
       <div class="control-group">
+        <div class="control-inline">
+          <input id="layout-lock-position" type="checkbox" checked />
+          <span>Separate Layout</span>
+        </div>
+      </div>
+      <div class="control-group">
         <label for="layout-title">Title</label>
         <input id="layout-title" type="text" placeholder="Tuning Lattice" />
       </div>
@@ -180,6 +186,11 @@
         <label for="layout-note-text-size">Note/Cent Text Size</label>
         <input id="layout-note-text-size" type="range" min="8" max="24" step="1" value="11" />
         <span id="layout-note-text-readout" class="control-readout">11 px</span>
+      </div>
+      <div class="control-group">
+        <label for="layout-triangle-label-size">Triangle Label Size</label>
+        <input id="layout-triangle-label-size" type="range" min="8" max="36" step="1" value="20" />
+        <span id="layout-triangle-label-readout" class="control-readout">20 px</span>
       </div>
       <div class="control-group">
         <label for="layout-node-shape">Default Shape</label>
@@ -422,7 +433,7 @@
               <button type="button" data-view="xy">X-Y</button>
               <button type="button" data-view="zy">Z-Y</button>
               <button type="button" data-view="quarter">Quarter</button>
-              <button type="button" data-action="best-view">Best View</button>
+              <button type="button" data-action="best-view">Next Best</button>
             </div>
             <div class="nav-3d-buttons" data-nav-mode="2d">
               <button type="button" data-action="fit-view">Fit</button>
@@ -595,9 +606,34 @@
             <option value="Arial">Arial</option>
           </select>
         </label>
+        <label>
+          Triangle Label Font
+          <select id="layout-triangle-label-font">
+            <option value="Georgia">Georgia</option>
+            <option value="Garamond">Garamond</option>
+            <option value="Palatino">Palatino</option>
+            <option value="Times New Roman">Times New Roman</option>
+            <option value="Lexend">Lexend</option>
+            <option value="Helvetica">Helvetica</option>
+            <option value="Arial">Arial</option>
+          </select>
+        </label>
         <menu class="dialog-actions">
           <button type="submit" value="cancel">Cancel</button>
           <button type="submit" value="confirm">Done</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="triangle-label-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form">
+        <div class="dialog-title">Label</div>
+        <label>
+          Label:
+          <input type="text" id="triangle-label-input" maxlength="40" />
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="none">None</button>
+          <button type="submit" value="ok">OK</button>
         </menu>
       </form>
     </dialog>

@@ -6,7 +6,7 @@
     <title>Tuning Lattice</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&family=Inter:wght@100..900&family=DM+Sans:wght@400..700&family=Radley:ital,wght@0,400;1,400&family=Alice&family=Cinzel:wght@400..900&display=swap" rel="stylesheet">
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-LWPVNSVEWV"></script>
     <script>
@@ -16,8 +16,8 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/index-BVsRfGO5.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-BPj3DWY_.css">
+    <script type="module" crossorigin src="./assets/index-DITIyomT.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CUp3YqzN.css">
   </head>
   <body>
     <canvas id="lattice"></canvas>
@@ -135,10 +135,10 @@
           </div>
         </div>
         </section>
+        </div>
         <div class="hint-row">
           <div id="ui-hint" class="ui-hint"></div>
           <div id="z-mode-message" class="ui-hint z-mode-message" hidden></div>
-        </div>
         </div>
       </div>
     </main>
@@ -179,19 +179,19 @@
         <div class="control-group">
           <input id="layout-title" type="text" placeholder="Title" aria-label="Title" />
         </div>
-        <div class="control-group control-group-inline">
-          <label for="layout-title-size">Size</label>
-          <input id="layout-title-size" type="range" min="10" max="96" step="1" value="28" />
-        </div>
         <div class="control-group">
           <input id="layout-creator" type="text" placeholder="Creator" aria-label="Creator" />
         </div>
-        <div class="control-group control-group-inline">
-          <label for="layout-creator-size">Size</label>
-          <input id="layout-creator-size" type="range" min="8" max="72" step="1" value="18" />
-        </div>
-        <div class="control-group">
-          <button id="layout-fonts" type="button" class="button-full">Edit Fonts</button>
+        <div class="control-group layout-font-group">
+          <button
+            id="layout-fonts"
+            type="button"
+            class="button-full"
+            aria-expanded="false"
+            aria-controls="layout-font-popover"
+          >
+            Edit Text Styles
+          </button>
         </div>
         <div class="nav-3d-title">Size</div>
         <div class="control-group">
@@ -222,24 +222,36 @@
           <label for="layout-node-size">Node</label>
           <input id="layout-node-size" type="range" min="18" max="70" step="1" value="35" />
         </div>
-        <div class="control-group control-group-inline">
-          <label for="layout-ratio-text-size">Text</label>
-          <input id="layout-ratio-text-size" type="range" min="10" max="36" step="1" value="21" />
-        </div>
-        <div class="control-group control-group-inline">
-          <label for="layout-note-text-size">Label</label>
-          <input id="layout-note-text-size" type="range" min="8" max="24" step="1" value="11" />
-        </div>
-        <div class="control-group control-group-inline">
-          <label for="layout-triangle-label-size">Chord</label>
-          <input id="layout-triangle-label-size" type="range" min="8" max="36" step="1" value="20" />
-        </div>
-        <div id="layout-custom-size-group" class="control-group control-group-inline" hidden>
-          <label for="layout-custom-label-size">Custom</label>
-          <input id="layout-custom-label-size" type="range" min="8" max="36" step="1" value="18" />
-        </div>
         <div id="layout-key-mappings-group" class="nav-3d-accordion-body" hidden>
-          <div class="nav-3d-title">Key Mappings</div>
+          <div
+            id="layout-key-mapping-trigger"
+            class="nav-3d-title layout-space-trigger layout-key-mapping-trigger"
+            role="button"
+            tabindex="0"
+            aria-expanded="false"
+            aria-controls="layout-key-mapping-popover"
+          >
+            Key Mappings
+          </div>
+          <div class="control-group layout-key-mapping-group">
+            <div
+              id="layout-key-mapping-popover"
+              class="layout-space-popover layout-key-mapping-popover"
+              hidden
+            >
+              <div class="layout-space-row">
+                <label for="layout-key-mapping-offset">Position</label>
+                <input id="layout-key-mapping-offset" type="range" min="-20" max="40" step="1" value="6" />
+              </div>
+              <div class="control-inline">
+                <input id="layout-key-mapping-dark" type="checkbox" />
+                <span>Dark</span>
+              </div>
+              <div class="control-inline">
+                <button id="layout-key-mapping-text" type="button">Text</button>
+              </div>
+            </div>
+          </div>
           <div class="control-group">
             <div class="nav-3d-buttons nav-3d-toggle-buttons nav-3d-toggle-buttons-3">
               <button type="button" data-layout-key-mapping="hide">Hide</button>
@@ -261,6 +273,227 @@
         </div>
       </div>
     </aside>
+
+    <div id="layout-font-popover" class="layout-font-popover" hidden>
+      <div class="layout-font-form">
+        <div class="dialog-title">Text Styles</div>
+        <label>
+          Title Font
+          <div class="layout-font-controls">
+            <select id="layout-title-font">
+              <option value="Lexend">Lexend</option>
+              <option value="HEJI2Text">HEJI2Text</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Inter">Inter</option>
+              <option value="DM Sans">DM Sans</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-title-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Title Size</span>
+            <input id="layout-title-size" type="range" min="10" max="96" step="1" value="28" />
+          </div>
+        </label>
+        <label>
+          Creator Font
+          <div class="layout-font-controls">
+            <select id="layout-creator-font">
+              <option value="Lexend">Lexend</option>
+              <option value="HEJI2Text">HEJI2Text</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Inter">Inter</option>
+              <option value="DM Sans">DM Sans</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-creator-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Creator Size</span>
+            <input id="layout-creator-size" type="range" min="8" max="72" step="1" value="18" />
+          </div>
+        </label>
+        <label>
+          Inside Font
+          <div class="layout-font-controls">
+            <select id="layout-ratio-font">
+              <option value="Georgia">Georgia</option>
+              <option value="Lexend">Lexend</option>
+              <option value="HEJI2Text">HEJI2Text</option>
+              <option value="Inter">Inter</option>
+              <option value="DM Sans">DM Sans</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-ratio-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Size</span>
+            <input id="layout-ratio-text-size" type="range" min="10" max="36" step="1" value="21" />
+          </div>
+        </label>
+        <label>
+          Label Font
+          <div class="layout-font-controls">
+            <select id="layout-note-font">
+              <option value="Lexend">Lexend</option>
+              <option value="HEJI2Text">HEJI2Text</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Inter">Inter</option>
+              <option value="DM Sans">DM Sans</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-note-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Size</span>
+            <input id="layout-note-text-size" type="range" min="8" max="24" step="1" value="11" />
+          </div>
+        </label>
+        <label>
+          Triangle Label Font
+          <div class="layout-font-controls">
+            <select id="layout-triangle-label-font">
+              <option value="Georgia">Georgia</option>
+              <option value="Lexend">Lexend</option>
+              <option value="HEJI2Text">HEJI2Text</option>
+              <option value="Inter">Inter</option>
+              <option value="DM Sans">DM Sans</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+              <option value="Cinzel">Cinzel</option>
+            </select>
+            <select id="layout-triangle-label-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Size</span>
+            <input id="layout-triangle-label-size" type="range" min="8" max="36" step="1" value="20" />
+          </div>
+        </label>
+        <label>
+          Axis Legend Font
+          <div class="layout-font-controls">
+            <select id="layout-axis-font">
+              <option value="Lexend">Lexend</option>
+              <option value="HEJI2Text">HEJI2Text</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Inter">Inter</option>
+              <option value="DM Sans">DM Sans</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-axis-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Size</span>
+            <input id="layout-axis-size" type="range" min="10" max="36" step="1" value="19" />
+          </div>
+        </label>
+        <div id="layout-custom-size-group" hidden>
+          <label id="layout-custom-font-group" hidden>
+            Custom Text Font
+            <div class="layout-font-controls">
+              <select id="layout-custom-font">
+                <option value="Georgia">Georgia</option>
+                <option value="Lexend">Lexend</option>
+                <option value="HEJI2Text">HEJI2Text</option>
+                <option value="Inter">Inter</option>
+                <option value="DM Sans">DM Sans</option>
+                <option value="Radley">Radley</option>
+                <option value="Alice">Alice</option>
+              </select>
+              <select id="layout-custom-weight">
+                <option value="200">Extra Light</option>
+                <option value="300">Light</option>
+                <option value="400">Regular</option>
+                <option value="500">Medium</option>
+                <option value="600">Semi Bold</option>
+                <option value="700">Bold</option>
+              </select>
+            </div>
+            <div class="layout-font-size">
+              <span>Size</span>
+              <input id="layout-custom-label-size" type="range" min="8" max="36" step="1" value="18" />
+            </div>
+          </label>
+        </div>
+        <label>
+          Key Mappings Font
+          <div class="layout-font-controls">
+            <select id="layout-key-mapping-font">
+              <option value="Lexend">Lexend</option>
+              <option value="HEJI2Text">HEJI2Text</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Inter">Inter</option>
+              <option value="DM Sans">DM Sans</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-key-mapping-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Size</span>
+            <input id="layout-key-mapping-size" type="range" min="8" max="20" step="1" value="11" />
+          </div>
+        </label>
+        <div class="layout-font-actions">
+          <button id="layout-font-cancel" type="button">Cancel</button>
+          <button id="layout-font-done" type="button">Done</button>
+        </div>
+      </div>
+    </div>
 
     <section class="panel synth-panel">
       <div class="synth-group">
@@ -635,75 +868,6 @@
       </form>
     </dialog>
 
-    <dialog id="layout-font-dialog" class="custom-ratio-dialog">
-      <form method="dialog" class="custom-ratio-form">
-        <div class="dialog-title">Layout Fonts</div>
-        <label>
-          Title Font
-          <select id="layout-title-font">
-            <option value="Georgia">Georgia</option>
-            <option value="Garamond">Garamond</option>
-            <option value="Palatino">Palatino</option>
-            <option value="Times New Roman">Times New Roman</option>
-            <option value="Lexend">Lexend</option>
-            <option value="Helvetica">Helvetica</option>
-            <option value="Arial">Arial</option>
-          </select>
-        </label>
-        <label>
-          Ratio Font
-          <select id="layout-ratio-font">
-            <option value="Georgia">Georgia</option>
-            <option value="Garamond">Garamond</option>
-            <option value="Palatino">Palatino</option>
-            <option value="Times New Roman">Times New Roman</option>
-            <option value="Lexend">Lexend</option>
-            <option value="Helvetica">Helvetica</option>
-            <option value="Arial">Arial</option>
-          </select>
-        </label>
-        <label>
-          Note/Cent Font
-          <select id="layout-note-font">
-            <option value="Georgia">Georgia</option>
-            <option value="Garamond">Garamond</option>
-            <option value="Palatino">Palatino</option>
-            <option value="Times New Roman">Times New Roman</option>
-            <option value="Lexend">Lexend</option>
-            <option value="Helvetica">Helvetica</option>
-            <option value="Arial">Arial</option>
-          </select>
-        </label>
-        <label>
-          Triangle Label Font
-          <select id="layout-triangle-label-font">
-            <option value="Georgia">Georgia</option>
-            <option value="Garamond">Garamond</option>
-            <option value="Palatino">Palatino</option>
-            <option value="Times New Roman">Times New Roman</option>
-            <option value="Lexend">Lexend</option>
-            <option value="Helvetica">Helvetica</option>
-            <option value="Arial">Arial</option>
-          </select>
-        </label>
-        <label id="layout-custom-font-group" hidden>
-          Custom Text Font
-          <select id="layout-custom-font">
-            <option value="Georgia">Georgia</option>
-            <option value="Garamond">Garamond</option>
-            <option value="Palatino">Palatino</option>
-            <option value="Times New Roman">Times New Roman</option>
-            <option value="Lexend">Lexend</option>
-            <option value="Helvetica">Helvetica</option>
-            <option value="Arial">Arial</option>
-          </select>
-        </label>
-        <menu class="dialog-actions">
-          <button type="submit" value="cancel">Cancel</button>
-          <button type="submit" value="confirm">Done</button>
-        </menu>
-      </form>
-    </dialog>
     <dialog id="layout-custom-label-dialog" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form">
         <div class="dialog-title">Custom Label</div>
@@ -714,6 +878,23 @@
         <menu class="dialog-actions">
           <button type="submit" value="cancel">Cancel</button>
           <button type="submit" value="confirm">OK</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="layout-key-mapping-text-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form">
+        <div class="dialog-title">Key Mapping Text</div>
+        <label>
+          Before
+          <input id="layout-key-mapping-prefix" type="text" maxlength="12" />
+        </label>
+        <label>
+          After
+          <input id="layout-key-mapping-suffix" type="text" maxlength="12" />
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="confirm">Done</button>
         </menu>
       </form>
     </dialog>

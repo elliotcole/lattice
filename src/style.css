@@ -4,6 +4,7 @@
   --panel: rgba(255, 255, 255, 0.78);
   --ink: #101316;
   --accent: #245a8d;
+  --map-mode: #2ea44f;
   --node: #2d7aa6;
   --node-active: #c94b3d;
   --border: rgba(16, 19, 22, 0.15);
@@ -49,12 +50,23 @@ body {
   transition: background 0.3s ease, color 0.3s ease;
 }
 
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  pointer-events: none;
+  transition: background 0.3s ease;
+  z-index: 1;
+}
+
 body.theme-dark {
   color-scheme: dark;
   --bg: #0c1117;
   --panel: rgba(18, 24, 33, 0.8);
   --ink: #e8edf2;
   --accent: #4aa3df;
+  --map-mode: #33c46b;
   --node: #59b0dd;
   --node-active: #f5a15b;
   --border: rgba(231, 237, 244, 0.18);
@@ -422,6 +434,34 @@ button:active {
   opacity: 0.7;
 }
 
+.nav-3d-accordion-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.nav-3d-accordion-chevron {
+  transition: transform 0.2s ease;
+}
+
+.nav-3d-accordion-toggle.is-collapsed .nav-3d-accordion-chevron {
+  transform: rotate(-90deg);
+}
+
+.nav-3d-accordion-body[hidden] {
+  display: none;
+}
+
 .nav-3d-buttons {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -743,6 +783,51 @@ button:active {
   box-sizing: border-box;
 }
 
+.layout-space-group {
+  position: relative;
+}
+
+.layout-space-trigger {
+  cursor: pointer;
+}
+
+.layout-space-trigger:hover,
+.layout-space-trigger:focus-visible {
+  opacity: 1;
+}
+
+.layout-space-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.15);
+  z-index: 5;
+}
+
+.layout-space-popover[hidden] {
+  display: none;
+}
+
+.layout-space-row {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 6px;
+  align-items: center;
+}
+
+.layout-space-row label {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  opacity: 0.8;
+}
+
 .preset-toggle {
   position: relative;
 }
@@ -823,6 +908,50 @@ button:active {
   position: relative;
 }
 
+.keyboard-mode-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.keyboard-mode-row button {
+  white-space: nowrap;
+}
+
+.keyboard-map-button {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.keyboard-mode-row button.is-active {
+  border-color: var(--button-active-border);
+  background: var(--button-active-bg);
+  color: var(--button-active-text);
+}
+
+.keyboard-map-button.is-active {
+  border-color: var(--map-mode);
+  background: color-mix(in srgb, var(--map-mode) 22%, transparent);
+  color: var(--map-mode);
+}
+
+body.map-mode-active #lattice {
+  box-shadow: inset 0 0 0 6px color-mix(in srgb, var(--map-mode) 55%, transparent);
+}
+
+body.map-mode-active .keyboard-mode-row {
+  background: color-mix(in srgb, var(--map-mode) 12%, transparent);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+body.map-mode-active::before {
+  background: color-mix(in srgb, var(--map-mode) 8%, transparent);
+}
+
 .keyboard-help {
   position: absolute;
   left: 0;
@@ -844,6 +973,132 @@ button:active {
   opacity: 1;
   transform: translateY(0);
 }
+
+.keyboard-map-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: 240px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
+  z-index: 3;
+}
+
+.keyboard-map-clear-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-transform: lowercase;
+  cursor: pointer;
+}
+
+.keyboard-map-clear-link:hover {
+  color: var(--text-primary);
+}
+
+.keyboard-map-popover[hidden] {
+  display: none;
+}
+
+.piano-keys {
+  position: relative;
+  display: block;
+  height: 86px;
+  margin-bottom: 10px;
+}
+
+.piano-keys-white {
+  display: flex;
+  height: 100%;
+  gap: 4px;
+}
+
+.piano-keys-black {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 52px;
+  width: 100%;
+  pointer-events: none;
+}
+
+.piano-key {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0;
+  font-size: 10px;
+  font-family: "Lexend", sans-serif;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+
+.piano-key.white {
+  flex: 1;
+  background: #ffffff;
+  color: var(--text-primary);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.12);
+}
+
+.piano-key.white:not(.is-mapped):not(.is-selected) {
+  background: #ffffff;
+  border-color: var(--border);
+}
+
+.piano-key.black {
+  position: absolute;
+  top: 0;
+  left: calc(var(--key-pos) * 100% / 7 - 10px);
+  width: 20px;
+  height: 52px;
+  background: #1b1b1b;
+  color: #f5f5f5;
+  border-color: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  pointer-events: auto;
+  box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.12);
+}
+
+.piano-key.black:not(.is-mapped):not(.is-selected) {
+  background: #1b1b1b;
+  border-color: rgba(0, 0, 0, 0.6);
+  color: #f5f5f5;
+}
+
+.piano-key.is-mapped {
+  background: color-mix(in srgb, var(--map-mode) 18%, #ffffff);
+  border-color: var(--border);
+}
+
+.piano-key.black.is-mapped {
+  background: color-mix(in srgb, var(--map-mode) 22%, #1b1b1b);
+  border-color: rgba(0, 0, 0, 0.6);
+}
+
+.piano-key.is-selected {
+  background: color-mix(in srgb, var(--map-mode) 45%, #ffffff);
+  border-color: var(--map-mode);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--map-mode) 70%, transparent);
+}
+
+.piano-key.black.is-selected {
+  background: color-mix(in srgb, var(--map-mode) 55%, #1b1b1b);
+  border-color: var(--map-mode);
+  color: #ffffff;
+}
+
+.piano-key:active {
+  transform: translateY(1px);
+}
+
 
 .synth-group.is-disabled {
   opacity: 0.45;

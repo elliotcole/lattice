@@ -8012,8 +8012,10 @@ function updateCustomPianoKeyStyles() {
     const key = Number(button.dataset.key);
     const mapped = customPianoMap.get(key);
     const isSelected = key === customPianoSelectedKey;
+    const isMapped = Boolean(mapped && mapped.size > 0);
     button.classList.toggle("is-selected", isSelected);
-    button.classList.toggle("is-mapped", mapped && mapped.size > 0);
+    button.classList.toggle("is-mapped", isMapped);
+    button.classList.toggle("is-unmapped", !isMapped);
   });
 }
 
@@ -10280,7 +10282,7 @@ function applyPresetState(state) {
   } else {
     customNodes = [];
   }
-  rebuildLattice(activeKeys, { remapTriangles: false });
+  rebuildLattice(activeKeys, { remapTriangles: false, remapLayoutOffsets: false });
   if (pendingLayoutLabelOffsets) {
     applyLayoutLabelOffsets(pendingLayoutLabelOffsets);
     pendingLayoutLabelOffsets = null;
@@ -11075,8 +11077,10 @@ function applyActiveNodeKeys(keys) {
   markIsomorphicDirty();
 }
 
-function rebuildLattice(activeKeys = null, { remapTriangles = true } = {}) {
+function rebuildLattice(activeKeys = null, { remapTriangles = true, remapLayoutOffsets = true } = {}) {
   stopAllVoices();
+  const labelOffsets = remapLayoutOffsets ? serializeLayoutLabelOffsets() : null;
+  const positionOffsets = remapLayoutOffsets ? serializeLayoutPositionOffsets() : null;
   const prevCenterZ = gridCenterZ;
   const latticeNodes = buildLattice();
   customNodes.forEach((node) => {
@@ -11096,6 +11100,14 @@ function rebuildLattice(activeKeys = null, { remapTriangles = true } = {}) {
   applyActiveNodeKeys(activeKeys);
   pruneTriangleDiagonals();
   edges = buildEdges(latticeNodes, GRID_COLS, GRID_ROWS, gridDepth);
+  if (remapLayoutOffsets) {
+    if (labelOffsets && labelOffsets.length) {
+      applyLayoutLabelOffsets(labelOffsets);
+    }
+    if (positionOffsets && positionOffsets.length) {
+      applyLayoutPositionOffsets(positionOffsets);
+    }
+  }
   updatePitchInstances();
   markIsomorphicDirty();
   refreshPatternFromActiveNodes();

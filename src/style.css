@@ -1048,11 +1048,6 @@ body.map-mode-active::before {
   box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.12);
 }
 
-.piano-key.white:not(.is-mapped):not(.is-selected) {
-  background: #ffffff;
-  border-color: var(--border);
-}
-
 .piano-key.black {
   position: absolute;
   top: 0;
@@ -1067,7 +1062,12 @@ body.map-mode-active::before {
   box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.12);
 }
 
-.piano-key.black:not(.is-mapped):not(.is-selected) {
+.piano-key.is-unmapped {
+  background: #ffffff;
+  border-color: var(--border);
+}
+
+.piano-key.black.is-unmapped {
   background: #1b1b1b;
   border-color: rgba(0, 0, 0, 0.6);
   color: #f5f5f5;

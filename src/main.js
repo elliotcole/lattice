@@ -9266,14 +9266,15 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
   draw();
 }
 
-function setLayoutMode(enabled) {
-  if (layoutMode === enabled) {
+function setLayoutMode(enabled, { force = false } = {}) {
+  const wasLayoutMode = layoutMode;
+  if (wasLayoutMode === enabled && !(force && enabled)) {
     return;
   }
   uiHintKey = "";
   uiHintDismissed = false;
   resetUiHintToDefault();
-  if (enabled) {
+  if (enabled && !wasLayoutMode) {
     layoutPrevState = {
       is3DMode,
       showAxes,
@@ -10822,7 +10823,19 @@ function applyPresetState(state) {
       }
     }
     if (typeof layoutState.mode === "boolean") {
-      setLayoutMode(layoutState.mode);
+      if (layoutMode) {
+        layoutPrevState = {
+          is3DMode,
+          showAxes,
+          showGrid,
+          zoom: view.zoom,
+          offsetX: view.offsetX,
+          offsetY: view.offsetY,
+          rotX: view.rotX,
+          rotY: view.rotY,
+        };
+      }
+      setLayoutMode(layoutState.mode, { force: layoutState.mode && layoutMode });
     }
   }
 

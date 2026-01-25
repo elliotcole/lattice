@@ -27,6 +27,15 @@ const layoutSpaceXInput = document.getElementById("layout-space-x");
 const layoutSpaceYInput = document.getElementById("layout-space-y");
 const layoutSpaceZInput = document.getElementById("layout-space-z");
 const layoutSpaceZRow = document.getElementById("layout-space-z-row");
+const layoutKeyMappingTrigger = document.getElementById("layout-key-mapping-trigger");
+const layoutKeyMappingPopover = document.getElementById("layout-key-mapping-popover");
+const layoutKeyMappingSizeInput = document.getElementById("layout-key-mapping-size");
+const layoutKeyMappingOffsetInput = document.getElementById("layout-key-mapping-offset");
+const layoutKeyMappingDarkToggle = document.getElementById("layout-key-mapping-dark");
+const layoutKeyMappingTextButton = document.getElementById("layout-key-mapping-text");
+const layoutKeyMappingTextDialog = document.getElementById("layout-key-mapping-text-dialog");
+const layoutKeyMappingPrefixInput = document.getElementById("layout-key-mapping-prefix");
+const layoutKeyMappingSuffixInput = document.getElementById("layout-key-mapping-suffix");
 const layoutLockPositionToggle = document.getElementById("layout-lock-position");
 const layoutNodeSizeInput = document.getElementById("layout-node-size");
 const layoutNodeSizeReadout = document.getElementById("layout-node-size-readout");
@@ -40,12 +49,26 @@ const layoutCustomLabelSizeInput = document.getElementById("layout-custom-label-
 const layoutCustomSizeGroup = document.getElementById("layout-custom-size-group");
 const layoutNodeShapeSelect = document.getElementById("layout-node-shape");
 const layoutFontsButton = document.getElementById("layout-fonts");
-const layoutFontDialog = document.getElementById("layout-font-dialog");
+const layoutFontPopover = document.getElementById("layout-font-popover");
+const layoutFontCancelButton = document.getElementById("layout-font-cancel");
+const layoutFontDoneButton = document.getElementById("layout-font-done");
 const layoutTitleFontSelect = document.getElementById("layout-title-font");
+const layoutTitleWeightSelect = document.getElementById("layout-title-weight");
+const layoutCreatorFontSelect = document.getElementById("layout-creator-font");
+const layoutCreatorWeightSelect = document.getElementById("layout-creator-weight");
 const layoutRatioFontSelect = document.getElementById("layout-ratio-font");
+const layoutRatioWeightSelect = document.getElementById("layout-ratio-weight");
 const layoutNoteFontSelect = document.getElementById("layout-note-font");
+const layoutNoteWeightSelect = document.getElementById("layout-note-weight");
 const layoutTriangleLabelFontSelect = document.getElementById("layout-triangle-label-font");
+const layoutTriangleLabelWeightSelect = document.getElementById("layout-triangle-label-weight");
+const layoutAxisFontSelect = document.getElementById("layout-axis-font");
+const layoutAxisWeightSelect = document.getElementById("layout-axis-weight");
+const layoutAxisSizeInput = document.getElementById("layout-axis-size");
 const layoutCustomFontSelect = document.getElementById("layout-custom-font");
+const layoutCustomWeightSelect = document.getElementById("layout-custom-weight");
+const layoutKeyMappingFontSelect = document.getElementById("layout-key-mapping-font");
+const layoutKeyMappingWeightSelect = document.getElementById("layout-key-mapping-weight");
 const layoutCustomFontGroup = document.getElementById("layout-custom-font-group");
 const layoutUnifySizeToggle = document.getElementById("layout-unify-size");
 const layoutResetButton = document.getElementById("layout-reset");
@@ -220,7 +243,7 @@ function clearTriangleLabelsForCell(entry) {
   });
 }
 
-function computeTriangleLabelLayout(text, font, baseSize, points) {
+function computeTriangleLabelLayout(text, font, baseSize, points, fontWeight = 400) {
   if (!text || !points || points.length < 3) {
     return { size: baseSize };
   }
@@ -239,10 +262,10 @@ function computeTriangleLabelLayout(text, font, baseSize, points) {
   const maxWidth = Math.max(8, Math.min(boxWidth, boxHeight) * 0.75);
   let size = baseSize;
   const minSize = Math.max(2, Math.round(baseSize * 0.25));
-  let width = measureTextWidth(text, size, font);
+  let width = measureTextWidthWithWeight(text, size, font, fontWeight);
   while (width > maxWidth && size > minSize) {
     size -= 4;
-    width = measureTextWidth(text, size, font);
+    width = measureTextWidthWithWeight(text, size, font, fontWeight);
   }
   return { size };
 }
@@ -258,7 +281,7 @@ function getLayoutNoteLabelHitbox(node, pos, radius) {
   let height = layoutNoteTextSize;
   if (featureMode === "ratio") {
     ctx.save();
-    ctx.font = `${layoutNoteTextSize}px ${layoutNoteFont}`;
+    ctx.font = `${layoutNoteFontWeight} ${layoutNoteTextSize}px ${layoutNoteFont}`;
     const metrics = ctx.measureText(getNodeNoteLabel(node));
     ctx.restore();
     width = metrics.width;
@@ -271,8 +294,18 @@ function getLayoutNoteLabelHitbox(node, pos, radius) {
       displayInfo
     );
     width = Math.max(
-      measureTextWidthWithWeight(ratioText, layoutNoteTextSize, "Lexend, sans-serif", 200),
-      measureTextWidthWithWeight(centsLabel, layoutNoteTextSize, "Lexend, sans-serif", 200)
+      measureTextWidthWithWeight(
+        ratioText,
+        layoutNoteTextSize,
+        layoutNoteFont,
+        layoutNoteFontWeight
+      ),
+      measureTextWidthWithWeight(
+        centsLabel,
+        layoutNoteTextSize,
+        layoutNoteFont,
+        layoutNoteFontWeight
+      )
     );
     height = layoutNoteTextSize * 2 + 4;
   }
@@ -288,6 +321,29 @@ function getLayoutNoteLabelHitbox(node, pos, radius) {
 
 function serializeLayoutLabelOffsets() {
   return Array.from(layoutLabelOffsets.entries())
+    .map(([id, offset]) => {
+      const node = nodeById.get(id);
+      if (!node) {
+        return null;
+      }
+      if (node.isCustom) {
+        const customIndex = customNodes.findIndex((item) => item.id === id);
+        if (customIndex < 0) {
+          return null;
+        }
+        return { customIndex, x: offset.x, y: offset.y };
+      }
+      return {
+        exponents: [node.exponentX, node.exponentY, node.exponentZ || 0],
+        x: offset.x,
+        y: offset.y,
+      };
+    })
+    .filter(Boolean);
+}
+
+function serializeLayoutKeyMappingOffsets() {
+  return Array.from(layoutKeyMappingOffsets.entries())
     .map(([id, offset]) => {
       const node = nodeById.get(id);
       if (!node) {
@@ -364,6 +420,54 @@ function applyLayoutLabelOffsets(entries) {
       const node = nodeById.get(id);
       if (node) {
         layoutLabelOffsets.set(node.id, { x, y });
+      }
+    }
+  });
+}
+
+function applyLayoutKeyMappingOffsets(entries) {
+  layoutKeyMappingOffsets.clear();
+  if (!Array.isArray(entries)) {
+    return;
+  }
+  const exponentMap = new Map();
+  nodes.forEach((node) => {
+    if (!node.isCustom) {
+      exponentMap.set(
+        `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`,
+        node
+      );
+    }
+  });
+  entries.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const x = Number(entry.x);
+    const y = Number(entry.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return;
+    }
+    if (Number.isFinite(entry.customIndex)) {
+      const customNode = customNodes[entry.customIndex];
+      if (customNode) {
+        layoutKeyMappingOffsets.set(customNode.id, { x, y });
+      }
+      return;
+    }
+    if (Array.isArray(entry.exponents) && entry.exponents.length >= 2) {
+      const [expX, expY, expZ = 0] = entry.exponents.map(Number);
+      const node = exponentMap.get(`${expX},${expY},${expZ}`);
+      if (node) {
+        layoutKeyMappingOffsets.set(node.id, { x, y });
+      }
+      return;
+    }
+    const id = Number(entry.id);
+    if (Number.isFinite(id)) {
+      const node = nodeById.get(id);
+      if (node) {
+        layoutKeyMappingOffsets.set(node.id, { x, y });
       }
     }
   });
@@ -587,8 +691,10 @@ let layoutLabelDrag = null;
 let layoutPositions = new Map();
 let layoutPositionOffsets = new Map();
 let layoutLabelOffsets = new Map();
+let layoutKeyMappingOffsets = new Map();
 let pendingLayoutLabelOffsets = null;
 let pendingLayoutPositionOffsets = null;
+let pendingLayoutKeyMappingOffsets = null;
 let layoutNodeShapes = new Map();
 let nodeSpellingOverrides = new Map();
 let layoutNodeSize = 35;
@@ -596,6 +702,11 @@ let layoutRatioTextSize = 21;
 let layoutNoteTextSize = 14;
 let layoutTriangleLabelTextSize = 20;
 let layoutCustomLabelTextSize = 18;
+let layoutKeyMappingTextSize = 11;
+let layoutKeyMappingOffset = 6;
+let layoutKeyMappingDark = false;
+let layoutKeyMappingPrefix = "";
+let layoutKeyMappingSuffix = "";
 let layoutSpacing = { x: 1, y: 1, z: 1 };
 let layoutNodeShape = "circle";
 let layoutTitle = "";
@@ -613,9 +724,21 @@ let layoutView = { zoom: 1, offsetX: 0, offsetY: 0, rotX: 0, rotY: 0 };
 let layoutPrevState = null;
 let layoutTitleFont = "Lexend";
 let layoutRatioFont = "Georgia";
-let layoutNoteFont = "Georgia";
+let layoutNoteFont = "Lexend";
 let layoutTriangleLabelFont = "Georgia";
 let layoutCustomLabelFont = "Georgia";
+let layoutKeyMappingFont = "Lexend";
+let layoutAxisLegendFont = "Georgia";
+let layoutCreatorFont = "Lexend";
+let layoutTitleFontWeight = 400;
+let layoutRatioFontWeight = 400;
+let layoutNoteFontWeight = 200;
+let layoutTriangleLabelFontWeight = 400;
+let layoutCustomLabelFontWeight = 400;
+let layoutKeyMappingFontWeight = 400;
+let layoutAxisLegendFontWeight = 400;
+let layoutCreatorFontWeight = 400;
+let layoutAxisLegendTextSize = 19;
 let layoutCustomLabels = [];
 let layoutCustomLabelPending = null;
 let layoutCustomLabelId = 1;
@@ -636,6 +759,7 @@ let layoutAxisEditDrag = null;
 let layoutTitleDrag = null;
 let layoutCreatorDrag = null;
 let layoutCustomLabelDrag = null;
+let layoutKeyMappingDrag = null;
 const layoutUndoStack = [];
 const layoutRedoStack = [];
 const LAYOUT_UNDO_LIMIT = 50;
@@ -681,6 +805,11 @@ const LAYOUT_DEFAULTS = {
   noteTextSize: 14,
   triangleLabelTextSize: 20,
   customLabelTextSize: 18,
+  keyMappingTextSize: 11,
+  keyMappingOffset: 6,
+  keyMappingDark: false,
+  keyMappingPrefix: "",
+  keyMappingSuffix: "",
   spacing: { x: 1, y: 1, z: 1 },
   nodeShape: "circle",
   title: "",
@@ -697,9 +826,21 @@ const LAYOUT_DEFAULTS = {
   view: { zoom: 1, offsetX: 0, offsetY: 0, rotX: 0, rotY: 0 },
   titleFont: "Lexend",
   ratioFont: "Georgia",
-  noteFont: "Georgia",
+  noteFont: "Lexend",
   triangleLabelFont: "Georgia",
   customLabelFont: "Georgia",
+  keyMappingFont: "Lexend",
+  axisLegendFont: "Georgia",
+  creatorFont: "Lexend",
+  titleFontWeight: 400,
+  ratioFontWeight: 400,
+  noteFontWeight: 200,
+  triangleLabelFontWeight: 400,
+  customLabelFontWeight: 400,
+  keyMappingFontWeight: 400,
+  axisLegendFontWeight: 400,
+  creatorFontWeight: 400,
+  axisLegendTextSize: 19,
 };
 
 function updateNavModeSections() {
@@ -732,6 +873,12 @@ function updateKeyMappingToggleVisibility() {
   }
   if (layoutKeyMappingsGroup) {
     layoutKeyMappingsGroup.hidden = keyboardMode !== "piano-custom";
+    if (layoutKeyMappingsGroup.hidden && layoutKeyMappingPopover) {
+      layoutKeyMappingPopover.hidden = true;
+      if (layoutKeyMappingTrigger) {
+        layoutKeyMappingTrigger.setAttribute("aria-expanded", "false");
+      }
+    }
   }
 }
 
@@ -835,6 +982,14 @@ function shouldShowLayoutKeyMappingLabel(label, pitchClass) {
     return false;
   }
   return labels.some((entry) => !allowed.has(entry));
+}
+
+function getLayoutKeyMappingLabelText(label) {
+  const prefix = layoutKeyMappingPrefix || "";
+  const suffix = layoutKeyMappingSuffix || "";
+  const prefixText = prefix ? `${prefix} ` : "";
+  const suffixText = suffix ? ` ${suffix}` : "";
+  return `${prefixText}${label}${suffixText}`;
 }
 
 function setLayoutKeyMappingMode(nextMode) {
@@ -3255,12 +3410,19 @@ function buildSvgTextWithSmallCent({
   return nodes.join("\n");
 }
 
-function computeRatioLabelLayout(numerator, denominator, font, baseSize, maxWidth) {
+function computeRatioLabelLayout(
+  numerator,
+  denominator,
+  font,
+  baseSize,
+  maxWidth,
+  fontWeight = 400
+) {
   const singleLine = `${numerator}:${denominator}`;
   let size = baseSize;
   let lines = [singleLine];
   let lineGap = 0;
-  let width = measureTextWidth(singleLine, size, font);
+  let width = measureTextWidthWithWeight(singleLine, size, font, fontWeight);
   if (width <= maxWidth) {
     return { lines, size, lineGap };
   }
@@ -3269,8 +3431,8 @@ function computeRatioLabelLayout(numerator, denominator, font, baseSize, maxWidt
   const minSize = Math.max(10, Math.round(baseSize * 0.6));
   const measureTwoLine = () =>
     Math.max(
-      measureTextWidth(lines[0], size, font),
-      measureTextWidth(lines[1], size, font)
+      measureTextWidthWithWeight(lines[0], size, font, fontWeight),
+      measureTextWidthWithWeight(lines[1], size, font, fontWeight)
     );
   width = measureTwoLine();
   while (width > maxWidth && size > minSize) {
@@ -4067,6 +4229,43 @@ function getLayoutNoteLabelPosition(node, pos, radius) {
   return { x: pos.x + offset.x, y: pos.y + offset.y };
 }
 
+function getLayoutKeyMappingOffset(node, radius, scale = 1) {
+  const override = layoutKeyMappingOffsets.get(node.id);
+  if (override) {
+    return {
+      x: override.x * view.zoom * scale,
+      y: override.y * view.zoom * scale,
+    };
+  }
+  const distance = radius + layoutKeyMappingOffset;
+  return { x: -distance, y: -distance };
+}
+
+function getLayoutKeyMappingLabelPosition(node, pos, radius) {
+  const offset = getLayoutKeyMappingOffset(node, radius, pos.scale || 1);
+  return { x: pos.x + offset.x, y: pos.y + offset.y };
+}
+
+function getLayoutKeyMappingLabelHitbox(labelText, node, pos, radius) {
+  const labelPos = getLayoutKeyMappingLabelPosition(node, pos, radius);
+  const fontSize = Math.max(8, Math.round(layoutKeyMappingTextSize));
+  ctx.save();
+  ctx.font = `${layoutKeyMappingFontWeight} ${fontSize}px ${layoutKeyMappingFont}`;
+  const textWidth = ctx.measureText(labelText).width;
+  ctx.restore();
+  const paddingX = layoutKeyMappingDark ? 6 : 0;
+  const paddingY = layoutKeyMappingDark ? 3 : 0;
+  const width = textWidth + paddingX * 2;
+  const height = fontSize + paddingY * 2;
+  return {
+    left: labelPos.x - width,
+    top: labelPos.y - height,
+    width,
+    height,
+    labelPos,
+  };
+}
+
 function getLayoutTitleY() {
   const { top } = getLayoutPageRect();
   const disableScale = layoutUnifyNodeSize;
@@ -4130,7 +4329,12 @@ function getLayoutCreatorPosition() {
   }
   const creatorSize = getLayoutCreatorSize();
   const textWidth = layoutCreator
-    ? measureTextWidth(layoutCreator, creatorSize, layoutTitleFont)
+    ? measureTextWidthWithWeight(
+        layoutCreator,
+        creatorSize,
+        layoutCreatorFont,
+        layoutCreatorFontWeight
+      )
     : 0;
   const x = left + width - 100 - textWidth / 2;
   return { x, y: top + 150 };
@@ -4151,7 +4355,7 @@ function drawLayoutCustomLabels() {
   const size = Math.max(8, Math.round(layoutCustomLabelTextSize));
   ctx.save();
   ctx.fillStyle = themeColors.textSecondary;
-  ctx.font = `${size}px ${layoutCustomLabelFont}`;
+  ctx.font = `${layoutCustomLabelFontWeight} ${size}px ${layoutCustomLabelFont}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   layoutCustomLabels.forEach((entry) => {
@@ -4170,6 +4374,7 @@ function syncLayoutFontVars() {
   document.documentElement.style.setProperty("--font-note", layoutNoteFont);
   document.documentElement.style.setProperty("--font-triangle-label", layoutTriangleLabelFont);
   document.documentElement.style.setProperty("--font-custom-label", layoutCustomLabelFont);
+  document.documentElement.style.setProperty("--font-key-mapping", layoutKeyMappingFont);
 }
 
 const AXIS_EDGE_COLORS = {
@@ -4919,11 +5124,18 @@ function drawTriangleLabels(nodePosMap, disableScale = false) {
     const baseSize = layoutMode
       ? Math.max(12, Math.round(layoutTriangleLabelTextSize))
       : 18;
-    const layout = computeTriangleLabelLayout(entry.label, layoutTriangleLabelFont, baseSize, points);
+    const fontWeight = layoutMode ? layoutTriangleLabelFontWeight : 400;
+    const layout = computeTriangleLabelLayout(
+      entry.label,
+      layoutTriangleLabelFont,
+      baseSize,
+      points,
+      fontWeight
+    );
     ctx.save();
     ctx.setLineDash([]);
     ctx.fillStyle = themeColors.textSecondary;
-    ctx.font = `400 ${layout.size}px ${layoutTriangleLabelFont}`;
+    ctx.font = `${fontWeight} ${layout.size}px ${layoutTriangleLabelFont}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(entry.label, cx, cy);
@@ -5322,7 +5534,7 @@ function nodeHasHighPrime(node) {
 
 function getAxisLegendSettings() {
   const margin = 36;
-  const fontSize = Math.max(12, Math.round(layoutRatioTextSize * 0.9));
+  const fontSize = Math.max(10, Math.round(layoutAxisLegendTextSize));
   const xRatio = Number(ratioXSelect.value) || 3;
   const yRatio = Number(ratioYSelect.value) || 5;
   const zRatio = Number(ratioZSelect.value) || 7;
@@ -5392,7 +5604,7 @@ function getAxisLegendInfo(axis, settings = getAxisLegendSettings()) {
     dir = { x: Math.cos(overrideAngle), y: Math.sin(overrideAngle) };
   }
   ctx.save();
-  ctx.font = `${settings.fontSize}px ${layoutRatioFont}`;
+  ctx.font = `${layoutAxisLegendFontWeight} ${settings.fontSize}px ${layoutAxisLegendFont}`;
   const labelWidth = ctx.measureText(label).width;
   ctx.restore();
   const gap = Math.max(28, labelWidth + 16);
@@ -5460,7 +5672,7 @@ function drawLayoutAxes() {
   ctx.strokeStyle = themeColors.textSecondary;
   ctx.fillStyle = themeColors.textSecondary;
   ctx.lineWidth = 1.5;
-  ctx.font = `${fontSize}px ${layoutRatioFont}`;
+  ctx.font = `${layoutAxisLegendFontWeight} ${fontSize}px ${layoutAxisLegendFont}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
@@ -5497,7 +5709,7 @@ function drawLayoutPage({ drawAxes = true } = {}) {
   if (layoutTitle) {
     const titleSize = Math.max(12, Math.round(layoutTitleSize));
     ctx.fillStyle = themeColors.textPrimary;
-    ctx.font = `${titleSize}px ${layoutTitleFont}`;
+    ctx.font = `${layoutTitleFontWeight} ${titleSize}px ${layoutTitleFont}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     const titlePos = getLayoutTitlePosition();
@@ -5506,7 +5718,7 @@ function drawLayoutPage({ drawAxes = true } = {}) {
   if (layoutCreator) {
     const creatorSize = getLayoutCreatorSize();
     ctx.fillStyle = themeColors.textSecondary;
-    ctx.font = `${creatorSize}px ${layoutTitleFont}`;
+    ctx.font = `${layoutCreatorFontWeight} ${creatorSize}px ${layoutCreatorFont}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     const creatorPos = getLayoutCreatorPosition();
@@ -5631,7 +5843,7 @@ function draw() {
   const isIsomorphicMode = keyboardMode === "iso" || keyboardMode === "iso-fuzzy";
   const isCustomMapMode = keyboardMode === "piano-custom";
   const customPianoLabels =
-    isCustomMapMode && showKeyMappings ? getCustomPianoLabelMap() : null;
+    isCustomMapMode && (layoutMode || showKeyMappings) ? getCustomPianoLabelMap() : null;
   const showPianoKeyMappings = isPianoMode && showKeyMappings;
   const selectedCustomNodes =
     isCustomMapMode && isCustomPianoMapModeActive() && customPianoSelectedKey != null
@@ -5754,6 +5966,7 @@ function draw() {
     ctx.fillStyle = themeColors.textPrimary;
     const labelSize = layoutMode ? layoutRatioTextSize : 21;
     const labelFont = layoutMode ? layoutRatioFont : "Georgia";
+    const labelWeight = layoutMode ? layoutRatioFontWeight : 400;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     if (featureMode === "note") {
@@ -5781,6 +5994,7 @@ function draw() {
           restText: "",
           size: labelSize,
           font: labelFont,
+          fontWeight: labelWeight,
           align: "center",
           baseline: "middle",
           color: themeColors.textPrimary,
@@ -5795,6 +6009,7 @@ function draw() {
           restText: "",
           size: labelSize,
           font: labelFont,
+          fontWeight: labelWeight,
           align: "center",
           baseline: "middle",
           color: themeColors.textPrimary,
@@ -5807,18 +6022,19 @@ function draw() {
         node.denominator,
         labelFont,
         labelSize,
-        maxWidth
+        maxWidth,
+        labelWeight
       );
       const ratioYOffset = Math.round(layout.size * -0.09);
-      ctx.font = `${layout.size}px ${labelFont}`;
+      ctx.font = `${labelWeight} ${layout.size}px ${labelFont}`;
       if (layout.lines.length === 1) {
         ctx.fillText(layout.lines[0], pos.x, pos.y + ratioYOffset);
       } else {
         const lineOffset = layout.size / 2 + layout.lineGap / 2;
         const baseY = pos.y + ratioYOffset;
         const lineWidth = Math.max(
-          measureTextWidth(layout.lines[0], layout.size, labelFont),
-          measureTextWidth(layout.lines[1], layout.size, labelFont)
+          measureTextWidthWithWeight(layout.lines[0], layout.size, labelFont, labelWeight),
+          measureTextWidthWithWeight(layout.lines[1], layout.size, labelFont, labelWeight)
         );
         const lineY = baseY + layout.size * 0.1;
         ctx.fillText(layout.lines[0], pos.x, baseY - lineOffset);
@@ -5835,9 +6051,11 @@ function draw() {
     }
 
     const detailSize = layoutMode ? layoutNoteTextSize : 14;
+    const noteLabelFont = layoutMode ? layoutNoteFont : "Lexend, sans-serif";
+    const noteLabelWeight = layoutMode ? layoutNoteFontWeight : 200;
     const displayInfo = getCachedDisplayInfo(node);
     if (featureMode === "note") {
-      ctx.font = `200 ${detailSize}px "Lexend", sans-serif`;
+      ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.fillStyle = themeColors.textSecondary;
@@ -5860,9 +6078,9 @@ function draw() {
         text: centsLabel,
         x: ratioX,
         y: ratioY + lineOffset,
-        font: "Lexend, sans-serif",
+        font: noteLabelFont,
         size: detailSize,
-        fontWeight: 200,
+        fontWeight: noteLabelWeight,
         align: "left",
         baseline: "top",
         hejiAccidentals: hejiEnabled,
@@ -5905,13 +6123,13 @@ function draw() {
         suffixParts: annotation.suffixParts,
         restText: ` ${centsLabel}`,
         size: detailSize,
-        font: "Lexend, sans-serif",
+        font: noteLabelFont,
         align: "left",
         baseline: "top",
         hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
         restGapScale,
         restHejiAccidentals: hejiEnabled && hasParen,
-        fontWeight: 200,
+        fontWeight: noteLabelWeight,
         color: themeColors.textSecondary,
       });
       if (showHz && Number.isFinite(node.freq)) {
@@ -5980,7 +6198,38 @@ function draw() {
         ? shouldShowLayoutKeyMappingLabel(keyLabel, pitchClass)
         : true;
       if (keyLabel && showLabel) {
-        if (is3DMode) {
+        if (layoutMode) {
+          const labelText = getLayoutKeyMappingLabelText(keyLabel);
+          const labelPos = getLayoutKeyMappingLabelPosition(node, pos, radius);
+          const fontSize = Math.max(8, Math.round(layoutKeyMappingTextSize));
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.font = `${layoutKeyMappingFontWeight} ${fontSize}px ${layoutKeyMappingFont}`;
+          ctx.textAlign = "right";
+          ctx.textBaseline = "bottom";
+          if (layoutKeyMappingDark) {
+            const paddingX = 6;
+            const paddingY = 3;
+            const textWidth = ctx.measureText(labelText).width;
+            const boxWidth = textWidth + paddingX * 2;
+            const boxHeight = fontSize + paddingY * 2;
+            const boxX = labelPos.x - boxWidth;
+            const boxY = labelPos.y - boxHeight;
+            ctx.fillStyle = "rgba(10, 15, 20, 0.7)";
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 6);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText(labelText, labelPos.x - paddingX, labelPos.y - paddingY);
+          } else {
+            ctx.fillStyle = themeColors.textSecondary;
+            ctx.fillText(labelText, labelPos.x, labelPos.y);
+          }
+          ctx.restore();
+        } else if (is3DMode) {
           drawKeyBanner(pos, radius, keyLabel, alpha);
         } else {
           ctx.save();
@@ -6005,7 +6254,7 @@ function draw() {
     ctx.strokeStyle = themeColors.textSecondary;
     ctx.fillStyle = themeColors.textSecondary;
     ctx.lineWidth = 1.5;
-    ctx.font = `${getAxisLegendSettings().fontSize}px ${layoutRatioFont}`;
+  ctx.font = `${layoutAxisLegendFontWeight} ${getAxisLegendSettings().fontSize}px ${layoutAxisLegendFont}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     drawLayoutAxisLegend(layoutAxisEdit, { showHandles: true });
@@ -6607,6 +6856,22 @@ function onPointerDown(event) {
       canvas.setPointerCapture(event.pointerId);
       return;
     }
+    const keyMappingHit = hitTestLayoutKeyMappingLabel(screenPoint);
+    if (keyMappingHit) {
+      pushLayoutUndoState();
+      layoutKeyMappingDrag = {
+        nodeId: keyMappingHit.node.id,
+        offsetX: keyMappingHit.labelPos.x - screenPoint.x,
+        offsetY: keyMappingHit.labelPos.y - screenPoint.y,
+        startLabelX: keyMappingHit.labelPos.x,
+        startLabelY: keyMappingHit.labelPos.y,
+        lockAxis: null,
+        lockOriginX: event.offsetX,
+        lockOriginY: event.offsetY,
+      };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
     const labelHit = hitTestNoteLabel(screenPoint);
     if (labelHit) {
       pushLayoutUndoState();
@@ -6890,6 +7155,32 @@ function onPointerMove(event) {
     scheduleDraw();
     return;
   }
+  if (layoutMode && layoutKeyMappingDrag) {
+    const node = nodeById.get(layoutKeyMappingDrag.nodeId);
+    if (node) {
+      const disableScale = layoutUnifyNodeSize;
+      const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+      const lockAxis = updateDragLock(layoutKeyMappingDrag, event);
+      let labelX = event.offsetX + layoutKeyMappingDrag.offsetX;
+      let labelY = event.offsetY + layoutKeyMappingDrag.offsetY;
+      if (lockAxis === "x") {
+        labelY = layoutKeyMappingDrag.startLabelY;
+      } else if (lockAxis === "y") {
+        labelX = layoutKeyMappingDrag.startLabelX;
+      }
+      if (!event.shiftKey) {
+        layoutKeyMappingDrag.startLabelX = labelX;
+        layoutKeyMappingDrag.startLabelY = labelY;
+      }
+      const scale = pos.scale || 1;
+      layoutKeyMappingOffsets.set(node.id, {
+        x: (labelX - pos.x) / (view.zoom * scale),
+        y: (labelY - pos.y) / (view.zoom * scale),
+      });
+      scheduleDraw();
+    }
+    return;
+  }
   if (layoutMode && layoutLabelDrag) {
     const node = nodeById.get(layoutLabelDrag.nodeId);
     if (node) {
@@ -7037,6 +7328,11 @@ function onPointerUp(event) {
   }
   if (layoutLabelDrag) {
     layoutLabelDrag = null;
+    schedulePresetUrlUpdate();
+    return;
+  }
+  if (layoutKeyMappingDrag) {
+    layoutKeyMappingDrag = null;
     schedulePresetUrlUpdate();
     return;
   }
@@ -7353,13 +7649,57 @@ function hitTestNoteLabel(screenPoint) {
   return hit;
 }
 
+function hitTestLayoutKeyMappingLabel(screenPoint) {
+  if (!layoutMode || layoutKeyMappingMode === "hide") {
+    return null;
+  }
+  const keyboardMode = getKeyboardMode();
+  if (keyboardMode !== "piano-custom") {
+    return null;
+  }
+  const customPianoLabels = getCustomPianoLabelMap();
+  const disableScale = layoutUnifyNodeSize;
+  let hit = null;
+  nodes.forEach((node) => {
+    if (!(node.isCenter || node.active || node.isCustom)) {
+      return;
+    }
+    const keyLabel = customPianoLabels.get(node.id);
+    if (!keyLabel) {
+      return;
+    }
+    const labelText = getLayoutKeyMappingLabelText(keyLabel);
+    const displayInfo = getCachedDisplayInfo(node);
+    const pitchClass = displayInfo.pitchClass || node.pitch_class;
+    if (!shouldShowLayoutKeyMappingLabel(keyLabel, pitchClass)) {
+      return;
+    }
+    const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+    const radius = layoutNodeSize * (pos.scale || 1);
+    const hitbox = getLayoutKeyMappingLabelHitbox(labelText, node, pos, radius);
+    const left = hitbox.left;
+    const right = hitbox.left + hitbox.width;
+    const top = hitbox.top;
+    const bottom = hitbox.top + hitbox.height;
+    if (
+      screenPoint.x >= left &&
+      screenPoint.x <= right &&
+      screenPoint.y >= top &&
+      screenPoint.y <= bottom
+    ) {
+      hit = { node, labelPos: hitbox.labelPos };
+    }
+  });
+  return hit;
+}
+
 function hitTestLayoutTitle(screenPoint) {
   if (!layoutMode || !layoutTitle) {
     return null;
   }
   const titleSize = Math.max(12, Math.round(layoutTitleSize));
   ctx.save();
-  ctx.font = `${titleSize}px ${layoutTitleFont}`;
+  ctx.font = `${layoutTitleFontWeight} ${titleSize}px ${layoutTitleFont}`;
   const width = ctx.measureText(layoutTitle).width;
   ctx.restore();
   const pos = getLayoutTitlePosition();
@@ -7385,7 +7725,7 @@ function hitTestLayoutCreator(screenPoint) {
   }
   const creatorSize = getLayoutCreatorSize();
   ctx.save();
-  ctx.font = `${creatorSize}px ${layoutTitleFont}`;
+  ctx.font = `${layoutCreatorFontWeight} ${creatorSize}px ${layoutCreatorFont}`;
   const width = ctx.measureText(layoutCreator).width;
   ctx.restore();
   const pos = getLayoutCreatorPosition();
@@ -7411,7 +7751,7 @@ function hitTestLayoutCustomLabel(screenPoint) {
   }
   const size = Math.max(8, Math.round(layoutCustomLabelTextSize));
   ctx.save();
-  ctx.font = `${size}px ${layoutCustomLabelFont}`;
+  ctx.font = `${layoutCustomLabelFontWeight} ${size}px ${layoutCustomLabelFont}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   for (let i = layoutCustomLabels.length - 1; i >= 0; i -= 1) {
@@ -7450,7 +7790,7 @@ function hitTestAxisLegend(screenPoint) {
     getAxisLegendInfo("z", settings),
   ];
   ctx.save();
-  ctx.font = `${settings.fontSize}px ${layoutRatioFont}`;
+  ctx.font = `${layoutAxisLegendFontWeight} ${settings.fontSize}px ${layoutAxisLegendFont}`;
   for (const axis of axes) {
     if (!axis) {
       continue;
@@ -7974,10 +8314,21 @@ function getCustomPianoLabelMap() {
   }
   const map = new Map();
   customPianoMap.forEach((nodeIds, key) => {
-    const label = noteNamesSharp[key % 12] || noteNames[key % 12];
+    const pitchIndex = key % 12;
+    const label = noteNamesSharp[pitchIndex] || noteNames[pitchIndex];
     nodeIds.forEach((nodeId) => {
+      const node = nodeById.get(nodeId);
+      let resolvedLabel = label;
+      if (node) {
+        const displayInfo = getCachedDisplayInfo(node);
+        const nodePitchClass = displayInfo.pitchClass || node.pitch_class;
+        const nodeIndex = PIANO_KEY_PITCH_CLASSES.get(nodePitchClass);
+        if (nodePitchClass && nodeIndex === pitchIndex) {
+          resolvedLabel = nodePitchClass;
+        }
+      }
       const list = map.get(nodeId) || [];
-      list.push(label);
+      list.push(resolvedLabel);
       map.set(nodeId, list);
     });
   });
@@ -8382,6 +8733,12 @@ function captureLayoutUndoState() {
     layoutLabelOffsets: new Map(
       Array.from(layoutLabelOffsets.entries()).map(([id, offset]) => [id, { ...offset }])
     ),
+    layoutKeyMappingOffsets: new Map(
+      Array.from(layoutKeyMappingOffsets.entries()).map(([id, offset]) => [
+        id,
+        { ...offset },
+      ])
+    ),
     layoutPositionOffsets: new Map(
       Array.from(layoutPositionOffsets.entries()).map(([key, offset]) => [
         key,
@@ -8407,6 +8764,13 @@ function captureLayoutUndoState() {
     layoutNoteTextSize,
     layoutTriangleLabelTextSize,
     layoutCustomLabelTextSize,
+    layoutKeyMappingTextSize,
+    layoutAxisLegendTextSize,
+    layoutKeyMappingOffset,
+    layoutKeyMappingDark,
+    layoutKeyMappingPrefix,
+    layoutKeyMappingSuffix,
+    layoutKeyMappingMode,
     layoutNodeShape,
     layoutTitle,
     layoutCreator,
@@ -8414,10 +8778,21 @@ function captureLayoutUndoState() {
     layoutCreatorSize,
     layoutTitleMargin,
     layoutTitleFont,
+    layoutCreatorFont,
     layoutRatioFont,
     layoutNoteFont,
     layoutTriangleLabelFont,
     layoutCustomLabelFont,
+    layoutKeyMappingFont,
+    layoutAxisLegendFont,
+    layoutTitleFontWeight,
+    layoutCreatorFontWeight,
+    layoutRatioFontWeight,
+    layoutNoteFontWeight,
+    layoutTriangleLabelFontWeight,
+    layoutCustomLabelFontWeight,
+    layoutKeyMappingFontWeight,
+    layoutAxisLegendFontWeight,
     layoutUnifyNodeSize,
     layoutPageSize,
     layoutOrientation,
@@ -8456,6 +8831,11 @@ function applyLayoutUndoState(state) {
   layoutLabelOffsets = new Map(
     Array.from(state.layoutLabelOffsets.entries()).map(([id, offset]) => [id, { ...offset }])
   );
+  layoutKeyMappingOffsets = new Map(
+    Array.from((state.layoutKeyMappingOffsets || new Map()).entries()).map(
+      ([id, offset]) => [id, { ...offset }]
+    )
+  );
   layoutPositionOffsets = new Map(
     Array.from(state.layoutPositionOffsets.entries()).map(([key, offset]) => [
       key,
@@ -8487,6 +8867,14 @@ function applyLayoutUndoState(state) {
   layoutNoteTextSize = state.layoutNoteTextSize;
   layoutTriangleLabelTextSize = state.layoutTriangleLabelTextSize;
   layoutCustomLabelTextSize = state.layoutCustomLabelTextSize ?? layoutCustomLabelTextSize;
+  layoutKeyMappingTextSize = state.layoutKeyMappingTextSize ?? layoutKeyMappingTextSize;
+  layoutAxisLegendTextSize =
+    state.layoutAxisLegendTextSize ?? layoutAxisLegendTextSize;
+  layoutKeyMappingOffset = state.layoutKeyMappingOffset ?? layoutKeyMappingOffset;
+  layoutKeyMappingDark = state.layoutKeyMappingDark ?? layoutKeyMappingDark;
+  layoutKeyMappingPrefix = state.layoutKeyMappingPrefix ?? layoutKeyMappingPrefix;
+  layoutKeyMappingSuffix = state.layoutKeyMappingSuffix ?? layoutKeyMappingSuffix;
+  layoutKeyMappingMode = state.layoutKeyMappingMode ?? layoutKeyMappingMode;
   layoutNodeShape = state.layoutNodeShape;
   layoutTitle = state.layoutTitle;
   layoutCreator = state.layoutCreator;
@@ -8498,6 +8886,22 @@ function applyLayoutUndoState(state) {
   layoutNoteFont = state.layoutNoteFont;
   layoutTriangleLabelFont = state.layoutTriangleLabelFont;
   layoutCustomLabelFont = state.layoutCustomLabelFont ?? layoutCustomLabelFont;
+  layoutKeyMappingFont = state.layoutKeyMappingFont ?? layoutKeyMappingFont;
+  layoutAxisLegendFont = state.layoutAxisLegendFont ?? layoutAxisLegendFont;
+  layoutCreatorFont = state.layoutCreatorFont ?? layoutCreatorFont;
+  layoutTitleFontWeight = state.layoutTitleFontWeight ?? layoutTitleFontWeight;
+  layoutRatioFontWeight = state.layoutRatioFontWeight ?? layoutRatioFontWeight;
+  layoutNoteFontWeight = state.layoutNoteFontWeight ?? layoutNoteFontWeight;
+  layoutTriangleLabelFontWeight =
+    state.layoutTriangleLabelFontWeight ?? layoutTriangleLabelFontWeight;
+  layoutCustomLabelFontWeight =
+    state.layoutCustomLabelFontWeight ?? layoutCustomLabelFontWeight;
+  layoutKeyMappingFontWeight =
+    state.layoutKeyMappingFontWeight ?? layoutKeyMappingFontWeight;
+  layoutAxisLegendFontWeight =
+    state.layoutAxisLegendFontWeight ?? layoutAxisLegendFontWeight;
+  layoutCreatorFontWeight =
+    state.layoutCreatorFontWeight ?? layoutCreatorFontWeight;
   layoutSpacing = state.layoutSpacing
     ? {
         x: Number(state.layoutSpacing.x) || 1,
@@ -8546,8 +8950,14 @@ function applyLayoutUndoState(state) {
   if (layoutTriangleLabelSizeInput) {
     layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
   }
+  if (layoutAxisSizeInput) {
+    layoutAxisSizeInput.value = String(layoutAxisLegendTextSize);
+  }
   if (layoutCustomLabelSizeInput) {
     layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
+  }
+  if (layoutAxisSizeInput) {
+    layoutAxisSizeInput.value = String(layoutAxisLegendTextSize);
   }
   if (layoutNodeShapeSelect) {
     layoutNodeShapeSelect.value = layoutNodeShape;
@@ -8561,21 +8971,67 @@ function applyLayoutUndoState(state) {
   if (layoutTitleFontSelect) {
     layoutTitleFontSelect.value = layoutTitleFont;
   }
+  if (layoutCreatorFontSelect) {
+    layoutCreatorFontSelect.value = layoutCreatorFont;
+  }
+  if (layoutTitleWeightSelect) {
+    layoutTitleWeightSelect.value = String(layoutTitleFontWeight);
+  }
+  if (layoutCreatorWeightSelect) {
+    layoutCreatorWeightSelect.value = String(layoutCreatorFontWeight);
+  }
   if (layoutRatioFontSelect) {
     layoutRatioFontSelect.value = layoutRatioFont;
+  }
+  if (layoutRatioWeightSelect) {
+    layoutRatioWeightSelect.value = String(layoutRatioFontWeight);
   }
   if (layoutNoteFontSelect) {
     layoutNoteFontSelect.value = layoutNoteFont;
   }
+  if (layoutNoteWeightSelect) {
+    layoutNoteWeightSelect.value = String(layoutNoteFontWeight);
+  }
   if (layoutTriangleLabelFontSelect) {
     layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
+  }
+  if (layoutAxisFontSelect) {
+    layoutAxisFontSelect.value = layoutAxisLegendFont;
+  }
+  if (layoutTriangleLabelWeightSelect) {
+    layoutTriangleLabelWeightSelect.value = String(layoutTriangleLabelFontWeight);
+  }
+  if (layoutAxisWeightSelect) {
+    layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
   }
   if (layoutCustomFontSelect) {
     layoutCustomFontSelect.value = layoutCustomLabelFont;
   }
+  if (layoutAxisFontSelect) {
+    layoutAxisFontSelect.value = layoutAxisLegendFont;
+  }
+  if (layoutCustomWeightSelect) {
+    layoutCustomWeightSelect.value = String(layoutCustomLabelFontWeight);
+  }
+  if (layoutAxisWeightSelect) {
+    layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
+  }
+  if (layoutKeyMappingFontSelect) {
+    layoutKeyMappingFontSelect.value = layoutKeyMappingFont;
+  }
+  if (layoutKeyMappingWeightSelect) {
+    layoutKeyMappingWeightSelect.value = String(layoutKeyMappingFontWeight);
+  }
+  if (layoutKeyMappingPrefixInput) {
+    layoutKeyMappingPrefixInput.value = layoutKeyMappingPrefix;
+  }
+  if (layoutKeyMappingSuffixInput) {
+    layoutKeyMappingSuffixInput.value = layoutKeyMappingSuffix;
+  }
   if (layoutUnifySizeToggle) {
     layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
   }
+  syncLayoutKeyMappingControls();
   updateLayoutCustomLabelControls();
   syncLayoutFontVars();
   syncLayoutScaleInput();
@@ -8617,6 +9073,7 @@ function redoLayoutChange() {
 function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
   layoutPositions.clear();
   layoutLabelOffsets.clear();
+  layoutKeyMappingOffsets.clear();
   layoutNodeShapes.clear();
   layoutPositionOffsets.clear();
   layoutCustomLabels = [];
@@ -8637,12 +9094,19 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
   };
   layoutAxisEdit = null;
   layoutAxisEditDrag = null;
+  layoutKeyMappingDrag = null;
   if (resetSettings) {
     layoutNodeSize = LAYOUT_DEFAULTS.nodeSize;
     layoutRatioTextSize = LAYOUT_DEFAULTS.ratioTextSize;
     layoutNoteTextSize = LAYOUT_DEFAULTS.noteTextSize;
     layoutTriangleLabelTextSize = LAYOUT_DEFAULTS.triangleLabelTextSize;
     layoutCustomLabelTextSize = LAYOUT_DEFAULTS.customLabelTextSize;
+    layoutKeyMappingTextSize = LAYOUT_DEFAULTS.keyMappingTextSize;
+    layoutAxisLegendTextSize = LAYOUT_DEFAULTS.axisLegendTextSize;
+    layoutKeyMappingOffset = LAYOUT_DEFAULTS.keyMappingOffset;
+    layoutKeyMappingDark = LAYOUT_DEFAULTS.keyMappingDark;
+    layoutKeyMappingPrefix = LAYOUT_DEFAULTS.keyMappingPrefix;
+    layoutKeyMappingSuffix = LAYOUT_DEFAULTS.keyMappingSuffix;
     layoutSpacing = { ...LAYOUT_DEFAULTS.spacing };
     layoutNodeShape = LAYOUT_DEFAULTS.nodeShape;
     layoutTitle = LAYOUT_DEFAULTS.title;
@@ -8661,6 +9125,17 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     layoutNoteFont = LAYOUT_DEFAULTS.noteFont;
     layoutTriangleLabelFont = LAYOUT_DEFAULTS.triangleLabelFont;
     layoutCustomLabelFont = LAYOUT_DEFAULTS.customLabelFont;
+    layoutKeyMappingFont = LAYOUT_DEFAULTS.keyMappingFont;
+    layoutAxisLegendFont = LAYOUT_DEFAULTS.axisLegendFont;
+    layoutCreatorFont = LAYOUT_DEFAULTS.creatorFont;
+    layoutTitleFontWeight = LAYOUT_DEFAULTS.titleFontWeight;
+    layoutRatioFontWeight = LAYOUT_DEFAULTS.ratioFontWeight;
+    layoutNoteFontWeight = LAYOUT_DEFAULTS.noteFontWeight;
+    layoutTriangleLabelFontWeight = LAYOUT_DEFAULTS.triangleLabelFontWeight;
+    layoutCustomLabelFontWeight = LAYOUT_DEFAULTS.customLabelFontWeight;
+    layoutKeyMappingFontWeight = LAYOUT_DEFAULTS.keyMappingFontWeight;
+    layoutAxisLegendFontWeight = LAYOUT_DEFAULTS.axisLegendFontWeight;
+    layoutCreatorFontWeight = LAYOUT_DEFAULTS.creatorFontWeight;
     if (layoutTitleInput) {
       layoutTitleInput.value = layoutTitle;
     }
@@ -8701,20 +9176,71 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     if (layoutCustomLabelSizeInput) {
       layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
     }
+    if (layoutKeyMappingSizeInput) {
+      layoutKeyMappingSizeInput.value = String(layoutKeyMappingTextSize);
+    }
+    if (layoutKeyMappingOffsetInput) {
+      layoutKeyMappingOffsetInput.value = String(layoutKeyMappingOffset);
+    }
+    if (layoutKeyMappingDarkToggle) {
+      layoutKeyMappingDarkToggle.checked = layoutKeyMappingDark;
+    }
+    if (layoutAxisSizeInput) {
+      layoutAxisSizeInput.value = String(layoutAxisLegendTextSize);
+    }
+    if (layoutKeyMappingPrefixInput) {
+      layoutKeyMappingPrefixInput.value = layoutKeyMappingPrefix;
+    }
+    if (layoutKeyMappingSuffixInput) {
+      layoutKeyMappingSuffixInput.value = layoutKeyMappingSuffix;
+    }
     if (layoutTitleFontSelect) {
       layoutTitleFontSelect.value = layoutTitleFont;
+    }
+    if (layoutCreatorFontSelect) {
+      layoutCreatorFontSelect.value = layoutCreatorFont;
+    }
+    if (layoutTitleWeightSelect) {
+      layoutTitleWeightSelect.value = String(layoutTitleFontWeight);
+    }
+    if (layoutCreatorWeightSelect) {
+      layoutCreatorWeightSelect.value = String(layoutCreatorFontWeight);
     }
     if (layoutRatioFontSelect) {
       layoutRatioFontSelect.value = layoutRatioFont;
     }
+    if (layoutRatioWeightSelect) {
+      layoutRatioWeightSelect.value = String(layoutRatioFontWeight);
+    }
     if (layoutNoteFontSelect) {
       layoutNoteFontSelect.value = layoutNoteFont;
+    }
+    if (layoutNoteWeightSelect) {
+      layoutNoteWeightSelect.value = String(layoutNoteFontWeight);
     }
     if (layoutTriangleLabelFontSelect) {
       layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
     }
+    if (layoutTriangleLabelWeightSelect) {
+      layoutTriangleLabelWeightSelect.value = String(layoutTriangleLabelFontWeight);
+    }
     if (layoutCustomFontSelect) {
       layoutCustomFontSelect.value = layoutCustomLabelFont;
+    }
+    if (layoutCustomWeightSelect) {
+      layoutCustomWeightSelect.value = String(layoutCustomLabelFontWeight);
+    }
+    if (layoutKeyMappingFontSelect) {
+      layoutKeyMappingFontSelect.value = layoutKeyMappingFont;
+    }
+    if (layoutAxisFontSelect) {
+      layoutAxisFontSelect.value = layoutAxisLegendFont;
+    }
+    if (layoutKeyMappingWeightSelect) {
+      layoutKeyMappingWeightSelect.value = String(layoutKeyMappingFontWeight);
+    }
+    if (layoutAxisWeightSelect) {
+      layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
     }
     if (layoutNodeShapeSelect) {
       layoutNodeShapeSelect.value = layoutNodeShape;
@@ -8767,6 +9293,9 @@ function setLayoutMode(enabled) {
   if (layoutPanel) {
     layoutPanel.hidden = !enabled;
   }
+  if (!enabled) {
+    closeLayoutFontPopover();
+  }
   if (synthPanel) {
     synthPanel.hidden = enabled;
   }
@@ -8808,6 +9337,7 @@ function setLayoutMode(enabled) {
     if (layoutSpacePopover) {
       layoutSpacePopover.hidden = true;
     }
+    closeLayoutFontPopover();
     layoutAxisEdit = null;
     layoutAxisEditDrag = null;
     showAxes = layoutPrevState.showAxes;
@@ -9196,25 +9726,64 @@ function initLayoutFonts() {
   const styles = getComputedStyle(document.documentElement);
   layoutTitleFont = styles.getPropertyValue("--font-title").trim() || "Georgia";
   layoutRatioFont = styles.getPropertyValue("--font-ratio").trim() || "Georgia";
-  layoutNoteFont = styles.getPropertyValue("--font-note").trim() || "Georgia";
+  layoutNoteFont = styles.getPropertyValue("--font-note").trim() || "Lexend";
   layoutTriangleLabelFont =
     styles.getPropertyValue("--font-triangle-label").trim() || "Georgia";
   layoutCustomLabelFont =
     styles.getPropertyValue("--font-custom-label").trim() || "Georgia";
+  layoutKeyMappingFont =
+    styles.getPropertyValue("--font-key-mapping").trim() || "Lexend";
+  layoutAxisLegendFont = layoutRatioFont;
+  layoutAxisLegendFontWeight = layoutRatioFontWeight;
+  layoutCreatorFont = layoutTitleFont;
+  layoutCreatorFontWeight = layoutTitleFontWeight;
   if (layoutTitleFontSelect) {
     layoutTitleFontSelect.value = layoutTitleFont;
+  }
+  if (layoutCreatorFontSelect) {
+    layoutCreatorFontSelect.value = layoutCreatorFont;
+  }
+  if (layoutTitleWeightSelect) {
+    layoutTitleWeightSelect.value = String(layoutTitleFontWeight);
+  }
+  if (layoutCreatorWeightSelect) {
+    layoutCreatorWeightSelect.value = String(layoutCreatorFontWeight);
   }
   if (layoutRatioFontSelect) {
     layoutRatioFontSelect.value = layoutRatioFont;
   }
+  if (layoutRatioWeightSelect) {
+    layoutRatioWeightSelect.value = String(layoutRatioFontWeight);
+  }
   if (layoutNoteFontSelect) {
     layoutNoteFontSelect.value = layoutNoteFont;
+  }
+  if (layoutNoteWeightSelect) {
+    layoutNoteWeightSelect.value = String(layoutNoteFontWeight);
   }
   if (layoutTriangleLabelFontSelect) {
     layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
   }
+  if (layoutTriangleLabelWeightSelect) {
+    layoutTriangleLabelWeightSelect.value = String(layoutTriangleLabelFontWeight);
+  }
   if (layoutCustomFontSelect) {
     layoutCustomFontSelect.value = layoutCustomLabelFont;
+  }
+  if (layoutCustomWeightSelect) {
+    layoutCustomWeightSelect.value = String(layoutCustomLabelFontWeight);
+  }
+  if (layoutKeyMappingFontSelect) {
+    layoutKeyMappingFontSelect.value = layoutKeyMappingFont;
+  }
+  if (layoutAxisFontSelect) {
+    layoutAxisFontSelect.value = layoutAxisLegendFont;
+  }
+  if (layoutKeyMappingWeightSelect) {
+    layoutKeyMappingWeightSelect.value = String(layoutKeyMappingFontWeight);
+  }
+  if (layoutAxisWeightSelect) {
+    layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
   }
   syncLayoutFontVars();
 }
@@ -9594,25 +10163,43 @@ function getPresetState() {
       noteTextSize: layoutNoteTextSize,
       triangleLabelTextSize: layoutTriangleLabelTextSize,
       customLabelTextSize: layoutCustomLabelTextSize,
+      keyMappingTextSize: layoutKeyMappingTextSize,
+      keyMappingOffset: layoutKeyMappingOffset,
+      keyMappingDark: layoutKeyMappingDark,
+      keyMappingPrefix: layoutKeyMappingPrefix,
+      keyMappingSuffix: layoutKeyMappingSuffix,
+      axisLegendTextSize: layoutAxisLegendTextSize,
       titleMargin: layoutTitleMargin,
       titlePosition: layoutTitlePosition,
       creatorPosition: layoutCreatorPosition,
-    customLabels: layoutCustomLabels.map((entry) => ({
-      id: entry.id,
-      text: entry.text,
-      position: entry.position ? { ...entry.position } : null,
-    })),
-    positionOffsets: serializeLayoutPositionOffsets(),
-    labelOffsets: serializeLayoutLabelOffsets(),
+      customLabels: layoutCustomLabels.map((entry) => ({
+        id: entry.id,
+        text: entry.text,
+        position: entry.position ? { ...entry.position } : null,
+      })),
+      positionOffsets: serializeLayoutPositionOffsets(),
+      labelOffsets: serializeLayoutLabelOffsets(),
+      keyMappingOffsets: serializeLayoutKeyMappingOffsets(),
       axisOffsets: layoutAxisOffsets,
       axisAngles: layoutAxisAngles,
       lockPosition: layoutLockPosition,
       view: layoutViewState,
       titleFont: layoutTitleFont,
+      creatorFont: layoutCreatorFont,
       ratioFont: layoutRatioFont,
       noteFont: layoutNoteFont,
       triangleLabelFont: layoutTriangleLabelFont,
       customLabelFont: layoutCustomLabelFont,
+      keyMappingFont: layoutKeyMappingFont,
+      axisLegendFont: layoutAxisLegendFont,
+      titleFontWeight: layoutTitleFontWeight,
+      creatorFontWeight: layoutCreatorFontWeight,
+      ratioFontWeight: layoutRatioFontWeight,
+      noteFontWeight: layoutNoteFontWeight,
+      triangleLabelFontWeight: layoutTriangleLabelFontWeight,
+      customLabelFontWeight: layoutCustomLabelFontWeight,
+      keyMappingFontWeight: layoutKeyMappingFontWeight,
+      axisLegendFontWeight: layoutAxisLegendFontWeight,
       spacing: { ...layoutSpacing },
       nodeShape: layoutNodeShape,
       unifyNodeSize: layoutUnifyNodeSize,
@@ -9863,6 +10450,9 @@ function applyPresetState(state) {
     pendingLayoutLabelOffsets = Array.isArray(layoutState.labelOffsets)
       ? layoutState.labelOffsets
       : null;
+    pendingLayoutKeyMappingOffsets = Array.isArray(layoutState.keyMappingOffsets)
+      ? layoutState.keyMappingOffsets
+      : null;
     pendingLayoutPositionOffsets = Array.isArray(layoutState.positionOffsets)
       ? layoutState.positionOffsets
       : null;
@@ -9957,6 +10547,48 @@ function applyPresetState(state) {
         layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
       }
     }
+    if (Number.isFinite(layoutState.keyMappingTextSize)) {
+      layoutKeyMappingTextSize = Math.min(
+        20,
+        Math.max(8, Math.round(layoutState.keyMappingTextSize))
+      );
+      if (layoutKeyMappingSizeInput) {
+        layoutKeyMappingSizeInput.value = String(layoutKeyMappingTextSize);
+      }
+    }
+    if (Number.isFinite(layoutState.keyMappingOffset)) {
+      layoutKeyMappingOffset = Math.min(40, Math.max(0, Math.round(layoutState.keyMappingOffset)));
+      if (layoutKeyMappingOffsetInput) {
+        layoutKeyMappingOffsetInput.value = String(layoutKeyMappingOffset);
+      }
+    }
+    if (typeof layoutState.keyMappingDark === "boolean") {
+      layoutKeyMappingDark = layoutState.keyMappingDark;
+      if (layoutKeyMappingDarkToggle) {
+        layoutKeyMappingDarkToggle.checked = layoutKeyMappingDark;
+      }
+    }
+    if (Number.isFinite(layoutState.axisLegendTextSize)) {
+      layoutAxisLegendTextSize = Math.min(
+        36,
+        Math.max(10, Math.round(layoutState.axisLegendTextSize))
+      );
+      if (layoutAxisSizeInput) {
+        layoutAxisSizeInput.value = String(layoutAxisLegendTextSize);
+      }
+    }
+    if (typeof layoutState.keyMappingPrefix === "string") {
+      layoutKeyMappingPrefix = layoutState.keyMappingPrefix;
+      if (layoutKeyMappingPrefixInput) {
+        layoutKeyMappingPrefixInput.value = layoutKeyMappingPrefix;
+      }
+    }
+    if (typeof layoutState.keyMappingSuffix === "string") {
+      layoutKeyMappingSuffix = layoutState.keyMappingSuffix;
+      if (layoutKeyMappingSuffixInput) {
+        layoutKeyMappingSuffixInput.value = layoutKeyMappingSuffix;
+      }
+    }
     if (layoutState.spacing && typeof layoutState.spacing === "object") {
       applyLayoutSpacing({
         x: Number(layoutState.spacing.x) || 1,
@@ -10016,6 +10648,12 @@ function applyPresetState(state) {
         layoutTitleFontSelect.value = layoutTitleFont;
       }
     }
+    if (typeof layoutState.creatorFont === "string") {
+      layoutCreatorFont = layoutState.creatorFont;
+      if (layoutCreatorFontSelect) {
+        layoutCreatorFontSelect.value = layoutCreatorFont;
+      }
+    }
     if (typeof layoutState.ratioFont === "string") {
       layoutRatioFont = layoutState.ratioFont;
       if (layoutRatioFontSelect) {
@@ -10038,6 +10676,66 @@ function applyPresetState(state) {
       layoutCustomLabelFont = layoutState.customLabelFont;
       if (layoutCustomFontSelect) {
         layoutCustomFontSelect.value = layoutCustomLabelFont;
+      }
+    }
+    if (typeof layoutState.keyMappingFont === "string") {
+      layoutKeyMappingFont = layoutState.keyMappingFont;
+      if (layoutKeyMappingFontSelect) {
+        layoutKeyMappingFontSelect.value = layoutKeyMappingFont;
+      }
+    }
+    if (typeof layoutState.axisLegendFont === "string") {
+      layoutAxisLegendFont = layoutState.axisLegendFont;
+      if (layoutAxisFontSelect) {
+        layoutAxisFontSelect.value = layoutAxisLegendFont;
+      }
+    }
+    if (Number.isFinite(layoutState.axisLegendFontWeight)) {
+      layoutAxisLegendFontWeight = layoutState.axisLegendFontWeight;
+      if (layoutAxisWeightSelect) {
+        layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
+      }
+    }
+    if (Number.isFinite(layoutState.titleFontWeight)) {
+      layoutTitleFontWeight = layoutState.titleFontWeight;
+      if (layoutTitleWeightSelect) {
+        layoutTitleWeightSelect.value = String(layoutTitleFontWeight);
+      }
+    }
+    if (Number.isFinite(layoutState.creatorFontWeight)) {
+      layoutCreatorFontWeight = layoutState.creatorFontWeight;
+      if (layoutCreatorWeightSelect) {
+        layoutCreatorWeightSelect.value = String(layoutCreatorFontWeight);
+      }
+    }
+    if (Number.isFinite(layoutState.ratioFontWeight)) {
+      layoutRatioFontWeight = layoutState.ratioFontWeight;
+      if (layoutRatioWeightSelect) {
+        layoutRatioWeightSelect.value = String(layoutRatioFontWeight);
+      }
+    }
+    if (Number.isFinite(layoutState.noteFontWeight)) {
+      layoutNoteFontWeight = layoutState.noteFontWeight;
+      if (layoutNoteWeightSelect) {
+        layoutNoteWeightSelect.value = String(layoutNoteFontWeight);
+      }
+    }
+    if (Number.isFinite(layoutState.triangleLabelFontWeight)) {
+      layoutTriangleLabelFontWeight = layoutState.triangleLabelFontWeight;
+      if (layoutTriangleLabelWeightSelect) {
+        layoutTriangleLabelWeightSelect.value = String(layoutTriangleLabelFontWeight);
+      }
+    }
+    if (Number.isFinite(layoutState.customLabelFontWeight)) {
+      layoutCustomLabelFontWeight = layoutState.customLabelFontWeight;
+      if (layoutCustomWeightSelect) {
+        layoutCustomWeightSelect.value = String(layoutCustomLabelFontWeight);
+      }
+    }
+    if (Number.isFinite(layoutState.keyMappingFontWeight)) {
+      layoutKeyMappingFontWeight = layoutState.keyMappingFontWeight;
+      if (layoutKeyMappingWeightSelect) {
+        layoutKeyMappingWeightSelect.value = String(layoutKeyMappingFontWeight);
       }
     }
     if (Array.isArray(layoutState.customLabels)) {
@@ -10288,6 +10986,11 @@ function applyPresetState(state) {
     pendingLayoutLabelOffsets = null;
     draw();
   }
+  if (pendingLayoutKeyMappingOffsets) {
+    applyLayoutKeyMappingOffsets(pendingLayoutKeyMappingOffsets);
+    pendingLayoutKeyMappingOffsets = null;
+    draw();
+  }
   if (pendingLayoutPositionOffsets) {
     applyLayoutPositionOffsets(pendingLayoutPositionOffsets);
     pendingLayoutPositionOffsets = null;
@@ -10520,7 +11223,7 @@ function buildHejiSvgInline({
 }
 
 const LEXEND_FONT_URL =
-  "https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&display=swap";
+  "https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&family=Inter:wght@100..900&family=DM+Sans:wght@400..700&family=Radley:ital,wght@0,400;1,400&family=Alice&family=Cinzel:wght@400..900&display=swap";
 
 function getHejiFontUrl() {
   try {
@@ -10569,7 +11272,7 @@ function buildLayoutSvgString() {
     parts.push(
       `<text x="${titleX}" y="${titleY}" text-anchor="middle" font-family="${escapeSvgText(
         layoutTitleFont
-      )}" font-size="${titleSize}" fill="${themeColors.textPrimary}">${escapeSvgText(
+      )}" font-size="${titleSize}" font-weight="${layoutTitleFontWeight}" fill="${themeColors.textPrimary}">${escapeSvgText(
         layoutTitle
       )}</text>`
     );
@@ -10580,8 +11283,8 @@ function buildLayoutSvgString() {
     const creatorY = Math.max(12, creatorPos.y - top);
     parts.push(
       `<text x="${creatorX}" y="${creatorY}" text-anchor="middle" font-family="${escapeSvgText(
-        layoutTitleFont
-      )}" font-size="${creatorSize}" fill="${themeColors.textSecondary}">${escapeSvgText(
+        layoutCreatorFont
+      )}" font-size="${creatorSize}" font-weight="${layoutCreatorFontWeight}" fill="${themeColors.textSecondary}">${escapeSvgText(
         layoutCreator
       )}</text>`
     );
@@ -10637,8 +11340,8 @@ function buildLayoutSvgString() {
     const rotation = (info.textAngle * 180) / Math.PI;
     parts.push(
       `<text x="${centerX}" y="${centerY}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
-        layoutRatioFont
-      )}" font-size="${axisSettings.fontSize}" fill="${axisColor}" transform="rotate(${rotation} ${centerX} ${centerY})">${escapeSvgText(
+        layoutAxisLegendFont
+      )}" font-size="${axisSettings.fontSize}" font-weight="${layoutAxisLegendFontWeight}" fill="${axisColor}" transform="rotate(${rotation} ${centerX} ${centerY})">${escapeSvgText(
         info.label
       )}</text>`
     );
@@ -10655,7 +11358,7 @@ function buildLayoutSvgString() {
       parts.push(
         `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="hanging" font-family="${escapeSvgText(
           layoutCustomLabelFont
-        )}" font-size="${customSize}" fill="${themeColors.textSecondary}">${escapeSvgText(
+        )}" font-size="${customSize}" font-weight="${layoutCustomLabelFontWeight}" fill="${themeColors.textSecondary}">${escapeSvgText(
           entry.text
         )}</text>`
       );
@@ -10759,12 +11462,13 @@ function buildLayoutSvgString() {
         entry.label,
         layoutTriangleLabelFont,
         baseSize,
-        points
+        points,
+        layoutTriangleLabelFontWeight
       );
       parts.push(
         `<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
           layoutTriangleLabelFont
-        )}" font-size="${layout.size}" fill="${themeColors.textSecondary}">${escapeSvgText(
+        )}" font-size="${layout.size}" font-weight="${layoutTriangleLabelFontWeight}" fill="${themeColors.textSecondary}">${escapeSvgText(
           entry.label
         )}</text>`
       );
@@ -10842,6 +11546,7 @@ function buildLayoutSvgString() {
             suffixParts,
             restText: "",
             font: layoutRatioFont,
+            fontWeight: layoutRatioFontWeight,
             size: labelSize,
             align: "center",
             baseline: "middle",
@@ -10858,6 +11563,7 @@ function buildLayoutSvgString() {
             suffixParts: annotation.suffixParts,
             restText: "",
             font: layoutRatioFont,
+            fontWeight: layoutRatioFontWeight,
             size: labelSize,
             align: "center",
             baseline: "middle",
@@ -10871,7 +11577,9 @@ function buildLayoutSvgString() {
       const ratioX = pos.x + labelOffsetX * 0.7 - left;
       const ratioY = rawLabelPos.y - top;
       parts.push(
-        `<text x="${ratioX}" y="${ratioY}" text-anchor="start" dominant-baseline="hanging" font-family="Lexend, sans-serif" font-weight="200" font-size="${detailSize}" fill="${themeColors.textSecondary}">${escapeSvgText(
+        `<text x="${ratioX}" y="${ratioY}" text-anchor="start" dominant-baseline="hanging" font-family="${escapeSvgText(
+          layoutNoteFont
+        )}" font-weight="${layoutNoteFontWeight}" font-size="${detailSize}" fill="${themeColors.textSecondary}">${escapeSvgText(
           `${node.numerator}:${node.denominator}`
         )}</text>`
       );
@@ -10880,9 +11588,9 @@ function buildLayoutSvgString() {
           text: centsLabel,
           x: ratioX,
           y: ratioY + detailSize + 4,
-          font: "Lexend, sans-serif",
+          font: layoutNoteFont,
           size: detailSize,
-          fontWeight: 200,
+          fontWeight: layoutNoteFontWeight,
           align: "left",
           baseline: "hanging",
           hejiAccidentals: hejiEnabled,
@@ -10897,14 +11605,15 @@ function buildLayoutSvgString() {
         node.denominator,
         layoutRatioFont,
         labelSize,
-        maxWidth
+        maxWidth,
+        layoutRatioFontWeight
       );
       const ratioYOffset = Math.round(layout.size * -0.09);
       if (layout.lines.length === 1) {
         parts.push(
           `<text x="${x}" y="${y + ratioYOffset}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
             layoutRatioFont
-          )}" font-size="${layout.size}" fill="${themeColors.textPrimary}">${escapeSvgText(
+          )}" font-size="${layout.size}" font-weight="${layoutRatioFontWeight}" fill="${themeColors.textPrimary}">${escapeSvgText(
             layout.lines[0]
           )}</text>`
         );
@@ -10913,21 +11622,31 @@ function buildLayoutSvgString() {
         const lineY1 = y + ratioYOffset - lineOffset;
         const lineY2 = y + ratioYOffset + lineOffset;
         const lineWidth = Math.max(
-          measureTextWidth(layout.lines[0], layout.size, layoutRatioFont),
-          measureTextWidth(layout.lines[1], layout.size, layoutRatioFont)
+          measureTextWidthWithWeight(
+            layout.lines[0],
+            layout.size,
+            layoutRatioFont,
+            layoutRatioFontWeight
+          ),
+          measureTextWidthWithWeight(
+            layout.lines[1],
+            layout.size,
+            layoutRatioFont,
+            layoutRatioFontWeight
+          )
         );
         const lineY = y + ratioYOffset + layout.size * 0.1;
         parts.push(
           `<text x="${x}" y="${lineY1}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
             layoutRatioFont
-          )}" font-size="${layout.size}" fill="${themeColors.textPrimary}">${escapeSvgText(
+          )}" font-size="${layout.size}" font-weight="${layoutRatioFontWeight}" fill="${themeColors.textPrimary}">${escapeSvgText(
             layout.lines[0]
           )}</text>`
         );
         parts.push(
           `<text x="${x}" y="${lineY2}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
             layoutRatioFont
-          )}" font-size="${layout.size}" fill="${themeColors.textPrimary}">${escapeSvgText(
+          )}" font-size="${layout.size}" font-weight="${layoutRatioFontWeight}" fill="${themeColors.textPrimary}">${escapeSvgText(
             layout.lines[1]
           )}</text>`
         );
@@ -10961,14 +11680,14 @@ function buildLayoutSvgString() {
           baseText: annotation.baseText,
           suffixParts: annotation.suffixParts,
           restText: ` ${centsLabel}`,
-          font: "Lexend, sans-serif",
+          font: layoutNoteFont,
           size: detailSize,
           align: "left",
           baseline: "hanging",
           hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
           restGapScale,
           restHejiAccidentals: hejiEnabled && hasParen,
-          fontWeight: 200,
+          fontWeight: layoutNoteFontWeight,
           color: themeColors.textSecondary,
         })
       );
@@ -11038,7 +11757,12 @@ function exportLayoutPdf() {
         const waitForFonts = document.fonts
           ? Promise.all([
               document.fonts.load('16px "HEJI2Text"'),
-              document.fonts.load('16px "Lexend"')
+              document.fonts.load('16px "Lexend"'),
+              document.fonts.load('16px "Inter"'),
+              document.fonts.load('16px "DM Sans"'),
+              document.fonts.load('16px "Radley"'),
+              document.fonts.load('16px "Alice"'),
+              document.fonts.load('16px "Cinzel"')
             ])
           : Promise.resolve();
         waitForFonts.finally(() => {
@@ -11077,9 +11801,13 @@ function applyActiveNodeKeys(keys) {
   markIsomorphicDirty();
 }
 
-function rebuildLattice(activeKeys = null, { remapTriangles = true, remapLayoutOffsets = true } = {}) {
+function rebuildLattice(
+  activeKeys = null,
+  { remapTriangles = true, remapLayoutOffsets = true } = {}
+) {
   stopAllVoices();
   const labelOffsets = remapLayoutOffsets ? serializeLayoutLabelOffsets() : null;
+  const keyMappingOffsets = remapLayoutOffsets ? serializeLayoutKeyMappingOffsets() : null;
   const positionOffsets = remapLayoutOffsets ? serializeLayoutPositionOffsets() : null;
   const prevCenterZ = gridCenterZ;
   const latticeNodes = buildLattice();
@@ -11103,6 +11831,9 @@ function rebuildLattice(activeKeys = null, { remapTriangles = true, remapLayoutO
   if (remapLayoutOffsets) {
     if (labelOffsets && labelOffsets.length) {
       applyLayoutLabelOffsets(labelOffsets);
+    }
+    if (keyMappingOffsets && keyMappingOffsets.length) {
+      applyLayoutKeyMappingOffsets(keyMappingOffsets);
     }
     if (positionOffsets && positionOffsets.length) {
       applyLayoutPositionOffsets(positionOffsets);
@@ -11191,6 +11922,15 @@ if (layoutTriangleLabelSizeInput) {
 if (layoutCustomLabelSizeInput) {
   layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
 }
+if (layoutKeyMappingSizeInput) {
+  layoutKeyMappingSizeInput.value = String(layoutKeyMappingTextSize);
+}
+if (layoutKeyMappingOffsetInput) {
+  layoutKeyMappingOffsetInput.value = String(layoutKeyMappingOffset);
+}
+if (layoutKeyMappingDarkToggle) {
+  layoutKeyMappingDarkToggle.checked = layoutKeyMappingDark;
+}
 if (layoutLockPositionToggle) {
   layoutLockPositionToggle.checked = layoutLockPosition;
 }
@@ -11224,14 +11964,47 @@ if (layoutTitleMarginInput) {
 if (layoutTitleFontSelect) {
   layoutTitleFontSelect.value = layoutTitleFont;
 }
+if (layoutTitleWeightSelect) {
+  layoutTitleWeightSelect.value = String(layoutTitleFontWeight);
+}
 if (layoutRatioFontSelect) {
   layoutRatioFontSelect.value = layoutRatioFont;
+}
+if (layoutRatioWeightSelect) {
+  layoutRatioWeightSelect.value = String(layoutRatioFontWeight);
 }
 if (layoutNoteFontSelect) {
   layoutNoteFontSelect.value = layoutNoteFont;
 }
+if (layoutNoteWeightSelect) {
+  layoutNoteWeightSelect.value = String(layoutNoteFontWeight);
+}
 if (layoutTriangleLabelFontSelect) {
   layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
+}
+if (layoutTriangleLabelWeightSelect) {
+  layoutTriangleLabelWeightSelect.value = String(layoutTriangleLabelFontWeight);
+}
+if (layoutCustomFontSelect) {
+  layoutCustomFontSelect.value = layoutCustomLabelFont;
+}
+if (layoutCustomWeightSelect) {
+  layoutCustomWeightSelect.value = String(layoutCustomLabelFontWeight);
+}
+if (layoutAxisFontSelect) {
+  layoutAxisFontSelect.value = layoutAxisLegendFont;
+}
+if (layoutAxisWeightSelect) {
+  layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
+}
+if (layoutAxisSizeInput) {
+  layoutAxisSizeInput.value = String(layoutAxisLegendTextSize);
+}
+if (layoutKeyMappingFontSelect) {
+  layoutKeyMappingFontSelect.value = layoutKeyMappingFont;
+}
+if (layoutKeyMappingWeightSelect) {
+  layoutKeyMappingWeightSelect.value = String(layoutKeyMappingFontWeight);
 }
 if (layoutUnifySizeToggle) {
   layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
@@ -11635,6 +12408,42 @@ if (layoutSpaceZInput) {
     schedulePresetUrlUpdate();
   });
 }
+if (layoutKeyMappingTrigger && layoutKeyMappingPopover) {
+  layoutKeyMappingTrigger.addEventListener("click", (event) => {
+    if (!layoutMode) {
+      return;
+    }
+    event.preventDefault();
+    const nextHidden = !layoutKeyMappingPopover.hidden;
+    layoutKeyMappingPopover.hidden = nextHidden;
+    layoutKeyMappingTrigger.setAttribute("aria-expanded", nextHidden ? "false" : "true");
+  });
+}
+if (layoutKeyMappingSizeInput) {
+  layoutKeyMappingSizeInput.addEventListener("input", () => {
+    pushLayoutUndoState();
+    layoutKeyMappingTextSize = Number(layoutKeyMappingSizeInput.value) || layoutKeyMappingTextSize;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutKeyMappingOffsetInput) {
+  layoutKeyMappingOffsetInput.addEventListener("input", () => {
+    pushLayoutUndoState();
+    layoutKeyMappingOffset =
+      Number(layoutKeyMappingOffsetInput.value) || layoutKeyMappingOffset;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutKeyMappingDarkToggle) {
+  layoutKeyMappingDarkToggle.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutKeyMappingDark = layoutKeyMappingDarkToggle.checked;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
 if (layoutLockPositionToggle) {
   layoutLockPositionToggle.addEventListener("change", () => {
     pushLayoutUndoState();
@@ -11700,6 +12509,15 @@ if (layoutTriangleLabelSizeInput) {
     schedulePresetUrlUpdate();
   });
 }
+if (layoutAxisSizeInput) {
+  layoutAxisSizeInput.addEventListener("input", () => {
+    pushLayoutUndoState();
+    layoutAxisLegendTextSize =
+      Number(layoutAxisSizeInput.value) || layoutAxisLegendTextSize;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
 if (layoutCustomLabelSizeInput) {
   layoutCustomLabelSizeInput.addEventListener("input", () => {
     pushLayoutUndoState();
@@ -11727,17 +12545,184 @@ if (layoutNodeShapeSelect) {
   });
 }
 let layoutFontSnapshot = null;
-if (layoutFontsButton && layoutFontDialog) {
-  layoutFontsButton.addEventListener("click", () => {
-    if (typeof layoutFontDialog.showModal === "function") {
-      layoutFontSnapshot = {
-        title: layoutTitleFont,
-        ratio: layoutRatioFont,
-        note: layoutNoteFont,
-        triangleLabel: layoutTriangleLabelFont,
-        customLabel: layoutCustomLabelFont,
+
+function syncLayoutFontPopoverInputs() {
+  if (layoutTitleFontSelect) {
+    layoutTitleFontSelect.value = layoutTitleFont;
+  }
+  if (layoutTitleWeightSelect) {
+    layoutTitleWeightSelect.value = String(layoutTitleFontWeight);
+  }
+  if (layoutTitleSizeInput) {
+    layoutTitleSizeInput.value = String(layoutTitleSize);
+  }
+  if (layoutCreatorSizeInput) {
+    layoutCreatorSizeInput.value = String(layoutCreatorSize);
+  }
+  if (layoutRatioFontSelect) {
+    layoutRatioFontSelect.value = layoutRatioFont;
+  }
+  if (layoutRatioWeightSelect) {
+    layoutRatioWeightSelect.value = String(layoutRatioFontWeight);
+  }
+  if (layoutRatioTextSizeInput) {
+    layoutRatioTextSizeInput.value = String(layoutRatioTextSize);
+  }
+  if (layoutNoteFontSelect) {
+    layoutNoteFontSelect.value = layoutNoteFont;
+  }
+  if (layoutNoteWeightSelect) {
+    layoutNoteWeightSelect.value = String(layoutNoteFontWeight);
+  }
+  if (layoutNoteTextSizeInput) {
+    layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
+  }
+  if (layoutTriangleLabelFontSelect) {
+    layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
+  }
+  if (layoutTriangleLabelWeightSelect) {
+    layoutTriangleLabelWeightSelect.value = String(layoutTriangleLabelFontWeight);
+  }
+  if (layoutTriangleLabelSizeInput) {
+    layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
+  }
+  if (layoutCustomFontSelect) {
+    layoutCustomFontSelect.value = layoutCustomLabelFont;
+  }
+  if (layoutCustomWeightSelect) {
+    layoutCustomWeightSelect.value = String(layoutCustomLabelFontWeight);
+  }
+  if (layoutCustomLabelSizeInput) {
+    layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
+  }
+  if (layoutKeyMappingFontSelect) {
+    layoutKeyMappingFontSelect.value = layoutKeyMappingFont;
+  }
+  if (layoutKeyMappingWeightSelect) {
+    layoutKeyMappingWeightSelect.value = String(layoutKeyMappingFontWeight);
+  }
+  if (layoutKeyMappingSizeInput) {
+    layoutKeyMappingSizeInput.value = String(layoutKeyMappingTextSize);
+  }
+}
+
+function applyLayoutFontSnapshot(snapshot) {
+  if (!snapshot) {
+    return;
+  }
+  layoutTitleFont = snapshot.title;
+  layoutRatioFont = snapshot.ratio;
+  layoutNoteFont = snapshot.note;
+  layoutTriangleLabelFont = snapshot.triangleLabel;
+  layoutCustomLabelFont = snapshot.customLabel;
+  layoutKeyMappingFont = snapshot.keyMapping;
+  layoutAxisLegendFont = snapshot.axisLegend;
+  layoutCreatorFont = snapshot.creator;
+  layoutTitleFontWeight = snapshot.titleWeight;
+  layoutRatioFontWeight = snapshot.ratioWeight;
+  layoutNoteFontWeight = snapshot.noteWeight;
+  layoutTriangleLabelFontWeight = snapshot.triangleLabelWeight;
+  layoutCustomLabelFontWeight = snapshot.customLabelWeight;
+  layoutKeyMappingFontWeight = snapshot.keyMappingWeight;
+  layoutAxisLegendFontWeight = snapshot.axisLegendWeight;
+  layoutCreatorFontWeight = snapshot.creatorWeight;
+  setLayoutTitleSize(snapshot.titleSize);
+  setLayoutCreatorSize(snapshot.creatorSize);
+  layoutRatioTextSize = snapshot.ratioTextSize;
+  layoutNoteTextSize = snapshot.noteTextSize;
+  layoutTriangleLabelTextSize = snapshot.triangleLabelTextSize;
+  setLayoutCustomLabelSize(snapshot.customLabelTextSize);
+  layoutKeyMappingTextSize = snapshot.keyMappingTextSize;
+  layoutAxisLegendTextSize = snapshot.axisLegendTextSize;
+  updateLayoutRatioTextReadout();
+  updateLayoutNoteTextReadout();
+  updateLayoutTriangleLabelReadout();
+  syncLayoutFontVars();
+  syncLayoutFontPopoverInputs();
+  invalidateLabelCache({ clearTextWidths: true });
+  draw();
+  schedulePresetUrlUpdate();
+}
+
+function closeLayoutFontPopover({ revert = false } = {}) {
+  if (!layoutFontPopover || !layoutFontsButton) {
+    return;
+  }
+  if (revert && layoutFontSnapshot) {
+    applyLayoutFontSnapshot(layoutFontSnapshot);
+  }
+  layoutFontPopover.hidden = true;
+  layoutFontsButton.setAttribute("aria-expanded", "false");
+  layoutFontSnapshot = null;
+}
+
+if (layoutFontsButton && layoutFontPopover) {
+  layoutFontsButton.addEventListener("click", (event) => {
+    if (!layoutMode) {
+      return;
+    }
+    event.preventDefault();
+    if (!layoutFontPopover.hidden) {
+      closeLayoutFontPopover();
+      return;
+    }
+    layoutFontSnapshot = {
+      title: layoutTitleFont,
+      ratio: layoutRatioFont,
+      note: layoutNoteFont,
+      triangleLabel: layoutTriangleLabelFont,
+      customLabel: layoutCustomLabelFont,
+      keyMapping: layoutKeyMappingFont,
+      axisLegend: layoutAxisLegendFont,
+      creator: layoutCreatorFont,
+      titleWeight: layoutTitleFontWeight,
+      ratioWeight: layoutRatioFontWeight,
+      noteWeight: layoutNoteFontWeight,
+      triangleLabelWeight: layoutTriangleLabelFontWeight,
+      customLabelWeight: layoutCustomLabelFontWeight,
+      keyMappingWeight: layoutKeyMappingFontWeight,
+      axisLegendWeight: layoutAxisLegendFontWeight,
+      creatorWeight: layoutCreatorFontWeight,
+      titleSize: layoutTitleSize,
+      creatorSize: layoutCreatorSize,
+      ratioTextSize: layoutRatioTextSize,
+      noteTextSize: layoutNoteTextSize,
+      triangleLabelTextSize: layoutTriangleLabelTextSize,
+      customLabelTextSize: layoutCustomLabelTextSize,
+      keyMappingTextSize: layoutKeyMappingTextSize,
+      axisLegendTextSize: layoutAxisLegendTextSize,
+    };
+    updateLayoutCustomLabelControls();
+    syncLayoutFontPopoverInputs();
+    layoutFontPopover.hidden = false;
+    layoutFontsButton.setAttribute("aria-expanded", "true");
+  });
+}
+if (layoutFontCancelButton) {
+  layoutFontCancelButton.addEventListener("click", () => {
+    closeLayoutFontPopover({ revert: true });
+  });
+}
+if (layoutFontDoneButton) {
+  layoutFontDoneButton.addEventListener("click", () => {
+    closeLayoutFontPopover();
+  });
+}
+let layoutKeyMappingTextSnapshot = null;
+if (layoutKeyMappingTextButton && layoutKeyMappingTextDialog) {
+  layoutKeyMappingTextButton.addEventListener("click", () => {
+    if (typeof layoutKeyMappingTextDialog.showModal === "function") {
+      layoutKeyMappingTextSnapshot = {
+        prefix: layoutKeyMappingPrefix,
+        suffix: layoutKeyMappingSuffix,
       };
-      layoutFontDialog.showModal();
+      if (layoutKeyMappingPrefixInput) {
+        layoutKeyMappingPrefixInput.value = layoutKeyMappingPrefix;
+      }
+      if (layoutKeyMappingSuffixInput) {
+        layoutKeyMappingSuffixInput.value = layoutKeyMappingSuffix;
+      }
+      layoutKeyMappingTextDialog.showModal();
     }
   });
 }
@@ -11747,33 +12732,26 @@ if (layoutPanelToggle) {
     setLayoutPanelCollapsed(!isCollapsed);
   });
 }
-  if (layoutFontDialog) {
-  layoutFontDialog.addEventListener("close", () => {
-    if (layoutFontDialog.returnValue === "cancel" && layoutFontSnapshot) {
-      layoutTitleFont = layoutFontSnapshot.title;
-      layoutRatioFont = layoutFontSnapshot.ratio;
-      layoutNoteFont = layoutFontSnapshot.note;
-      layoutTriangleLabelFont = layoutFontSnapshot.triangleLabel;
-      layoutCustomLabelFont = layoutFontSnapshot.customLabel;
-      if (layoutTitleFontSelect) {
-        layoutTitleFontSelect.value = layoutTitleFont;
-      }
-      if (layoutRatioFontSelect) {
-        layoutRatioFontSelect.value = layoutRatioFont;
-      }
-      if (layoutNoteFontSelect) {
-        layoutNoteFontSelect.value = layoutNoteFont;
-      }
-      if (layoutTriangleLabelFontSelect) {
-        layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
-      }
-      if (layoutCustomFontSelect) {
-        layoutCustomFontSelect.value = layoutCustomLabelFont;
-      }
+if (layoutKeyMappingTextDialog) {
+  layoutKeyMappingTextDialog.addEventListener("close", () => {
+    if (layoutKeyMappingTextDialog.returnValue === "cancel" && layoutKeyMappingTextSnapshot) {
+      layoutKeyMappingPrefix = layoutKeyMappingTextSnapshot.prefix;
+      layoutKeyMappingSuffix = layoutKeyMappingTextSnapshot.suffix;
+    } else {
+      layoutKeyMappingPrefix = layoutKeyMappingPrefixInput
+        ? layoutKeyMappingPrefixInput.value
+        : "";
+      layoutKeyMappingSuffix = layoutKeyMappingSuffixInput
+        ? layoutKeyMappingSuffixInput.value
+        : "";
     }
-    layoutFontSnapshot = null;
-    syncLayoutFontVars();
-    invalidateLabelCache({ clearTextWidths: true });
+    if (layoutKeyMappingPrefixInput) {
+      layoutKeyMappingPrefixInput.value = layoutKeyMappingPrefix;
+    }
+    if (layoutKeyMappingSuffixInput) {
+      layoutKeyMappingSuffixInput.value = layoutKeyMappingSuffix;
+    }
+    layoutKeyMappingTextSnapshot = null;
     draw();
     schedulePresetUrlUpdate();
   });
@@ -11783,6 +12761,34 @@ if (layoutTitleFontSelect) {
     pushLayoutUndoState();
     layoutTitleFont = layoutTitleFontSelect.value || layoutTitleFont;
     syncLayoutFontVars();
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutCreatorFontSelect) {
+  layoutCreatorFontSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutCreatorFont = layoutCreatorFontSelect.value || layoutCreatorFont;
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutTitleWeightSelect) {
+  layoutTitleWeightSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutTitleFontWeight = Number(layoutTitleWeightSelect.value) || layoutTitleFontWeight;
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutCreatorWeightSelect) {
+  layoutCreatorWeightSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutCreatorFontWeight =
+      Number(layoutCreatorWeightSelect.value) || layoutCreatorFontWeight;
     invalidateLabelCache({ clearTextWidths: true });
     draw();
     schedulePresetUrlUpdate();
@@ -11798,11 +12804,29 @@ if (layoutRatioFontSelect) {
     schedulePresetUrlUpdate();
   });
 }
+if (layoutRatioWeightSelect) {
+  layoutRatioWeightSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutRatioFontWeight = Number(layoutRatioWeightSelect.value) || layoutRatioFontWeight;
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
 if (layoutNoteFontSelect) {
   layoutNoteFontSelect.addEventListener("change", () => {
     pushLayoutUndoState();
     layoutNoteFont = layoutNoteFontSelect.value || layoutNoteFont;
     syncLayoutFontVars();
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutNoteWeightSelect) {
+  layoutNoteWeightSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutNoteFontWeight = Number(layoutNoteWeightSelect.value) || layoutNoteFontWeight;
     invalidateLabelCache({ clearTextWidths: true });
     draw();
     schedulePresetUrlUpdate();
@@ -11818,11 +12842,68 @@ if (layoutCustomFontSelect) {
     schedulePresetUrlUpdate();
   });
 }
+if (layoutCustomWeightSelect) {
+  layoutCustomWeightSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutCustomLabelFontWeight =
+      Number(layoutCustomWeightSelect.value) || layoutCustomLabelFontWeight;
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutKeyMappingFontSelect) {
+  layoutKeyMappingFontSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutKeyMappingFont = layoutKeyMappingFontSelect.value || layoutKeyMappingFont;
+    syncLayoutFontVars();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutKeyMappingWeightSelect) {
+  layoutKeyMappingWeightSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutKeyMappingFontWeight =
+      Number(layoutKeyMappingWeightSelect.value) || layoutKeyMappingFontWeight;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
 if (layoutTriangleLabelFontSelect) {
   layoutTriangleLabelFontSelect.addEventListener("change", () => {
     pushLayoutUndoState();
     layoutTriangleLabelFont = layoutTriangleLabelFontSelect.value || layoutTriangleLabelFont;
     syncLayoutFontVars();
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutAxisFontSelect) {
+  layoutAxisFontSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutAxisLegendFont = layoutAxisFontSelect.value || layoutAxisLegendFont;
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutTriangleLabelWeightSelect) {
+  layoutTriangleLabelWeightSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutTriangleLabelFontWeight =
+      Number(layoutTriangleLabelWeightSelect.value) || layoutTriangleLabelFontWeight;
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutAxisWeightSelect) {
+  layoutAxisWeightSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutAxisLegendFontWeight =
+      Number(layoutAxisWeightSelect.value) || layoutAxisLegendFontWeight;
     invalidateLabelCache({ clearTextWidths: true });
     draw();
     schedulePresetUrlUpdate();
@@ -12328,6 +13409,10 @@ window.addEventListener("keydown", (event) => {
     draw();
   }
   if (event.key === "Escape") {
+    if (layoutFontPopover && !layoutFontPopover.hidden) {
+      closeLayoutFontPopover();
+      return;
+    }
     if (layoutAxisEdit) {
       layoutAxisEdit = null;
       layoutAxisEditDrag = null;
@@ -12353,6 +13438,33 @@ window.addEventListener("pointerdown", (event) => {
     return;
   }
   layoutSpacePopover.hidden = true;
+});
+window.addEventListener("pointerdown", (event) => {
+  if (!layoutKeyMappingPopover || layoutKeyMappingPopover.hidden) {
+    return;
+  }
+  if (layoutKeyMappingPopover.contains(event.target)) {
+    return;
+  }
+  if (layoutKeyMappingTrigger && layoutKeyMappingTrigger.contains(event.target)) {
+    return;
+  }
+  layoutKeyMappingPopover.hidden = true;
+  if (layoutKeyMappingTrigger) {
+    layoutKeyMappingTrigger.setAttribute("aria-expanded", "false");
+  }
+});
+window.addEventListener("pointerdown", (event) => {
+  if (!layoutFontPopover || layoutFontPopover.hidden) {
+    return;
+  }
+  if (layoutFontPopover.contains(event.target)) {
+    return;
+  }
+  if (layoutFontsButton && layoutFontsButton.contains(event.target)) {
+    return;
+  }
+  closeLayoutFontPopover();
 });
 window.addEventListener("pointerdown", (event) => {
   if (!keyboardMapPopover || keyboardMapPopover.hidden) {

@@ -705,6 +705,7 @@ let layoutKeyMappingOffsets = new Map();
 let pendingLayoutLabelOffsets = null;
 let pendingLayoutPositionOffsets = null;
 let pendingLayoutKeyMappingOffsets = null;
+let pendingLayoutSpacing = null;
 let layoutNodeShapes = new Map();
 let nodeSpellingOverrides = new Map();
 let nodeOctaveOffsets = new Map();
@@ -9353,6 +9354,7 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
   layoutCustomLabels = [];
   layoutCustomLabelId = 1;
   pendingLayoutPositionOffsets = null;
+  pendingLayoutSpacing = null;
   layoutRedoStack.length = 0;
   layoutTitlePosition = null;
   layoutCreatorPosition = null;
@@ -10634,6 +10636,7 @@ function applyPresetState(state) {
   if (!state || typeof state !== "object") {
     return;
   }
+  pendingLayoutSpacing = null;
   if (typeof state.axes === "boolean") {
     showAxes = state.axes;
     if (navAxesToggle) {
@@ -10970,12 +10973,11 @@ function applyPresetState(state) {
       }
     }
     if (layoutState.spacing && typeof layoutState.spacing === "object") {
-      applyLayoutSpacing({
+      pendingLayoutSpacing = {
         x: Number(layoutState.spacing.x) || 1,
         y: Number(layoutState.spacing.y) || 1,
         z: Number(layoutState.spacing.z) || 1,
-      });
-      updateLayoutSpacingControls();
+      };
     }
     if (Number.isFinite(layoutState.titleMargin)) {
       layoutTitleMargin = layoutState.titleMargin;
@@ -11388,6 +11390,13 @@ function applyPresetState(state) {
     pendingLayoutKeyMappingOffsets = null;
     draw();
   }
+  if (pendingLayoutSpacing) {
+    layoutPositions.clear();
+    applyLayoutSpacing(pendingLayoutSpacing);
+    pendingLayoutSpacing = null;
+    updateLayoutSpacingControls();
+    draw();
+  }
   if (pendingLayoutPositionOffsets) {
     applyLayoutPositionOffsets(pendingLayoutPositionOffsets);
     pendingLayoutPositionOffsets = null;
@@ -11625,19 +11634,51 @@ const LEXEND_FONT_URL =
 
 function getHejiFontUrl() {
   try {
-    return new URL("./src/HEJI2Text.otf", window.location.href).href;
+    return new URL("./HEJI2Text.otf", import.meta.url).href;
   } catch (error) {
     return "./src/HEJI2Text.otf";
   }
 }
 
-function getExportFontCss() {
-  const hejiFontUrl = getHejiFontUrl();
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function buildFontDataUrl(url, mimeType) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error("Font fetch failed");
+    }
+    const buffer = await response.arrayBuffer();
+    const base64 = arrayBufferToBase64(buffer);
+    return `data:${mimeType};base64,${base64}`;
+  } catch (error) {
+    return null;
+  }
+}
+
+function getExportFontCss(hejiFontSrc = null) {
+  const hejiFontUrl = hejiFontSrc || getHejiFontUrl();
   return `@import url("${LEXEND_FONT_URL}");
 @font-face { font-family: "HEJI2Text"; src: url("${hejiFontUrl}") format("opentype"); font-display: swap; }`;
 }
 
-function buildLayoutSvgString() {
+function getExportMetadataLabel() {
+  const creator = layoutCreator ? layoutCreator.trim() : "";
+  const title = layoutTitle ? layoutTitle.trim() : "";
+  const safeCreator = creator || "Creator";
+  const safeTitle = title || "Title";
+  return `${safeCreator} - ${safeTitle} [tuninglattice.com]`;
+}
+
+function buildLayoutSvgString(hejiFontSrc = null) {
   if (!layoutMode) {
     return null;
   }
@@ -11651,12 +11692,17 @@ function buildLayoutSvgString() {
   const detailSize = layoutNoteTextSize;
   const titleSize = Math.max(12, Math.round(layoutTitleSize));
   const creatorSize = getLayoutCreatorSize();
+  const exportLabel = getExportMetadataLabel();
 
   const parts = [];
   parts.push(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${widthIn}in" height="${heightIn}in" viewBox="0 0 ${widthPx} ${heightPx}">`
   );
-  parts.push(`<defs><style><![CDATA[${getExportFontCss()}]]></style></defs>`);
+  parts.push(`<title>${escapeSvgText(exportLabel)}</title>`);
+  parts.push(`<desc>${escapeSvgText(exportLabel)}</desc>`);
+  parts.push(
+    `<defs><style><![CDATA[${getExportFontCss(hejiFontSrc)}]]></style></defs>`
+  );
   parts.push(`<rect width="100%" height="100%" fill="${themeColors.page}"/>`);
 
   if (layoutTitle) {
@@ -12097,31 +12143,39 @@ function buildLayoutSvgString() {
   return parts.join("\n");
 }
 
-function exportLayoutSvg() {
-  const svg = buildLayoutSvgString();
+async function exportLayoutSvg() {
+  if (!layoutMode) {
+    alert("Enable Page Layout mode to export SVG.");
+    return;
+  }
+  const hejiFontUrl = getHejiFontUrl();
+  const hejiFontDataUrl = await buildFontDataUrl(hejiFontUrl, "font/otf");
+  const svg = buildLayoutSvgString(hejiFontDataUrl || hejiFontUrl);
   if (!svg) {
     alert("Enable Page Layout mode to export SVG.");
     return;
   }
+  const exportLabel = getExportMetadataLabel();
   const blob = new Blob([svg], {
     type: "image/svg+xml;charset=utf-8",
   });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "lattice-layout.svg";
+  link.download = `${exportLabel}.svg`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
 
-function exportLayoutPdf() {
-  const svg = buildLayoutSvgString();
-  if (!svg) {
+async function exportLayoutPdf() {
+  if (!layoutMode) {
     alert("Enable Page Layout mode to export PDF.");
     return;
   }
+  const exportLabel = getExportMetadataLabel();
+  const escapedExportLabel = escapeSvgText(exportLabel);
   const { widthPx, heightPx } = getLayoutPageDimensions();
   const win = window.open("", "_blank");
   if (!win) {
@@ -12129,12 +12183,23 @@ function exportLayoutPdf() {
     return;
   }
   const hejiFontUrl = getHejiFontUrl();
+  const hejiFontDataUrl = await buildFontDataUrl(hejiFontUrl, "font/otf");
+  const hejiFontSrc = hejiFontDataUrl || hejiFontUrl;
+  const svg = buildLayoutSvgString(hejiFontSrc);
+  if (!svg) {
+    alert("Enable Page Layout mode to export PDF.");
+    win.close();
+    return;
+  }
   win.document.open();
+  win.document.title = exportLabel;
   win.document.write(`<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Layout PDF</title>
+    <title>${escapedExportLabel}</title>
+    <meta name="title" content="${escapedExportLabel}" />
+    <meta name="author" content="${escapedExportLabel}" />
     <link rel="stylesheet" href="${LEXEND_FONT_URL}">
     <style>
       @page { size: ${Math.round(widthPx)}px ${Math.round(heightPx)}px; margin: 0; }
@@ -12143,7 +12208,7 @@ function exportLayoutPdf() {
       svg { width: ${Math.round(widthPx)}px; height: ${Math.round(heightPx)}px; display: block; }
       @font-face {
         font-family: "HEJI2Text";
-        src: url("${hejiFontUrl}") format("opentype");
+        src: url("${hejiFontSrc}") format("opentype");
         font-display: swap;
       }
     </style>

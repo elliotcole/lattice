@@ -84,6 +84,8 @@ const presetPanel = document.getElementById("preset-panel");
 const presetList = document.getElementById("preset-list");
 const fileToggle = document.getElementById("file-toggle");
 const filePanel = document.getElementById("file-panel");
+const sharePresetButton = document.getElementById("share-preset");
+const fileSharePopover = document.getElementById("file-share-popover");
 const saveLatticeButton = document.getElementById("save-lattice");
 const loadLatticeButton = document.getElementById("load-lattice");
 const loadLatticeInput = document.getElementById("load-lattice-input");
@@ -5972,6 +5974,15 @@ function draw() {
 
     ctx.save();
     ctx.globalAlpha = alpha;
+    if (node.id === ratioWheelHoverNodeId) {
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius * 1.35, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 168, 200, 0.25)";
+      ctx.strokeStyle = "rgba(255, 168, 200, 0.6)";
+      ctx.lineWidth = 2;
+      ctx.fill();
+      ctx.stroke();
+    }
     if (showNodeShape && showCircles) {
       ctx.beginPath();
       ctx.strokeStyle = themeColors.nodeStroke;
@@ -6543,7 +6554,7 @@ function enableAudio() {
     audioCtx.resume();
   }
 
-  audioToggle.textContent = "Disable Audio";
+  audioToggle.textContent = "Sound On";
   audioToggle.classList.add("button-on");
 }
 
@@ -6554,7 +6565,7 @@ function disableAudio() {
 
   stopAllVoices();
   audioCtx.suspend();
-  audioToggle.textContent = "Enable Audio";
+  audioToggle.textContent = "Sound Off";
   audioToggle.classList.remove("button-on");
 }
 
@@ -6722,7 +6733,7 @@ async function initMidi() {
 }
 
 function onPointerDown(event) {
-  closeTopMenus();
+  closeTopMenus("ratio-wheel");
   closeBottomMenus();
   const screenPoint = { x: event.offsetX, y: event.offsetY };
   if (layoutMode && layoutLabelHitboxVisible && !hitTestNoteLabel(screenPoint)) {
@@ -8184,6 +8195,27 @@ function getActiveRatioAngles() {
   }));
 }
 
+function findClosestNodeForRatio(numerator, denominator) {
+  let bestNode = null;
+  let bestScore = Infinity;
+  nodes.forEach((node) => {
+    if (!node.active) {
+      return;
+    }
+    if (node.numerator !== numerator || node.denominator !== denominator) {
+      return;
+    }
+    const z = Number.isFinite(node.gridZ) ? node.gridZ : gridCenterZ;
+    const score =
+      Math.abs(node.gridX || 0) + Math.abs(node.gridY || 0) + Math.abs(z - gridCenterZ);
+    if (score < bestScore) {
+      bestScore = score;
+      bestNode = node;
+    }
+  });
+  return bestNode;
+}
+
 function gcd(a, b) {
   let x = Math.abs(a);
   let y = Math.abs(b);
@@ -8218,7 +8250,7 @@ function drawRatioWheel(canvasEl, options = {}) {
   if (!canvasEl || !themeColors) {
     return;
   }
-  const { showLabels = true, showIntervals = true } = options;
+  const { showLabels = false, showIntervals = false, hoverIndex = null } = options;
   resizeWheelCanvas(canvasEl);
   const ctx2d = canvasEl.getContext("2d");
   if (!ctx2d) {
@@ -8232,6 +8264,36 @@ function drawRatioWheel(canvasEl, options = {}) {
   const radius = Math.min(width, height) * 0.4;
   const cx = width / 2;
   const cy = height / 2;
+
+  const playingKeys = new Set();
+  voices.forEach((voice) => {
+    const node = nodeById.get(voice.nodeId);
+    if (!node) {
+      return;
+    }
+    const ratio = node.numerator / node.denominator;
+    const cents = 1200 * Math.log2(ratio);
+    playingKeys.add(cents.toFixed(3));
+  });
+  angles.forEach((entry, index) => {
+    const isPlaying = playingKeys.has(entry.cents.toFixed(3));
+    const isHover = hoverIndex === index;
+    if (!isPlaying && !isHover) {
+      return;
+    }
+    const next = angles[(index + 1) % angles.length];
+    let endAngle = next.angle;
+    if (endAngle <= entry.angle) {
+      endAngle += Math.PI * 2;
+    }
+    const alpha = isHover ? 0.45 : 0.25;
+    ctx2d.fillStyle = `rgba(255, 168, 200, ${alpha})`;
+    ctx2d.beginPath();
+    ctx2d.moveTo(cx, cy);
+    ctx2d.arc(cx, cy, radius, entry.angle, endAngle);
+    ctx2d.closePath();
+    ctx2d.fill();
+  });
 
   ctx2d.strokeStyle = themeColors.wheelRing;
   ctx2d.lineWidth = 2;
@@ -8249,7 +8311,7 @@ function drawRatioWheel(canvasEl, options = {}) {
     ctx2d.stroke();
   });
 
-  if (!angles.length || (!showLabels && !showIntervals)) {
+  if (!angles.length) {
     return;
   }
 
@@ -8312,6 +8374,106 @@ function drawRatioWheel(canvasEl, options = {}) {
   }
 }
 
+function setRatioWheelHover(nextIndex, nextNodeId) {
+  if (ratioWheelHoverIndex === nextIndex && ratioWheelHoverNodeId === nextNodeId) {
+    return;
+  }
+  ratioWheelHoverIndex = nextIndex;
+  ratioWheelHoverNodeId = nextNodeId;
+  updateRatioWheels();
+  draw();
+}
+
+function clearRatioWheelHover() {
+  setRatioWheelHover(null, null);
+}
+
+function getRatioWheelHit(canvasEl, event) {
+  if (!canvasEl || (ratioWheelPanel && ratioWheelPanel.hidden)) {
+    return null;
+  }
+  const rect = canvasEl.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) {
+    return null;
+  }
+  const scaleX = canvasEl.width / rect.width;
+  const scaleY = canvasEl.height / rect.height;
+  const x = (event.clientX - rect.left) * scaleX;
+  const y = (event.clientY - rect.top) * scaleY;
+  const width = canvasEl.width;
+  const height = canvasEl.height;
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = Math.min(width, height) * 0.4;
+  const dx = x - cx;
+  const dy = y - cy;
+  const dist = Math.hypot(dx, dy);
+  if (dist > radius) {
+    return null;
+  }
+  let angle = Math.atan2(dy, dx);
+  if (angle < -Math.PI / 2) {
+    angle += Math.PI * 2;
+  }
+  const angles = getActiveRatioAngles();
+  if (!angles.length) {
+    return null;
+  }
+  let hoverIndex = null;
+  for (let i = 0; i < angles.length; i += 1) {
+    const current = angles[i];
+    const next = angles[(i + 1) % angles.length];
+    let endAngle = next.angle;
+    if (endAngle <= current.angle) {
+      endAngle += Math.PI * 2;
+    }
+    if (angle >= current.angle && angle < endAngle) {
+      hoverIndex = i;
+      break;
+    }
+  }
+  if (hoverIndex == null) {
+    return null;
+  }
+  const entry = angles[hoverIndex];
+  const node = findClosestNodeForRatio(entry.numerator, entry.denominator);
+  return { index: hoverIndex, entry, node };
+}
+
+function handleRatioWheelHover(event) {
+  const hit = getRatioWheelHit(ratioWheelLarge, event);
+  if (!hit) {
+    clearRatioWheelHover();
+    return;
+  }
+  setRatioWheelHover(hit.index, hit.node ? hit.node.id : null);
+}
+
+function handleRatioWheelClick(event) {
+  const hit = getRatioWheelHit(ratioWheelLarge, event);
+  if (!hit || !hit.node) {
+    return;
+  }
+  const node = hit.node;
+  const baseVoice = node.baseVoiceId ? findVoiceById(node.baseVoiceId) : null;
+  if (baseVoice) {
+    stopVoice(baseVoice);
+    node.baseVoiceId = null;
+  } else {
+    const voice = startVoice({
+      nodeId: node.id,
+      octave: 0,
+      freq: node.freq,
+      source: "node",
+    });
+    if (voice) {
+      node.baseVoiceId = voice.id;
+    }
+  }
+  setRatioWheelHover(hit.index, node.id);
+  draw();
+}
+
 function updateRatioWheels() {
   if (
     view.dragging ||
@@ -8328,7 +8490,7 @@ function updateRatioWheels() {
     return;
   }
   if (ratioWheelPanel && !ratioWheelPanel.hidden) {
-    drawRatioWheel(ratioWheelLarge);
+    drawRatioWheel(ratioWheelLarge, { hoverIndex: ratioWheelHoverIndex });
   }
   if (ratioWheelMini) {
     drawRatioWheel(ratioWheelMini, { showLabels: false, showIntervals: false });
@@ -10022,6 +10184,7 @@ function closeRatioWheelPanel() {
   ratioWheelToggle.setAttribute("aria-expanded", "false");
   ratioWheelPanel.hidden = true;
   ratioWheelPanel.classList.remove("panel-open");
+  clearRatioWheelHover();
   syncTopMenuPanelState();
 }
 
@@ -10076,6 +10239,7 @@ function closeFilePanel() {
   fileToggle.setAttribute("aria-expanded", "false");
   filePanel.hidden = true;
   filePanel.classList.remove("panel-open");
+  hideFileSharePopover();
   const parentPanel = fileToggle.closest(".panel");
   if (parentPanel) {
     parentPanel.classList.remove("panel-open");
@@ -10213,6 +10377,9 @@ async function loadPresets() {
 const PRESET_PARAM = "s";
 let presetSyncEnabled = false;
 let presetUpdateTimer = null;
+let fileShareTimer = null;
+let ratioWheelHoverIndex = null;
+let ratioWheelHoverNodeId = null;
 
 function encodePresetState(state) {
   const json = JSON.stringify(state);
@@ -10416,6 +10583,34 @@ function schedulePresetUrlUpdate() {
     clearTimeout(presetUpdateTimer);
   }
   presetUpdateTimer = setTimeout(updatePresetUrl, 250);
+}
+
+function getPresetShareUrl() {
+  const encoded = encodePresetState(getPresetState());
+  const hash = `${PRESET_PARAM}=${encoded}`;
+  return `${location.origin}${location.pathname}${location.search}#${hash}`;
+}
+
+function hideFileSharePopover() {
+  if (!fileSharePopover) {
+    return;
+  }
+  fileSharePopover.hidden = true;
+}
+
+function showFileSharePopover(message) {
+  if (!fileSharePopover) {
+    return;
+  }
+  fileSharePopover.textContent = message;
+  fileSharePopover.hidden = false;
+  if (fileShareTimer) {
+    clearTimeout(fileShareTimer);
+  }
+  fileShareTimer = setTimeout(() => {
+    fileShareTimer = null;
+    hideFileSharePopover();
+  }, 2400);
 }
 
 function readPresetFromUrl() {
@@ -12300,6 +12495,17 @@ if (loadLatticeButton && loadLatticeInput) {
     }
   });
 }
+if (sharePresetButton) {
+  sharePresetButton.addEventListener("click", async () => {
+    const shareUrl = getPresetShareUrl();
+    try {
+      await copyTextToClipboard(shareUrl);
+      showFileSharePopover("Preset URL copied. Paste it in a new tab to reopen this preset.");
+    } catch (error) {
+      showFileSharePopover("Couldn't copy the preset URL. Try again.");
+    }
+  });
+}
 window.addEventListener("hashchange", () => {
   const presetState = readPresetFromUrl();
   if (presetState) {
@@ -13208,6 +13414,11 @@ if (animationToggle) {
 if (ratioWheelToggle) {
   ratioWheelToggle.addEventListener("click", toggleRatioWheelPanel);
 }
+if (ratioWheelLarge) {
+  ratioWheelLarge.addEventListener("mousemove", handleRatioWheelHover);
+  ratioWheelLarge.addEventListener("mouseleave", clearRatioWheelHover);
+  ratioWheelLarge.addEventListener("click", handleRatioWheelClick);
+}
 if (presetToggle) {
   presetToggle.addEventListener("click", togglePresetPanel);
 }
@@ -13727,7 +13938,6 @@ window.addEventListener("keydown", (event) => {
       draw();
       return;
     }
-    closeRatioWheelPanel();
     zModeActive = false;
     zModeAnchor = null;
     updateAddModeFromShift();

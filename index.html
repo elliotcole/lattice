@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="./src/style.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&family=Inter:wght@100..900&family=DM+Sans:wght@400..700&family=Radley:ital,wght@0,400;1,400&family=Alice&family=Cinzel:wght@400..900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&family=Inter:wght@100..900&family=IBM+Plex+Sans:wght@200..700&family=Lato:wght@300..900&family=PT+Sans:wght@400..700&family=PT+Serif:wght@400..700&family=Radley:ital,wght@0,400;1,400&family=Alice&family=Noto+Serif:wght@400..700&display=swap" rel="stylesheet">
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-LWPVNSVEWV"></script>
     <script>
@@ -278,7 +278,9 @@
           <div class="control-inline">
             <button id="export-svg" type="button">SVG</button>
             <button id="export-pdf" type="button">PDF</button>
+            <button id="export-check" type="button">Check</button>
           </div>
+          <div id="export-check-status" class="export-check-status" aria-live="polite"></div>
         </div>
         <div class="nav-3d-title">Reset</div>
         <div class="control-group">
@@ -295,9 +297,14 @@
           <div class="layout-font-controls">
             <select id="layout-title-font">
               <option value="Lexend">Lexend</option>
-              <option value="Georgia">Georgia</option>
+              <option value="Noto Serif">Noto Serif</option>
               <option value="Inter">Inter</option>
-              <option value="DM Sans">DM Sans</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
               <option value="Radley">Radley</option>
               <option value="Alice">Alice</option>
             </select>
@@ -320,9 +327,14 @@
           <div class="layout-font-controls">
             <select id="layout-creator-font">
               <option value="Lexend">Lexend</option>
-              <option value="Georgia">Georgia</option>
+              <option value="Noto Serif">Noto Serif</option>
               <option value="Inter">Inter</option>
-              <option value="DM Sans">DM Sans</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
               <option value="Radley">Radley</option>
               <option value="Alice">Alice</option>
             </select>
@@ -344,10 +356,15 @@
           Inside Font
           <div class="layout-font-controls">
             <select id="layout-ratio-font">
-              <option value="Georgia">Georgia</option>
+              <option value="Noto Serif">Noto Serif</option>
               <option value="Lexend">Lexend</option>
               <option value="Inter">Inter</option>
-              <option value="DM Sans">DM Sans</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
               <option value="Radley">Radley</option>
               <option value="Alice">Alice</option>
             </select>
@@ -370,9 +387,14 @@
           <div class="layout-font-controls">
             <select id="layout-note-font">
               <option value="Lexend">Lexend</option>
-              <option value="Georgia">Georgia</option>
+              <option value="Noto Serif">Noto Serif</option>
               <option value="Inter">Inter</option>
-              <option value="DM Sans">DM Sans</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
               <option value="Radley">Radley</option>
               <option value="Alice">Alice</option>
             </select>
@@ -394,14 +416,18 @@
           Triangle Label Font
           <div class="layout-font-controls">
             <select id="layout-triangle-label-font">
-              <option value="Georgia">Georgia</option>
+              <option value="Noto Serif">Noto Serif</option>
               <option value="Lexend">Lexend</option>
               <option value="Inter">Inter</option>
-              <option value="DM Sans">DM Sans</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
               <option value="Radley">Radley</option>
               <option value="Alice">Alice</option>
-              <option value="Cinzel">Cinzel</option>
-            </select>
+                          </select>
             <select id="layout-triangle-label-weight">
               <option value="200">Extra Light</option>
               <option value="300">Light</option>
@@ -421,9 +447,14 @@
           <div class="layout-font-controls">
             <select id="layout-axis-font">
               <option value="Lexend">Lexend</option>
-              <option value="Georgia">Georgia</option>
+              <option value="Noto Serif">Noto Serif</option>
               <option value="Inter">Inter</option>
-              <option value="DM Sans">DM Sans</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
               <option value="Radley">Radley</option>
               <option value="Alice">Alice</option>
             </select>
@@ -446,10 +477,15 @@
             Custom Text Font
             <div class="layout-font-controls">
               <select id="layout-custom-font">
-                <option value="Georgia">Georgia</option>
+                <option value="Noto Serif">Noto Serif</option>
                 <option value="Lexend">Lexend</option>
                 <option value="Inter">Inter</option>
-                <option value="DM Sans">DM Sans</option>
+                <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
                 <option value="Radley">Radley</option>
                 <option value="Alice">Alice</option>
               </select>
@@ -473,9 +509,14 @@
           <div class="layout-font-controls">
             <select id="layout-key-mapping-font">
               <option value="Lexend">Lexend</option>
-              <option value="Georgia">Georgia</option>
+              <option value="Noto Serif">Noto Serif</option>
               <option value="Inter">Inter</option>
-              <option value="DM Sans">DM Sans</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
               <option value="Radley">Radley</option>
               <option value="Alice">Alice</option>
             </select>

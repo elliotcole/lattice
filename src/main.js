@@ -1,4 +1,5 @@
 import { customOscillatorTypes, customOscillators } from "web-audio-oscillators";
+import opentype from "opentype.js";
 const canvas = document.getElementById("lattice");
 const ctx = canvas.getContext("2d");
 const audioToggle = document.getElementById("audio-toggle");
@@ -76,6 +77,8 @@ const layoutUnifySizeToggle = document.getElementById("layout-unify-size");
 const layoutResetButton = document.getElementById("layout-reset");
 const exportSvgButton = document.getElementById("export-svg");
 const exportPdfButton = document.getElementById("export-pdf");
+const exportCheckButton = document.getElementById("export-check");
+const exportCheckStatus = document.getElementById("export-check-status");
 const midiEnable = document.getElementById("midi-enable");
 const midiPortSelect = document.getElementById("midi-port");
 const midiChannelSelect = document.getElementById("midi-channel");
@@ -626,6 +629,7 @@ noteNamesFlat.forEach((name, index) => {
 });
 const KEYBOARD_BASE_MIDI = 60;
 const HEJI_SUFFIX_Y_OFFSET = -0.52;
+const HEJI_SVG_EXTRA_Y_OFFSET = 0.21;
 const HEJI_REST_GAP = 0.08;
 const HEJI_REST_GAP_PLAIN = -0.2;
 const CENTS_CHAR = "¢";
@@ -736,12 +740,12 @@ let layoutLockPosition = true;
 let layoutView = { zoom: 1, offsetX: 0, offsetY: 0, rotX: 0, rotY: 0 };
 let layoutPrevState = null;
 let layoutTitleFont = "Lexend";
-let layoutRatioFont = "Georgia";
+let layoutRatioFont = "Noto Serif";
 let layoutNoteFont = "Lexend";
-let layoutTriangleLabelFont = "Georgia";
-let layoutCustomLabelFont = "Georgia";
+let layoutTriangleLabelFont = "Noto Serif";
+let layoutCustomLabelFont = "Noto Serif";
 let layoutKeyMappingFont = "Lexend";
-let layoutAxisLegendFont = "Georgia";
+let layoutAxisLegendFont = "Noto Serif";
 let layoutCreatorFont = "Lexend";
 let layoutTitleFontWeight = 400;
 let layoutRatioFontWeight = 400;
@@ -838,12 +842,12 @@ const LAYOUT_DEFAULTS = {
   lockPosition: true,
   view: { zoom: 1, offsetX: 0, offsetY: 0, rotX: 0, rotY: 0 },
   titleFont: "Lexend",
-  ratioFont: "Georgia",
+  ratioFont: "Noto Serif",
   noteFont: "Lexend",
-  triangleLabelFont: "Georgia",
-  customLabelFont: "Georgia",
+  triangleLabelFont: "Noto Serif",
+  customLabelFont: "Noto Serif",
   keyMappingFont: "Lexend",
-  axisLegendFont: "Georgia",
+  axisLegendFont: "Noto Serif",
   creatorFont: "Lexend",
   titleFontWeight: 400,
   ratioFontWeight: 400,
@@ -3372,7 +3376,7 @@ function drawTextWithSmallCent({
   context.restore();
 }
 
-function buildSvgTextWithSmallCent({
+async function buildSvgTextWithSmallCent({
   text,
   x,
   y,
@@ -3380,7 +3384,7 @@ function buildSvgTextWithSmallCent({
   size,
   fontWeight = 400,
   align = "left",
-  baseline = "hanging",
+  baseline = "text-before-edge",
   hejiAccidentals = false,
   hejiYOffset = 0,
   color,
@@ -3389,14 +3393,14 @@ function buildSvgTextWithSmallCent({
   if (!chars.length) {
     return "";
   }
-  const widths = chars.map((char) => {
+  const widths = await Promise.all(chars.map(async (char) => {
     const isCent = char === CENTS_CHAR;
     const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
     const charSize = isCent ? getCentsCharSize(size) : size;
     const charFont = isHeji ? "HEJI2Text" : font;
     const charWeight = isHeji ? 400 : fontWeight;
-    return measureCharWidth(char, charSize, charFont, charWeight);
-  });
+    return measureSvgCharWidth(char, charSize, charFont, charWeight);
+  }));
   const totalWidth = widths.reduce((sum, width) => sum + width, 0);
   let startX = x;
   if (align === "center") {
@@ -3406,7 +3410,8 @@ function buildSvgTextWithSmallCent({
   }
   let cursorX = startX;
   const nodes = [];
-  chars.forEach((char, index) => {
+  for (let index = 0; index < chars.length; index += 1) {
+    const char = chars[index];
     const isCent = char === CENTS_CHAR;
     const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
     const charSize = isCent ? getCentsCharSize(size) : size;
@@ -3414,14 +3419,20 @@ function buildSvgTextWithSmallCent({
     const charWeight = isHeji ? 400 : fontWeight;
     const charY = y + (isHeji ? hejiYOffset : 0);
     nodes.push(
-      `<text x="${cursorX}" y="${charY}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-        charFont
-      )}" font-size="${charSize}" font-weight="${charWeight}" fill="${color}">${escapeSvgText(
-        char
-      )}</text>`
+      await buildSvgTextElement({
+        text: char,
+        x: cursorX,
+        y: charY,
+        font: charFont,
+        size: charSize,
+        fontWeight: charWeight,
+        anchor: "start",
+        baseline,
+        color,
+      })
     );
     cursorX += widths[index];
-  });
+  }
   return nodes.join("\n");
 }
 
@@ -6055,7 +6066,7 @@ function draw() {
 
     ctx.fillStyle = themeColors.textPrimary;
     const labelSize = layoutMode ? layoutRatioTextSize : 21;
-    const labelFont = layoutMode ? layoutRatioFont : "Georgia";
+    const labelFont = layoutMode ? layoutRatioFont : "Noto Serif";
     const labelWeight = layoutMode ? layoutRatioFontWeight : 400;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -8319,7 +8330,7 @@ function drawRatioWheel(canvasEl, options = {}) {
   if (showLabels) {
     const fontSize = Math.max(9, Math.round(width * 0.03));
     ctx2d.fillStyle = themeColors.wheelText;
-    ctx2d.font = `${fontSize}px Georgia`;
+    ctx2d.font = `${fontSize}px Noto Serif`;
     ctx2d.textAlign = "center";
     ctx2d.textBaseline = "middle";
 
@@ -8336,7 +8347,7 @@ function drawRatioWheel(canvasEl, options = {}) {
         text: label,
         x: lx,
         y: ly,
-        font: "Georgia",
+        font: "Noto Serif",
         size: fontSize,
         align: "center",
         baseline: "middle",
@@ -8350,7 +8361,7 @@ function drawRatioWheel(canvasEl, options = {}) {
 
   if (showIntervals) {
     const sliceFont = Math.max(10, Math.round(width * 0.03));
-    ctx2d.font = `${sliceFont}px Georgia`;
+    ctx2d.font = `${sliceFont}px Noto Serif`;
 
     for (let i = 0; i < angles.length; i += 1) {
       const current = angles[i];
@@ -10001,13 +10012,13 @@ function refreshThemeColors() {
 
 function initLayoutFonts() {
   const styles = getComputedStyle(document.documentElement);
-  layoutTitleFont = styles.getPropertyValue("--font-title").trim() || "Georgia";
-  layoutRatioFont = styles.getPropertyValue("--font-ratio").trim() || "Georgia";
+  layoutTitleFont = styles.getPropertyValue("--font-title").trim() || "Noto Serif";
+  layoutRatioFont = styles.getPropertyValue("--font-ratio").trim() || "Noto Serif";
   layoutNoteFont = styles.getPropertyValue("--font-note").trim() || "Lexend";
   layoutTriangleLabelFont =
-    styles.getPropertyValue("--font-triangle-label").trim() || "Georgia";
+    styles.getPropertyValue("--font-triangle-label").trim() || "Noto Serif";
   layoutCustomLabelFont =
-    styles.getPropertyValue("--font-custom-label").trim() || "Georgia";
+    styles.getPropertyValue("--font-custom-label").trim() || "Noto Serif";
   layoutKeyMappingFont =
     styles.getPropertyValue("--font-key-mapping").trim() || "Lexend";
   layoutAxisLegendFont = layoutRatioFont;
@@ -11491,10 +11502,10 @@ function buildHejiSvgText({
   const restSpan = restText ? `<tspan>${escapeSvgText(restText)}</tspan>` : "";
   return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
     font
-  )}" font-size="${size}" fill="${color}">${baseSpan}${suffixSpan}${restSpan}</text>`;
+  )}" font-size="${size}" ${svgColorAttr("fill", color)}>${baseSpan}${suffixSpan}${restSpan}</text>`;
 }
 
-function buildHejiSvgInline({
+async function buildHejiSvgInline({
   x,
   y,
   baseText,
@@ -11514,14 +11525,17 @@ function buildHejiSvgInline({
   const partGap = Math.round(size * 0.1);
   const baseSuffixGap = Math.round(size * 0.1);
   const restGap = Math.round(size * restGapScale);
-  const baseWidth = measureTextWidthWithWeight(baseText, size, font, fontWeight);
+  const baseWidth = await measureSvgTextWidth(baseText, size, font, fontWeight);
   const parts = Array.isArray(suffixParts) ? suffixParts : [];
-  const suffixWidth = parts.reduce((sum, part, index) => {
-    const partWidth = measureSuffixPartWidth(part, size, suffixSpacing, fontWeight);
-    return sum + partWidth + (index > 0 ? partGap : 0);
-  }, 0);
+  const suffixWidths = await Promise.all(
+    parts.map((part) => measureSvgSuffixPartWidth(part, size, suffixSpacing, fontWeight))
+  );
+  const suffixWidth = suffixWidths.reduce(
+    (sum, partWidth, index) => sum + partWidth + (index > 0 ? partGap : 0),
+    0
+  );
   const restWidth = restText
-    ? measureTextWidthWithWeight(restText, size, font, fontWeight)
+    ? await measureSvgTextWidth(restText, size, font, fontWeight)
     : 0;
   const totalWidth =
     baseWidth +
@@ -11536,23 +11550,30 @@ function buildHejiSvgInline({
 
   const nodes = [];
   nodes.push(
-    `<text x="${startX}" y="${y}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-      font
-    )}" font-size="${size}" font-weight="${fontWeight}" fill="${color}">${escapeSvgText(
-      baseText
-    )}</text>`
+    await buildSvgTextElement({
+      text: baseText,
+      x: startX,
+      y,
+      font,
+      size,
+      fontWeight,
+      anchor: "start",
+      baseline,
+      color,
+    })
   );
 
   let cursorX = startX + baseWidth;
   if (parts.length) {
     cursorX += baseSuffixGap;
-    parts.forEach((part, partIndex) => {
+    for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+      const part = parts[partIndex];
       if (partIndex > 0) {
         cursorX += partGap;
       }
       const partCharGap = Number.isFinite(part.charGap) ? part.charGap : suffixSpacing;
       const partStartX = cursorX;
-      const partWidth = measureSuffixPartWidth(part, size, suffixSpacing, fontWeight);
+      const partWidth = suffixWidths[partIndex] ?? 0;
       const partFont = part.font || "HEJI2Text";
       const partWeight = Number.isFinite(part.fontWeight)
         ? part.fontWeight
@@ -11562,21 +11583,29 @@ function buildHejiSvgInline({
       const partYOffset =
         typeof part.yOffset === "number" ? part.yOffset : hejiYOffset;
       const sizeScale = Number.isFinite(part.sizeScale) ? part.sizeScale : 1;
-      Array.from(part.text).forEach((char, index) => {
+      const partChars = Array.from(part.text);
+      for (let index = 0; index < partChars.length; index += 1) {
+        const char = partChars[index];
         if (index > 0) {
           cursorX += partCharGap;
         }
         const baseSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
         const charSize = Math.max(6, Math.round(baseSize * sizeScale));
         nodes.push(
-          `<text x="${cursorX}" y="${y + partYOffset}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-            partFont
-          )}" font-size="${charSize}" font-weight="${partWeight}" fill="${color}">${escapeSvgText(
-            char
-          )}</text>`
+          await buildSvgTextElement({
+            text: char,
+            x: cursorX,
+            y: y + partYOffset,
+            font: partFont,
+            size: charSize,
+            fontWeight: partWeight,
+            anchor: "start",
+            baseline,
+            color,
+          })
         );
-        cursorX += measureCharWidth(char, charSize, partFont, partWeight);
-      });
+        cursorX += await measureSvgCharWidth(char, charSize, partFont, partWeight);
+      }
       if (part.expLabel) {
         const expSize = Math.max(8, Math.round(size * 0.55));
         const expY =
@@ -11584,14 +11613,20 @@ function buildHejiSvgInline({
           (typeof part.yOffset === "number" ? part.yOffset : hejiYOffset) +
           getExponentOffset(size, baseline);
         nodes.push(
-          `<text x="${partStartX + partWidth / 2}" y="${expY}" text-anchor="middle" dominant-baseline="hanging" font-family="${escapeSvgText(
-            font
-          )}" font-size="${expSize}" font-weight="${fontWeight}" fill="${color}">${escapeSvgText(
-            part.expLabel
-          )}</text>`
+          await buildSvgTextElement({
+            text: part.expLabel,
+            x: partStartX + partWidth / 2,
+            y: expY,
+            font,
+            size: expSize,
+            fontWeight,
+            anchor: "middle",
+            baseline: "hanging",
+            color,
+          })
         );
       }
-    });
+    }
   }
 
   if (restText) {
@@ -11601,28 +11636,46 @@ function buildHejiSvgInline({
       restHejiAccidentals || restText.includes(CENTS_CHAR) || /[veV]/.test(restText);
     if (!needsInline) {
       nodes.push(
-        `<text x="${cursorX}" y="${y}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-          font
-        )}" font-size="${size}" font-weight="${fontWeight}" fill="${color}">${escapeSvgText(
-          restText
-        )}</text>`
+        await buildSvgTextElement({
+          text: restText,
+          x: cursorX,
+          y,
+          font,
+          size,
+          fontWeight,
+          anchor: "start",
+          baseline,
+          color,
+        })
       );
     } else {
-      chars.forEach((char) => {
+      for (let index = 0; index < chars.length; index += 1) {
+        const char = chars[index];
         const useHeji = char === "v" || char === "e" || char === "V";
         const isCent = char === CENTS_CHAR;
         const charSize = isCent ? getCentsCharSize(size) : size;
         const charFont = useHeji ? "HEJI2Text" : font;
         const charWeight = useHeji ? "normal" : fontWeight;
         nodes.push(
-          `<text x="${cursorX}" y="${y + (useHeji ? hejiYOffset : 0)}" text-anchor="start" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-            charFont
-          )}" font-size="${charSize}" font-weight="${charWeight}" fill="${color}">${escapeSvgText(
-            char
-          )}</text>`
+          await buildSvgTextElement({
+            text: char,
+            x: cursorX,
+            y: y + (useHeji ? hejiYOffset : 0),
+            font: charFont,
+            size: charSize,
+            fontWeight: useHeji ? 400 : fontWeight,
+            anchor: "start",
+            baseline,
+            color,
+          })
         );
-        cursorX += measureCharWidth(char, charSize, charFont, useHeji ? 400 : fontWeight);
-      });
+        cursorX += await measureSvgCharWidth(
+          char,
+          charSize,
+          charFont,
+          useHeji ? 400 : fontWeight
+        );
+      }
     }
   }
 
@@ -11630,7 +11683,7 @@ function buildHejiSvgInline({
 }
 
 const LEXEND_FONT_URL =
-  "https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&family=Inter:wght@100..900&family=DM+Sans:wght@400..700&family=Radley:ital,wght@0,400;1,400&family=Alice&family=Cinzel:wght@400..900&display=swap";
+  "https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&family=Inter:wght@100..900&family=IBM+Plex+Sans:wght@200..700&family=Lato:wght@300..900&family=PT+Sans:wght@400..700&family=PT+Serif:wght@400..700&family=Radley:ital,wght@0,400;1,400&family=Alice&family=Noto+Serif:wght@400..700&display=swap";
 
 function getHejiFontUrl() {
   try {
@@ -11664,10 +11717,94 @@ async function buildFontDataUrl(url, mimeType) {
   }
 }
 
-function getExportFontCss(hejiFontSrc = null) {
+function getFontMimeType(url) {
+  const lower = String(url).toLowerCase();
+  if (lower.endsWith(".woff2")) {
+    return "font/woff2";
+  }
+  if (lower.endsWith(".woff")) {
+    return "font/woff";
+  }
+  if (lower.endsWith(".ttf")) {
+    return "font/ttf";
+  }
+  if (lower.endsWith(".otf")) {
+    return "font/otf";
+  }
+  return "application/octet-stream";
+}
+
+async function inlineFontCssFromUrl(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return "";
+    }
+    let css = await response.text();
+    const urlMatches = Array.from(css.matchAll(/url\(([^)]+)\)/g));
+    const replacements = new Map();
+    for (const match of urlMatches) {
+      const raw = match[1].trim().replace(/^['"]|['"]$/g, "");
+      if (raw.startsWith("data:") || replacements.has(raw)) {
+        continue;
+      }
+      try {
+        const fontResponse = await fetch(raw);
+        if (!fontResponse.ok) {
+          continue;
+        }
+        const buffer = await fontResponse.arrayBuffer();
+        const base64 = arrayBufferToBase64(buffer);
+        const mimeType = getFontMimeType(raw);
+        replacements.set(raw, `data:${mimeType};base64,${base64}`);
+      } catch (error) {
+        continue;
+      }
+    }
+    replacements.forEach((dataUrl, raw) => {
+      css = css.split(raw).join(dataUrl);
+    });
+    return css;
+  } catch (error) {
+    return "";
+  }
+}
+
+async function getExportFontCss(hejiFontSrc = null) {
   const hejiFontUrl = hejiFontSrc || getHejiFontUrl();
-  return `@import url("${LEXEND_FONT_URL}");
+  const inlineGoogleCss = await inlineFontCssFromUrl(LEXEND_FONT_URL);
+  const googleCss = inlineGoogleCss || `@import url("${LEXEND_FONT_URL}");`;
+  return `${googleCss}
 @font-face { font-family: "HEJI2Text"; src: url("${hejiFontUrl}") format("opentype"); font-display: swap; }`;
+}
+
+function analyzeExportFontCss(css) {
+  const content = String(css || "");
+  const hasImport = content.includes("@import");
+  const embeddedFonts = (content.match(/data:font\//g) || []).length;
+  const hasHejiData = content.includes("HEJI2Text") && content.includes("data:font/");
+  return { hasImport, embeddedFonts, hasHejiData };
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) {
+    return "n/a";
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const kb = bytes / 1024;
+  if (kb < 1024) {
+    return `${kb.toFixed(1)} KB`;
+  }
+  return `${(kb / 1024).toFixed(2)} MB`;
+}
+
+function setExportCheckStatus(message) {
+  if (!exportCheckStatus) {
+    return;
+  }
+  exportCheckStatus.textContent = message;
 }
 
 function getExportMetadataLabel() {
@@ -11678,7 +11815,334 @@ function getExportMetadataLabel() {
   return `${safeCreator} - ${safeTitle} [tuninglattice.com]`;
 }
 
-function buildLayoutSvgString(hejiFontSrc = null) {
+function normalizeSvgColor(color) {
+  if (!color) {
+    return { color: "none", opacity: null };
+  }
+  const trimmed = String(color).trim();
+  if (trimmed === "none" || trimmed === "transparent") {
+    return { color: trimmed, opacity: null };
+  }
+  const rgbaMatch = trimmed.match(/^rgba?\(([^)]+)\)$/i);
+  if (rgbaMatch) {
+    const parts = rgbaMatch[1]
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const r = Number(parts[0]);
+    const g = Number(parts[1]);
+    const b = Number(parts[2]);
+    const a = parts.length > 3 ? Number(parts[3]) : 1;
+    if ([r, g, b].every((value) => Number.isFinite(value))) {
+      const rgb = `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+      const opacity = Number.isFinite(a) ? Math.max(0, Math.min(1, a)) : 1;
+      return { color: rgb, opacity };
+    }
+  }
+  const hexMatch = trimmed.match(/^#([0-9a-f]{4}|[0-9a-f]{8})$/i);
+  if (hexMatch) {
+    const hex = hexMatch[1];
+    const values =
+      hex.length === 4
+        ? hex.split("").map((char) => parseInt(char + char, 16))
+        : [
+            parseInt(hex.slice(0, 2), 16),
+            parseInt(hex.slice(2, 4), 16),
+            parseInt(hex.slice(4, 6), 16),
+            parseInt(hex.slice(6, 8), 16),
+          ];
+    const [r, g, b, a = 255] = values;
+    const rgb = `rgb(${r}, ${g}, ${b})`;
+    const opacity = Math.max(0, Math.min(1, a / 255));
+    return { color: rgb, opacity };
+  }
+  return { color: trimmed, opacity: null };
+}
+
+function svgColorAttr(name, color) {
+  const normalized = normalizeSvgColor(color);
+  const base = `${name}="${normalized.color}"`;
+  if (normalized.opacity === null || normalized.color === "none") {
+    return base;
+  }
+  const opacity = Number(normalized.opacity.toFixed(3));
+  return `${base} ${name}-opacity="${opacity}"`;
+}
+
+const OUTLINE_SVG_TEXT = true;
+const OUTLINE_FONT_FILES = {
+  Lexend: {
+    200: "fonts/Lexend-ExtraLight.ttf",
+    300: "fonts/Lexend-Light.ttf",
+    400: "fonts/Lexend-Regular.ttf",
+    500: "fonts/Lexend-Medium.ttf",
+    600: "fonts/Lexend-SemiBold.ttf",
+    700: "fonts/Lexend-Bold.ttf",
+  },
+  Inter: {
+    200: "fonts/Inter-ExtraLight.ttf",
+    300: "fonts/Inter-Light.ttf",
+    400: "fonts/Inter-Regular.ttf",
+    500: "fonts/Inter-Medium.ttf",
+    600: "fonts/Inter-SemiBold.ttf",
+    700: "fonts/Inter-Bold.ttf",
+  },
+  "IBM Plex Sans": {
+    200: "fonts/IBMPlexSans-ExtraLight.ttf",
+    300: "fonts/IBMPlexSans-Light.ttf",
+    400: "fonts/IBMPlexSans-Regular.ttf",
+    500: "fonts/IBMPlexSans-Medium.ttf",
+    600: "fonts/IBMPlexSans-SemiBold.ttf",
+    700: "fonts/IBMPlexSans-Bold.ttf",
+  },
+  Lato: {
+    300: "fonts/Lato-Light.ttf",
+    400: "fonts/Lato-Regular.ttf",
+    700: "fonts/Lato-Bold.ttf",
+    900: "fonts/Lato-Black.ttf",
+  },
+  "PT Sans": {
+    400: "fonts/PT_Sans-Web-Regular.ttf",
+    700: "fonts/PT_Sans-Web-Bold.ttf",
+  },
+  "PT Serif": {
+    400: "fonts/PT_Serif-Web-Regular.ttf",
+    700: "fonts/PT_Serif-Web-Bold.ttf",
+  },
+  "Noto Serif": {
+    400: "fonts/NotoSerif-Regular.ttf",
+    500: "fonts/NotoSerif-Medium.ttf",
+    600: "fonts/NotoSerif-SemiBold.ttf",
+    700: "fonts/NotoSerif-Bold.ttf",
+  },
+  Radley: { 400: "fonts/Radley-Regular.ttf" },
+  Alice: { 400: "fonts/Alice-Regular.ttf" },
+  iAWriterDuoS: {
+    400: "fonts/iAWriterDuoS-Regular.ttf",
+    700: "fonts/iAWriterDuoS-Bold.ttf",
+  },
+  iAWriterMonoS: {
+    400: "fonts/iAWriterMonoS-Regular.ttf",
+    700: "fonts/iAWriterMonoS-Bold.ttf",
+  },
+  HEJI2Text: { 400: "HEJI2Text.otf" },
+};
+const outlineFontCache = new Map();
+
+function resolveOutlineFontFile(fontFamily, fontWeight = 400) {
+  const family = OUTLINE_FONT_FILES[fontFamily];
+  if (!family) {
+    return null;
+  }
+  const weight = Number(fontWeight) || 400;
+  if (family[weight]) {
+    return family[weight];
+  }
+  const available = Object.keys(family)
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  if (!available.length) {
+    return null;
+  }
+  let best = available[0];
+  let bestDelta = Math.abs(weight - best);
+  available.slice(1).forEach((candidate) => {
+    const delta = Math.abs(weight - candidate);
+    if (delta < bestDelta) {
+      best = candidate;
+      bestDelta = delta;
+    }
+  });
+  return family[best];
+}
+
+async function loadOutlineFont(fontFamily, fontWeight) {
+  const file = resolveOutlineFontFile(fontFamily, fontWeight);
+  if (!file) {
+    return null;
+  }
+  if (!outlineFontCache.has(file)) {
+    const url = new URL(`./${file}`, import.meta.url).href;
+    const promise = fetch(url)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("Font fetch failed");
+        }
+        return response.arrayBuffer();
+      })
+      .then((buffer) => opentype.parse(buffer))
+      .catch(() => null);
+    outlineFontCache.set(file, promise);
+  }
+  return outlineFontCache.get(file);
+}
+
+async function getOutlineFontOrFallback(fontFamily, fontWeight) {
+  const primary = await loadOutlineFont(fontFamily, fontWeight);
+  if (primary) {
+    return primary;
+  }
+  if (fontFamily === "Noto Serif") {
+    return null;
+  }
+  return loadOutlineFont("Noto Serif", fontWeight);
+}
+
+async function measureSvgTextWidth(text, size, font, fontWeight = 400) {
+  if (!OUTLINE_SVG_TEXT) {
+    return measureTextWidthWithWeight(text, size, font, fontWeight);
+  }
+  const fontObj = await getOutlineFontOrFallback(font, fontWeight);
+  if (!fontObj) {
+    return measureTextWidthWithWeight(text, size, font, fontWeight);
+  }
+  return fontObj.getAdvanceWidth(text, size);
+}
+
+async function measureSvgCharWidth(char, size, font, fontWeight = 400) {
+  if (!OUTLINE_SVG_TEXT) {
+    return measureCharWidth(char, size, font, fontWeight);
+  }
+  const fontObj = await getOutlineFontOrFallback(font, fontWeight);
+  if (!fontObj) {
+    return measureCharWidth(char, size, font, fontWeight);
+  }
+  return fontObj.getAdvanceWidth(char, size);
+}
+
+async function measureSvgSuffixPartWidth(part, size, charGap, baseWeight) {
+  if (!part || !part.text) {
+    return 0;
+  }
+  const sizeScale = Number.isFinite(part.sizeScale) ? part.sizeScale : 1;
+  const font = part.font || "HEJI2Text";
+  const partCharGap = Number.isFinite(part.charGap) ? part.charGap : charGap;
+  const weight = Number.isFinite(part.fontWeight)
+    ? part.fontWeight
+    : part.font
+    ? baseWeight
+    : 400;
+  const chars = Array.from(part.text);
+  const widths = await Promise.all(
+    chars.map((char) => {
+      const baseSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
+      const charSize = Math.max(6, Math.round(baseSize * sizeScale));
+      return measureSvgCharWidth(char, charSize, font, weight);
+    })
+  );
+  return widths.reduce((sum, width, index) => sum + width + (index > 0 ? partCharGap : 0), 0);
+}
+
+async function buildSvgTextElement({
+  text,
+  x,
+  y,
+  font,
+  size,
+  fontWeight = 400,
+  anchor = "start",
+  baseline = "alphabetic",
+  color,
+  transform = "",
+}) {
+  const safeText = text == null ? "" : String(text);
+  if (!safeText) {
+    return "";
+  }
+  if (!OUTLINE_SVG_TEXT) {
+    return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
+      font
+    )}" font-size="${size}" font-weight="${fontWeight}" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
+      "fill",
+      color
+    )}>${escapeSvgText(safeText)}</text>`;
+  }
+  const fontObj = await getOutlineFontOrFallback(font, fontWeight);
+  if (!fontObj) {
+    return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
+      font
+    )}" font-size="${size}" font-weight="${fontWeight}" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
+      "fill",
+      color
+    )}>${escapeSvgText(safeText)}</text>`;
+  }
+  const ascent = (fontObj.ascender / fontObj.unitsPerEm) * size;
+  const descent = (-fontObj.descender / fontObj.unitsPerEm) * size;
+  let baselineY = y;
+  if (baseline === "middle") {
+    baselineY = y + (ascent - descent) / 2;
+  } else if (baseline === "text-before-edge" || baseline === "hanging") {
+    baselineY = y + ascent;
+  }
+  let anchorX = x;
+  const advance = fontObj.getAdvanceWidth(safeText, size);
+  if (anchor === "middle") {
+    anchorX = x - advance / 2;
+  } else if (anchor === "end") {
+    anchorX = x - advance;
+  }
+  const pathData = fontObj.getPath(safeText, anchorX, baselineY, size).toPathData(2);
+  return `<path d="${pathData}" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
+    "fill",
+    color
+  )} />`;
+}
+
+function measureFontMetrics(sample, size, font, fontWeight = 400) {
+  ctx.save();
+  ctx.font = `${fontWeight} ${size}px ${font}`;
+  const metrics = ctx.measureText(sample);
+  ctx.restore();
+  return {
+    ascent: Number(metrics.actualBoundingBoxAscent) || size * 0.8,
+    descent: Number(metrics.actualBoundingBoxDescent) || size * 0.2,
+  };
+}
+
+function getSvgTopBaselineOffset(size, font, fontWeight) {
+  const metrics = measureFontMetrics("H", size, font, fontWeight);
+  return Math.round(metrics.ascent);
+}
+
+async function ensureFontLoaded(font, size) {
+  if (!document.fonts || !document.fonts.load) {
+    return;
+  }
+  try {
+    await document.fonts.load(`${Math.max(6, Math.round(size))}px "${font}"`);
+  } catch (error) {
+    // Ignore font loading errors; we will fall back to default metrics.
+  }
+}
+
+function ensureUiFontReady(font, weight = 400, size = 16) {
+  if (!document.fonts || !document.fonts.load) {
+    return Promise.resolve();
+  }
+  const safeWeight = Number(weight) || 400;
+  const safeSize = Math.max(6, Math.round(size));
+  return document.fonts.load(`${safeWeight} ${safeSize}px "${font}"`).catch(() => {});
+}
+
+async function getSvgHejiYOffset(size, baseFont, baseWeight) {
+  await Promise.all([
+    ensureFontLoaded("HEJI2Text", size),
+    ensureFontLoaded(baseFont, size),
+  ]);
+  const baseMetrics = measureFontMetrics("H", size, baseFont, baseWeight);
+  const hejiMetrics = measureFontMetrics("v", size, "HEJI2Text", 400);
+  const ascentDelta = baseMetrics.ascent - hejiMetrics.ascent;
+  return Math.round(size * (HEJI_SUFFIX_Y_OFFSET + HEJI_SVG_EXTRA_Y_OFFSET) + ascentDelta);
+}
+
+async function buildLayoutSvgString(
+  hejiFontSrc = null,
+  detailHejiYOffset = null,
+  fontCss = null,
+  noteBaselineOffset = null,
+  labelHejiYOffset = null
+) {
   if (!layoutMode) {
     return null;
   }
@@ -11693,6 +12157,17 @@ function buildLayoutSvgString(hejiFontSrc = null) {
   const titleSize = Math.max(12, Math.round(layoutTitleSize));
   const creatorSize = getLayoutCreatorSize();
   const exportLabel = getExportMetadataLabel();
+  const svgDetailHejiYOffset = Number.isFinite(detailHejiYOffset)
+    ? detailHejiYOffset
+    : Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET);
+  const svgLabelHejiYOffset = Number.isFinite(labelHejiYOffset)
+    ? labelHejiYOffset
+    : Math.round(labelSize * HEJI_SUFFIX_Y_OFFSET);
+  const svgNoteBaselineOffset = Number.isFinite(noteBaselineOffset)
+    ? noteBaselineOffset
+    : 0;
+  const svgFill = (color) => svgColorAttr("fill", color);
+  const svgStroke = (color) => svgColorAttr("stroke", color);
 
   const parts = [];
   parts.push(
@@ -11700,10 +12175,12 @@ function buildLayoutSvgString(hejiFontSrc = null) {
   );
   parts.push(`<title>${escapeSvgText(exportLabel)}</title>`);
   parts.push(`<desc>${escapeSvgText(exportLabel)}</desc>`);
-  parts.push(
-    `<defs><style><![CDATA[${getExportFontCss(hejiFontSrc)}]]></style></defs>`
-  );
-  parts.push(`<rect width="100%" height="100%" fill="${themeColors.page}"/>`);
+  const resolvedFontCss =
+    typeof fontCss === "string" && fontCss.trim()
+      ? fontCss
+      : `@import url("${LEXEND_FONT_URL}");`;
+  parts.push(`<defs><style><![CDATA[${resolvedFontCss}]]></style></defs>`);
+  parts.push(`<rect width="100%" height="100%" ${svgFill(themeColors.page)}/>`);
 
   if (layoutTitle) {
     const titlePos = getLayoutTitlePosition();
@@ -11714,11 +12191,17 @@ function buildLayoutSvgString(hejiFontSrc = null) {
       ? layoutTitlePosition.y
       : Math.max(12, titlePos.y - top);
     parts.push(
-      `<text x="${titleX}" y="${titleY}" text-anchor="middle" font-family="${escapeSvgText(
-        layoutTitleFont
-      )}" font-size="${titleSize}" font-weight="${layoutTitleFontWeight}" fill="${themeColors.textPrimary}">${escapeSvgText(
-        layoutTitle
-      )}</text>`
+      await buildSvgTextElement({
+        text: layoutTitle,
+        x: titleX,
+        y: titleY,
+        font: layoutTitleFont,
+        size: titleSize,
+        fontWeight: layoutTitleFontWeight,
+        anchor: "middle",
+        baseline: "alphabetic",
+        color: themeColors.textPrimary,
+      })
     );
   }
   if (layoutCreator) {
@@ -11726,11 +12209,17 @@ function buildLayoutSvgString(hejiFontSrc = null) {
     const creatorX = creatorPos.x - left;
     const creatorY = Math.max(12, creatorPos.y - top);
     parts.push(
-      `<text x="${creatorX}" y="${creatorY}" text-anchor="middle" font-family="${escapeSvgText(
-        layoutCreatorFont
-      )}" font-size="${creatorSize}" font-weight="${layoutCreatorFontWeight}" fill="${themeColors.textSecondary}">${escapeSvgText(
-        layoutCreator
-      )}</text>`
+      await buildSvgTextElement({
+        text: layoutCreator,
+        x: creatorX,
+        y: creatorY,
+        font: layoutCreatorFont,
+        size: creatorSize,
+        fontWeight: layoutCreatorFontWeight,
+        anchor: "middle",
+        baseline: "alphabetic",
+        color: themeColors.textSecondary,
+      })
     );
   }
 
@@ -11742,9 +12231,9 @@ function buildLayoutSvgString(hejiFontSrc = null) {
     getAxisLegendInfo("y", axisSettings),
     getAxisLegendInfo("z", axisSettings),
   ];
-  axisDefs.forEach((info) => {
+  for (const info of axisDefs) {
     if (!info) {
-      return;
+      continue;
     }
     const centerX = info.center.x - left;
     const centerY = info.center.y - top;
@@ -11773,40 +12262,55 @@ function buildLayoutSvgString(hejiFontSrc = null) {
       const p3 = `${x2 - headLength * Math.cos(angle + Math.PI / 6)},${y2 -
         headLength * Math.sin(angle + Math.PI / 6)}`;
       parts.push(
-        `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${axisColor}" stroke-width="${axisStroke}" />`
+        `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${svgStroke(
+          axisColor
+        )} stroke-width="${axisStroke}" />`
       );
       parts.push(
-        `<polygon points="${p1} ${p2} ${p3}" fill="${axisColor}" />`
+        `<polygon points="${p1} ${p2} ${p3}" ${svgFill(axisColor)} />`
       );
     };
     buildArrow(leftStart.x, leftStart.y, leftEnd.x, leftEnd.y);
     buildArrow(rightStart.x, rightStart.y, rightEnd.x, rightEnd.y);
     const rotation = (info.textAngle * 180) / Math.PI;
     parts.push(
-      `<text x="${centerX}" y="${centerY}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
-        layoutAxisLegendFont
-      )}" font-size="${axisSettings.fontSize}" font-weight="${layoutAxisLegendFontWeight}" fill="${axisColor}" transform="rotate(${rotation} ${centerX} ${centerY})">${escapeSvgText(
-        info.label
-      )}</text>`
+      await buildSvgTextElement({
+        text: info.label,
+        x: centerX,
+        y: centerY,
+        font: layoutAxisLegendFont,
+        size: axisSettings.fontSize,
+        fontWeight: layoutAxisLegendFontWeight,
+        anchor: "middle",
+        baseline: "middle",
+        color: axisColor,
+        transform: `rotate(${rotation} ${centerX} ${centerY})`,
+      })
     );
-  });
+  }
 
   if (layoutCustomLabels.length) {
     const customSize = Math.max(8, Math.round(layoutCustomLabelTextSize));
-    layoutCustomLabels.forEach((entry) => {
+    for (const entry of layoutCustomLabels) {
       if (!entry.text || !entry.position) {
-        return;
+        continue;
       }
       const x = entry.position.x;
       const y = entry.position.y;
       parts.push(
-        `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="hanging" font-family="${escapeSvgText(
-          layoutCustomLabelFont
-        )}" font-size="${customSize}" font-weight="${layoutCustomLabelFontWeight}" fill="${themeColors.textSecondary}">${escapeSvgText(
-          entry.text
-        )}</text>`
+        await buildSvgTextElement({
+          text: entry.text,
+          x,
+          y,
+          font: layoutCustomLabelFont,
+          size: customSize,
+          fontWeight: layoutCustomLabelFontWeight,
+          anchor: "middle",
+          baseline: "hanging",
+          color: themeColors.textSecondary,
+        })
       );
-    });
+    }
   }
 
   edges.forEach(([a, b]) => {
@@ -11834,7 +12338,9 @@ function buildLayoutSvgString(hejiFontSrc = null) {
       y: end.y - uy * radiusB - top,
     };
     parts.push(
-      `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" stroke="${themeColors.edge}" stroke-width="1.5" />`
+      `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" ${svgStroke(
+        themeColors.edge
+      )} stroke-width="1.5" />`
     );
   });
 
@@ -11871,7 +12377,9 @@ function buildLayoutSvgString(hejiFontSrc = null) {
         y: end.y - uy * radiusB - top,
       };
       parts.push(
-        `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" stroke="${themeColors.edge}" stroke-width="1.5" stroke-dasharray="6 4" />`
+        `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" ${svgStroke(
+          themeColors.edge
+        )} stroke-width="1.5" stroke-dasharray="6 4" />`
       );
     });
   }
@@ -11882,18 +12390,18 @@ function buildLayoutSvgString(hejiFontSrc = null) {
         gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
       }
     });
-    triangleLabels.forEach((entry) => {
+    for (const entry of triangleLabels) {
       if (!entry.label) {
-        return;
+        continue;
       }
       const diag = TRIANGLE_TRI_TO_DIAG[entry.tri];
       if (!diag || !triangleDiagonals.has(triangleKey({ ...entry, diag }))) {
-        return;
+        continue;
       }
       const cellNodes = getTriangleCellNodes(entry, gridMap);
       const labelNodes = getTriangleLabelPoints(entry.tri, cellNodes);
       if (!labelNodes) {
-        return;
+        continue;
       }
       const points = labelNodes.map((node) => {
         const proj = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
@@ -11910,19 +12418,25 @@ function buildLayoutSvgString(hejiFontSrc = null) {
         layoutTriangleLabelFontWeight
       );
       parts.push(
-        `<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
-          layoutTriangleLabelFont
-        )}" font-size="${layout.size}" font-weight="${layoutTriangleLabelFontWeight}" fill="${themeColors.textSecondary}">${escapeSvgText(
-          entry.label
-        )}</text>`
+        await buildSvgTextElement({
+          text: entry.label,
+          x: cx,
+          y: cy,
+          font: layoutTriangleLabelFont,
+          size: layout.size,
+          fontWeight: layoutTriangleLabelFontWeight,
+          anchor: "middle",
+          baseline: "middle",
+          color: themeColors.textSecondary,
+        })
       );
-    });
+    }
   }
 
-  nodes.forEach((node) => {
+  for (const node of nodes) {
     const isVisible = node.isCenter || node.active || node.isCustom;
     if (!isVisible) {
-      return;
+      continue;
     }
     const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
     const x = pos.x - left;
@@ -11934,13 +12448,15 @@ function buildLayoutSvgString(hejiFontSrc = null) {
     if (showCircles) {
       if (shape === "circle") {
         parts.push(
-          `<circle cx="${x}" cy="${y}" r="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="2" />`
+          `<circle cx="${x}" cy="${y}" r="${radius}" ${svgFill(
+            fill
+          )} ${svgStroke(stroke)} stroke-width="2" />`
         );
       } else if (shape === "square") {
         parts.push(
           `<rect x="${x - radius}" y="${y - radius}" width="${radius * 2}" height="${
             radius * 2
-          }" fill="${fill}" stroke="${stroke}" stroke-width="2" />`
+          }" ${svgFill(fill)} ${svgStroke(stroke)} stroke-width="2" />`
         );
       } else if (shape === "triangle") {
         const height = radius * 1.2;
@@ -11950,7 +12466,9 @@ function buildLayoutSvgString(hejiFontSrc = null) {
           `${x - radius},${y + height * 0.6}`,
         ].join(" ");
         parts.push(
-          `<polygon points="${points}" fill="${fill}" stroke="${stroke}" stroke-width="2" />`
+          `<polygon points="${points}" ${svgFill(fill)} ${svgStroke(
+            stroke
+          )} stroke-width="2" />`
         );
       } else if (shape === "diamond") {
         const points = [
@@ -11960,7 +12478,9 @@ function buildLayoutSvgString(hejiFontSrc = null) {
           `${x - radius},${y}`,
         ].join(" ");
         parts.push(
-          `<polygon points="${points}" fill="${fill}" stroke="${stroke}" stroke-width="2" />`
+          `<polygon points="${points}" ${svgFill(fill)} ${svgStroke(
+            stroke
+          )} stroke-width="2" />`
         );
       }
     }
@@ -11983,7 +12503,7 @@ function buildLayoutSvgString(hejiFontSrc = null) {
             ]
           : base.suffixParts;
         parts.push(
-          buildHejiSvgInline({
+          await buildHejiSvgInline({
             x,
             y,
             baseText: base.baseText,
@@ -11994,13 +12514,14 @@ function buildLayoutSvgString(hejiFontSrc = null) {
             size: labelSize,
             align: "center",
             baseline: "middle",
+            hejiYOffset: svgLabelHejiYOffset,
             color: themeColors.textPrimary,
           })
         );
       } else {
         const annotation = getHejiAnnotation(node, getNodePitchLabel(node));
         parts.push(
-          buildHejiSvgInline({
+          await buildHejiSvgInline({
             x,
             y,
             baseText: annotation.baseText,
@@ -12011,6 +12532,7 @@ function buildLayoutSvgString(hejiFontSrc = null) {
             size: labelSize,
             align: "center",
             baseline: "middle",
+            hejiYOffset: svgLabelHejiYOffset,
             color: themeColors.textPrimary,
           })
         );
@@ -12021,24 +12543,30 @@ function buildLayoutSvgString(hejiFontSrc = null) {
       const ratioX = pos.x + labelOffsetX * 0.7 - left;
       const ratioY = rawLabelPos.y - top;
       parts.push(
-        `<text x="${ratioX}" y="${ratioY}" text-anchor="start" dominant-baseline="hanging" font-family="${escapeSvgText(
-          layoutNoteFont
-        )}" font-weight="${layoutNoteFontWeight}" font-size="${detailSize}" fill="${themeColors.textSecondary}">${escapeSvgText(
-          `${node.numerator}:${node.denominator}`
-        )}</text>`
+        await buildSvgTextElement({
+          text: `${node.numerator}:${node.denominator}`,
+          x: ratioX,
+          y: ratioY + svgNoteBaselineOffset,
+          font: layoutNoteFont,
+          size: detailSize,
+          fontWeight: layoutNoteFontWeight,
+          anchor: "start",
+          baseline: "alphabetic",
+          color: themeColors.textSecondary,
+        })
       );
       parts.push(
-        buildSvgTextWithSmallCent({
+        await buildSvgTextWithSmallCent({
           text: centsLabel,
           x: ratioX,
-          y: ratioY + detailSize + 4,
+          y: ratioY + detailSize + 4 + svgNoteBaselineOffset,
           font: layoutNoteFont,
           size: detailSize,
           fontWeight: layoutNoteFontWeight,
           align: "left",
-          baseline: "hanging",
+          baseline: "alphabetic",
           hejiAccidentals: hejiEnabled,
-          hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
+          hejiYOffset: svgDetailHejiYOffset,
           color: themeColors.textSecondary,
         })
       );
@@ -12055,24 +12583,30 @@ function buildLayoutSvgString(hejiFontSrc = null) {
       const ratioYOffset = Math.round(layout.size * -0.09);
       if (layout.lines.length === 1) {
         parts.push(
-          `<text x="${x}" y="${y + ratioYOffset}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
-            layoutRatioFont
-          )}" font-size="${layout.size}" font-weight="${layoutRatioFontWeight}" fill="${themeColors.textPrimary}">${escapeSvgText(
-            layout.lines[0]
-          )}</text>`
+          await buildSvgTextElement({
+            text: layout.lines[0],
+            x,
+            y: y + ratioYOffset,
+            font: layoutRatioFont,
+            size: layout.size,
+            fontWeight: layoutRatioFontWeight,
+            anchor: "middle",
+            baseline: "middle",
+            color: themeColors.textPrimary,
+          })
         );
       } else {
         const lineOffset = layout.size / 2 + layout.lineGap / 2;
         const lineY1 = y + ratioYOffset - lineOffset;
         const lineY2 = y + ratioYOffset + lineOffset;
         const lineWidth = Math.max(
-          measureTextWidthWithWeight(
+          await measureSvgTextWidth(
             layout.lines[0],
             layout.size,
             layoutRatioFont,
             layoutRatioFontWeight
           ),
-          measureTextWidthWithWeight(
+          await measureSvgTextWidth(
             layout.lines[1],
             layout.size,
             layoutRatioFont,
@@ -12081,24 +12615,35 @@ function buildLayoutSvgString(hejiFontSrc = null) {
         );
         const lineY = y + ratioYOffset + layout.size * 0.1;
         parts.push(
-          `<text x="${x}" y="${lineY1}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
-            layoutRatioFont
-          )}" font-size="${layout.size}" font-weight="${layoutRatioFontWeight}" fill="${themeColors.textPrimary}">${escapeSvgText(
-            layout.lines[0]
-          )}</text>`
+          await buildSvgTextElement({
+            text: layout.lines[0],
+            x,
+            y: lineY1,
+            font: layoutRatioFont,
+            size: layout.size,
+            fontWeight: layoutRatioFontWeight,
+            anchor: "middle",
+            baseline: "middle",
+            color: themeColors.textPrimary,
+          })
         );
         parts.push(
-          `<text x="${x}" y="${lineY2}" text-anchor="middle" dominant-baseline="middle" font-family="${escapeSvgText(
-            layoutRatioFont
-          )}" font-size="${layout.size}" font-weight="${layoutRatioFontWeight}" fill="${themeColors.textPrimary}">${escapeSvgText(
-            layout.lines[1]
-          )}</text>`
+          await buildSvgTextElement({
+            text: layout.lines[1],
+            x,
+            y: lineY2,
+            font: layoutRatioFont,
+            size: layout.size,
+            fontWeight: layoutRatioFontWeight,
+            anchor: "middle",
+            baseline: "middle",
+            color: themeColors.textPrimary,
+          })
         );
         parts.push(
-          `<line x1="${x - lineWidth / 2}" y1="${lineY}" x2="${x + lineWidth / 2}" y2="${lineY}" stroke="${themeColors.textPrimary}" stroke-width="${Math.max(
-            1,
-            Math.round(layout.size * 0.06)
-          )}" />`
+          `<line x1="${x - lineWidth / 2}" y1="${lineY}" x2="${x + lineWidth / 2}" y2="${lineY}" ${svgStroke(
+            themeColors.textPrimary
+          )} stroke-width="${Math.max(1, Math.round(layout.size * 0.06))}" />`
         );
       }
 
@@ -12118,17 +12663,17 @@ function buildLayoutSvgString(hejiFontSrc = null) {
       const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
       const annotation = getHejiAnnotation(node, baseLabel || node.note_name);
       parts.push(
-        buildHejiSvgInline({
+        await buildHejiSvgInline({
           x: labelX,
-          y: labelY,
+          y: labelY + svgNoteBaselineOffset,
           baseText: annotation.baseText,
           suffixParts: annotation.suffixParts,
           restText: ` ${centsLabel}`,
           font: layoutNoteFont,
           size: detailSize,
           align: "left",
-          baseline: "hanging",
-          hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
+          baseline: "alphabetic",
+          hejiYOffset: svgDetailHejiYOffset,
           restGapScale,
           restHejiAccidentals: hejiEnabled && hasParen,
           fontWeight: layoutNoteFontWeight,
@@ -12136,11 +12681,71 @@ function buildLayoutSvgString(hejiFontSrc = null) {
         })
       );
     }
-  });
+  }
 
   parts.push("</svg>");
 
   return parts.join("\n");
+}
+
+async function runExportSelfCheck() {
+  if (!exportCheckStatus) {
+    return;
+  }
+  if (!layoutMode) {
+    setExportCheckStatus("Enable Page Layout mode to check exports.");
+    return;
+  }
+  setExportCheckStatus("Checking export fonts...");
+  const hejiFontUrl = getHejiFontUrl();
+  const hejiFontDataUrl = await buildFontDataUrl(hejiFontUrl, "font/otf");
+  const exportFontCss = await getExportFontCss(hejiFontDataUrl || hejiFontUrl);
+  const fontAnalysis = analyzeExportFontCss(exportFontCss);
+  const svgDetailHejiYOffset = await getSvgHejiYOffset(
+    layoutNoteTextSize,
+    layoutNoteFont,
+    layoutNoteFontWeight
+  );
+  const svgLabelHejiYOffset = await getSvgHejiYOffset(
+    layoutRatioTextSize,
+    layoutRatioFont,
+    layoutRatioFontWeight
+  );
+  const svgNoteBaselineOffset = getSvgTopBaselineOffset(
+    layoutNoteTextSize,
+    layoutNoteFont,
+    layoutNoteFontWeight
+  );
+  const svg = await buildLayoutSvgString(
+    hejiFontDataUrl || hejiFontUrl,
+    svgDetailHejiYOffset,
+    exportFontCss,
+    svgNoteBaselineOffset,
+    svgLabelHejiYOffset
+  );
+  const byteSize = new TextEncoder().encode(svg).length;
+  const fonts = [
+    layoutTitleFont,
+    layoutCreatorFont,
+    layoutRatioFont,
+    layoutNoteFont,
+    layoutTriangleLabelFont,
+    layoutCustomLabelFont,
+    layoutKeyMappingFont,
+    layoutAxisLegendFont,
+    "HEJI2Text",
+  ].filter(Boolean);
+  const uniqueFonts = Array.from(new Set(fonts));
+  const fontSummary = uniqueFonts.join(", ");
+  const embedSummary = fontAnalysis.hasImport
+    ? "Google fonts: external import"
+    : `Google fonts: embedded (${fontAnalysis.embeddedFonts})`;
+  const hejiSummary = hejiFontDataUrl
+    ? "HEJI: embedded"
+    : "HEJI: external";
+  setExportCheckStatus(
+    `SVG size ${formatBytes(byteSize)} · ${embedSummary} · ${hejiSummary} · Fonts: ${fontSummary}`
+  );
 }
 
 async function exportLayoutSvg() {
@@ -12150,7 +12755,29 @@ async function exportLayoutSvg() {
   }
   const hejiFontUrl = getHejiFontUrl();
   const hejiFontDataUrl = await buildFontDataUrl(hejiFontUrl, "font/otf");
-  const svg = buildLayoutSvgString(hejiFontDataUrl || hejiFontUrl);
+  const exportFontCss = await getExportFontCss(hejiFontDataUrl || hejiFontUrl);
+  const svgDetailHejiYOffset = await getSvgHejiYOffset(
+    layoutNoteTextSize,
+    layoutNoteFont,
+    layoutNoteFontWeight
+  );
+  const svgLabelHejiYOffset = await getSvgHejiYOffset(
+    layoutRatioTextSize,
+    layoutRatioFont,
+    layoutRatioFontWeight
+  );
+  const svgNoteBaselineOffset = getSvgTopBaselineOffset(
+    layoutNoteTextSize,
+    layoutNoteFont,
+    layoutNoteFontWeight
+  );
+  const svg = await buildLayoutSvgString(
+    hejiFontDataUrl || hejiFontUrl,
+    svgDetailHejiYOffset,
+    exportFontCss,
+    svgNoteBaselineOffset,
+    svgLabelHejiYOffset
+  );
   if (!svg) {
     alert("Enable Page Layout mode to export SVG.");
     return;
@@ -12185,7 +12812,29 @@ async function exportLayoutPdf() {
   const hejiFontUrl = getHejiFontUrl();
   const hejiFontDataUrl = await buildFontDataUrl(hejiFontUrl, "font/otf");
   const hejiFontSrc = hejiFontDataUrl || hejiFontUrl;
-  const svg = buildLayoutSvgString(hejiFontSrc);
+  const exportFontCss = await getExportFontCss(hejiFontSrc);
+  const svgDetailHejiYOffset = await getSvgHejiYOffset(
+    layoutNoteTextSize,
+    layoutNoteFont,
+    layoutNoteFontWeight
+  );
+  const svgLabelHejiYOffset = await getSvgHejiYOffset(
+    layoutRatioTextSize,
+    layoutRatioFont,
+    layoutRatioFontWeight
+  );
+  const svgNoteBaselineOffset = getSvgTopBaselineOffset(
+    layoutNoteTextSize,
+    layoutNoteFont,
+    layoutNoteFontWeight
+  );
+  const svg = await buildLayoutSvgString(
+    hejiFontSrc,
+    svgDetailHejiYOffset,
+    exportFontCss,
+    svgNoteBaselineOffset,
+    svgLabelHejiYOffset
+  );
   if (!svg) {
     alert("Enable Page Layout mode to export PDF.");
     win.close();
@@ -12222,10 +12871,13 @@ async function exportLayoutPdf() {
               document.fonts.load('16px "HEJI2Text"'),
               document.fonts.load('16px "Lexend"'),
               document.fonts.load('16px "Inter"'),
-              document.fonts.load('16px "DM Sans"'),
+              document.fonts.load('16px "IBM Plex Sans"'),
+              document.fonts.load('16px "Lato"'),
+              document.fonts.load('16px "PT Sans"'),
+              document.fonts.load('16px "PT Serif"'),
               document.fonts.load('16px "Radley"'),
               document.fonts.load('16px "Alice"'),
-              document.fonts.load('16px "Cinzel"')
+              document.fonts.load('16px "Noto Serif"'),
             ])
           : Promise.resolve();
         waitForFonts.finally(() => {
@@ -13288,6 +13940,7 @@ if (layoutTitleFontSelect) {
     layoutTitleFont = layoutTitleFontSelect.value || layoutTitleFont;
     syncLayoutFontVars();
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(layoutTitleFont, layoutTitleFontWeight, layoutTitleSize).then(draw);
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13297,6 +13950,11 @@ if (layoutCreatorFontSelect) {
     pushLayoutUndoState();
     layoutCreatorFont = layoutCreatorFontSelect.value || layoutCreatorFont;
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(
+      layoutCreatorFont,
+      layoutCreatorFontWeight,
+      layoutCreatorSize
+    ).then(draw);
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13306,6 +13964,7 @@ if (layoutTitleWeightSelect) {
     pushLayoutUndoState();
     layoutTitleFontWeight = Number(layoutTitleWeightSelect.value) || layoutTitleFontWeight;
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(layoutTitleFont, layoutTitleFontWeight, layoutTitleSize).then(draw);
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13316,6 +13975,11 @@ if (layoutCreatorWeightSelect) {
     layoutCreatorFontWeight =
       Number(layoutCreatorWeightSelect.value) || layoutCreatorFontWeight;
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(
+      layoutCreatorFont,
+      layoutCreatorFontWeight,
+      layoutCreatorSize
+    ).then(draw);
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13326,6 +13990,9 @@ if (layoutRatioFontSelect) {
     layoutRatioFont = layoutRatioFontSelect.value || layoutRatioFont;
     syncLayoutFontVars();
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(layoutRatioFont, layoutRatioFontWeight, layoutRatioTextSize).then(
+      draw
+    );
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13335,6 +14002,9 @@ if (layoutRatioWeightSelect) {
     pushLayoutUndoState();
     layoutRatioFontWeight = Number(layoutRatioWeightSelect.value) || layoutRatioFontWeight;
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(layoutRatioFont, layoutRatioFontWeight, layoutRatioTextSize).then(
+      draw
+    );
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13345,6 +14015,9 @@ if (layoutNoteFontSelect) {
     layoutNoteFont = layoutNoteFontSelect.value || layoutNoteFont;
     syncLayoutFontVars();
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(layoutNoteFont, layoutNoteFontWeight, layoutNoteTextSize).then(
+      draw
+    );
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13354,6 +14027,9 @@ if (layoutNoteWeightSelect) {
     pushLayoutUndoState();
     layoutNoteFontWeight = Number(layoutNoteWeightSelect.value) || layoutNoteFontWeight;
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(layoutNoteFont, layoutNoteFontWeight, layoutNoteTextSize).then(
+      draw
+    );
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13364,6 +14040,11 @@ if (layoutCustomFontSelect) {
     layoutCustomLabelFont = layoutCustomFontSelect.value || layoutCustomLabelFont;
     syncLayoutFontVars();
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(
+      layoutCustomLabelFont,
+      layoutCustomLabelFontWeight,
+      layoutCustomLabelTextSize
+    ).then(draw);
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13374,6 +14055,11 @@ if (layoutCustomWeightSelect) {
     layoutCustomLabelFontWeight =
       Number(layoutCustomWeightSelect.value) || layoutCustomLabelFontWeight;
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(
+      layoutCustomLabelFont,
+      layoutCustomLabelFontWeight,
+      layoutCustomLabelTextSize
+    ).then(draw);
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13383,6 +14069,11 @@ if (layoutKeyMappingFontSelect) {
     pushLayoutUndoState();
     layoutKeyMappingFont = layoutKeyMappingFontSelect.value || layoutKeyMappingFont;
     syncLayoutFontVars();
+    ensureUiFontReady(
+      layoutKeyMappingFont,
+      layoutKeyMappingFontWeight,
+      layoutKeyMappingTextSize
+    ).then(draw);
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13392,6 +14083,11 @@ if (layoutKeyMappingWeightSelect) {
     pushLayoutUndoState();
     layoutKeyMappingFontWeight =
       Number(layoutKeyMappingWeightSelect.value) || layoutKeyMappingFontWeight;
+    ensureUiFontReady(
+      layoutKeyMappingFont,
+      layoutKeyMappingFontWeight,
+      layoutKeyMappingTextSize
+    ).then(draw);
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13402,6 +14098,11 @@ if (layoutTriangleLabelFontSelect) {
     layoutTriangleLabelFont = layoutTriangleLabelFontSelect.value || layoutTriangleLabelFont;
     syncLayoutFontVars();
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(
+      layoutTriangleLabelFont,
+      layoutTriangleLabelFontWeight,
+      layoutTriangleLabelTextSize
+    ).then(draw);
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13411,6 +14112,11 @@ if (layoutAxisFontSelect) {
     pushLayoutUndoState();
     layoutAxisLegendFont = layoutAxisFontSelect.value || layoutAxisLegendFont;
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(
+      layoutAxisLegendFont,
+      layoutAxisLegendFontWeight,
+      layoutAxisLegendTextSize
+    ).then(draw);
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13421,6 +14127,11 @@ if (layoutTriangleLabelWeightSelect) {
     layoutTriangleLabelFontWeight =
       Number(layoutTriangleLabelWeightSelect.value) || layoutTriangleLabelFontWeight;
     invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(
+      layoutTriangleLabelFont,
+      layoutTriangleLabelFontWeight,
+      layoutTriangleLabelTextSize
+    ).then(draw);
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13456,6 +14167,9 @@ if (exportSvgButton) {
 }
 if (exportPdfButton) {
   exportPdfButton.addEventListener("click", exportLayoutPdf);
+}
+if (exportCheckButton) {
+  exportCheckButton.addEventListener("click", runExportSelfCheck);
 }
 if (midiEnable) {
   midiEnable.addEventListener("change", async () => {

@@ -1,3 +1,35 @@
+@font-face {
+  font-family: "iAWriterDuoS";
+  src: url("./fonts/iAWriterDuoS-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "iAWriterDuoS";
+  src: url("./fonts/iAWriterDuoS-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "iAWriterMonoS";
+  src: url("./fonts/iAWriterMonoS-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "iAWriterMonoS";
+  src: url("./fonts/iAWriterMonoS-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
   --bg: #f3f4f6;
@@ -15,11 +47,11 @@
   --node-stroke: rgba(0, 0, 0, 0.35);
   --text-primary: #1e1e1e;
   --text-secondary: #2a2a2a;
-  --font-title: "Georgia";
-  --font-ratio: "Georgia";
+  --font-title: "Noto Serif";
+  --font-ratio: "Noto Serif";
   --font-note: "Lexend";
-  --font-triangle-label: "Georgia";
-  --font-custom-label: "Georgia";
+  --font-triangle-label: "Noto Serif";
+  --font-custom-label: "Noto Serif";
   --font-key-mapping: "Lexend";
   --page: #ffffff;
   --page-border: rgba(16, 19, 22, 0.15);
@@ -227,6 +259,13 @@ body.theme-dark {
 .control-group {
   display: grid;
   gap: 6px;
+}
+
+.export-check-status {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  min-height: 14px;
 }
 
 .control-group-inline {

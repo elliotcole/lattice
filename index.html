@@ -31,8 +31,8 @@
         <div class="controls-wrap">
         <section class="panel controls">
         <div class="control-group">
-          <label for="fundamental">Fundamental (Hz)</label>
-          <div class="control-inline">
+          <div class="control-inline fundamental-inline">
+            <label for="fundamental" class="inline-label">Fundamental</label>
             <select id="fundamental-note"></select>
             <input id="fundamental" type="number" min="20" max="2000" step="1" value="261.63" />
           </div>
@@ -60,79 +60,91 @@
           <select id="ratio-z" class="narrow-select ratio-z"></select>
         </div>
         <div class="control-actions">
-          <button id="audio-toggle" type="button">Enable Audio</button>
-          <div class="control-group preset-toggle">
-            <button id="preset-toggle" type="button" aria-expanded="false" aria-controls="preset-panel">
-              Presets <span class="chevron">v</span>
-            </button>
-            <div id="preset-panel" class="panel preset-panel" hidden>
-              <ul id="preset-list" class="preset-list"></ul>
+          <div class="control-actions-group">
+            <button id="audio-toggle" type="button">Enable Audio</button>
+            <div class="control-group preset-toggle">
+              <button id="preset-toggle" type="button" aria-expanded="false" aria-controls="preset-panel">
+                Presets <span class="chevron">v</span>
+              </button>
+              <div id="preset-panel" class="panel preset-panel" hidden>
+                <ul id="preset-list" class="preset-list"></ul>
+              </div>
             </div>
+            <div class="control-group file-toggle">
+              <button id="file-toggle" type="button" aria-expanded="false" aria-controls="file-panel">
+                File <span class="chevron">v</span>
+              </button>
+              <div id="file-panel" class="panel file-panel" hidden>
+                <button id="save-lattice" type="button" class="button-full">Save Lattice</button>
+                <button id="load-lattice" type="button" class="button-full">Load Lattice</button>
+                <button id="export-scale" type="button" class="button-full">Export to Scale Workshop</button>
+              </div>
+              <input id="load-lattice-input" type="file" accept="application/json" hidden />
+            </div>
+            <button id="reset-lattice" type="button" class="button-ghost">Reset</button>
           </div>
-          <button id="save-lattice" type="button">Save Lattice</button>
-          <button id="load-lattice" type="button">Load Lattice</button>
-          <input id="load-lattice-input" type="file" accept="application/json" hidden />
-          <button id="reset-lattice" type="button">Reset</button>
-          <div class="ratio-wheel-toggle">
-            <button
-              id="ratio-wheel-toggle"
-              type="button"
-              class="ratio-wheel-button"
-              aria-label="Octave Wheel"
-              aria-expanded="false"
-              aria-controls="ratio-wheel-panel"
-            >
-              <canvas id="ratio-wheel-mini" class="ratio-wheel-canvas" width="40" height="40"></canvas>
-            </button>
-          </div>
-          <div class="control-group options-toggle">
-            <button id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel">
-              Options <span class="chevron">v</span>
-            </button>
-            <div id="options-panel" class="panel options-panel" hidden>
-              <button id="add-custom-ratio" type="button" class="button-full">Add Custom Ratio</button>
-              <div class="control-group">
-                <label for="a4">A4 Reference (Hz)</label>
-                <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
-              </div>
-              <div class="control-group">
-                <label for="theme-select">Theme</label>
-                <select id="theme-select">
-                  <option value="light">Light Mode</option>
-                  <option value="dark">Dark Mode</option>
-                </select>
-              </div>
-              <div class="control-group">
-                <div class="control-inline">
-                  <input id="show-help" type="checkbox" checked />
-                  <label for="show-help">Show help</label>
+          <div class="control-actions-divider" aria-hidden="true"></div>
+          <div class="control-actions-group">
+            <div class="ratio-wheel-toggle">
+              <button
+                id="ratio-wheel-toggle"
+                type="button"
+                class="ratio-wheel-button"
+                aria-label="Octave Wheel"
+                aria-expanded="false"
+                aria-controls="ratio-wheel-panel"
+              >
+                <canvas id="ratio-wheel-mini" class="ratio-wheel-canvas" width="40" height="40"></canvas>
+              </button>
+            </div>
+            <div class="control-group options-toggle">
+              <button id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel">
+                Options <span class="chevron">v</span>
+              </button>
+              <div id="options-panel" class="panel options-panel" hidden>
+                <button id="add-custom-ratio" type="button" class="button-full">Add Custom Ratio</button>
+                <div class="control-group">
+                  <label for="a4">A4 Reference (Hz)</label>
+                  <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
+                </div>
+                <div class="control-group">
+                  <label for="theme-select">Theme</label>
+                  <select id="theme-select">
+                    <option value="light">Light Mode</option>
+                    <option value="dark">Dark Mode</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <div class="control-inline">
+                    <input id="show-help" type="checkbox" checked />
+                    <label for="show-help">Show help</label>
+                  </div>
+                </div>
+                <div class="control-group control-group-inline">
+                  <label>¢ Decimals</label>
+                  <div class="nav-3d-buttons nav-3d-toggle-buttons nav-3d-toggle-buttons-3">
+                    <button type="button" data-cents-precision="0">0</button>
+                    <button type="button" data-cents-precision="1">1</button>
+                    <button type="button" data-cents-precision="2">2</button>
+                  </div>
+                </div>
+               
+                <div class="control-group">
+                  <label for="midi-enable">MIDI Input</label>
+                  <div class="control-inline">
+                    <input id="midi-enable" type="checkbox" />
+                    <span>Enable</span>
+                  </div>
+                </div>
+                <div class="control-group">
+                  <label for="midi-port">MIDI Port</label>
+                  <select id="midi-port"></select>
+                </div>
+                <div class="control-group">
+                  <label for="midi-channel">MIDI Channel</label>
+                  <select id="midi-channel"></select>
                 </div>
               </div>
-              <div class="control-group control-group-inline">
-                <label>¢ Decimals</label>
-                <div class="nav-3d-buttons nav-3d-toggle-buttons nav-3d-toggle-buttons-3">
-                  <button type="button" data-cents-precision="0">0</button>
-                  <button type="button" data-cents-precision="1">1</button>
-                  <button type="button" data-cents-precision="2">2</button>
-                </div>
-              </div>
-             
-              <div class="control-group">
-                <label for="midi-enable">MIDI Input</label>
-                <div class="control-inline">
-                  <input id="midi-enable" type="checkbox" />
-                  <span>Enable</span>
-                </div>
-              </div>
-              <div class="control-group">
-                <label for="midi-port">MIDI Port</label>
-                <select id="midi-port"></select>
-              </div>
-              <div class="control-group">
-                <label for="midi-channel">MIDI Channel</label>
-                <select id="midi-channel"></select>
-              </div>
-              <button id="export-scale" type="button" class="button-full">Export to Scale Workshop</button>
             </div>
           </div>
         </div>

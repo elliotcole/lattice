@@ -82,6 +82,8 @@ const midiChannelSelect = document.getElementById("midi-channel");
 const presetToggle = document.getElementById("preset-toggle");
 const presetPanel = document.getElementById("preset-panel");
 const presetList = document.getElementById("preset-list");
+const fileToggle = document.getElementById("file-toggle");
+const filePanel = document.getElementById("file-panel");
 const saveLatticeButton = document.getElementById("save-lattice");
 const loadLatticeButton = document.getElementById("load-lattice");
 const loadLatticeInput = document.getElementById("load-lattice-input");
@@ -9967,6 +9969,24 @@ function togglePresetPanel() {
   syncTopMenuPanelState();
 }
 
+function toggleFilePanel() {
+  if (!fileToggle || !filePanel) {
+    return;
+  }
+  const isOpen = fileToggle.getAttribute("aria-expanded") === "true";
+  if (!isOpen) {
+    closeTopMenus("file");
+  }
+  fileToggle.setAttribute("aria-expanded", String(!isOpen));
+  filePanel.hidden = isOpen;
+  filePanel.classList.toggle("panel-open", !isOpen);
+  const parentPanel = fileToggle.closest(".panel");
+  if (parentPanel) {
+    parentPanel.classList.toggle("panel-open", !isOpen);
+  }
+  syncTopMenuPanelState();
+}
+
 function toggleEnvelopePanel() {
   if (!envelopeToggle || !envelopePanel) {
     return;
@@ -10049,6 +10069,19 @@ function closePresetPanel() {
   }
 }
 
+function closeFilePanel() {
+  if (!fileToggle || !filePanel) {
+    return;
+  }
+  fileToggle.setAttribute("aria-expanded", "false");
+  filePanel.hidden = true;
+  filePanel.classList.remove("panel-open");
+  const parentPanel = fileToggle.closest(".panel");
+  if (parentPanel) {
+    parentPanel.classList.remove("panel-open");
+  }
+}
+
 function closeEnvelopePanel() {
   if (!envelopeToggle || !envelopePanel) {
     return;
@@ -10074,6 +10107,9 @@ function closeTopMenus(except = "") {
   if (except !== "presets") {
     closePresetPanel();
   }
+  if (except !== "file") {
+    closeFilePanel();
+  }
   if (except !== "ratio-wheel") {
     closeRatioWheelPanel();
   }
@@ -10097,6 +10133,7 @@ function syncTopMenuPanelState() {
   const anyOpen =
     (optionsPanel && !optionsPanel.hidden) ||
     (presetPanel && !presetPanel.hidden) ||
+    (filePanel && !filePanel.hidden) ||
     (ratioWheelPanel && !ratioWheelPanel.hidden);
   controlsPanel.classList.toggle("panel-open", anyOpen);
 }
@@ -10211,6 +10248,7 @@ function downloadLatticeState() {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+  closeFilePanel();
 }
 
 function getPresetState() {
@@ -12255,6 +12293,7 @@ if (loadLatticeButton && loadLatticeInput) {
       const state = JSON.parse(text);
       applyPresetState(state);
       schedulePresetUrlUpdate();
+      closeFilePanel();
     } catch (error) {
       console.warn("Failed to load lattice file", error);
       alert("Could not load lattice file.");
@@ -13171,6 +13210,9 @@ if (ratioWheelToggle) {
 }
 if (presetToggle) {
   presetToggle.addEventListener("click", togglePresetPanel);
+}
+if (fileToggle) {
+  fileToggle.addEventListener("click", toggleFilePanel);
 }
 if (uiHint) {
   uiHint.addEventListener("click", () => {

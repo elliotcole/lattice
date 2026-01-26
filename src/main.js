@@ -34,6 +34,8 @@ const layoutKeyMappingOffsetInput = document.getElementById("layout-key-mapping-
 const layoutKeyMappingDarkToggle = document.getElementById("layout-key-mapping-dark");
 const layoutKeyMappingTextButton = document.getElementById("layout-key-mapping-text");
 const layoutKeyMappingTextDialog = document.getElementById("layout-key-mapping-text-dialog");
+const octaveShiftDialog = document.getElementById("octave-shift-dialog");
+const octaveShiftInput = document.getElementById("octave-shift-input");
 const layoutKeyMappingPrefixInput = document.getElementById("layout-key-mapping-prefix");
 const layoutKeyMappingSuffixInput = document.getElementById("layout-key-mapping-suffix");
 const layoutLockPositionToggle = document.getElementById("layout-lock-position");
@@ -80,6 +82,9 @@ const midiChannelSelect = document.getElementById("midi-channel");
 const presetToggle = document.getElementById("preset-toggle");
 const presetPanel = document.getElementById("preset-panel");
 const presetList = document.getElementById("preset-list");
+const saveLatticeButton = document.getElementById("save-lattice");
+const loadLatticeButton = document.getElementById("load-lattice");
+const loadLatticeInput = document.getElementById("load-lattice-input");
 const topBar = document.querySelector(".top-bar");
 const controlsPanel = document.querySelector(".controls");
 const synthPanel = document.querySelector(".synth-panel");
@@ -217,6 +222,7 @@ let midiEnabled = false;
 let rHeld = false;
 let tHeld = false;
 let lHeld = false;
+let oHeld = false;
 let suppressClickAfterRespell = false;
 const midiActiveNotes = new Map();
 let lastLfoTapTime = 0;
@@ -697,6 +703,8 @@ let pendingLayoutPositionOffsets = null;
 let pendingLayoutKeyMappingOffsets = null;
 let layoutNodeShapes = new Map();
 let nodeSpellingOverrides = new Map();
+let nodeOctaveOffsets = new Map();
+let octaveShiftTargetId = null;
 let layoutNodeSize = 35;
 let layoutRatioTextSize = 21;
 let layoutNoteTextSize = 14;
@@ -1721,7 +1729,7 @@ function getSequenceNodeOrder() {
   return result;
 }
 
-function createCustomNode(numerator, denominator, position, isActive = true) {
+function createCustomNode(numerator, denominator, position, isActive = true, octaveShift = 0) {
   const num = Number(numerator);
   const den = Number(denominator);
   if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) {
@@ -1754,6 +1762,7 @@ function createCustomNode(numerator, denominator, position, isActive = true) {
     isCenter: false,
     baseVoiceId: null,
     isCustom: true,
+    octaveShift: Number.isFinite(octaveShift) ? Math.trunc(octaveShift) : 0,
   };
 }
 
@@ -2036,6 +2045,7 @@ function buildLattice() {
           active: isCenter,
           isCenter,
           baseVoiceId: null,
+          octaveShift: 0,
         });
       }
     }
@@ -3469,6 +3479,38 @@ function bumpLabelDataVersion() {
   labelCache.clear();
 }
 
+function getNodeOctaveShift(node) {
+  const shift = Number(node && node.octaveShift);
+  return Number.isFinite(shift) ? shift : 0;
+}
+
+function formatOctaveShiftLabel(shift) {
+  if (!Number.isFinite(shift) || shift === 0) {
+    return "";
+  }
+  const factor = Math.pow(2, Math.abs(shift));
+  return shift > 0 ? `x${factor}` : `÷${factor}`;
+}
+
+function getOctaveOffsetKey(node) {
+  const z = node.exponentZ || 0;
+  return `${node.exponentX},${node.exponentY},${z}`;
+}
+
+function applyNodeOctaveOffsets() {
+  nodes.forEach((node) => {
+    if (node.isCustom) {
+      if (!Number.isFinite(node.octaveShift)) {
+        node.octaveShift = 0;
+      }
+      return;
+    }
+    const key = getOctaveOffsetKey(node);
+    const shift = nodeOctaveOffsets.get(key);
+    node.octaveShift = Number.isFinite(shift) ? shift : 0;
+  });
+}
+
 function getNodeLabelCacheEntry(node) {
   const key = getLabelCacheKey();
   let entry = labelCache.get(node.id);
@@ -4880,6 +4922,40 @@ function openLayoutCustomLabelDialog(value = "") {
   });
 }
 
+function setNodeOctaveShift(node, shift) {
+  if (!node) {
+    return;
+  }
+  const normalized = Number.isFinite(shift) ? Math.trunc(shift) : 0;
+  if (node.isCustom) {
+    node.octaveShift = normalized;
+    return;
+  }
+  const key = getOctaveOffsetKey(node);
+  if (normalized) {
+    nodeOctaveOffsets.set(key, normalized);
+  } else {
+    nodeOctaveOffsets.delete(key);
+  }
+  node.octaveShift = normalized;
+}
+
+function openOctaveShiftDialog(node) {
+  if (!octaveShiftDialog || !octaveShiftInput || !node) {
+    return;
+  }
+  octaveShiftTargetId = node.id;
+  const currentShift = getNodeOctaveShift(node);
+  octaveShiftInput.value = currentShift ? String(currentShift) : "";
+  if (typeof octaveShiftDialog.showModal === "function") {
+    octaveShiftDialog.showModal();
+  }
+  requestAnimationFrame(() => {
+    octaveShiftInput.focus();
+    octaveShiftInput.select();
+  });
+}
+
 function triangleKey(entry) {
   return `${entry.plane}:${entry.x},${entry.y},${entry.z}:${entry.diag}`;
 }
@@ -6059,7 +6135,8 @@ function draw() {
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.fillStyle = themeColors.textSecondary;
-      const ratioText = `${node.numerator}:${node.denominator}`;
+      const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
+      const ratioText = `${node.numerator}:${node.denominator}${octaveLabel}`;
       const centsLabel = getCachedCentsReadout(
         node,
         { wrap: enharmonicsEnabled },
@@ -6116,6 +6193,8 @@ function draw() {
         hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
       const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
       const annotation = getCachedHejiAnnotation(node, baseLabel || node.note_name);
+      const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
+      let lineOffset = 0;
       drawHejiInline({
         x: labelPos.x,
         y: labelPos.y,
@@ -6132,13 +6211,24 @@ function draw() {
         fontWeight: noteLabelWeight,
         color: themeColors.textSecondary,
       });
+      lineOffset += detailSize + 4;
+      if (octaveLabel) {
+        ctx.save();
+        ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = themeColors.textSecondary;
+        ctx.fillText(octaveLabel, labelPos.x, labelPos.y + lineOffset);
+        ctx.restore();
+        lineOffset += detailSize + 4;
+      }
       if (showHz && Number.isFinite(node.freq)) {
         ctx.save();
         ctx.font = `200 ${detailSize}px "Lexend", sans-serif`;
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
         ctx.fillStyle = themeColors.textSecondary;
-        const hzY = labelPos.y + detailSize + 4;
+        const hzY = labelPos.y + lineOffset;
         ctx.fillText(`${node.freq.toFixed(2)} Hz`, labelPos.x, hzY);
         ctx.restore();
       }
@@ -6276,6 +6366,14 @@ function startVoice(options) {
   }
 
   const now = audioCtx.currentTime;
+  const node = nodeById.get(options.nodeId);
+  const octaveShift = node ? getNodeOctaveShift(node) : 0;
+  const baseOctave = Number(options.octave) || 0;
+  const effectiveOctave = baseOctave + octaveShift;
+  const baseFreq = Number(options.freq);
+  const effectiveFreq = Number.isFinite(baseFreq)
+    ? baseFreq * Math.pow(2, octaveShift)
+    : options.freq;
   const velocity = Math.max(0, Math.min(1, Number(options.velocity ?? 1)));
   const waveformType = waveformSelect.value || "sine";
   const oscillator = CUSTOM_WAVEFORMS.has(waveformType)
@@ -6287,7 +6385,7 @@ function startVoice(options) {
   if (!CUSTOM_WAVEFORMS.has(waveformType)) {
     oscillator.type = waveformType;
   }
-  oscillator.frequency.value = options.freq;
+  oscillator.frequency.value = effectiveFreq;
   const isOneShot =
     Boolean(oneShotCheckbox && oneShotCheckbox.checked) && !options.ignoreOneShot;
   envGain.gain.setValueAtTime(0.0001, now);
@@ -6305,8 +6403,8 @@ function startVoice(options) {
   const voice = {
     id: nextVoiceId++,
     nodeId: options.nodeId,
-    octave: options.octave,
-    freq: options.freq,
+    octave: effectiveOctave,
+    freq: effectiveFreq,
     oscillator,
     envGain,
     lfoGain,
@@ -6544,7 +6642,11 @@ function handleMidiMessage(event) {
   if (command === 0x90 && data2 > 0) {
     if (useCustomMap) {
       const pc = ((data1 % 12) + 12) % 12;
-      const octaveOffset = Math.floor((data1 - KEYBOARD_BASE_MIDI) / 12);
+      const targetFreq = midiToFrequency(data1, Number(a4Input.value) || 440);
+      const nearest = findNearestPitchInstance(targetFreq);
+      const octaveOffset = nearest
+        ? nearest.octave
+        : Math.floor((data1 - KEYBOARD_BASE_MIDI) / 12);
       const voices = startCustomPianoMappedVoices(pc, "midi", velocity, octaveOffset);
       if (voices.length) {
         midiActiveNotes.set(key, voices);
@@ -6648,6 +6750,11 @@ function onPointerDown(event) {
       canvas.setPointerCapture(event.pointerId);
       return;
     }
+  }
+
+  if (oHeld && hit) {
+    openOctaveShiftDialog(hit);
+    return;
   }
 
   if (rHeld && hit && spellingMode === "simple") {
@@ -8314,6 +8421,9 @@ function getCustomPianoLabelMap() {
   }
   const map = new Map();
   customPianoMap.forEach((nodeIds, key) => {
+    if (!nodeIds || !nodeIds.size) {
+      return;
+    }
     const pitchIndex = key % 12;
     const label = noteNamesSharp[pitchIndex] || noteNames[pitchIndex];
     nodeIds.forEach((nodeId) => {
@@ -10089,6 +10199,20 @@ function decodePresetState(encoded) {
   return JSON.parse(json);
 }
 
+function downloadLatticeState() {
+  const state = getPresetState();
+  const json = JSON.stringify(state, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "lattice.json";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function getPresetState() {
   const active = nodes
     .filter((node) => node.active && !node.isCustom)
@@ -10099,6 +10223,7 @@ function getPresetState() {
     x: node.coordinate.x,
     y: node.coordinate.y,
     active: Boolean(node.active),
+    octaveShift: getNodeOctaveShift(node),
   }));
   const layoutViewState =
     layoutLockPosition && !layoutMode
@@ -10132,6 +10257,7 @@ function getPresetState() {
       Number(ratioZSelect.value) || 7,
     ],
     noteSpellings: Array.from(nodeSpellingOverrides.entries()),
+    octaveOffsets: Array.from(nodeOctaveOffsets.entries()),
     triangles: Array.from(triangleDiagonals.values()).map((entry) => ({
       plane: entry.plane,
       x: entry.x,
@@ -10306,6 +10432,12 @@ function applyPresetState(state) {
   const wants3D = Boolean(state.mode3d) || activeHasZ;
   const targetDepth = wants3D ? GRID_DEPTH : 1;
   const targetCenterZ = Math.floor(targetDepth / 2);
+  gridDepth = targetDepth;
+  gridCenterZ = targetCenterZ;
+  const presetTriangles = Array.isArray(state.triangles) ? state.triangles : null;
+  const presetTriangleLabels = Array.isArray(state.triangleLabels)
+    ? state.triangleLabels
+    : null;
   if (mode3dCheckbox) {
     mode3dCheckbox.checked = wants3D;
   }
@@ -10355,6 +10487,20 @@ function applyPresetState(state) {
     } else if (spelling === "lower" || spelling === "upper") {
       nodeSpellingOverrides.set(nodeId, spelling);
     }
+    });
+  }
+  nodeOctaveOffsets = new Map();
+  if (Array.isArray(state.octaveOffsets)) {
+    state.octaveOffsets.forEach((entry) => {
+      if (!Array.isArray(entry) || entry.length < 2) {
+        return;
+      }
+      const key = String(entry[0]);
+      const shift = Number(entry[1]);
+      if (!Number.isFinite(shift) || shift === 0) {
+        return;
+      }
+      nodeOctaveOffsets.set(key, Math.trunc(shift));
     });
   }
 
@@ -10875,10 +11021,52 @@ function applyPresetState(state) {
     centsPrecision = Math.min(2, Math.max(0, Math.round(state.centsPrecision)));
     syncCentsPrecisionControls();
   }
+  invalidateLabelCache();
+  updateFundamentalNotes();
+  syncFundamentalNoteSelect();
+
+  const activeKeys = new Set();
+  if (Array.isArray(state.active)) {
+    state.active.forEach((entry) => {
+      if (!Array.isArray(entry) || entry.length < 2) {
+        return;
+      }
+      const [x, y, z = 0] = entry;
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        return;
+      }
+      activeKeys.add(`${x},${y},${z}`);
+    });
+  }
+  if (Array.isArray(state.customNodes)) {
+    customNodes = state.customNodes
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const x = Number(entry.x);
+        const y = Number(entry.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          return null;
+        }
+        const node = createCustomNode(
+          entry.numerator,
+          entry.denominator,
+          { x, y },
+          entry.active,
+          entry.octaveShift
+        );
+        return node;
+      })
+      .filter(Boolean);
+  } else {
+    customNodes = [];
+  }
+  rebuildLattice(activeKeys, { remapTriangles: false, remapLayoutOffsets: false });
   triangleDiagonals.clear();
   triangleLabels.clear();
-  if (Array.isArray(state.triangles)) {
-    state.triangles.forEach((entry) => {
+  if (presetTriangles) {
+    presetTriangles.forEach((entry) => {
       if (!entry || typeof entry !== "object") {
         return;
       }
@@ -10924,8 +11112,8 @@ function applyPresetState(state) {
       }
     });
   }
-  if (Array.isArray(state.triangleLabels)) {
-    state.triangleLabels.forEach((entry) => {
+  if (presetTriangleLabels) {
+    presetTriangleLabels.forEach((entry) => {
       if (!entry || typeof entry !== "object") {
         return;
       }
@@ -10957,43 +11145,6 @@ function applyPresetState(state) {
       triangleLabels.set(triangleLabelKey(normalized), normalized);
     });
   }
-
-  invalidateLabelCache();
-  updateFundamentalNotes();
-  syncFundamentalNoteSelect();
-
-  const activeKeys = new Set();
-  if (Array.isArray(state.active)) {
-    state.active.forEach((entry) => {
-      if (!Array.isArray(entry) || entry.length < 2) {
-        return;
-      }
-      const [x, y, z = 0] = entry;
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-        return;
-      }
-      activeKeys.add(`${x},${y},${z}`);
-    });
-  }
-  if (Array.isArray(state.customNodes)) {
-    customNodes = state.customNodes
-      .map((entry) => {
-        if (!entry || typeof entry !== "object") {
-          return null;
-        }
-        const x = Number(entry.x);
-        const y = Number(entry.y);
-        if (!Number.isFinite(x) || !Number.isFinite(y)) {
-          return null;
-        }
-        const node = createCustomNode(entry.numerator, entry.denominator, { x, y }, entry.active);
-        return node;
-      })
-      .filter(Boolean);
-  } else {
-    customNodes = [];
-  }
-  rebuildLattice(activeKeys, { remapTriangles: false, remapLayoutOffsets: false });
   if (pendingLayoutLabelOffsets) {
     applyLayoutLabelOffsets(pendingLayoutLabelOffsets);
     pendingLayoutLabelOffsets = null;
@@ -11009,6 +11160,7 @@ function applyPresetState(state) {
     pendingLayoutPositionOffsets = null;
     draw();
   }
+  draw();
 }
 
 function formatActiveRatiosForScaleWorkshop() {
@@ -11834,12 +11986,15 @@ function rebuildLattice(
     remapTrianglesForGridCenter(prevCenterZ, gridCenterZ);
   }
   nodeById = new Map(nodes.map((node) => [node.id, node]));
+  applyNodeOctaveOffsets();
   if (layoutMode) {
     nodes.forEach((node) => ensureLayoutPosition(node));
   }
   bumpLabelDataVersion();
   applyActiveNodeKeys(activeKeys);
-  pruneTriangleDiagonals();
+  if (remapTriangles) {
+    pruneTriangleDiagonals();
+  }
   edges = buildEdges(latticeNodes, GRID_COLS, GRID_ROWS, gridDepth);
   if (remapLayoutOffsets) {
     if (labelOffsets && labelOffsets.length) {
@@ -11859,6 +12014,9 @@ function rebuildLattice(
 }
 
 function resetLattice() {
+  const preservedMidiEnabled = midiEnabled;
+  const preservedMidiChecked = midiEnable ? midiEnable.checked : false;
+  const preservedMidiPort = midiPortSelect ? midiPortSelect.value : null;
   stopAllVoices();
   activeKeys.clear();
   customPianoActiveKeys.clear();
@@ -11868,6 +12026,7 @@ function resetLattice() {
   markCustomPianoMapDirty();
   updateCustomPianoKeyStyles();
   nodeSpellingOverrides.clear();
+  nodeOctaveOffsets.clear();
   triangleDiagonals.clear();
   triangleLabels.clear();
   layoutUndoStack.length = 0;
@@ -11885,6 +12044,23 @@ function resetLattice() {
   rebuildLattice();
   updateUiHint();
   schedulePresetUrlUpdate();
+  if (midiEnable) {
+    midiEnable.checked = preservedMidiChecked;
+  }
+  midiEnabled = preservedMidiEnabled;
+  if (preservedMidiPort && midiPortSelect) {
+    const applyPortSelection = () => {
+      if (Array.from(midiPortSelect.options).some((option) => option.value === preservedMidiPort)) {
+        midiPortSelect.value = preservedMidiPort;
+        selectMidiInput(preservedMidiPort);
+      }
+    };
+    if (midiEnabled && !midiAccess) {
+      initMidi().then(applyPortSelection);
+    } else {
+      applyPortSelection();
+    }
+  }
 }
 
 populateRatioSelect(ratioXSelect, 3);
@@ -12061,6 +12237,30 @@ updatePresetUrl();
 
 audioToggle.addEventListener("click", toggleAudio);
 resetButton.addEventListener("click", resetLattice);
+if (saveLatticeButton) {
+  saveLatticeButton.addEventListener("click", downloadLatticeState);
+}
+if (loadLatticeButton && loadLatticeInput) {
+  loadLatticeButton.addEventListener("click", () => {
+    loadLatticeInput.value = "";
+    loadLatticeInput.click();
+  });
+  loadLatticeInput.addEventListener("change", async () => {
+    const file = loadLatticeInput.files && loadLatticeInput.files[0];
+    if (!file) {
+      return;
+    }
+    try {
+      const text = await file.text();
+      const state = JSON.parse(text);
+      applyPresetState(state);
+      schedulePresetUrlUpdate();
+    } catch (error) {
+      console.warn("Failed to load lattice file", error);
+      alert("Could not load lattice file.");
+    }
+  });
+}
 window.addEventListener("hashchange", () => {
   const presetState = readPresetFromUrl();
   if (presetState) {
@@ -12464,6 +12664,9 @@ if (layoutLockPositionToggle) {
     if (layoutLockPosition) {
       syncLayoutViewFromCurrent();
     } else {
+      layoutPositionOffsets.clear();
+      layoutPositions.clear();
+      layoutLabelOffsets.clear();
       if (layoutMode && layoutPrevState) {
         view.zoom = layoutPrevState.zoom;
         view.offsetX = layoutPrevState.offsetX;
@@ -13329,6 +13532,52 @@ if (layoutCustomLabelDialog && layoutCustomLabelInput) {
     draw();
   });
 }
+if (octaveShiftDialog && octaveShiftInput) {
+  octaveShiftInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    octaveShiftDialog.close("confirm");
+  });
+  octaveShiftDialog.addEventListener("click", (event) => {
+    if (event.target === octaveShiftDialog) {
+      octaveShiftDialog.close("clear");
+    }
+  });
+  octaveShiftDialog.addEventListener("close", () => {
+    if (octaveShiftTargetId == null) {
+      return;
+    }
+    const targetNode = nodeById.get(octaveShiftTargetId);
+    if (
+      (octaveShiftDialog.returnValue === "confirm" ||
+        octaveShiftDialog.returnValue === "clear") &&
+      targetNode
+    ) {
+      const nextShift =
+        octaveShiftDialog.returnValue === "clear"
+          ? 0
+          : Number(octaveShiftInput.value);
+      const normalized = Number.isFinite(nextShift) ? Math.trunc(nextShift) : 0;
+      const previousShift = getNodeOctaveShift(targetNode);
+      setNodeOctaveShift(targetNode, normalized);
+      const delta = normalized - previousShift;
+      if (delta) {
+        voices.forEach((voice) => {
+          if (voice.nodeId === targetNode.id) {
+            voice.octave += delta;
+          }
+        });
+      }
+      bumpLabelDataVersion();
+      updateVoiceFrequencies();
+      schedulePresetUrlUpdate();
+      draw();
+    }
+    octaveShiftTargetId = null;
+  });
+}
 canvas.addEventListener("pointerdown", onPointerDown);
 canvas.addEventListener("pointermove", onPointerMove);
 canvas.addEventListener("pointerup", onPointerUp);
@@ -13362,6 +13611,9 @@ window.addEventListener("keydown", (event) => {
   }
   if (event.key.toLowerCase() === "l") {
     lHeld = true;
+  }
+  if (event.key.toLowerCase() === "o") {
+    oHeld = true;
   }
   if (triangleLabelDialog) {
     triangleLabelDialog.addEventListener("close", () => {
@@ -13511,6 +13763,9 @@ window.addEventListener("keyup", (event) => {
   }
   if (event.key.toLowerCase() === "l") {
     lHeld = false;
+  }
+  if (event.key.toLowerCase() === "o") {
+    oHeld = false;
   }
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = false;

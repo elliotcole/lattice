@@ -1360,6 +1360,11 @@ body.map-mode-active::before {
   padding: 0;
 }
 
+.dialog-help {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
 .dialog-actions button {
   font-size: 12px;
 }

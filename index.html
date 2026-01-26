@@ -69,6 +69,9 @@
               <ul id="preset-list" class="preset-list"></ul>
             </div>
           </div>
+          <button id="save-lattice" type="button">Save Lattice</button>
+          <button id="load-lattice" type="button">Load Lattice</button>
+          <input id="load-lattice-input" type="file" accept="application/json" hidden />
           <button id="reset-lattice" type="button">Reset</button>
           <div class="ratio-wheel-toggle">
             <button
@@ -201,19 +204,19 @@
         </div>
         <div class="control-group control-group-inline layout-space-group">
           <label id="layout-space-trigger" class="layout-space-trigger" for="layout-scale">Spacing</label>
-          <input id="layout-scale" type="range" min="0.5" max="2" step="0.01" value="1" aria-label="Spacing" />
+          <input id="layout-scale" type="range" min="0.5" max="3" step="0.01" value="1" aria-label="Spacing" />
           <div id="layout-space-popover" class="layout-space-popover" hidden>
             <div class="layout-space-row">
               <label for="layout-space-x">X</label>
-              <input id="layout-space-x" type="range" min="0.5" max="2" step="0.01" value="1" />
+              <input id="layout-space-x" type="range" min="0.5" max="3" step="0.01" value="1" />
             </div>
             <div class="layout-space-row">
               <label for="layout-space-y">Y</label>
-              <input id="layout-space-y" type="range" min="0.5" max="2" step="0.01" value="1" />
+              <input id="layout-space-y" type="range" min="0.5" max="3" step="0.01" value="1" />
             </div>
             <div id="layout-space-z-row" class="layout-space-row">
               <label for="layout-space-z">Z</label>
-              <input id="layout-space-z" type="range" min="0.5" max="2" step="0.01" value="1" />
+              <input id="layout-space-z" type="range" min="0.5" max="3" step="0.01" value="1" />
             </div>
           </div>
         </div>
@@ -281,7 +284,6 @@
           <div class="layout-font-controls">
             <select id="layout-title-font">
               <option value="Lexend">Lexend</option>
-              <option value="HEJI2Text">HEJI2Text</option>
               <option value="Georgia">Georgia</option>
               <option value="Inter">Inter</option>
               <option value="DM Sans">DM Sans</option>
@@ -307,7 +309,6 @@
           <div class="layout-font-controls">
             <select id="layout-creator-font">
               <option value="Lexend">Lexend</option>
-              <option value="HEJI2Text">HEJI2Text</option>
               <option value="Georgia">Georgia</option>
               <option value="Inter">Inter</option>
               <option value="DM Sans">DM Sans</option>
@@ -334,7 +335,6 @@
             <select id="layout-ratio-font">
               <option value="Georgia">Georgia</option>
               <option value="Lexend">Lexend</option>
-              <option value="HEJI2Text">HEJI2Text</option>
               <option value="Inter">Inter</option>
               <option value="DM Sans">DM Sans</option>
               <option value="Radley">Radley</option>
@@ -359,7 +359,6 @@
           <div class="layout-font-controls">
             <select id="layout-note-font">
               <option value="Lexend">Lexend</option>
-              <option value="HEJI2Text">HEJI2Text</option>
               <option value="Georgia">Georgia</option>
               <option value="Inter">Inter</option>
               <option value="DM Sans">DM Sans</option>
@@ -386,7 +385,6 @@
             <select id="layout-triangle-label-font">
               <option value="Georgia">Georgia</option>
               <option value="Lexend">Lexend</option>
-              <option value="HEJI2Text">HEJI2Text</option>
               <option value="Inter">Inter</option>
               <option value="DM Sans">DM Sans</option>
               <option value="Radley">Radley</option>
@@ -412,7 +410,6 @@
           <div class="layout-font-controls">
             <select id="layout-axis-font">
               <option value="Lexend">Lexend</option>
-              <option value="HEJI2Text">HEJI2Text</option>
               <option value="Georgia">Georgia</option>
               <option value="Inter">Inter</option>
               <option value="DM Sans">DM Sans</option>
@@ -440,7 +437,6 @@
               <select id="layout-custom-font">
                 <option value="Georgia">Georgia</option>
                 <option value="Lexend">Lexend</option>
-                <option value="HEJI2Text">HEJI2Text</option>
                 <option value="Inter">Inter</option>
                 <option value="DM Sans">DM Sans</option>
                 <option value="Radley">Radley</option>
@@ -466,7 +462,6 @@
           <div class="layout-font-controls">
             <select id="layout-key-mapping-font">
               <option value="Lexend">Lexend</option>
-              <option value="HEJI2Text">HEJI2Text</option>
               <option value="Georgia">Georgia</option>
               <option value="Inter">Inter</option>
               <option value="DM Sans">DM Sans</option>
@@ -894,6 +889,19 @@
         <menu class="dialog-actions">
           <button type="submit" value="cancel">Cancel</button>
           <button type="submit" value="confirm">Done</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="octave-shift-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form">
+        <div class="dialog-title">Octave Shift</div>
+        <label>
+          Octaves to transpose on playback
+          <input id="octave-shift-input" type="number" min="-6" max="6" step="1" />
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="clear">Clear</button>
+          <button type="submit" value="confirm">OK</button>
         </menu>
       </form>
     </dialog>

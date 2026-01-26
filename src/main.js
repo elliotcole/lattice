@@ -8394,11 +8394,11 @@ function updateUiHint() {
 
   if (!is3DMode) {
     uiHint.textContent =
-      "Click to play. Shift double-click & hold to start LFO.\n Shift-click to add. Option-click to remove. Hold R and click to respell.\nDrag to pan. Scroll to zoom.\nHold T to label triangles.\n(click to hide)";
+      "2D Mode\nShift-click to add a node. \nOption-click to remove. \nShift double-click & hold to start LFO.\nHold T to label triangles\nHold O and click a node to change playback octave.\nDrag to pan. Scroll to zoom.\n(click to hide)";
     return;
   }
   uiHint.textContent =
-    "3D Mode:\nShift-click to add\nOption-click to remove\nZ-click a node to access Z axis for that node\nClick-drag to rotate\nShift double-click & hold for LFO\nHold R and click to respell\nHold T to label triangles\nArrow keys to pan\nScroll to zoom\n(click to hide)";
+    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis\nShift double-click & hold for LFO\nHold T to label triangles\nHold O and click a node to change playback octave.\nDrag to rotate\nArrow keys to pan\nScroll to zoom\n(click to hide)";
 }
 
 function resetUiHintToDefault() {

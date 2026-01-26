@@ -16,8 +16,8 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/index-DDDbbsTB.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-L7j9J2wU.css">
+    <script type="module" crossorigin src="./assets/index-CxXKgl33.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BViEPo6W.css">
   </head>
   <body>
     <canvas id="lattice"></canvas>
@@ -62,45 +62,30 @@
         </div>
         <div class="control-actions">
           <div class="control-actions-group">
-            <button id="audio-toggle" type="button">Enable Audio</button>
+            <div class="control-group file-toggle">
+              <button id="file-toggle" type="button" aria-expanded="false" aria-controls="file-panel">
+                File
+              </button>
+              <div id="file-panel" class="panel file-panel" hidden>
+                <button id="share-preset" type="button" class="button-full">Share</button>
+                <button id="save-lattice" type="button" class="button-full">Save Lattice</button>
+                <button id="load-lattice" type="button" class="button-full">Load Lattice</button>
+                <button id="export-scale" type="button" class="button-full">Export to Scale Workshop</button>
+                <div id="file-share-popover" class="panel file-share-popover" hidden></div>
+              </div>
+              <input id="load-lattice-input" type="file" accept="application/json" hidden />
+            </div>
             <div class="control-group preset-toggle">
               <button id="preset-toggle" type="button" aria-expanded="false" aria-controls="preset-panel">
-                Presets <span class="chevron">v</span>
+                Presets
               </button>
               <div id="preset-panel" class="panel preset-panel" hidden>
                 <ul id="preset-list" class="preset-list"></ul>
               </div>
             </div>
-            <div class="control-group file-toggle">
-              <button id="file-toggle" type="button" aria-expanded="false" aria-controls="file-panel">
-                File <span class="chevron">v</span>
-              </button>
-              <div id="file-panel" class="panel file-panel" hidden>
-                <button id="save-lattice" type="button" class="button-full">Save Lattice</button>
-                <button id="load-lattice" type="button" class="button-full">Load Lattice</button>
-                <button id="export-scale" type="button" class="button-full">Export to Scale Workshop</button>
-              </div>
-              <input id="load-lattice-input" type="file" accept="application/json" hidden />
-            </div>
-            <button id="reset-lattice" type="button" class="button-ghost">Reset</button>
-          </div>
-          <div class="control-actions-divider" aria-hidden="true"></div>
-          <div class="control-actions-group">
-            <div class="ratio-wheel-toggle">
-              <button
-                id="ratio-wheel-toggle"
-                type="button"
-                class="ratio-wheel-button"
-                aria-label="Octave Wheel"
-                aria-expanded="false"
-                aria-controls="ratio-wheel-panel"
-              >
-                <canvas id="ratio-wheel-mini" class="ratio-wheel-canvas" width="40" height="40"></canvas>
-              </button>
-            </div>
             <div class="control-group options-toggle">
               <button id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel">
-                Options <span class="chevron">v</span>
+                Options
               </button>
               <div id="options-panel" class="panel options-panel" hidden>
                 <button id="add-custom-ratio" type="button" class="button-full">Add Custom Ratio</button>
@@ -146,6 +131,20 @@
                   <select id="midi-channel"></select>
                 </div>
               </div>
+            </div>
+            <button id="reset-lattice" type="button" class="button-ghost">Reset</button>
+            <button id="audio-toggle" type="button">Sound Off</button>
+            <div class="ratio-wheel-toggle">
+              <button
+                id="ratio-wheel-toggle"
+                type="button"
+                class="ratio-wheel-button"
+                aria-label="Octave Wheel"
+                aria-expanded="false"
+                aria-controls="ratio-wheel-panel"
+              >
+                <canvas id="ratio-wheel-mini" class="ratio-wheel-canvas" width="40" height="40"></canvas>
+              </button>
             </div>
           </div>
         </div>

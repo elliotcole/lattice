@@ -1186,7 +1186,7 @@ button:active {
 
 .keyboard-mode-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) auto;
+  grid-template-columns: minmax(160px, 1fr) auto auto;
   gap: 8px;
   align-items: center;
 }
@@ -1197,6 +1197,31 @@ button:active {
 
 .keyboard-mode-row button {
   white-space: nowrap;
+}
+
+.midi-menu {
+  position: relative;
+}
+
+.midi-menu-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  top: auto;
+  right: 0;
+  min-width: 220px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  z-index: 4;
+}
+
+.midi-menu-panel[hidden] {
+  display: none;
+}
+
+.midi-menu-panel .control-group {
+  display: grid;
+  gap: 6px;
 }
 
 .keyboard-map-button {

@@ -19,7 +19,7 @@
     </script>
   </head>
   <body>
-    <canvas id="lattice"></canvas>
+    <canvas id="lattice" tabindex="0" aria-label="Tuning lattice"></canvas>
 
     <main class="app">
       <div class="top-bar">
@@ -87,7 +87,7 @@
                 Options
               </button>
               <div id="options-panel" class="panel options-panel" hidden>
-                <button id="add-custom-ratio" type="button" class="button-full">Add Custom Ratio</button>
+                <button id="add-custom-ratio" type="button" class="button-full">Custom Ratio (C+Click)</button>
                 <div class="control-group">
                   <label for="a4">A4 Reference (Hz)</label>
                   <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
@@ -114,21 +114,6 @@
                   </div>
                 </div>
                
-                <div class="control-group">
-                  <label for="midi-enable">MIDI Input</label>
-                  <div class="control-inline">
-                    <input id="midi-enable" type="checkbox" />
-                    <span>Enable</span>
-                  </div>
-                </div>
-                <div class="control-group">
-                  <label for="midi-port">MIDI Port</label>
-                  <select id="midi-port"></select>
-                </div>
-                <div class="control-group">
-                  <label for="midi-channel">MIDI Channel</label>
-                  <select id="midi-channel"></select>
-                </div>
               </div>
             </div>
             <button id="reset-lattice" type="button" class="button-ghost">Reset</button>
@@ -211,6 +196,12 @@
           <div class="control-inline">
             <input id="layout-unify-size" type="checkbox" checked />
             <span>Unify Node Size</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <div class="control-inline">
+            <input id="layout-line-labels-toggle" type="checkbox" checked />
+            <label for="layout-line-labels-toggle">Line labels</label>
           </div>
         </div>
         <div class="control-group control-group-inline layout-space-group">
@@ -595,6 +586,32 @@
           >
             Edit
           </button>
+          <div class="midi-menu">
+            <button
+              id="midi-menu-toggle"
+              type="button"
+              aria-expanded="false"
+              aria-controls="midi-menu-panel"
+            >
+              MIDI
+            </button>
+            <div id="midi-menu-panel" class="panel midi-menu-panel" hidden>
+              <div class="control-group">
+                <div class="control-inline">
+                  <input id="midi-enable" type="checkbox" />
+                  <label for="midi-enable">Activate</label>
+                </div>
+              </div>
+              <div class="control-group">
+                <label for="midi-port">MIDI Port</label>
+                <select id="midi-port"></select>
+              </div>
+              <div class="control-group">
+                <label for="midi-channel">MIDI Channel</label>
+                <select id="midi-channel"></select>
+              </div>
+            </div>
+          </div>
         </div>
         <div id="keyboard-help" class="keyboard-help" aria-live="polite"></div>
       </div>
@@ -869,6 +886,12 @@
                 <label for="nav-circles">Circles</label>
               </div>
             </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="line-labels-toggle" type="checkbox" checked />
+                <label for="line-labels-toggle">Line labels</label>
+              </div>
+            </div>
             <div class="control-group" hidden>
               <div class="control-inline">
                 <input id="nav-key-mappings" type="checkbox" checked />
@@ -898,7 +921,7 @@
 
     <dialog id="custom-ratio-dialog" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form">
-        <div class="dialog-title">Add Custom Ratio</div>
+        <div class="dialog-title">Add Custom Factor</div>
         <label>
           Numerator
           <input id="custom-ratio-numerator" type="number" min="1" step="1" required />

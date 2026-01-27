@@ -6,9 +6,18 @@
     <title>Tuning Lattice</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="./assets/index-BBpUWFs7.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DhfUVRUe.css">
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&family=Inter:wght@100..900&family=IBM+Plex+Sans:wght@200..700&family=Lato:wght@300..900&family=PT+Sans:wght@400..700&family=PT+Serif:wght@400..700&family=Radley:ital,wght@0,400;1,400&family=Alice&family=Noto+Serif:wght@400..700&display=swap" rel="stylesheet">
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-LWPVNSVEWV"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-LWPVNSVEWV');
+    </script>
+    <script type="module" crossorigin src="./assets/index-BxbGiBSA.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/style-D43bXKUd.css">
   </head>
   <body>
     <canvas id="lattice"></canvas>
@@ -23,19 +32,22 @@
         <div class="controls-wrap">
         <section class="panel controls">
         <div class="control-group">
-          <label for="fundamental">Fundamental (Hz)</label>
-          <div class="control-inline">
+          <div class="control-inline fundamental-inline">
+            <label for="fundamental" class="inline-label">Fundamental</label>
             <select id="fundamental-note"></select>
             <input id="fundamental" type="number" min="20" max="2000" step="1" value="261.63" />
           </div>
         </div>
-        
-        <div class="control-group">
-          <div class="control-inline">
-            <input id="mode-3d" type="checkbox" />
-            <span>3D</span>
+        <dialog id="fundamental-spelling-dialog" class="custom-ratio-dialog">
+          <div class="dialog-content">
+            <h2>Spell fundamental:</h2>
+            <div class="dialog-actions fundamental-spelling-actions">
+              <button id="fundamental-spelling-sharp" type="button"></button>
+              <button id="fundamental-spelling-flat" type="button"></button>
+            </div>
           </div>
-        </div>
+        </dialog>
+        
         <div class="control-group ratios-inline">
           <span class="ratios-label">Ratios:</span>
           <span class="ratio-axis-label">X</span>
@@ -49,56 +61,477 @@
           <select id="ratio-z" class="narrow-select ratio-z"></select>
         </div>
         <div class="control-actions">
-          <button id="audio-toggle" type="button">Enable Audio</button>
-          <div class="control-group preset-toggle">
-            <button id="preset-toggle" type="button" aria-expanded="false" aria-controls="preset-panel">
-              Presets <span class="chevron">v</span>
-            </button>
-            <div id="preset-panel" class="panel preset-panel" hidden>
-              <ul id="preset-list" class="preset-list"></ul>
+          <div class="control-actions-group">
+            <div class="control-group file-toggle">
+              <button id="file-toggle" type="button" aria-expanded="false" aria-controls="file-panel">
+                File
+              </button>
+              <div id="file-panel" class="panel file-panel" hidden>
+                <button id="share-preset" type="button" class="button-full">Share</button>
+                <button id="save-lattice" type="button" class="button-full">Save Lattice</button>
+                <button id="load-lattice" type="button" class="button-full">Load Lattice</button>
+                <button id="export-scale" type="button" class="button-full">Export to Scale Workshop</button>
+                <div id="file-share-popover" class="panel file-share-popover" hidden></div>
+              </div>
+              <input id="load-lattice-input" type="file" accept="application/json" hidden />
             </div>
-          </div>
-          <button id="reset-lattice" type="button">Reset</button>
-          <div class="ratio-wheel-toggle">
-            <button
-              id="ratio-wheel-toggle"
-              type="button"
-              class="ratio-wheel-button"
-              aria-label="Octave Wheel"
-              aria-expanded="false"
-              aria-controls="ratio-wheel-panel"
-            >
-              <canvas id="ratio-wheel-mini" class="ratio-wheel-canvas" width="40" height="40"></canvas>
-            </button>
-          </div>
-          <div class="control-group options-toggle">
-            <button id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel">
-              Options <span class="chevron">v</span>
-            </button>
-            <div id="options-panel" class="panel options-panel" hidden>
-              <div class="control-group">
-                <label for="a4">A4 Reference (Hz)</label>
-                <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
+            <div class="control-group preset-toggle">
+              <button id="preset-toggle" type="button" aria-expanded="false" aria-controls="preset-panel">
+                Presets
+              </button>
+              <div id="preset-panel" class="panel preset-panel" hidden>
+                <ul id="preset-list" class="preset-list"></ul>
               </div>
-              <div class="control-group">
-                <label for="theme-select">Theme</label>
-                <select id="theme-select">
-                  <option value="light">Light Mode</option>
-                  <option value="dark">Dark Mode</option>
-                </select>
+            </div>
+            <div class="control-group options-toggle">
+              <button id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel">
+                Options
+              </button>
+              <div id="options-panel" class="panel options-panel" hidden>
+                <button id="add-custom-ratio" type="button" class="button-full">Custom Ratio (C+Click)</button>
+                <div class="control-group">
+                  <label for="a4">A4 Reference (Hz)</label>
+                  <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
+                </div>
+                <div class="control-group">
+                  <label for="theme-select">Theme</label>
+                  <select id="theme-select">
+                    <option value="light">Light Mode</option>
+                    <option value="dark">Dark Mode</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <div class="control-inline">
+                    <input id="show-help" type="checkbox" checked />
+                    <label for="show-help">Show help</label>
+                  </div>
+                </div>
+                <div class="control-group control-group-inline">
+                  <label>¢ Decimals</label>
+                  <div class="nav-3d-buttons nav-3d-toggle-buttons nav-3d-toggle-buttons-3">
+                    <button type="button" data-cents-precision="0">0</button>
+                    <button type="button" data-cents-precision="1">1</button>
+                    <button type="button" data-cents-precision="2">2</button>
+                  </div>
+                </div>
+               
               </div>
-              <button id="export-scale" type="button">Export to Scale Workshop</button>
+            </div>
+            <button id="reset-lattice" type="button" class="button-ghost">Reset</button>
+            <button id="audio-toggle" type="button">Sound Off</button>
+            <div class="ratio-wheel-toggle">
+              <button
+                id="ratio-wheel-toggle"
+                type="button"
+                class="ratio-wheel-button"
+                aria-label="Octave Wheel"
+                aria-expanded="false"
+                aria-controls="ratio-wheel-panel"
+              >
+                <canvas id="ratio-wheel-mini" class="ratio-wheel-canvas" width="40" height="40"></canvas>
+              </button>
             </div>
           </div>
         </div>
         </section>
+        </div>
         <div class="hint-row">
           <div id="ui-hint" class="ui-hint"></div>
           <div id="z-mode-message" class="ui-hint z-mode-message" hidden></div>
         </div>
-        </div>
       </div>
     </main>
+
+    <aside id="layout-panel" class="panel layout-float" hidden>
+      <button id="layout-panel-toggle" class="layout-header" type="button" aria-expanded="true">
+        <span>Layout</span>
+        <span class="layout-chevron">▾</span>
+      </button>
+      <div class="layout-content">
+        <div class="control-group">
+          <div class="nav-3d-buttons nav-3d-view-modes">
+            <button type="button" data-view-mode="2d">2D</button>
+            <button type="button" data-view-mode="3d">3D</button>
+            <button type="button" data-view-mode="layout">Print</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <label for="layout-page-size">Page Size</label>
+          <select id="layout-page-size">
+            <option value="letter">Letter</option>
+            <option value="a4">A4</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="layout-orientation">Orientation</label>
+          <select id="layout-orientation">
+            <option value="portrait">Portrait</option>
+            <option value="landscape" selected>Landscape</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <div class="control-inline">
+            <input id="layout-lock-position" type="checkbox" checked />
+            <span>Separate Layout</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <input id="layout-title" type="text" placeholder="Title" aria-label="Title" />
+        </div>
+        <div class="control-group">
+          <input id="layout-creator" type="text" placeholder="Creator" aria-label="Creator" />
+        </div>
+        <div class="control-group layout-font-group">
+          <button
+            id="layout-fonts"
+            type="button"
+            class="button-full"
+            aria-expanded="false"
+            aria-controls="layout-font-popover"
+          >
+            Edit Text Styles
+          </button>
+        </div>
+        <div class="nav-3d-title">Size</div>
+        <div class="control-group">
+          <div class="control-inline">
+            <input id="layout-unify-size" type="checkbox" checked />
+            <span>Unify Node Size</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <div class="control-inline">
+            <input id="layout-line-labels-toggle" type="checkbox" checked />
+            <label for="layout-line-labels-toggle">Line labels</label>
+          </div>
+        </div>
+        <div class="control-group control-group-inline layout-space-group">
+          <label id="layout-space-trigger" class="layout-space-trigger" for="layout-scale">Spacing</label>
+          <input id="layout-scale" type="range" min="0.5" max="3" step="0.01" value="1" aria-label="Spacing" />
+          <div id="layout-space-popover" class="layout-space-popover" hidden>
+            <div class="layout-space-row">
+              <label for="layout-space-x">X</label>
+              <input id="layout-space-x" type="range" min="0.5" max="3" step="0.01" value="1" />
+            </div>
+            <div class="layout-space-row">
+              <label for="layout-space-y">Y</label>
+              <input id="layout-space-y" type="range" min="0.5" max="3" step="0.01" value="1" />
+            </div>
+            <div id="layout-space-z-row" class="layout-space-row">
+              <label for="layout-space-z">Z</label>
+              <input id="layout-space-z" type="range" min="0.5" max="3" step="0.01" value="1" />
+            </div>
+          </div>
+        </div>
+        <div class="control-group control-group-inline">
+          <label for="layout-node-size">Node</label>
+          <input id="layout-node-size" type="range" min="18" max="70" step="1" value="35" />
+        </div>
+        <div id="layout-key-mappings-group" class="nav-3d-accordion-body" hidden>
+          <div
+            id="layout-key-mapping-trigger"
+            class="nav-3d-title layout-space-trigger layout-key-mapping-trigger"
+            role="button"
+            tabindex="0"
+            aria-expanded="false"
+            aria-controls="layout-key-mapping-popover"
+          >
+            Key Mappings
+          </div>
+          <div class="control-group layout-key-mapping-group">
+            <div
+              id="layout-key-mapping-popover"
+              class="layout-space-popover layout-key-mapping-popover"
+              hidden
+            >
+              <div class="layout-space-row">
+                <label for="layout-key-mapping-offset">Position</label>
+                <input id="layout-key-mapping-offset" type="range" min="-20" max="40" step="1" value="6" />
+              </div>
+              <div class="control-inline">
+                <input id="layout-key-mapping-dark" type="checkbox" />
+                <span>Dark</span>
+              </div>
+              <div class="control-inline">
+                <button id="layout-key-mapping-text" type="button">Text</button>
+              </div>
+            </div>
+          </div>
+          <div class="control-group">
+            <div class="nav-3d-buttons nav-3d-toggle-buttons nav-3d-toggle-buttons-3">
+              <button type="button" data-layout-key-mapping="hide">Hide</button>
+              <button type="button" data-layout-key-mapping="unique">Unique</button>
+              <button type="button" data-layout-key-mapping="all">All</button>
+            </div>
+          </div>
+        </div>
+        <div class="nav-3d-title">Export</div>
+        <div class="control-group">
+          <div class="control-inline">
+            <button id="export-svg" type="button">SVG</button>
+            <button id="export-pdf" type="button">PDF</button>
+            <button id="export-check" type="button">Check</button>
+          </div>
+          <div id="export-check-status" class="export-check-status" aria-live="polite"></div>
+        </div>
+        <div class="nav-3d-title">Reset</div>
+        <div class="control-group">
+          <button id="layout-reset" type="button" class="button-full">Reset Layout</button>
+        </div>
+      </div>
+    </aside>
+
+    <div id="layout-font-popover" class="layout-font-popover" hidden>
+      <div class="layout-font-form">
+        <div class="dialog-title">Text Styles</div>
+        <label>
+          Title Font
+          <div class="layout-font-controls">
+            <select id="layout-title-font">
+              <option value="Lexend">Lexend</option>
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-title-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Title Size</span>
+            <input id="layout-title-size" type="range" min="10" max="96" step="1" value="28" />
+          </div>
+        </label>
+        <label>
+          Creator Font
+          <div class="layout-font-controls">
+            <select id="layout-creator-font">
+              <option value="Lexend">Lexend</option>
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-creator-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Creator Size</span>
+            <input id="layout-creator-size" type="range" min="8" max="72" step="1" value="18" />
+          </div>
+        </label>
+        <label>
+          Inside Font
+          <div class="layout-font-controls">
+            <select id="layout-ratio-font">
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Lexend">Lexend</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-ratio-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Size</span>
+            <input id="layout-ratio-text-size" type="range" min="10" max="36" step="1" value="21" />
+          </div>
+        </label>
+        <label>
+          Label Font
+          <div class="layout-font-controls">
+            <select id="layout-note-font">
+              <option value="Lexend">Lexend</option>
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-note-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Size</span>
+            <input id="layout-note-text-size" type="range" min="8" max="24" step="1" value="11" />
+          </div>
+        </label>
+        <label>
+          Triangle Label Font
+          <div class="layout-font-controls">
+            <select id="layout-triangle-label-font">
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Lexend">Lexend</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+                          </select>
+            <select id="layout-triangle-label-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Size</span>
+            <input id="layout-triangle-label-size" type="range" min="8" max="36" step="1" value="20" />
+          </div>
+        </label>
+        <label>
+          Axis Legend Font
+          <div class="layout-font-controls">
+            <select id="layout-axis-font">
+              <option value="Lexend">Lexend</option>
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-axis-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Size</span>
+            <input id="layout-axis-size" type="range" min="10" max="36" step="1" value="19" />
+          </div>
+        </label>
+        <div id="layout-custom-size-group" hidden>
+          <label id="layout-custom-font-group" hidden>
+            Custom Text Font
+            <div class="layout-font-controls">
+              <select id="layout-custom-font">
+                <option value="Noto Serif">Noto Serif</option>
+                <option value="Lexend">Lexend</option>
+                <option value="Inter">Inter</option>
+                <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
+                <option value="Radley">Radley</option>
+                <option value="Alice">Alice</option>
+              </select>
+              <select id="layout-custom-weight">
+                <option value="200">Extra Light</option>
+                <option value="300">Light</option>
+                <option value="400">Regular</option>
+                <option value="500">Medium</option>
+                <option value="600">Semi Bold</option>
+                <option value="700">Bold</option>
+              </select>
+            </div>
+            <div class="layout-font-size">
+              <span>Size</span>
+              <input id="layout-custom-label-size" type="range" min="8" max="36" step="1" value="18" />
+            </div>
+          </label>
+        </div>
+        <label>
+          Key Mappings Font
+          <div class="layout-font-controls">
+            <select id="layout-key-mapping-font">
+              <option value="Lexend">Lexend</option>
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-key-mapping-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Size</span>
+            <input id="layout-key-mapping-size" type="range" min="8" max="20" step="1" value="11" />
+          </div>
+        </label>
+        <div class="layout-font-actions">
+          <button id="layout-font-cancel" type="button">Cancel</button>
+          <button id="layout-font-done" type="button">Done</button>
+        </div>
+      </div>
+    </div>
 
     <section class="panel synth-panel">
       <div class="synth-group">
@@ -112,13 +545,76 @@
         <span id="lfo-depth-readout">100%</span>
       </div>
       <div class="synth-group">
+        <div id="keyboard-map-popover" class="keyboard-map-popover" hidden>
+          <div class="piano-keys" role="group" aria-label="Piano keys">
+            <div class="piano-keys-white">
+              <button type="button" class="piano-key white" data-key="0" aria-label="C"></button>
+              <button type="button" class="piano-key white" data-key="2" aria-label="D"></button>
+              <button type="button" class="piano-key white" data-key="4" aria-label="E"></button>
+              <button type="button" class="piano-key white" data-key="5" aria-label="F"></button>
+              <button type="button" class="piano-key white" data-key="7" aria-label="G"></button>
+              <button type="button" class="piano-key white" data-key="9" aria-label="A"></button>
+              <button type="button" class="piano-key white" data-key="11" aria-label="B"></button>
+            </div>
+            <div class="piano-keys-black" aria-hidden="true">
+              <button type="button" class="piano-key black" data-key="1" style="--key-pos: 1;" aria-label="C#"></button>
+              <button type="button" class="piano-key black" data-key="3" style="--key-pos: 2;" aria-label="D#"></button>
+              <button type="button" class="piano-key black" data-key="6" style="--key-pos: 4;" aria-label="F#"></button>
+              <button type="button" class="piano-key black" data-key="8" style="--key-pos: 5;" aria-label="G#"></button>
+              <button type="button" class="piano-key black" data-key="10" style="--key-pos: 6;" aria-label="A#"></button>
+            </div>
+          </div>
+          <button id="keyboard-map-clear" type="button" class="keyboard-map-clear-link">
+            clear
+          </button>
+        </div>
         <label for="keyboard-mode">Keyboard Mode</label>
-        <select id="keyboard-mode">
-          <option value="off" selected>Keyboard Off</option>
-          <option value="piano">Piano Keyboard</option>
-          <option value="iso">Isomorphic</option>
-          <option value="iso-fuzzy">Isomorphic (fuzzy)</option>
-        </select>
+        <div class="keyboard-mode-row">
+          <select id="keyboard-mode">
+            <option value="off" selected>Keyboard Off</option>
+            <option value="piano">Piano Keyboard</option>
+            <option value="piano-custom">Custom Piano Map</option>
+            <option value="iso">Isomorphic</option>
+            <option value="iso-fuzzy">Isomorphic (fuzzy)</option>
+          </select>
+          <button
+            id="keyboard-map-toggle"
+            type="button"
+            class="keyboard-map-button"
+            aria-pressed="false"
+            aria-label="Map mode"
+            hidden
+          >
+            Edit
+          </button>
+          <div class="midi-menu">
+            <button
+              id="midi-menu-toggle"
+              type="button"
+              aria-expanded="false"
+              aria-controls="midi-menu-panel"
+            >
+              MIDI
+            </button>
+            <div id="midi-menu-panel" class="panel midi-menu-panel" hidden>
+              <div class="control-group">
+                <div class="control-inline">
+                  <input id="midi-enable" type="checkbox" />
+                  <label for="midi-enable">Activate</label>
+                </div>
+              </div>
+              <div class="control-group">
+                <label for="midi-port">MIDI Port</label>
+                <select id="midi-port"></select>
+              </div>
+              <div class="control-group">
+                <label for="midi-channel">MIDI Channel</label>
+                <select id="midi-channel"></select>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="keyboard-help" class="keyboard-help" aria-live="polite"></div>
       </div>
       <div class="synth-group">
         <label for="waveform">Waveform</label>
@@ -143,12 +639,12 @@
       <div class="envelope-panel-header">Envelope</div>
       <div class="synth-group">
         <label for="attack">Attack</label>
-        <input id="attack" type="range" min="0.005" max="2" step="0.005" value="0.02" />
+        <input id="attack" type="range" min="0.005" max="15" step="0.005" value="0.02" />
         <span id="attack-readout">0.02s</span>
       </div>
       <div class="synth-group">
         <label for="decay">Decay</label>
-        <input id="decay" type="range" min="0.01" max="3" step="0.01" value="0.2" />
+        <input id="decay" type="range" min="0.01" max="15" step="0.01" value="0.2" />
         <span id="decay-readout">0.20s</span>
       </div>
       <div class="synth-group">
@@ -158,7 +654,7 @@
       </div>
       <div class="synth-group">
         <label for="release">Release</label>
-        <input id="release" type="range" min="0.01" max="5" step="0.01" value="0.6" />
+        <input id="release" type="range" min="0.01" max="15" step="0.01" value="0.6" />
         <span id="release-readout">0.60s</span>
       </div>
       <div class="synth-group">
@@ -168,46 +664,116 @@
           <span>One-shot</span>
         </div>
       </div>
+      <div class="synth-group">
+        <label>Timing</label>
+        <div class="control-inline">
+          <label class="radio-option">
+            <input type="radio" name="envelope-time" value="absolute" checked />
+            Absolute
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="envelope-time" value="tempo" />
+            Clock to tempo
+          </label>
+        </div>
+      </div>
     </aside>
 
     <aside id="animation-panel" class="panel animation-panel" hidden>
       <div class="animation-panel-header">Animation</div>
-      <div class="synth-group">
-        <label for="looper-toggle">Looper</label>
-        <button id="looper-toggle" type="button">Record</button>
-      </div>
-      <div class="synth-group">
-        <label for="tempo">Tempo</label>
-        <input id="tempo" type="range" min="30" max="300" step="1" value="120" />
-        <span id="tempo-readout">120 BPM</span>
-      </div>
-      <div class="synth-group">
-        <label for="sequence-pattern">Sequence</label>
+      <div class="animation-section">
+        <div class="animation-section-title">Patterns</div>
+        <div class="synth-group">
+          <label for="tempo">Tempo</label>
+          <input id="tempo" type="range" min="10" max="400" step="1" value="120" />
+          <span id="tempo-readout" class="control-readout">120 BPM</span>
+        </div>
+        <div class="synth-group" id="pattern-length-group">
+          <label for="pattern-length">Length</label>
+          <div class="control-inline">
+            <label class="radio-option">
+              <input type="radio" name="pattern-length-mode" value="sustain" checked />
+              Sustain
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="pattern-length-mode" value="gate" />
+              Gate
+            </label>
+          </div>
+          <input id="pattern-length" type="range" min="0.1" max="12" step="0.05" value="1" />
+          <span id="pattern-length-readout" class="control-readout">1.00 beats</span>
+          <span id="pattern-length-note" class="control-note" hidden>1-shot on</span>
+        </div>
+        <div class="synth-group">
+          <label for="sequence-pattern">Sequence</label>
         <select id="sequence-pattern">
           <option value="ascending" selected>Ascending</option>
           <option value="descending">Descending</option>
           <option value="shuffle">Shuffle</option>
+          <option value="mutate">Mutate</option>
           <option value="random">Random</option>
-        </select>
-        <button id="pattern-build" type="button">Build</button>
-      </div>
-      <div class="synth-group">
-        <label for="rhythm-pattern">Rhythm</label>
+          <option value="left-right">Left to Right</option>
+          <option value="spiral-in">Spiral In</option>
+          <option value="merukhand">Merukhand</option>
+          <option value="plain-bob-minor">Plain Bob Minor</option>
+          </select>
+        </div>
+        <div class="synth-group">
+          <label for="rhythm-pattern">Rhythm</label>
         <select id="rhythm-pattern">
           <option value="steady" selected>Steady</option>
           <option value="random">Random</option>
+          <option value="euclidean">Euclidean</option>
+          <option value="golden">Golden</option>
+          <option value="blooms">Blooms</option>
+          <option value="even-pairs">Even Pairs</option>
         </select>
+        </div>
+        <div class="synth-group">
+          <label for="octave-pattern">Octave</label>
+          <select id="octave-pattern">
+            <option value="unison" selected>Unison</option>
+            <option value="random">Random</option>
+            <option value="down-unison">-1, 0, 0, 0</option>
+            <option value="down-up">-1, 0, 1, 0</option>
+          </select>
+        </div>
+        <div class="synth-group">
+          <label class="visually-hidden" for="pattern-build">Build pattern</label>
+          <div class="control-inline">
+            <button id="pattern-build" type="button">Build</button>
+            <span class="arrow-sep">&gt;</span>
+            <button id="score-play-toggle" type="button">Play</button>
+          </div>
+        </div>
+      </div>
+      <div class="animation-section">
+        <div class="animation-section-title">
+          LFOs
+          <button id="lfo-stop" type="button" class="lfo-stop">stop</button>
+        </div>
+        <div class="synth-group">
+          <select id="lfo-preset">
+            <option value="random" selected>Random</option>
+          </select>
+        </div>
+        <div class="synth-group">
+          <label class="visually-hidden" for="lfo-play-toggle">LFO Play</label>
+          <button id="lfo-play-toggle" type="button">Play</button>
+        </div>
+      </div>
+      <div class="animation-section">
+        <div class="animation-section-title">
+          Looper
+          <button id="looper-clear" type="button" class="looper-clear">clear</button>
+        </div>
+        <div class="synth-group">
+          <label class="visually-hidden" for="looper-toggle">Looper</label>
+          <button id="looper-toggle" type="button">Record</button>
+        </div>
       </div>
       <div class="synth-group">
-        <label for="octave-pattern">Octave</label>
-        <select id="octave-pattern">
-          <option value="unison" selected>Unison</option>
-          <option value="random">Random</option>
-        </select>
-      </div>
-      <div class="synth-group">
-        <label for="score-play-toggle">Score Player</label>
-        <button id="score-play-toggle" type="button">Play</button>
+        <button id="all-notes-off" type="button" class="all-notes-off">All notes off</button>
       </div>
     </aside>
 
@@ -218,51 +784,216 @@
 
     <aside id="nav-3d" class="nav-3d" hidden>
       <div class="panel nav-3d-panel">
-        <div class="nav-3d-section">
-          <div class="nav-3d-title">Views</div>
-          <button type="button" data-view="xy">X-Y</button>
-          <button type="button" data-view="zy">Z-Y</button>
-          <button type="button" data-view="quarter">Quarter</button>
-          <button type="button" data-action="best-view">Best View</button>
-        </div>
-        
-        <div class="nav-3d-section">
-          <label class="nav-3d-toggle">
-            <input id="nav-axes" type="checkbox" checked />
-            <span>Axes</span>
-          </label>
-          <label class="nav-3d-toggle">
-            <input id="nav-grid" type="checkbox" checked />
-            <span>Grid</span>
-          </label>
-        </div>
-        <div class="nav-3d-section">
-          <div class="nav-3d-title">Rotate</div>
-          <div class="nav-3d-buttons">
-            <button type="button" data-action="rot-up">Up</button>
-            <button type="button" data-action="rot-down">Down</button>
-            <button type="button" data-action="rot-left">Left</button>
-            <button type="button" data-action="rot-right">Right</button>
+        <button id="view-panel-toggle" class="nav-3d-header" type="button" aria-expanded="true">
+          <span>View</span>
+          <span class="nav-3d-chevron">▾</span>
+        </button>
+        <div class="nav-3d-content">
+          <div class="nav-3d-section">
+            <div class="nav-3d-buttons nav-3d-view-modes">
+              <button type="button" data-view-mode="2d">2D</button>
+              <button type="button" data-view-mode="3d">3D</button>
+              <button type="button" data-view-mode="layout">Print</button>
+            </div>
           </div>
-        </div>
-        <div class="nav-3d-section">
-          <div class="nav-3d-title">Pan</div>
-          <div class="nav-3d-buttons">
-            <button type="button" data-action="pan-up">Up</button>
-            <button type="button" data-action="pan-down">Down</button>
-            <button type="button" data-action="pan-left">Left</button>
-            <button type="button" data-action="pan-right">Right</button>
+          <div class="nav-3d-section">
+            <div class="nav-3d-title">Orientation</div>
+            <div class="nav-3d-buttons" data-nav-mode="3d">
+              <button type="button" data-view="xy">X-Y</button>
+              <button type="button" data-view="zy">Z-Y</button>
+              <button type="button" data-view="quarter">Quarter</button>
+              <button type="button" data-action="best-view">Next Best</button>
+            </div>
+            <div class="nav-3d-buttons" data-nav-mode="2d">
+              <button type="button" data-action="fit-view">Fit</button>
+              <button type="button" data-action="reset-view">Reset</button>
+            </div>
           </div>
-        </div>
-        <div class="nav-3d-section">
-          <div class="nav-3d-title">Zoom</div>
-          <div class="nav-3d-buttons">
-            <button type="button" data-action="zoom-in">+</button>
-            <button type="button" data-action="zoom-out">-</button>
+          <div class="nav-3d-section" data-nav-mode="3d">
+            <button
+              id="nav-3d-navigation-toggle"
+              class="nav-3d-accordion-toggle is-collapsed"
+              type="button"
+              aria-expanded="false"
+            >
+              <span>Navigation</span>
+              <span class="nav-3d-accordion-chevron">▾</span>
+            </button>
+            <div id="nav-3d-navigation-body" class="nav-3d-accordion-body" hidden>
+              <div class="nav-3d-subsection">
+                <div class="nav-3d-subtitle">Rotate</div>
+                <div class="nav-3d-buttons">
+                  <button type="button" data-action="rot-up">Up</button>
+                  <button type="button" data-action="rot-down">Down</button>
+                  <button type="button" data-action="rot-left">Left</button>
+                  <button type="button" data-action="rot-right">Right</button>
+                </div>
+              </div>
+              <div class="nav-3d-subsection">
+                <div class="nav-3d-subtitle">Pan</div>
+                <div class="nav-3d-buttons">
+                  <button type="button" data-action="pan-up">Up</button>
+                  <button type="button" data-action="pan-down">Down</button>
+                  <button type="button" data-action="pan-left">Left</button>
+                  <button type="button" data-action="pan-right">Right</button>
+                </div>
+              </div>
+              <div class="nav-3d-subsection">
+                <div class="nav-3d-subtitle">Zoom</div>
+                <div class="nav-3d-buttons">
+                  <button type="button" data-action="zoom-in">+</button>
+                  <button type="button" data-action="zoom-out">-</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="nav-3d-section">
+            <div class="nav-3d-title">Feature</div>
+            <div class="nav-3d-buttons nav-3d-toggle-buttons">
+              <button type="button" data-feature-mode="ratio">Ratio</button>
+              <button type="button" data-feature-mode="note">Note</button>
+            </div>
+          </div>
+          <div class="nav-3d-section">
+            <div class="nav-3d-title">Spelling</div>
+            <div class="nav-3d-buttons nav-3d-toggle-buttons">
+              <button type="button" data-spelling-mode="true">Diatonic</button>
+              <button type="button" data-spelling-mode="simple">Custom</button>
+            </div>
+          </div>
+          <div class="nav-3d-section">
+            <div class="nav-3d-title">Show</div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="heji-enabled" type="checkbox" checked />
+                <label for="heji-enabled">HEJI</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="enharmonics-enabled" type="checkbox" checked />
+                <label for="enharmonics-enabled">Enharmonics</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="show-hz" type="checkbox" />
+                <label for="show-hz">Hz</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="nav-circles" type="checkbox" checked />
+                <label for="nav-circles">Circles</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="line-labels-toggle" type="checkbox" checked />
+                <label for="line-labels-toggle">Line labels</label>
+              </div>
+            </div>
+            <div class="control-group" hidden>
+              <div class="control-inline">
+                <input id="nav-key-mappings" type="checkbox" checked />
+                <label for="nav-key-mappings">Key Mappings</label>
+              </div>
+            </div>
+            <div class="control-group" style="display:none">
+              <div class="control-inline">
+                <input id="show-cents-sign" type="checkbox" />
+                <label for="show-cents-sign">¢</label>
+              </div>
+            </div>
+            <div class="control-group" data-nav-mode="3d">
+              <label class="nav-3d-toggle" data-nav-mode="3d">
+                <input id="nav-axes" type="checkbox" checked />
+                <span>Axes</span>
+              </label>
+              <label class="nav-3d-toggle" data-nav-mode="3d">
+                <input id="nav-grid" type="checkbox" checked />
+                <span>Grid</span>
+              </label>
+            </div>
           </div>
         </div>
       </div>
     </aside>
+
+    <dialog id="custom-ratio-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form">
+        <div class="dialog-title">Add Custom Factor</div>
+        <label>
+          Numerator
+          <input id="custom-ratio-numerator" type="number" min="1" step="1" required />
+        </label>
+        <label>
+          Denominator
+          <input id="custom-ratio-denominator" type="number" min="1" step="1" required />
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="confirm">Add</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="layout-custom-label-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form">
+        <div class="dialog-title">Custom Label</div>
+        <label>
+          Text:
+          <input type="text" id="layout-custom-label-input" maxlength="60" />
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="confirm">OK</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="layout-key-mapping-text-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form">
+        <div class="dialog-title">Key Mapping Text</div>
+        <label>
+          Before
+          <input id="layout-key-mapping-prefix" type="text" maxlength="12" />
+        </label>
+        <label>
+          After
+          <input id="layout-key-mapping-suffix" type="text" maxlength="12" />
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="confirm">Done</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="octave-shift-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form">
+        <div class="dialog-title">Octave Shift</div>
+        <label>
+          Octaves to transpose on playback
+          <input id="octave-shift-input" type="number" min="-6" max="6" step="1" />
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="clear">Clear</button>
+          <button type="submit" value="confirm">OK</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="triangle-label-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form">
+        <div class="dialog-title">Label</div>
+        <label>
+          Label:
+          <input type="text" id="triangle-label-input" maxlength="40" />
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="none">None</button>
+          <button type="submit" value="ok">OK</button>
+        </menu>
+      </form>
+    </dialog>
 
   </body>
 </html>

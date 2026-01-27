@@ -74,6 +74,7 @@ const layoutKeyMappingFontSelect = document.getElementById("layout-key-mapping-f
 const layoutKeyMappingWeightSelect = document.getElementById("layout-key-mapping-weight");
 const layoutCustomFontGroup = document.getElementById("layout-custom-font-group");
 const layoutUnifySizeToggle = document.getElementById("layout-unify-size");
+const layoutLineLabelsToggle = document.getElementById("layout-line-labels-toggle");
 const layoutResetButton = document.getElementById("layout-reset");
 const exportSvgButton = document.getElementById("export-svg");
 const exportPdfButton = document.getElementById("export-pdf");
@@ -164,7 +165,6 @@ const lfoPresetSelect = document.getElementById("lfo-preset");
 const lfoPlayToggle = document.getElementById("lfo-play-toggle");
 const lfoStopButton = document.getElementById("lfo-stop");
 const allNotesOffButton = document.getElementById("all-notes-off");
-const addCustomRatioButton = document.getElementById("add-custom-ratio");
 const customRatioDialog = document.getElementById("custom-ratio-dialog");
 const triangleLabelDialog = document.getElementById("triangle-label-dialog");
 const triangleLabelInput = document.getElementById("triangle-label-input");
@@ -184,6 +184,7 @@ const navAxesToggle = document.getElementById("nav-axes");
 const navGridToggle = document.getElementById("nav-grid");
 const navCirclesToggle = document.getElementById("nav-circles");
 const navKeyMappingsToggle = document.getElementById("nav-key-mappings");
+const lineLabelsToggle = document.getElementById("line-labels-toggle");
 const nav3dNavigationToggle = document.getElementById("nav-3d-navigation-toggle");
 const nav3dNavigationBody = document.getElementById("nav-3d-navigation-body");
 const layoutKeyMappingsGroup = document.getElementById("layout-key-mappings-group");
@@ -339,13 +340,6 @@ function serializeLayoutLabelOffsets() {
       if (!node) {
         return null;
       }
-      if (node.isCustom) {
-        const customIndex = customNodes.findIndex((item) => item.id === id);
-        if (customIndex < 0) {
-          return null;
-        }
-        return { customIndex, x: offset.x, y: offset.y };
-      }
       return {
         exponents: [node.exponentX, node.exponentY, node.exponentZ || 0],
         x: offset.x,
@@ -361,13 +355,6 @@ function serializeLayoutKeyMappingOffsets() {
       const node = nodeById.get(id);
       if (!node) {
         return null;
-      }
-      if (node.isCustom) {
-        const customIndex = customNodes.findIndex((item) => item.id === id);
-        if (customIndex < 0) {
-          return null;
-        }
-        return { customIndex, x: offset.x, y: offset.y };
       }
       return {
         exponents: [node.exponentX, node.exponentY, node.exponentZ || 0],
@@ -413,13 +400,6 @@ function applyLayoutLabelOffsets(entries) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
       return;
     }
-    if (Number.isFinite(entry.customIndex)) {
-      const customNode = customNodes[entry.customIndex];
-      if (customNode) {
-        layoutLabelOffsets.set(customNode.id, { x, y });
-      }
-      return;
-    }
     if (Array.isArray(entry.exponents) && entry.exponents.length >= 2) {
       const [expX, expY, expZ = 0] = entry.exponents.map(Number);
       const node = exponentMap.get(`${expX},${expY},${expZ}`);
@@ -459,13 +439,6 @@ function applyLayoutKeyMappingOffsets(entries) {
     const x = Number(entry.x);
     const y = Number(entry.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      return;
-    }
-    if (Number.isFinite(entry.customIndex)) {
-      const customNode = customNodes[entry.customIndex];
-      if (customNode) {
-        layoutKeyMappingOffsets.set(customNode.id, { x, y });
-      }
       return;
     }
     if (Array.isArray(entry.exponents) && entry.exponents.length >= 2) {
@@ -557,7 +530,7 @@ function syncLayoutViewFromCurrent() {
 
 const noteNamesSharp = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const noteNamesFlat = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
-const noteNames = noteNamesSharp;
+const noteNames = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "G#", "A", "Bb", "B"];
 const HEJI_STEP_OFFSETS = {
   3: 7,
   5: 4,
@@ -710,9 +683,10 @@ let patternLengthValue = 1;
 let patternLengthMode = "sustain";
 let envelopeTimeMode = "absolute";
 let customNodes = [];
-let nextCustomNodeId = 100000;
-let customDrag = null;
-let customDragJustPlaced = false;
+let nextCustomNodeId = 200000;
+let pendingCustomAction = null;
+let lastCustomFactor = { numerator: 5, denominator: 4 };
+let cHeld = false;
 let layoutMode = false;
 let layoutDrag = null;
 let layoutLabelDrag = null;
@@ -724,6 +698,7 @@ let pendingLayoutLabelOffsets = null;
 let pendingLayoutPositionOffsets = null;
 let pendingLayoutKeyMappingOffsets = null;
 let pendingLayoutSpacing = null;
+let customNodeDrag = null;
 let layoutNodeShapes = new Map();
 let nodeSpellingOverrides = new Map();
 let nodeOctaveOffsets = new Map();
@@ -805,6 +780,7 @@ let hejiEnabled = true;
 let enharmonicsEnabled = true;
 let centsPrecision = 0;
 let showCircles = true;
+let showLineLabels = true;
 let showKeyMappings = true;
 let layoutKeyMappingMode = "hide";
 let showHelpEnabled = true;
@@ -1752,106 +1728,393 @@ function getSequenceNodeOrder() {
   return result;
 }
 
-function createCustomNode(numerator, denominator, position, isActive = true, octaveShift = 0) {
-  const num = Number(numerator);
-  const den = Number(denominator);
-  if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) {
-    return null;
-  }
-  const ratio = num / den;
-  if (!Number.isFinite(ratio) || ratio <= 0) {
-    return null;
-  }
-  const fundamental = Number(fundamentalInput.value) || 220;
-  const a4 = Number(a4Input.value) || 440;
-  const freq = fundamental * ratio;
-  const etInfo = getNearestEtInfo(freq, a4);
+const CUSTOM_SLOT_VECTORS = [
+  { x: 0.5, y: -0.5 },
+  { x: 0.5, y: 0.5 },
+  { x: -0.5, y: 0.5 },
+  { x: -0.5, y: -0.5 },
+];
+
+function getCustomSlotOffset(slot) {
+  const vector = CUSTOM_SLOT_VECTORS[(slot % CUSTOM_SLOT_VECTORS.length + CUSTOM_SLOT_VECTORS.length) % CUSTOM_SLOT_VECTORS.length];
   return {
+    x: vector.x * GRID_SPACING,
+    y: vector.y * GRID_SPACING,
+  };
+}
+
+function getCustomNodesForSource(sourceId) {
+  return customNodes.filter((node) => node.sourceNodeId === sourceId);
+}
+
+function findNextCustomSlot(sourceId) {
+  const used = new Set(getCustomNodesForSource(sourceId).map((node) => node.customSlot));
+  for (let index = 0; index < 4; index += 1) {
+    if (!used.has(index)) {
+      return index;
+    }
+  }
+  return null;
+}
+
+function computeCustomNodeCoordinate(sourceNode, slot) {
+  if (!sourceNode || typeof slot !== "number") {
+    return null;
+  }
+  const offset = getCustomSlotOffset(slot);
+  return {
+    x: sourceNode.coordinate.x + offset.x,
+    y: sourceNode.coordinate.y + offset.y,
+    z: 0,
+  };
+}
+
+function createCustomNodeFromSource(sourceNode, slot, factorNumerator, factorDenominator) {
+  if (!sourceNode || !sourceNode.id || typeof slot !== "number") {
+    return null;
+  }
+  const coordinate = computeCustomNodeCoordinate(sourceNode, slot) || {
+    x: sourceNode.coordinate.x,
+    y: sourceNode.coordinate.y,
+    z: 0,
+  };
+  const node = {
     id: nextCustomNodeId++,
-    numerator: num,
-    denominator: den,
+    sourceNodeId: sourceNode.id,
+    customSlot: slot,
+    factorNumerator: Math.max(1, Number(factorNumerator) || 1),
+    factorDenominator: Math.max(1, Number(factorDenominator) || 1),
+    numerator: 1,
+    denominator: 1,
     exponentX: null,
     exponentY: null,
     exponentZ: 0,
     gridX: null,
     gridY: null,
-    gridZ: gridCenterZ,
-    coordinate: { x: position.x, y: position.y, z: 0 },
-    freq,
-    cents_from_et: etInfo.cents,
-    note_name: etInfo.name,
-    pitch_class: etInfo.pitchClass,
-    active: isActive,
+    gridZ: 0,
+    coordinate: { ...coordinate },
+    freq: 0,
+    cents_from_et: 0,
+    note_name: "",
+    pitch_class: "",
+    active: Boolean(sourceNode.active),
     isCenter: false,
     baseVoiceId: null,
     isCustom: true,
-    octaveShift: Number.isFinite(octaveShift) ? Math.trunc(octaveShift) : 0,
+    octaveShift: 0,
   };
+  layoutNodeShapes.set(node.id, "diamond");
+  return node;
 }
 
-function addCustomRatioNode(numerator, denominator) {
-  const center = screenToWorld({
-    x: view.lastPointer ? view.lastPointer.x : canvas.clientWidth / 2,
-    y: view.lastPointer ? view.lastPointer.y : canvas.clientHeight / 2,
-  });
-  const node = createCustomNode(numerator, denominator, center, true);
+function insertCustomNode(node) {
   if (!node) {
     return;
   }
   customNodes.push(node);
   nodes.push(node);
   nodeById.set(node.id, node);
-  customDrag = {
-    nodeId: node.id,
-    offsetX: 0,
-    offsetY: 0,
-    placing: true,
-  };
+}
+
+function addCustomNodeToScene(node) {
+  insertCustomNode(node);
+  refreshCustomNodes();
   updatePitchInstances();
-  refreshPatternFromActiveNodes();
   markIsomorphicDirty();
+  refreshPatternFromActiveNodes();
+  schedulePresetUrlUpdate();
+  draw();
+}
+
+function removeCustomNode(nodeId) {
+  const node = nodeById.get(nodeId);
+  if (!node || !node.isCustom) {
+    return false;
+  }
+  customNodes = customNodes.filter((item) => item.id !== nodeId);
+  nodes = nodes.filter((item) => item.id !== nodeId);
+  nodeById.delete(nodeId);
+  layoutNodeShapes.delete(nodeId);
+  layoutPositions.delete(nodeId);
+  layoutLabelOffsets.delete(nodeId);
+  layoutKeyMappingOffsets.delete(nodeId);
+  layoutPositionOffsets.delete(nodeId);
+  return true;
+}
+
+function getCustomNodeDisplayInfo(node) {
+  if (!node) {
+    return null;
+  }
+  const freq = Number(node.freq);
+  if (!Number.isFinite(freq)) {
+    return null;
+  }
+  const a4 = Number(a4Input.value) || 440;
+  const nearest = getNearestEtInfo(freq, a4);
+  const nearestPitchClass = noteNames[nearest.midi % 12];
+  const nearestName = `${nearestPitchClass}${Math.floor(nearest.midi / 12) - 1}`;
+  const nearestCents = Number.isFinite(node.cents_from_et) ? node.cents_from_et : nearest.cents;
+  if (spellingMode === "true" || hejiEnabled) {
+    const analysis = analyzeCustomRatio(node.derivedNumerator || node.numerator, node.derivedDenominator || node.denominator);
+    if (analysis) {
+      const info = buildTrueSpellingFromAxisRatios({
+        node,
+        axisRatios: analysis.axisRatios,
+        freq,
+        nearest,
+        nearestPitchClass,
+        nearestName,
+        nearestCents,
+      });
+      info.octaveShift = Number.isFinite(info.octaveShift) ? info.octaveShift : analysis.octaveShift;
+      return info;
+    }
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  const targetPc = nearest.midi % 12;
+  const pitchClass =
+    spellingMode === "simple"
+      ? getManualSpellingForNode(node, targetPc)
+      : nearestPitchClass;
+  return {
+    name: `${pitchClass}${Math.floor(nearest.midi / 12) - 1}`,
+    pitchClass,
+    cents: nearestCents,
+  };
+}
+
+function refreshCustomNodes() {
+  const fundamental = Number(fundamentalInput.value) || 220;
+  const a4 = Number(a4Input.value) || 440;
+  customNodes.forEach((customNode) => {
+    const source = nodeById.get(customNode.sourceNodeId);
+    if (!source) {
+      return;
+    }
+    const numerator = source.numerator * customNode.factorNumerator;
+    const denominator = source.denominator * customNode.factorDenominator;
+    if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+      return;
+    }
+    const reduced = reduceFraction(numerator, denominator);
+    customNode.numerator = reduced.numerator;
+    customNode.denominator = reduced.denominator;
+    customNode.derivedNumerator = reduced.numerator;
+    customNode.derivedDenominator = reduced.denominator;
+    const ratioValue = reduced.numerator / reduced.denominator;
+    if (!Number.isFinite(ratioValue)) {
+      return;
+    }
+    customNode.freq = fundamental * ratioValue;
+    const etInfo = getNearestEtInfo(customNode.freq, a4);
+    customNode.cents_from_et = etInfo.cents;
+    customNode.note_name = etInfo.name;
+    customNode.pitch_class = etInfo.pitchClass;
+    const analysis = analyzeCustomRatio(
+      customNode.derivedNumerator || customNode.numerator,
+      customNode.derivedDenominator || customNode.denominator
+    );
+    customNode.customAxisRatios = analysis ? analysis.axisRatios : [];
+    const derivedInfo = getCustomNodeDisplayInfo(customNode);
+    if (derivedInfo) {
+      customNode.note_name = derivedInfo.name;
+      customNode.pitch_class = derivedInfo.pitchClass;
+      customNode.cents_from_et = derivedInfo.cents;
+    }
+  });
+  invalidateLabelCache();
+}
+
+function createCustomNodeForSource(sourceId, numerator, denominator) {
+  const source = nodeById.get(sourceId);
+  if (!source || !source.active) {
+    return;
+  }
+  const slot = findNextCustomSlot(sourceId);
+  if (slot == null) {
+    return;
+  }
+  const node = createCustomNodeFromSource(source, slot, numerator, denominator);
+  if (!node) {
+    return;
+  }
+  addCustomNodeToScene(node);
+}
+
+function updateCustomNodeFactor(nodeId, numerator, denominator) {
+  const node = nodeById.get(nodeId);
+  if (!node || !node.isCustom) {
+    return;
+  }
+  node.factorNumerator = Math.max(1, numerator);
+  node.factorDenominator = Math.max(1, denominator);
+  refreshCustomNodes();
   draw();
   schedulePresetUrlUpdate();
 }
 
-function openCustomRatioDialog() {
-  if (!customRatioDialog || typeof customRatioDialog.showModal !== "function") {
-    const numerator = window.prompt("Numerator");
-    if (numerator == null) {
-      return;
-    }
-    const denominator = window.prompt("Denominator");
-    if (denominator == null) {
-      return;
-    }
-    addCustomRatioNode(numerator, denominator);
+function applyCustomDialogResult(numerator, denominator) {
+  if (!pendingCustomAction) {
     return;
   }
+  lastCustomFactor = {
+    numerator,
+    denominator,
+  };
+  const factorNumerator = Math.max(1, Math.trunc(numerator));
+  const factorDenominator = Math.max(1, Math.trunc(denominator));
+  if (pendingCustomAction.type === "create") {
+    createCustomNodeForSource(pendingCustomAction.sourceId, factorNumerator, factorDenominator);
+  } else if (pendingCustomAction.type === "edit") {
+    updateCustomNodeFactor(pendingCustomAction.nodeId, factorNumerator, factorDenominator);
+  }
+  pendingCustomAction = null;
+}
+
+function syncCustomNodesWithSource(sourceId, active) {
+  customNodes.forEach((node) => {
+    if (node.sourceNodeId === sourceId) {
+      node.active = active;
+    }
+  });
+}
+
+function openCustomRatioDialog(action) {
+  if (!action) {
+    return;
+  }
+  pendingCustomAction = action;
+  let numerator = lastCustomFactor.numerator;
+  let denominator = lastCustomFactor.denominator;
+  if (action.type === "edit") {
+    const node = nodeById.get(action.nodeId);
+    if (node) {
+      numerator = node.factorNumerator || numerator;
+      denominator = node.factorDenominator || denominator;
+    }
+  }
   if (customRatioNumerator) {
-    customRatioNumerator.value = "";
+    customRatioNumerator.value = String(numerator);
   }
   if (customRatioDenominator) {
-    customRatioDenominator.value = "";
+    customRatioDenominator.value = String(denominator);
   }
-  customRatioDialog.showModal();
-  if (customRatioNumerator) {
-    customRatioNumerator.focus();
+  if (customRatioDialog && typeof customRatioDialog.showModal === "function") {
+    customRatioDialog.showModal();
+    if (customRatioNumerator) {
+      customRatioNumerator.focus();
+    }
+    return;
   }
+  const promptNumerator = window.prompt("Numerator", String(numerator));
+  if (promptNumerator == null) {
+    pendingCustomAction = null;
+    return;
+  }
+  const promptDenominator = window.prompt("Denominator", String(denominator));
+  if (promptDenominator == null) {
+    pendingCustomAction = null;
+    return;
+  }
+  const num = Number(promptNumerator);
+  const den = Number(promptDenominator);
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) {
+    alert("Please enter valid integers for numerator and denominator.");
+    pendingCustomAction = null;
+    return;
+  }
+  applyCustomDialogResult(Math.max(1, num), Math.max(1, den));
 }
 
 function handleCustomRatioDialogClose() {
-  if (!customRatioDialog || customRatioDialog.returnValue !== "confirm") {
+  if (!customRatioDialog) {
+    pendingCustomAction = null;
     return;
   }
-  const numerator = customRatioNumerator ? customRatioNumerator.value : "";
-  const denominator = customRatioDenominator ? customRatioDenominator.value : "";
-  const num = Number(numerator);
-  const den = Number(denominator);
-  if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) {
-    alert("Please enter a valid numerator and denominator.");
+  if (customRatioDialog.returnValue !== "confirm") {
+    pendingCustomAction = null;
     return;
   }
-  addCustomRatioNode(num, den);
+  const numerator = Number(customRatioNumerator ? customRatioNumerator.value : lastCustomFactor.numerator);
+  const denominator = Number(customRatioDenominator ? customRatioDenominator.value : lastCustomFactor.denominator);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    alert("Please enter valid integers for numerator and denominator.");
+    pendingCustomAction = null;
+    return;
+  }
+  applyCustomDialogResult(Math.max(1, numerator), Math.max(1, denominator));
+}
+
+const DIALOG_CONFIRM_VALUES = new Set(["confirm", "ok", "add", "done"]);
+const DIALOG_CANCEL_VALUES = new Set(["cancel", "none", "clear"]);
+
+function getDialogSubmitButton(form) {
+  if (!form) {
+    return null;
+  }
+  const buttons = Array.from(
+    form.querySelectorAll('button[type="submit"], button:not([type])')
+  );
+  let submitter = buttons.find((button) => DIALOG_CONFIRM_VALUES.has(button.value));
+  if (!submitter) {
+    submitter = buttons.find(
+      (button) => button.value && !DIALOG_CANCEL_VALUES.has(button.value)
+    );
+  }
+  if (!submitter && buttons.length) {
+    submitter = buttons[buttons.length - 1];
+  }
+  return submitter || null;
+}
+
+function setupDialogKeyDefaults(dialog) {
+  if (!dialog) {
+    return;
+  }
+  dialog.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented) {
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dialog.close("cancel");
+      return;
+    }
+    if (event.key !== "Enter") {
+      return;
+    }
+    if (event.isComposing) {
+      return;
+    }
+    const targetTag = event.target ? event.target.tagName : "";
+    if (targetTag === "TEXTAREA") {
+      return;
+    }
+    event.preventDefault();
+    const form = dialog.querySelector('form[method="dialog"]');
+    if (form) {
+      const submitter = getDialogSubmitButton(form);
+      if (submitter) {
+        submitter.click();
+        return;
+      }
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+        return;
+      }
+      form.submit();
+      return;
+    }
+    const buttons = Array.from(dialog.querySelectorAll("button"));
+    if (buttons.length) {
+      buttons[buttons.length - 1].click();
+    }
+  });
 }
 
 function scheduleLfoStopsAtCycleEnd() {
@@ -2088,6 +2351,7 @@ function updateNodeFrequencies() {
     node.note_name = etInfo.name;
     node.pitch_class = etInfo.pitchClass;
   });
+  refreshCustomNodes();
   bumpLabelDataVersion();
   updatePitchInstances();
   updateVoiceFrequencies();
@@ -2129,6 +2393,7 @@ function updateNodeRatios() {
     node.pitch_class = etInfo.pitchClass;
   });
 
+  refreshCustomNodes();
   bumpLabelDataVersion();
   updatePitchInstances();
   updateVoiceFrequencies();
@@ -3266,6 +3531,9 @@ function getLayoutPageRect() {
 }
 
 function getLayoutNodeShape(node) {
+  if (node.isCustom) {
+    return "diamond";
+  }
   return layoutNodeShapes.get(node.id) || layoutNodeShape;
 }
 
@@ -3684,6 +3952,12 @@ function getDisplayNoteInfo(node) {
   if (!node) {
     return { name: "", pitchClass: "", cents: 0 };
   }
+  if (node.isCustom) {
+    const customInfo = getCustomNodeDisplayInfo(node);
+    if (customInfo) {
+      return customInfo;
+    }
+  }
   const a4 = Number(a4Input.value) || 440;
   const freq = Number(node.freq);
   const nearest = getNearestEtInfo(freq, a4);
@@ -3941,11 +4215,20 @@ function getHejiAnnotation(node, baseText) {
   const sharpCount = (baseText.match(/#/g) || []).length;
   const flatCount = (baseText.match(/b/g) || []).length;
   const doubleSharpCount = (baseText.match(/x/g) || []).length;
-  const axisStates = [
-    { axis: "x", ratio: Number(ratioXSelect.value), exponent: Number(node.exponentX) },
-    { axis: "y", ratio: Number(ratioYSelect.value), exponent: Number(node.exponentY) },
-    { axis: "z", ratio: Number(ratioZSelect.value), exponent: Number(node.exponentZ) },
-  ];
+  let axisStates = [];
+  if (node.isCustom && Array.isArray(node.customAxisRatios) && node.customAxisRatios.length) {
+    axisStates = node.customAxisRatios.map((axis) => ({
+      axis: "any",
+      ratio: Number(axis.ratio),
+      exponent: Number(axis.exp),
+    }));
+  } else {
+    axisStates = [
+      { axis: "x", ratio: Number(ratioXSelect.value), exponent: Number(node.exponentX) },
+      { axis: "y", ratio: Number(ratioYSelect.value), exponent: Number(node.exponentY) },
+      { axis: "z", ratio: Number(ratioZSelect.value), exponent: Number(node.exponentZ) },
+    ];
+  }
   let nextBase = String(baseText).replace(/[x#b]/g, "");
   const suffixParts = [];
   for (let i = 0; i < sharpCount; i += 1) {
@@ -4342,7 +4625,7 @@ function getLayoutTitleY() {
   const { top } = getLayoutPageRect();
   const disableScale = layoutUnifyNodeSize;
   let maxY = Number.NEGATIVE_INFINITY;
-  edges.forEach(([a, b]) => {
+  for (const [a, b] of edges) {
     if (!a.active || !b.active) {
       return;
     }
@@ -4367,7 +4650,7 @@ function getLayoutTitleY() {
       y: end.y - uy * radiusB,
     };
     maxY = Math.max(maxY, edgeStart.y, edgeEnd.y);
-  });
+  }
   if (!Number.isFinite(maxY)) {
     return top + layoutTitleMargin;
   }
@@ -4555,7 +4838,7 @@ function getAccidentalForTargetPc(letterIndex, targetPc) {
 }
 
 function getManualSpellingOptions(targetPc) {
-  const basePitchClass = noteNamesSharp[mod(targetPc, 12)];
+  const basePitchClass = noteNames[mod(targetPc, 12)];
   const base = parsePitchClass(basePitchClass);
   const lowerAccidental = getAccidentalForTargetPc(base.letterIndex - 1, targetPc);
   const upperAccidental = getAccidentalForTargetPc(base.letterIndex + 1, targetPc);
@@ -4685,6 +4968,187 @@ function getManualSpellingForNode(node, targetPc) {
   return baseOption ? baseOption.pitchClass : noteNamesSharp[mod(targetPc, 12)];
 }
 
+function buildTrueSpellingFromAxisRatios({
+  node,
+  axisRatios,
+  freq,
+  nearest,
+  nearestPitchClass,
+  nearestName,
+  nearestCents,
+}) {
+  if (!axisRatios || !axisRatios.length) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  const beyondLimit = axisRatios.some((axis) => {
+    if (!axis.exp) {
+      return false;
+    }
+    const limit = getTrueSpellingLimit(axis.ratio);
+    if (!Number.isFinite(limit)) {
+      return false;
+    }
+    return Math.abs(axis.exp) > limit;
+  });
+  if (beyondLimit) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  const hasUnknownInterval = axisRatios.some(
+    (axis) => axis.exp && !TRUE_SPELLING_INTERVALS[axis.ratio]
+  );
+  if (hasUnknownInterval) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  const hasHigherPrime = axisRatios.some(
+    (axis) => axis.exp && Number(axis.ratio) >= 53
+  );
+  if (hasHigherPrime) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  let totalLetterShift = 0;
+  let totalSemitoneShift = 0;
+  let hasOffsetAxis = false;
+  axisRatios.forEach((axis) => {
+    if (!axis.exp) {
+      return;
+    }
+    const spec = TRUE_SPELLING_INTERVALS[axis.ratio];
+    if (!spec) {
+      return;
+    }
+    hasOffsetAxis = true;
+    totalLetterShift += axis.exp * spec.letter;
+    totalSemitoneShift += axis.exp * spec.semitones;
+  });
+  if (!hasOffsetAxis) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
+  if (!Number.isFinite(fundamentalMidi)) {
+    const fallback = getNearestEtInfo(
+      Number(fundamentalInput.value) || 220,
+      Number(a4Input.value) || 440
+    );
+    fundamentalMidi = fallback.midi;
+  }
+  const basePitchClassText = getFundamentalNoteNames()[mod(fundamentalMidi, 12)];
+  const base = parsePitchClass(basePitchClassText);
+  const baseLetterIndex = Number.isFinite(base.letterIndex) ? base.letterIndex : 0;
+  const baseAccidental = Number.isFinite(base.accidental) ? base.accidental : 0;
+  const totalLetter = baseLetterIndex + totalLetterShift;
+  const octaveShift = floorDiv(totalLetter, 7);
+  const targetLetterIndex = mod(totalLetter, 7);
+  const targetNatural =
+    LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + octaveShift * 12;
+  const totalSemitone =
+    baseAccidental + LETTER_TO_SEMITONE[LETTERS[baseLetterIndex]] + totalSemitoneShift;
+  const accidental = totalSemitone - targetNatural;
+  const pitchClass = buildPitchClass(targetLetterIndex, accidental);
+  const targetPc = mod(
+    LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + accidental,
+    12
+  );
+  const midiFloat = 69 + 12 * Math.log2(freq / (Number(a4Input.value) || 440));
+  const midiBase = Math.round((midiFloat - targetPc) / 12);
+  const midi = targetPc + 12 * midiBase;
+  const etFreq =
+    (Number(a4Input.value) || 440) * Math.pow(2, (midi - 69) / 12);
+  const cents = 1200 * Math.log2(freq / etFreq);
+  if (spellingMode === "simple") {
+    return {
+      name: `${getManualSpellingForNode(node, targetPc)}${Math.floor(midi / 12) - 1}`,
+      pitchClass: getManualSpellingForNode(node, targetPc),
+      cents,
+    };
+  }
+  const name = `${pitchClass}${Math.floor(midi / 12) - 1}`;
+  return { name, pitchClass, cents };
+}
+
+function normalizeRatioToOctave(numerator, denominator) {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return null;
+  }
+  let num = numerator;
+  let den = denominator;
+  let shift = 0;
+  let ratio = num / den;
+  while (ratio < 1) {
+    num *= 2;
+    shift -= 1;
+    ratio = num / den;
+  }
+  while (ratio > 2) {
+    den *= 2;
+    shift += 1;
+    ratio = num / den;
+  }
+  return { numerator: num, denominator: den, shift };
+}
+
+function analyzeCustomRatio(numerator, denominator) {
+  const normalized = normalizeRatioToOctave(numerator, denominator);
+  if (!normalized) {
+    return null;
+  }
+  const reduced = reduceFraction(normalized.numerator, normalized.denominator);
+  let num = Math.abs(reduced.numerator);
+  let den = Math.abs(reduced.denominator);
+  let octaveShift = normalized.shift;
+  while (num % 2 === 0 && den % 2 === 0) {
+    num /= 2;
+    den /= 2;
+  }
+  while (num % 2 === 0) {
+    num /= 2;
+    octaveShift += 1;
+  }
+  while (den % 2 === 0) {
+    den /= 2;
+    octaveShift -= 1;
+  }
+  const axisRatios = [];
+  for (const primeKey of Object.keys(TRUE_SPELLING_INTERVALS)) {
+    const prime = Number(primeKey);
+    let exponent = 0;
+    while (num % prime === 0) {
+      num /= prime;
+      exponent += 1;
+    }
+    while (den % prime === 0) {
+      den /= prime;
+      exponent -= 1;
+    }
+    if (exponent) {
+      axisRatios.push({ ratio: prime, exp: exponent });
+    }
+  }
+  if (num !== 1 || den !== 1 || !axisRatios.length) {
+    return null;
+  }
+  return { axisRatios, octaveShift };
+}
+
 const trueSpellingLimitCache = new Map();
 
 function getTrueSpellingLimit(ratio) {
@@ -4736,88 +5200,15 @@ function getTrueSpellingPitchClass(node) {
     { ratio: ratioY, exp: Number(node.exponentY) || 0 },
     { ratio: ratioZ, exp: Number(node.exponentZ) || 0 },
   ];
-  const beyondLimit = axisRatios.some((axis) => {
-    if (!axis.exp) {
-      return false;
-    }
-    const limit = getTrueSpellingLimit(axis.ratio);
-    if (!Number.isFinite(limit)) {
-      return false;
-    }
-    return Math.abs(axis.exp) > limit;
+  return buildTrueSpellingFromAxisRatios({
+    node,
+    axisRatios,
+    freq,
+    nearest,
+    nearestPitchClass,
+    nearestName,
+    nearestCents,
   });
-  if (beyondLimit) {
-    return {
-      name: nearestName,
-      pitchClass: nearestPitchClass,
-      cents: nearestCents,
-    };
-  }
-  const hasUnknownInterval = axisRatios.some(
-    (axis) => axis.exp && !TRUE_SPELLING_INTERVALS[axis.ratio]
-  );
-  if (hasUnknownInterval) {
-    return {
-      name: nearestName,
-      pitchClass: nearestPitchClass,
-      cents: nearestCents,
-    };
-  }
-  const hasHigherPrime = axisRatios.some(
-    (axis) => axis.exp && Number(axis.ratio) >= 53
-  );
-  if (hasHigherPrime) {
-    return {
-      name: nearestName,
-      pitchClass: nearestPitchClass,
-      cents: nearestCents,
-    };
-  }
-  let totalLetterShift = 0;
-  let totalSemitoneShift = 0;
-  axisRatios.forEach((axis) => {
-    if (!axis.exp) {
-      return;
-    }
-    const spec = TRUE_SPELLING_INTERVALS[axis.ratio];
-    if (!spec) {
-      return;
-    }
-    totalLetterShift += axis.exp * spec.letter;
-    totalSemitoneShift += axis.exp * spec.semitones;
-  });
-  let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
-  if (!Number.isFinite(fundamentalMidi)) {
-    const fallback = getNearestEtInfo(Number(fundamentalInput.value) || 220, a4);
-    fundamentalMidi = fallback.midi;
-  }
-  const basePitchClass = getFundamentalNoteNames()[mod(fundamentalMidi, 12)];
-  const base = parsePitchClass(basePitchClass);
-  const baseNatural = LETTER_TO_SEMITONE[LETTERS[base.letterIndex]] || 0;
-  const baseSemitone = baseNatural + base.accidental;
-  const totalLetter = base.letterIndex + totalLetterShift;
-  const octaveShift = floorDiv(totalLetter, 7);
-  const targetLetterIndex = mod(totalLetter, 7);
-  const targetNatural =
-    LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + octaveShift * 12;
-  const targetSemitone = baseSemitone + totalSemitoneShift;
-  let accidental = targetSemitone - targetNatural;
-  if (Math.abs(accidental) > 3) {
-    return {
-      name: nearestName,
-      pitchClass: nearestPitchClass,
-      cents: nearestCents,
-    };
-  }
-  const pitchClass = buildPitchClass(targetLetterIndex, accidental);
-  const targetPc = mod(LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + accidental, 12);
-  const midiFloat = 69 + 12 * Math.log2(freq / a4);
-  const midiBase = Math.round((midiFloat - targetPc) / 12);
-  const midi = targetPc + 12 * midiBase;
-  const name = `${pitchClass}${Math.floor(midi / 12) - 1}`;
-  const etFreq = a4 * Math.pow(2, (midi - 69) / 12);
-  const cents = 1200 * Math.log2(freq / etFreq);
-  return { name, pitchClass, cents };
 }
 
 function getLightDir2D() {
@@ -5647,7 +6038,194 @@ function findTriangleHit(screenPoint) {
   return best;
 }
 
+function formatAxisRatioLabel(ratioValue) {
+  if (!Number.isFinite(ratioValue) || ratioValue === 0) {
+    return null;
+  }
+  const reduced = reduceToOctave(Math.abs(ratioValue), 1);
+  if (!Number.isFinite(reduced.numerator) || !Number.isFinite(reduced.denominator)) {
+    return null;
+  }
+  return `${reduced.numerator}:${reduced.denominator}`;
+}
+
+function getEdgeLabelText(a, b) {
+  if (!a || !b) {
+    return null;
+  }
+  const dx = (b.gridX ?? 0) - (a.gridX ?? 0);
+  const dy = (b.gridY ?? 0) - (a.gridY ?? 0);
+  const dz = (b.gridZ ?? 0) - (a.gridZ ?? 0);
+  if (dx === 1 && dy === 0 && dz === 0) {
+    return formatAxisRatioLabel(Number(ratioXSelect.value));
+  }
+  if (dx === -1 && dy === 0 && dz === 0) {
+    return formatAxisRatioLabel(1 / Number(ratioXSelect.value));
+  }
+  if (dy === 1 && dx === 0 && dz === 0) {
+    return formatAxisRatioLabel(Number(ratioYSelect.value));
+  }
+  if (dy === -1 && dx === 0 && dz === 0) {
+    return formatAxisRatioLabel(1 / Number(ratioYSelect.value));
+  }
+  if (dz === 1 && dx === 0 && dy === 0) {
+    return formatAxisRatioLabel(Number(ratioZSelect.value));
+  }
+  if (dz === -1 && dx === 0 && dy === 0) {
+    return formatAxisRatioLabel(1 / Number(ratioZSelect.value));
+  }
+  return null;
+}
+
+function drawCanvasEdgeSegment({
+  start,
+  end,
+  startRadius,
+  endRadius,
+  color,
+  label,
+  labelFont,
+  labelWeight,
+  labelSize,
+  forceLabel = false,
+}) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist === 0) {
+    return;
+  }
+  const ux = dx / dist;
+  const uy = dy / dist;
+  const lineStart = {
+    x: start.x + ux * startRadius,
+    y: start.y + uy * startRadius,
+  };
+  const lineEnd = {
+    x: end.x - ux * endRadius,
+    y: end.y - uy * endRadius,
+  };
+  const lineLen = Math.max(0, dist - startRadius - endRadius);
+  const shouldLabel = (forceLabel || showLineLabels) && label;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  if (shouldLabel && lineLen > 0) {
+    ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
+    const baseWidth = ctx.measureText(label).width;
+    const layout = computeEdgeLabelLayoutFromWidth({
+      baseSize: labelSize,
+      baseWidth,
+      lineLen,
+      minSize: 4,
+    });
+    const size = layout.size;
+    const gap = layout.gap;
+    if (size !== labelSize) {
+      ctx.font = `${labelWeight} ${size}px ${labelFont}`;
+    }
+    const gapHalf = gap / 2;
+    const midX = (lineStart.x + lineEnd.x) / 2;
+    const midY = (lineStart.y + lineEnd.y) / 2;
+    const gapStart = {
+      x: midX - ux * gapHalf,
+      y: midY - uy * gapHalf,
+    };
+    const gapEnd = {
+      x: midX + ux * gapHalf,
+      y: midY + uy * gapHalf,
+    };
+    ctx.beginPath();
+    ctx.moveTo(lineStart.x, lineStart.y);
+    ctx.lineTo(gapStart.x, gapStart.y);
+    ctx.moveTo(gapEnd.x, gapEnd.y);
+    ctx.lineTo(lineEnd.x, lineEnd.y);
+    ctx.stroke();
+    let angle = 0;
+    if (Math.abs(dx) > 1e-6) {
+      angle = Math.atan2(dy, dx);
+      if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+        angle += Math.PI;
+      }
+    }
+    ctx.save();
+    ctx.translate(midX, midY);
+    ctx.rotate(angle);
+    ctx.fillStyle = themeColors.textSecondary;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(lineStart.x, lineStart.y);
+    ctx.lineTo(lineEnd.x, lineEnd.y);
+    ctx.stroke();
+  }
+}
+
+function computeEdgeLabelLayoutFromWidth({ baseSize, baseWidth, lineLen, minSize = 4 }) {
+  const maxGap = Math.max(0, lineLen - 6);
+  let size = baseSize;
+  let padding = Math.max(6, Math.round(size * 0.4));
+  let textWidth = baseWidth;
+  let total = textWidth + padding * 2;
+  if (maxGap > 0 && total > maxGap) {
+    const scale = Math.max(minSize / size, maxGap / total);
+    size *= scale;
+    padding = Math.max(2, Math.round(size * 0.4));
+    textWidth = baseWidth * (size / baseSize);
+    total = textWidth + padding * 2;
+  }
+  const gap = Math.min(total, maxGap);
+  return { size, gap };
+}
+
+function getNodeEdgeRadius(node, ux, uy, radius) {
+  if (!Number.isFinite(ux) || !Number.isFinite(uy)) {
+    return radius;
+  }
+  const shape = layoutMode ? getLayoutNodeShape(node) : node.isCustom ? "diamond" : "circle";
+  if (shape === "none") {
+    return 0;
+  }
+  if (shape === "circle") {
+    return radius;
+  }
+  const vertices = [];
+  if (shape === "square") {
+    vertices.push([radius, radius], [-radius, radius], [-radius, -radius], [radius, -radius]);
+  } else if (shape === "diamond") {
+    vertices.push([0, -radius], [radius, 0], [0, radius], [-radius, 0]);
+  } else if (shape === "triangle") {
+    const height = radius * 1.2;
+    vertices.push([0, -height], [radius, height * 0.6], [-radius, height * 0.6]);
+  } else {
+    return radius;
+  }
+  let best = Infinity;
+  const count = vertices.length;
+  for (let i = 0; i < count; i += 1) {
+    const [x1, y1] = vertices[i];
+    const [x2, y2] = vertices[(i + 1) % count];
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const denom = ux * dy - uy * dx;
+    if (Math.abs(denom) < 1e-9) {
+      continue;
+    }
+    const t = (x1 * dy - y1 * dx) / denom;
+    const s = (ux * y1 - uy * x1) / denom;
+    if (t >= 0 && s >= 0 && s <= 1) {
+      best = Math.min(best, t);
+    }
+  }
+  return Number.isFinite(best) ? best : radius;
+}
+
 function draw3DEdges(nodePosMap) {
+  const labelFont = layoutRatioFont;
+  const labelWeight = layoutRatioFontWeight;
+  const labelSize = Math.max(10, Math.round(layoutRatioTextSize * 0.6));
   edges.forEach(([a, b]) => {
     if (!a.active || !b.active) {
       return;
@@ -5670,26 +6248,25 @@ function draw3DEdges(nodePosMap) {
     }
     const ux = dx / dist;
     const uy = dy / dist;
-    const edgeStart = {
-      x: start.x + ux * radiusA,
-      y: start.y + uy * radiusA,
-    };
-    const edgeEnd = {
-      x: end.x - ux * radiusB,
-      y: end.y - uy * radiusB,
-    };
+    const startRadius = getNodeEdgeRadius(a, ux, uy, radiusA);
+    const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
     let color = AXIS_EDGE_COLORS.x;
     if (a.gridY !== b.gridY) {
       color = AXIS_EDGE_COLORS.y;
     } else if (a.gridZ !== b.gridZ) {
       color = AXIS_EDGE_COLORS.z;
     }
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.moveTo(edgeStart.x, edgeStart.y);
-    ctx.lineTo(edgeEnd.x, edgeEnd.y);
-    ctx.stroke();
+    drawCanvasEdgeSegment({
+      start,
+      end,
+      startRadius,
+      endRadius,
+      color,
+      label: showLineLabels ? getEdgeLabelText(a, b) : null,
+      labelFont,
+      labelWeight,
+      labelSize,
+    });
   });
 }
 
@@ -6071,8 +6648,9 @@ function draw() {
   if (is3DMode) {
     draw3DEdges(nodePosMap);
   } else {
-    ctx.strokeStyle = themeColors.edge;
-    ctx.lineWidth = 1.5;
+    const labelFont = layoutMode ? layoutAxisLegendFont : "Noto Serif";
+    const labelWeight = layoutMode ? layoutAxisLegendFontWeight : 400;
+    const labelSize = layoutMode ? Math.max(10, Math.round(layoutRatioTextSize * 0.6)) : 14;
     edges.forEach(([a, b]) => {
       if (!a.active || !b.active) {
         return;
@@ -6099,20 +6677,88 @@ function draw() {
       }
       const ux = dx / dist;
       const uy = dy / dist;
-      const edgeStart = {
-        x: start.x + ux * radiusA,
-        y: start.y + uy * radiusA,
-      };
-      const edgeEnd = {
-        x: end.x - ux * radiusB,
-        y: end.y - uy * radiusB,
-      };
-      ctx.beginPath();
-      ctx.moveTo(edgeStart.x, edgeStart.y);
-      ctx.lineTo(edgeEnd.x, edgeEnd.y);
-      ctx.stroke();
+      const startRadius = getNodeEdgeRadius(a, ux, uy, radiusA);
+      const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
+    drawCanvasEdgeSegment({
+      start,
+      end,
+      startRadius,
+      endRadius,
+      color: themeColors.edge,
+      label: showLineLabels ? getEdgeLabelText(a, b) : null,
+      labelFont,
+      labelWeight,
+      labelSize,
     });
+  });
+}
+
+function drawCustomConnections(nodePosMap) {
+  if (!customNodes.length) {
+    return;
   }
+  const edgeInset = 1;
+  const labelFont = layoutMode
+    ? layoutAxisLegendFont
+    : is3DMode
+    ? layoutRatioFont
+    : "Noto Serif";
+  const labelWeight = layoutMode
+    ? layoutAxisLegendFontWeight
+    : is3DMode
+    ? layoutRatioFontWeight
+    : 400;
+  const labelSize = layoutMode
+    ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
+    : is3DMode
+    ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
+    : 14;
+  customNodes.forEach((node) => {
+    if (!node.active) {
+      return;
+    }
+    const source = nodeById.get(node.sourceNodeId);
+    if (!source) {
+      return;
+    }
+    const startEntry = nodePosMap.get(source.id);
+    const endEntry = nodePosMap.get(node.id);
+    if (!startEntry || !endEntry) {
+      return;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const startRadius = Math.max(
+      0,
+      getNodeEdgeRadius(source, ux, uy, startEntry.radius) - edgeInset
+    );
+    const endRadius = Math.max(
+      0,
+      getNodeEdgeRadius(node, ux, uy, endEntry.radius) - edgeInset
+    );
+    drawCanvasEdgeSegment({
+      start,
+      end,
+      startRadius,
+      endRadius,
+      color: themeColors.edge,
+      label: formatIntervalRatio(node.factorNumerator, node.factorDenominator),
+      labelFont,
+      labelWeight,
+      labelSize,
+      forceLabel: true,
+    });
+  });
+  }
+  drawCustomConnections(nodePosMap);
   const { guideNodes } = getGuideRevealInfo(nodePosMap);
   drawGuideEdges(nodePosMap, guideNodes);
   drawTriangleDiagonals(nodePosMap, disableScale);
@@ -6177,7 +6823,7 @@ function draw() {
     const layoutShape = layoutMode
       ? getLayoutNodeShape(node)
       : node.isCustom
-      ? "square"
+      ? "diamond"
       : "circle";
     const showNodeShape = !layoutMode || layoutShape !== "none";
     const isSquare = layoutShape === "square";
@@ -6263,7 +6909,8 @@ function draw() {
     }
 
     ctx.fillStyle = themeColors.textPrimary;
-    const labelSize = layoutMode ? layoutRatioTextSize : 21;
+    const baseLabelSize = layoutMode ? layoutRatioTextSize : 21;
+    const labelSize = node.isCustom ? baseLabelSize * 0.85 : baseLabelSize;
     const labelFont = layoutMode ? layoutRatioFont : "Noto Serif";
     const labelWeight = layoutMode ? layoutRatioFontWeight : 400;
     ctx.textAlign = "center";
@@ -6369,7 +7016,7 @@ function draw() {
         ? getLayoutNoteLabelPosition(node, pos, radius)
         : { x: pos.x + radius + 6, y: pos.y + radius - 10 };
       const labelOffsetX = rawLabelPos.x - pos.x;
-      const ratioX = pos.x + labelOffsetX * 0.7;
+      const ratioX = layoutMode ? pos.x + labelOffsetX * 0.7 : rawLabelPos.x;
       const ratioY = rawLabelPos.y;
       let lineOffset = 0;
       ctx.fillText(ratioText, ratioX, ratioY + lineOffset);
@@ -6398,10 +7045,9 @@ function draw() {
         ? getLayoutNoteLabelPosition(node, pos, radius)
         : { x: pos.x + radius + 6, y: pos.y + radius - 10 };
       const labelOffsetX = rawLabelPos.x - pos.x;
-      const labelPos = {
-        x: pos.x + labelOffsetX * 0.7,
-        y: rawLabelPos.y,
-      };
+      const labelPos = layoutMode
+        ? { x: pos.x + labelOffsetX * 0.7, y: rawLabelPos.y }
+        : { x: rawLabelPos.x, y: rawLabelPos.y };
       const centsLabel = getCachedCentsReadout(
         node,
         {
@@ -6943,6 +7589,9 @@ async function initMidi() {
 }
 
 function onPointerDown(event) {
+  if (canvas && document.activeElement !== canvas) {
+    canvas.focus();
+  }
   closeTopMenus("ratio-wheel");
   closeBottomMenus();
   const screenPoint = { x: event.offsetX, y: event.offsetY };
@@ -7020,7 +7669,7 @@ function onPointerDown(event) {
     const currentKey = nodeSpellingOverrides.get(hit.id);
     let currentIndex = options.findIndex((option) => option.key === currentKey);
     if (currentIndex < 0) {
-      currentIndex = options.findIndex((option) => option.key === "base");
+      currentIndex = -1;
     }
     const nextIndex = (currentIndex + 1) % options.length;
     const nextKey = options[nextIndex].key;
@@ -7243,39 +7892,6 @@ function onPointerDown(event) {
     return;
   }
 
-  if (customDrag && customDrag.placing) {
-    const node = nodeById.get(customDrag.nodeId);
-    if (node) {
-      const worldPoint = screenToWorld(screenPoint);
-      node.coordinate.x = worldPoint.x + customDrag.offsetX;
-      node.coordinate.y = worldPoint.y + customDrag.offsetY;
-      node.coordinate.z = 0;
-      draw();
-    }
-    customDrag = null;
-    customDragJustPlaced = true;
-    if (uiHint) {
-      if (showHelpEnabled && !uiHintDismissed) {
-        uiHint.hidden = false;
-        uiHintKey = "custom-node";
-        uiHint.textContent =
-          "Custom node: Command-drag to move. Option-click to deactivate. Option-click again to delete. Click to activate.\n(click to hide)";
-      }
-    }
-    return;
-  }
-
-  if (hit && hit.isCustom && (event.metaKey || event.ctrlKey)) {
-    const worldPoint = screenToWorld(screenPoint);
-    customDrag = {
-      nodeId: hit.id,
-      offsetX: hit.coordinate.x - worldPoint.x,
-      offsetY: hit.coordinate.y - worldPoint.y,
-    };
-    canvas.setPointerCapture(event.pointerId);
-    return;
-  }
-
   if (event.shiftKey && hit) {
     const isDoubleTap = lastLfoTapId === hit.id && now - lastLfoTapTime < 320;
     lastLfoTapId = hit.id;
@@ -7288,6 +7904,26 @@ function onPointerDown(event) {
       draw();
       return;
     }
+  }
+
+  if (
+    !layoutMode &&
+    !cHeld &&
+    hit &&
+    hit.isCustom &&
+    !event.altKey &&
+    !event.shiftKey
+  ) {
+    const worldPoint = screenToWorld(screenPoint);
+    customNodeDrag = {
+      nodeId: hit.id,
+      startWorld: { x: worldPoint.x, y: worldPoint.y },
+      startCoordinate: { x: hit.coordinate.x, y: hit.coordinate.y },
+      startScreen: { x: event.offsetX, y: event.offsetY },
+      moved: false,
+    };
+    canvas.setPointerCapture(event.pointerId);
+    return;
   }
 
   if (is3DMode) {
@@ -7327,10 +7963,14 @@ function onCanvasDoubleClick(event) {
       return;
     }
   }
+  const screenPoint = { x: event.offsetX, y: event.offsetY };
   if (!layoutMode) {
+    const hit = hitTestScreen(screenPoint);
+    if (hit && hit.isCustom) {
+      openCustomRatioDialog({ type: "edit", nodeId: hit.id });
+    }
     return;
   }
-  const screenPoint = { x: event.offsetX, y: event.offsetY };
   const customLabelHit = hitTestLayoutCustomLabel(screenPoint);
   if (customLabelHit) {
     layoutCustomLabelEditId = customLabelHit.entry.id;
@@ -7385,6 +8025,25 @@ function onCanvasDoubleClick(event) {
 
 function onPointerMove(event) {
   view.lastPointer = { x: event.offsetX, y: event.offsetY };
+  if (customNodeDrag) {
+    const node = nodeById.get(customNodeDrag.nodeId);
+    if (node) {
+      const dx = event.offsetX - customNodeDrag.startScreen.x;
+      const dy = event.offsetY - customNodeDrag.startScreen.y;
+      if (!customNodeDrag.moved && Math.hypot(dx, dy) < 3) {
+        return;
+      }
+      customNodeDrag.moved = true;
+      const worldPoint = screenToWorld({ x: event.offsetX, y: event.offsetY });
+      node.coordinate.x =
+        customNodeDrag.startCoordinate.x + (worldPoint.x - customNodeDrag.startWorld.x);
+      node.coordinate.y =
+        customNodeDrag.startCoordinate.y + (worldPoint.y - customNodeDrag.startWorld.y);
+      node.coordinate.z = 0;
+    }
+    scheduleDraw();
+    return;
+  }
   if (layoutMode && layoutAxisEditDrag) {
     const info = getAxisLegendInfo(layoutAxisEditDrag.axis);
     if (info) {
@@ -7579,18 +8238,6 @@ function onPointerMove(event) {
     }
     return;
   }
-  if (customDrag) {
-    const node = nodeById.get(customDrag.nodeId);
-    if (node) {
-      const worldPoint = screenToWorld({ x: event.offsetX, y: event.offsetY });
-      node.coordinate.x = worldPoint.x + customDrag.offsetX;
-      node.coordinate.y = worldPoint.y + customDrag.offsetY;
-      node.coordinate.z = 0;
-      scheduleDraw();
-      schedulePresetUrlUpdate();
-    }
-    return;
-  }
   if (view.rotating) {
     updateReducedEffects(event);
     const dx = event.offsetX - view.rotateStart.x;
@@ -7654,9 +8301,13 @@ function onPointerUp(event) {
     customPianoMapClickActive = false;
     return;
   }
-  if (customDragJustPlaced) {
-    customDragJustPlaced = false;
-    return;
+  if (customNodeDrag) {
+    const { moved } = customNodeDrag;
+    customNodeDrag = null;
+    if (moved) {
+      schedulePresetUrlUpdate();
+      return;
+    }
   }
   if (layoutLabelDrag) {
     layoutLabelDrag = null;
@@ -7702,10 +8353,6 @@ function onPointerUp(event) {
       view.dragging = false;
     }
     view.reducedEffects = false;
-    return;
-  }
-  if (customDrag) {
-    customDrag = null;
     return;
   }
   const wasRotating = view.rotating;
@@ -7768,33 +8415,36 @@ function onPointerUp(event) {
   if (moved < 4) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const hit = hitTestScreen(screenPoint);
+    if (cHeld && hit && hit.active) {
+      openCustomRatioDialog({ type: "create", sourceId: hit.id });
+      return;
+    }
     if (hit) {
       if (event.altKey && !hit.isCenter) {
-        if (hit.isCustom) {
-          if (hit.active) {
-            hit.active = false;
-            stopVoicesForNode(hit.id, false);
-            pruneTriangleDiagonals();
-          } else {
-            stopVoicesForNode(hit.id, false);
-            customNodes = customNodes.filter((node) => node.id !== hit.id);
-            nodes = nodes.filter((node) => node.id !== hit.id);
-            nodeById.delete(hit.id);
-            pruneTriangleDiagonals();
-          }
-        } else if (hit.active) {
+        if (hit.active) {
           hit.active = false;
+          syncCustomNodesWithSource(hit.id, false);
           stopVoicesForNode(hit.id, false);
           pruneTriangleDiagonals();
-        } else {
+          updatePitchInstances();
+          refreshPatternFromActiveNodes();
+          updateUiHint();
+          markIsomorphicDirty();
+          schedulePresetUrlUpdate();
+          draw();
           return;
         }
-        updatePitchInstances();
-        refreshPatternFromActiveNodes();
-        updateUiHint();
-        markIsomorphicDirty();
-        schedulePresetUrlUpdate();
-        draw();
+        if (hit.isCustom) {
+          if (removeCustomNode(hit.id)) {
+            refreshCustomNodes();
+            updatePitchInstances();
+            refreshPatternFromActiveNodes();
+            updateUiHint();
+            markIsomorphicDirty();
+            schedulePresetUrlUpdate();
+            draw();
+          }
+        }
         return;
       }
       if (zKeyHeld) {
@@ -7822,6 +8472,7 @@ function onPointerUp(event) {
       }
       if (!hit.active) {
         hit.active = true;
+        syncCustomNodesWithSource(hit.id, true);
         updatePitchInstances();
         refreshPatternFromActiveNodes();
         updateUiHint();
@@ -7853,9 +8504,9 @@ function onPointerUp(event) {
 }
 
 function onPointerLeave() {
+  customNodeDrag = null;
   hoverNodeId = null;
   lfoArmingId = null;
-  customDrag = null;
   layoutDrag = null;
   layoutLabelDrag = null;
   layoutAxisDrag = null;
@@ -7912,7 +8563,7 @@ function isInactiveNodeAvailable(node) {
 }
 
 function hitTestScreen(screenPoint) {
-  const radius = layoutMode ? layoutNodeSize : 36 / view.zoom;
+  const baseRadius = layoutMode ? layoutNodeSize : null;
   let best = null;
   let bestDistance = Number.POSITIVE_INFINITY;
   let bestDepth = Number.NEGATIVE_INFINITY;
@@ -7935,8 +8586,15 @@ function hitTestScreen(screenPoint) {
     const dx = projected.x - screenPoint.x;
     const dy = projected.y - screenPoint.y;
     const distance = Math.hypot(dx, dy);
-    const adjustedRadius = radius * (projected.scale || 1);
-    if (distance <= adjustedRadius) {
+    const nodeRadius = baseRadius != null ? baseRadius : getNodeRadius(node);
+    const adjustedRadius = nodeRadius * (projected.scale || 1);
+    let hitRadius = adjustedRadius;
+    if (distance > 0) {
+      const ux = dx / distance;
+      const uy = dy / distance;
+      hitRadius = getNodeEdgeRadius(node, ux, uy, adjustedRadius);
+    }
+    if (hitRadius > 0 && distance <= hitRadius) {
       const prefersCustom = node.isCustom && (!best || !best.isCustom);
       if (
         prefersCustom ||
@@ -8442,7 +9100,15 @@ function gcd(a, b) {
 
 function formatIntervalRatio(numerator, denominator) {
   const divisor = gcd(numerator, denominator);
-  return `${numerator / divisor}/${denominator / divisor}`;
+  return `${numerator / divisor}:${denominator / divisor}`;
+}
+
+function reduceFraction(numerator, denominator) {
+  const divisor = gcd(numerator, denominator);
+  return {
+    numerator: numerator / divisor,
+    denominator: denominator / divisor,
+  };
 }
 
 function resizeWheelCanvas(canvasEl) {
@@ -8697,8 +9363,7 @@ function updateRatioWheels() {
     layoutCreatorDrag ||
     layoutCustomLabelDrag ||
     layoutAxisDrag ||
-    layoutAxisEditDrag ||
-    customDrag
+    layoutAxisEditDrag
   ) {
     return;
   }
@@ -9751,6 +10416,16 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     view.offsetY = 0;
     syncLayoutScaleInput();
   }
+  if (layoutMode && layoutPrevState) {
+    view.zoom = layoutPrevState.zoom;
+    view.offsetX = layoutPrevState.offsetX;
+    view.offsetY = layoutPrevState.offsetY;
+    view.rotX = layoutPrevState.rotX;
+    view.rotY = layoutPrevState.rotY;
+    syncLayoutScaleInput();
+    markIsomorphicDirty();
+    syncLayoutViewFromCurrent();
+  }
   draw();
 }
 
@@ -10636,13 +11311,13 @@ function getPresetState() {
   const active = nodes
     .filter((node) => node.active && !node.isCustom)
     .map((node) => [node.exponentX, node.exponentY, node.exponentZ || 0]);
-  const custom = customNodes.map((node) => ({
-    numerator: node.numerator,
-    denominator: node.denominator,
-    x: node.coordinate.x,
-    y: node.coordinate.y,
+  const customState = customNodes.map((node) => ({
+    sourceNodeId: node.sourceNodeId,
+    customSlot: node.customSlot,
+    factorNumerator: node.factorNumerator,
+    factorDenominator: node.factorDenominator,
+    position: { x: node.coordinate.x, y: node.coordinate.y },
     active: Boolean(node.active),
-    octaveShift: getNodeOctaveShift(node),
   }));
   const layoutViewState =
     layoutLockPosition && !layoutMode
@@ -10657,7 +11332,7 @@ function getPresetState() {
   return {
     v: 1,
     active,
-    customNodes: custom,
+    customNodes: customState,
     mode3d: is3DMode,
     view: {
       zoom: view.zoom,
@@ -10668,6 +11343,7 @@ function getPresetState() {
     },
     axes: showAxes,
     grid: showGrid,
+    lineLabels: showLineLabels,
     circles: showCircles,
     keyMappings: showKeyMappings,
     ratios: [
@@ -10777,6 +11453,52 @@ function getPresetState() {
   };
 }
 
+function applyPresetCustomNodes(entries) {
+  customNodes = [];
+  if (!Array.isArray(entries)) {
+    return;
+  }
+  entries.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const source = nodeById.get(entry.sourceNodeId);
+    if (!source) {
+      return;
+    }
+    const numerator = Math.trunc(Number(entry.factorNumerator));
+    const denominator = Math.trunc(Number(entry.factorDenominator));
+    if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+      return;
+    }
+    let slot = Number.isFinite(entry.customSlot)
+      ? Math.max(0, Math.min(3, Math.trunc(entry.customSlot)))
+      : null;
+    const usedSlots = new Set(getCustomNodesForSource(source.id).map((node) => node.customSlot));
+    if (slot == null || usedSlots.has(slot)) {
+      slot = findNextCustomSlot(source.id);
+    }
+    if (slot == null) {
+      return;
+    }
+    const node = createCustomNodeFromSource(source, slot, numerator, denominator);
+    if (!node) {
+      return;
+    }
+    if (
+      entry.position &&
+      Number.isFinite(entry.position.x) &&
+      Number.isFinite(entry.position.y)
+    ) {
+      node.coordinate.x = entry.position.x;
+      node.coordinate.y = entry.position.y;
+    }
+    node.active = entry.active !== false;
+    insertCustomNode(node);
+  });
+  refreshCustomNodes();
+}
+
 function updatePresetUrl() {
   if (!presetSyncEnabled) {
     return;
@@ -10859,6 +11581,23 @@ function applyPresetState(state) {
     showGrid = state.grid;
     if (navGridToggle) {
       navGridToggle.checked = showGrid;
+    }
+  }
+  if (typeof state.lineLabels === "boolean") {
+    showLineLabels = state.lineLabels;
+    if (lineLabelsToggle) {
+      lineLabelsToggle.checked = showLineLabels;
+    }
+    if (layoutLineLabelsToggle) {
+      layoutLineLabelsToggle.checked = showLineLabels;
+    }
+  } else {
+    showLineLabels = false;
+    if (lineLabelsToggle) {
+      lineLabelsToggle.checked = showLineLabels;
+    }
+    if (layoutLineLabelsToggle) {
+      layoutLineLabelsToggle.checked = showLineLabels;
     }
   }
   if (typeof state.circles === "boolean") {
@@ -11485,31 +12224,10 @@ function applyPresetState(state) {
       activeKeys.add(`${x},${y},${z}`);
     });
   }
-  if (Array.isArray(state.customNodes)) {
-    customNodes = state.customNodes
-      .map((entry) => {
-        if (!entry || typeof entry !== "object") {
-          return null;
-        }
-        const x = Number(entry.x);
-        const y = Number(entry.y);
-        if (!Number.isFinite(x) || !Number.isFinite(y)) {
-          return null;
-        }
-        const node = createCustomNode(
-          entry.numerator,
-          entry.denominator,
-          { x, y },
-          entry.active,
-          entry.octaveShift
-        );
-        return node;
-      })
-      .filter(Boolean);
-  } else {
-    customNodes = [];
-  }
+  customNodes = [];
   rebuildLattice(activeKeys, { remapTriangles: false, remapLayoutOffsets: false });
+  applyPresetCustomNodes(state.customNodes);
+  refreshPatternFromActiveNodes();
   triangleDiagonals.clear();
   triangleLabels.clear();
   if (presetTriangles) {
@@ -11615,6 +12333,7 @@ function applyPresetState(state) {
     draw();
   }
   draw();
+  queuePresetFontRecalc();
 }
 
 function formatActiveRatiosForScaleWorkshop() {
@@ -12326,6 +13045,37 @@ function ensureUiFontReady(font, weight = 400, size = 16) {
   return document.fonts.load(`${safeWeight} ${safeSize}px "${font}"`).catch(() => {});
 }
 
+let presetFontRecalcTimer = null;
+
+function queuePresetFontRecalc() {
+  if (presetFontRecalcTimer) {
+    clearTimeout(presetFontRecalcTimer);
+  }
+  presetFontRecalcTimer = setTimeout(() => {
+    presetFontRecalcTimer = null;
+    const tasks = [];
+    const add = (font, weight, size) => {
+      if (!font) {
+        return;
+      }
+      tasks.push(ensureUiFontReady(font, weight, size));
+    };
+    add(layoutTitleFont, layoutTitleFontWeight, layoutTitleSize);
+    add(layoutCreatorFont, layoutCreatorFontWeight, layoutCreatorSize);
+    add(layoutRatioFont, layoutRatioFontWeight, layoutRatioTextSize);
+    add(layoutNoteFont, layoutNoteFontWeight, layoutNoteTextSize);
+    add(layoutTriangleLabelFont, layoutTriangleLabelFontWeight, layoutTriangleLabelTextSize);
+    add(layoutCustomLabelFont, layoutCustomLabelFontWeight, layoutCustomLabelTextSize);
+    add(layoutKeyMappingFont, layoutKeyMappingFontWeight, layoutKeyMappingTextSize);
+    add(layoutAxisLegendFont, layoutAxisLegendFontWeight, layoutAxisLegendTextSize);
+    add("HEJI2Text", 400, layoutNoteTextSize);
+    Promise.all(tasks).finally(() => {
+      invalidateLabelCache({ clearTextWidths: true });
+      draw();
+    });
+  }, 0);
+}
+
 async function getSvgHejiYOffset(size, baseFont, baseWeight) {
   await Promise.all([
     ensureFontLoaded("HEJI2Text", size),
@@ -12514,9 +13264,12 @@ async function buildLayoutSvgString(
     }
   }
 
-  edges.forEach(([a, b]) => {
+  const edgeLabelSize = Math.max(10, Math.round(layoutRatioTextSize * 0.6));
+  const lineLabelFont = layoutAxisLegendFont;
+  const lineLabelWeight = layoutAxisLegendFontWeight;
+  for (const [a, b] of edges) {
     if (!a.active || !b.active) {
-      return;
+      continue;
     }
     const start = worldToScreen(getNodeDisplayCoordinate(a), disableScale);
     const end = worldToScreen(getNodeDisplayCoordinate(b), disableScale);
@@ -12530,20 +13283,174 @@ async function buildLayoutSvgString(
     }
     const ux = dx / dist;
     const uy = dy / dist;
+    const startRadius = getNodeEdgeRadius(a, ux, uy, radiusA);
+    const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
     const edgeStart = {
-      x: start.x + ux * radiusA - left,
-      y: start.y + uy * radiusA - top,
+      x: start.x + ux * startRadius - left,
+      y: start.y + uy * startRadius - top,
     };
     const edgeEnd = {
-      x: end.x - ux * radiusB - left,
-      y: end.y - uy * radiusB - top,
+      x: end.x - ux * endRadius - left,
+      y: end.y - uy * endRadius - top,
     };
-    parts.push(
-      `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" ${svgStroke(
-        themeColors.edge
-      )} stroke-width="1.5" />`
-    );
-  });
+    const lineLen = Math.max(0, dist - startRadius - endRadius);
+    const label = showLineLabels ? getEdgeLabelText(a, b) : null;
+    const pushLine = (from, to) => {
+      parts.push(
+        `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" ${svgStroke(
+          themeColors.edge
+        )} stroke-width="1.5" />`
+      );
+    };
+    if (label && lineLen > 0) {
+      const baseWidth = await measureSvgTextWidth(
+        label,
+        edgeLabelSize,
+        lineLabelFont,
+        lineLabelWeight
+      );
+      const layout = computeEdgeLabelLayoutFromWidth({
+        baseSize: edgeLabelSize,
+        baseWidth,
+        lineLen,
+        minSize: 4,
+      });
+      const size = layout.size;
+      const gap = layout.gap;
+      if (gap > 0) {
+        const gapHalf = gap / 2;
+        const midX = (edgeStart.x + edgeEnd.x) / 2;
+        const midY = (edgeStart.y + edgeEnd.y) / 2;
+        const gapStart = {
+          x: midX - ux * gapHalf,
+          y: midY - uy * gapHalf,
+        };
+        const gapEnd = {
+          x: midX + ux * gapHalf,
+          y: midY + uy * gapHalf,
+        };
+        pushLine(edgeStart, gapStart);
+        pushLine(gapEnd, edgeEnd);
+        let angle = 0;
+        if (Math.abs(edgeEnd.x - edgeStart.x) > 1e-6) {
+          angle = Math.atan2(edgeEnd.y - edgeStart.y, edgeEnd.x - edgeStart.x);
+          if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+            angle += Math.PI;
+          }
+        }
+        const rotation = (angle * 180) / Math.PI;
+        parts.push(
+          await buildSvgTextElement({
+            text: label,
+            x: midX,
+            y: midY,
+            font: lineLabelFont,
+            size,
+            fontWeight: lineLabelWeight,
+            anchor: "middle",
+            baseline: "middle",
+            color: themeColors.textSecondary,
+            transform: `rotate(${rotation} ${midX} ${midY})`,
+          })
+        );
+      } else {
+        pushLine(edgeStart, edgeEnd);
+      }
+    } else {
+      pushLine(edgeStart, edgeEnd);
+    }
+  }
+
+  const customEdgeInset = 1;
+  for (const customNode of customNodes) {
+    const source = nodeById.get(customNode.sourceNodeId);
+    if (!source) {
+      continue;
+    }
+    const start = worldToScreen(getNodeDisplayCoordinate(source), disableScale);
+    const end = worldToScreen(getNodeDisplayCoordinate(customNode), disableScale);
+    const radiusA = layoutNodeSize * (start.scale || 1);
+    const radiusB = layoutNodeSize * (end.scale || 1);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      continue;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const startRadius = Math.max(0, getNodeEdgeRadius(source, ux, uy, radiusA) - customEdgeInset);
+    const endRadius = Math.max(0, getNodeEdgeRadius(customNode, ux, uy, radiusB) - customEdgeInset);
+    const edgeStart = {
+      x: start.x + ux * startRadius - left,
+      y: start.y + uy * startRadius - top,
+    };
+    const edgeEnd = {
+      x: end.x - ux * endRadius - left,
+      y: end.y - uy * endRadius - top,
+    };
+    const lineLen = Math.max(0, dist - startRadius - endRadius);
+    const label = formatIntervalRatio(customNode.factorNumerator, customNode.factorDenominator);
+    const pushLine = (from, to) => {
+      parts.push(
+        `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" ${svgStroke(
+          themeColors.edge
+        )} stroke-width="1.5" />`
+      );
+    };
+    if (lineLen > 0) {
+      const baseWidth = await measureSvgTextWidth(label, edgeLabelSize, lineLabelFont, lineLabelWeight);
+      const layout = computeEdgeLabelLayoutFromWidth({
+        baseSize: edgeLabelSize,
+        baseWidth,
+        lineLen,
+        minSize: 4,
+      });
+      const size = layout.size;
+      const gap = layout.gap;
+      if (gap > 0) {
+        const gapHalf = gap / 2;
+        const midX = (edgeStart.x + edgeEnd.x) / 2;
+        const midY = (edgeStart.y + edgeEnd.y) / 2;
+        const gapStart = {
+          x: midX - ux * gapHalf,
+          y: midY - uy * gapHalf,
+        };
+        const gapEnd = {
+          x: midX + ux * gapHalf,
+          y: midY + uy * gapHalf,
+        };
+        pushLine(edgeStart, gapStart);
+        pushLine(gapEnd, edgeEnd);
+        let angle = 0;
+        if (Math.abs(edgeEnd.x - edgeStart.x) > 1e-6) {
+          angle = Math.atan2(edgeEnd.y - edgeStart.y, edgeEnd.x - edgeStart.x);
+          if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+            angle += Math.PI;
+          }
+        }
+        const rotation = (angle * 180) / Math.PI;
+        parts.push(
+          await buildSvgTextElement({
+            text: label,
+            x: midX,
+            y: midY,
+            font: lineLabelFont,
+            size,
+            fontWeight: lineLabelWeight,
+            anchor: "middle",
+            baseline: "middle",
+            color: themeColors.textSecondary,
+            transform: `rotate(${rotation} ${midX} ${midY})`,
+          })
+        );
+      } else {
+        pushLine(edgeStart, edgeEnd);
+      }
+    } else {
+      pushLine(edgeStart, edgeEnd);
+    }
+  }
 
   if (triangleDiagonals.size) {
     const gridMap = new Map();
@@ -13122,15 +14029,40 @@ function rebuildLattice(
   { remapTriangles = true, remapLayoutOffsets = true } = {}
 ) {
   stopAllVoices();
+  const previousSourceKeys = new Map();
+  const previousCustomIds = new Set(customNodes.map((node) => node.id));
+  nodes.forEach((node) => {
+    if (!node || node.isCustom) {
+      return;
+    }
+    previousSourceKeys.set(
+      node.id,
+      `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`
+    );
+  });
   const labelOffsets = remapLayoutOffsets ? serializeLayoutLabelOffsets() : null;
   const keyMappingOffsets = remapLayoutOffsets ? serializeLayoutKeyMappingOffsets() : null;
   const positionOffsets = remapLayoutOffsets ? serializeLayoutPositionOffsets() : null;
   const prevCenterZ = gridCenterZ;
   const latticeNodes = buildLattice();
-  customNodes.forEach((node) => {
-    node.gridZ = gridCenterZ;
-    node.exponentZ = 0;
-    node.coordinate.z = 0;
+  const nextSourceIds = new Map(
+    latticeNodes.map((node) => [
+      `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`,
+      node.id,
+    ])
+  );
+  customNodes.forEach((customNode) => {
+    if (previousCustomIds.has(customNode.sourceNodeId)) {
+      return;
+    }
+    const sourceKey = previousSourceKeys.get(customNode.sourceNodeId);
+    if (!sourceKey) {
+      return;
+    }
+    const nextId = nextSourceIds.get(sourceKey);
+    if (nextId != null) {
+      customNode.sourceNodeId = nextId;
+    }
   });
   nodes = [...latticeNodes, ...customNodes];
   if (remapTriangles) {
@@ -13161,6 +14093,7 @@ function rebuildLattice(
   updatePitchInstances();
   markIsomorphicDirty();
   refreshPatternFromActiveNodes();
+  refreshCustomNodes();
   draw();
 }
 
@@ -13182,7 +14115,6 @@ function resetLattice() {
   triangleLabels.clear();
   layoutUndoStack.length = 0;
   layoutRedoStack.length = 0;
-  customNodes = [];
   fundamentalNoteSelect.value = "60";
   onFundamentalNoteChange();
   resetLayoutState();
@@ -13229,6 +14161,12 @@ if (navGridToggle) {
 if (navCirclesToggle) {
   showCircles = navCirclesToggle.checked;
 }
+if (lineLabelsToggle) {
+  showLineLabels = lineLabelsToggle.checked;
+}
+if (layoutLineLabelsToggle) {
+  layoutLineLabelsToggle.checked = showLineLabels;
+}
 if (mode3dCheckbox) {
   is3DMode = mode3dCheckbox.checked;
   updateNavPanelVisibility();
@@ -13236,6 +14174,7 @@ if (mode3dCheckbox) {
     ratioZSelect.hidden = false;
   }
 }
+updateNavPanelVisibility();
 updateAddModeFromShift();
 updateUiHint();
 fundamentalNoteSelect.value = "60";
@@ -13430,6 +14369,11 @@ window.addEventListener("hashchange", () => {
     applyPresetState(presetState);
   }
 });
+window.addEventListener("beforeunload", () => {
+  if (presetSyncEnabled) {
+    updatePresetUrl();
+  }
+});
 if (mode3dCheckbox && !viewModeInputs.length && !viewModeButtons.length) {
   mode3dCheckbox.addEventListener("change", () => {
     if (layoutMode) {
@@ -13457,6 +14401,26 @@ if (navGridToggle) {
 if (navCirclesToggle) {
   navCirclesToggle.addEventListener("change", () => {
     showCircles = navCirclesToggle.checked;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (lineLabelsToggle) {
+  lineLabelsToggle.addEventListener("change", () => {
+    showLineLabels = lineLabelsToggle.checked;
+    if (layoutLineLabelsToggle) {
+      layoutLineLabelsToggle.checked = showLineLabels;
+    }
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutLineLabelsToggle) {
+  layoutLineLabelsToggle.addEventListener("change", () => {
+    showLineLabels = layoutLineLabelsToggle.checked;
+    if (lineLabelsToggle) {
+      lineLabelsToggle.checked = showLineLabels;
+    }
     draw();
     schedulePresetUrlUpdate();
   });
@@ -13580,6 +14544,7 @@ if (spellingModeButtons.length) {
       } else if (fundamentalNoteSelect) {
         showFundamentalSpellingDialog(Number(fundamentalNoteSelect.value));
       }
+      refreshCustomNodes();
       invalidateLabelCache();
       draw();
       schedulePresetUrlUpdate();
@@ -13616,6 +14581,7 @@ if (showCentsSignToggle) {
 if (hejiEnabledToggle) {
   hejiEnabledToggle.addEventListener("change", () => {
     hejiEnabled = hejiEnabledToggle.checked;
+    refreshCustomNodes();
     invalidateLabelCache();
     draw();
     schedulePresetUrlUpdate();
@@ -13624,6 +14590,7 @@ if (hejiEnabledToggle) {
 if (enharmonicsEnabledToggle) {
   enharmonicsEnabledToggle.addEventListener("change", () => {
     enharmonicsEnabled = enharmonicsEnabledToggle.checked;
+    refreshCustomNodes();
     invalidateLabelCache();
     draw();
     schedulePresetUrlUpdate();
@@ -14135,6 +15102,9 @@ if (layoutKeyMappingTextDialog) {
     schedulePresetUrlUpdate();
   });
 }
+document.querySelectorAll("dialog").forEach((dialog) => {
+  setupDialogKeyDefaults(dialog);
+});
 if (layoutTitleFontSelect) {
   layoutTitleFontSelect.addEventListener("change", () => {
     pushLayoutUndoState();
@@ -14650,16 +15620,6 @@ if (lfoStopButton) {
     scheduleLfoStopsAtCycleEnd();
   });
 }
-if (addCustomRatioButton) {
-  addCustomRatioButton.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    openCustomRatioDialog();
-  });
-}
-if (customRatioDialog) {
-  customRatioDialog.addEventListener("close", handleCustomRatioDialogClose);
-}
 if (allNotesOffButton) {
   allNotesOffButton.addEventListener("click", () => {
     allNotesOff();
@@ -14706,30 +15666,20 @@ if (document.fonts && document.fonts.load) {
     })
     .catch(() => {});
 }
-if (triangleLabelDialog && triangleLabelInput) {
-  triangleLabelInput.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") {
-      return;
-    }
-    event.preventDefault();
-    const value = triangleLabelInput.value.trim();
-    triangleLabelDialog.close(value ? "ok" : "none");
-  });
-}
 if (layoutCustomLabelDialog && layoutCustomLabelInput) {
-  layoutCustomLabelInput.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") {
-      return;
-    }
-    event.preventDefault();
-    layoutCustomLabelDialog.close("confirm");
-  });
   layoutCustomLabelDialog.addEventListener("click", (event) => {
     if (event.target === layoutCustomLabelDialog) {
       layoutCustomLabelDialog.close("confirm");
     }
   });
   layoutCustomLabelDialog.addEventListener("close", () => {
+    if (layoutCustomLabelDialog.returnValue === "cancel") {
+      layoutCustomLabelEditId = null;
+      layoutCustomLabelPending = null;
+      schedulePresetUrlUpdate();
+      draw();
+      return;
+    }
     const text = layoutCustomLabelInput.value.trim();
     if (layoutCustomLabelEditId != null) {
       const index = layoutCustomLabels.findIndex((entry) => entry.id === layoutCustomLabelEditId);
@@ -14766,13 +15716,6 @@ if (layoutCustomLabelDialog && layoutCustomLabelInput) {
   });
 }
 if (octaveShiftDialog && octaveShiftInput) {
-  octaveShiftInput.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") {
-      return;
-    }
-    event.preventDefault();
-    octaveShiftDialog.close("confirm");
-  });
   octaveShiftDialog.addEventListener("click", (event) => {
     if (event.target === octaveShiftDialog) {
       octaveShiftDialog.close("clear");
@@ -14849,13 +15792,18 @@ window.addEventListener("keydown", (event) => {
   if (event.key.toLowerCase() === "o") {
     oHeld = true;
   }
-  if (triangleLabelDialog) {
-    triangleLabelDialog.addEventListener("close", () => {
-      if (!triangleLabelTargetKey || !triangleLabelTargetTri) {
-        return;
-      }
-      const result = triangleLabelDialog.returnValue;
-      const entry = triangleLabels.get(triangleLabelTargetKey);
+if (triangleLabelDialog) {
+  triangleLabelDialog.addEventListener("close", () => {
+    if (!triangleLabelTargetKey || !triangleLabelTargetTri) {
+      return;
+    }
+    const result = triangleLabelDialog.returnValue;
+    if (result === "cancel") {
+      triangleLabelTargetKey = null;
+      triangleLabelTargetTri = null;
+      return;
+    }
+    const entry = triangleLabels.get(triangleLabelTargetKey);
       const parts = triangleLabelTargetKey.split(":");
       const coords = parts[1] ? parts[1].split(",") : [];
       const baseEntry = {
@@ -14890,6 +15838,9 @@ window.addEventListener("keydown", (event) => {
   }
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = true;
+  }
+  if (event.key.toLowerCase() === "c") {
+    cHeld = true;
   }
   if (event.key === "ArrowUp") {
     view.offsetY += (is3DMode ? 1 : -1) * (24 / view.zoom);
@@ -15004,7 +15955,14 @@ window.addEventListener("keyup", (event) => {
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = false;
   }
+  if (event.key.toLowerCase() === "c") {
+    cHeld = false;
+  }
 });
+
+if (customRatioDialog) {
+  customRatioDialog.addEventListener("close", handleCustomRatioDialogClose);
+}
 
 resizeCanvas();
 updateRatioWheelPosition();

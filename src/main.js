@@ -672,6 +672,20 @@ let wasZModeActive = false;
 let zKeyHeld = false;
 let isAddMode = false;
 let shiftHeld = false;
+let capsLockOn = false;
+
+function syncCapsLockState(event) {
+  if (!event.getModifierState) {
+    return;
+  }
+  const nextState = event.getModifierState("CapsLock");
+  if (nextState === capsLockOn) {
+    return;
+  }
+  capsLockOn = nextState;
+  updateAddModeFromShift();
+  draw();
+}
 let isomorphicKeyMap = null;
 let isomorphicLayout = null;
 let isomorphicDirty = true;
@@ -3015,7 +3029,7 @@ function getNodeRadius(node) {
   if (node.isCustom) {
     return 35;
   }
-  return node.active ? 35 : 32;
+  return 35;
 }
 
 function midiToNoteName(midi) {
@@ -5303,6 +5317,183 @@ function drawTriangleHover(nodePosMap, disableScale = false) {
 
 }
 
+function getGuideRevealInfo(nodePosMap) {
+  const empty = { guideNodes: new Map(), guideAnchorId: null };
+  if (!shiftHeld && !capsLockOn) {
+    return empty;
+  }
+  const pointer = view.lastPointer;
+  if (!pointer) {
+    return empty;
+  }
+  return getClusterGuideInfo(pointer, nodePosMap);
+}
+
+function getClusterGuideInfo(pointer, nodePosMap) {
+  const guideNodes = new Map();
+  let anchor = null;
+  let anchorDist = Infinity;
+  nodes.forEach((node) => {
+    if (node.isCustom) {
+      return;
+    }
+    const z = Number.isFinite(node.gridZ) ? node.gridZ : gridCenterZ;
+    if (z !== gridCenterZ) {
+      return;
+    }
+    const entry = nodePosMap.get(node.id);
+    if (!entry) {
+      return;
+    }
+    const dx = entry.pos.x - pointer.x;
+    const dy = entry.pos.y - pointer.y;
+    const dist = dx * dx + dy * dy;
+    if (dist < anchorDist) {
+      anchorDist = dist;
+      anchor = node;
+    }
+  });
+  if (!anchor) {
+    return { guideNodes, guideAnchorId: null };
+  }
+
+  const anchorZ = Number.isFinite(anchor.gridZ) ? anchor.gridZ : gridCenterZ;
+  const gridMap = new Map();
+  nodes.forEach((node) => {
+    if (node.isCustom) {
+      return;
+    }
+    const z = Number.isFinite(node.gridZ) ? node.gridZ : gridCenterZ;
+    if (z !== anchorZ) {
+      return;
+    }
+    gridMap.set(`${node.gridX},${node.gridY}`, node);
+  });
+
+  const maxCluster = 5;
+  const cluster = [];
+  const visited = new Set();
+  const queue = [];
+  const pushNode = (node) => {
+    if (!node) {
+      return;
+    }
+    const key = `${node.gridX},${node.gridY}`;
+    if (visited.has(key)) {
+      return;
+    }
+    visited.add(key);
+    queue.push(node);
+  };
+  pushNode(anchor);
+  while (queue.length && cluster.length < maxCluster) {
+    const current = queue.shift();
+    cluster.push(current);
+    const neighbors = [
+      gridMap.get(`${current.gridX - 1},${current.gridY}`),
+      gridMap.get(`${current.gridX + 1},${current.gridY}`),
+      gridMap.get(`${current.gridX},${current.gridY - 1}`),
+      gridMap.get(`${current.gridX},${current.gridY + 1}`),
+    ];
+    neighbors.forEach(pushNode);
+  }
+
+  const inactiveEntries = cluster
+    .filter((node) => !node.active)
+    .map((node) => {
+      const entry = nodePosMap.get(node.id);
+      if (!entry) {
+        return null;
+      }
+      const dx = entry.pos.x - pointer.x;
+      const dy = entry.pos.y - pointer.y;
+      return { node, distance: Math.hypot(dx, dy) };
+    })
+    .filter(Boolean);
+  if (inactiveEntries.length) {
+    const distances = inactiveEntries.map((entry) => entry.distance);
+    const minDist = Math.min(...distances);
+    const maxDist = Math.max(...distances);
+    const span = Math.max(1e-6, maxDist - minDist);
+    inactiveEntries.forEach((entry) => {
+      const t = (entry.distance - minDist) / span;
+      const opacity = 0.5 + (0 - 0.5) * t;
+      guideNodes.set(entry.node.id, opacity);
+    });
+  }
+
+  return { guideNodes, guideAnchorId: anchor.id };
+}
+
+function drawGuideEdges(nodePosMap, guideNodes) {
+  if (!guideNodes || !guideNodes.size) {
+    return;
+  }
+  const activeGrid = new Map();
+  nodes.forEach((node) => {
+    if (!node.active || node.isCustom) {
+      return;
+    }
+    const z = Number.isFinite(node.gridZ) ? node.gridZ : gridCenterZ;
+    activeGrid.set(`${node.gridX},${node.gridY},${z}`, node);
+  });
+  ctx.save();
+  ctx.strokeStyle = themeColors.edge;
+  ctx.lineWidth = 1.5;
+  guideNodes.forEach((opacity, id) => {
+    const guideNode = nodeById.get(id);
+    if (!guideNode) {
+      return;
+    }
+    const z = Number.isFinite(guideNode.gridZ) ? guideNode.gridZ : gridCenterZ;
+    const neighbors = [
+      activeGrid.get(`${guideNode.gridX - 1},${guideNode.gridY},${z}`),
+      activeGrid.get(`${guideNode.gridX + 1},${guideNode.gridY},${z}`),
+      activeGrid.get(`${guideNode.gridX},${guideNode.gridY - 1},${z}`),
+      activeGrid.get(`${guideNode.gridX},${guideNode.gridY + 1},${z}`),
+    ].filter(Boolean);
+    if (!neighbors.length) {
+      return;
+    }
+    const guideEntry = nodePosMap.get(guideNode.id);
+    if (!guideEntry) {
+      return;
+    }
+    neighbors.forEach((neighbor) => {
+      const neighborEntry = nodePosMap.get(neighbor.id);
+      if (!neighborEntry) {
+        return;
+      }
+      ctx.globalAlpha = opacity;
+      const start = neighborEntry.pos;
+      const end = guideEntry.pos;
+      const radiusA = neighborEntry.radius;
+      const radiusB = guideEntry.radius;
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist === 0) {
+        return;
+      }
+      const ux = dx / dist;
+      const uy = dy / dist;
+      const edgeStart = {
+        x: start.x + ux * radiusA,
+        y: start.y + uy * radiusA,
+      };
+      const edgeEnd = {
+        x: end.x - ux * radiusB,
+        y: end.y - uy * radiusB,
+      };
+      ctx.beginPath();
+      ctx.moveTo(edgeStart.x, edgeStart.y);
+      ctx.lineTo(edgeEnd.x, edgeEnd.y);
+      ctx.stroke();
+    });
+  });
+  ctx.restore();
+}
+
 function pruneTriangleDiagonals() {
   if (!triangleDiagonals.size) {
     return;
@@ -5922,6 +6113,8 @@ function draw() {
       ctx.stroke();
     });
   }
+  const { guideNodes } = getGuideRevealInfo(nodePosMap);
+  drawGuideEdges(nodePosMap, guideNodes);
   drawTriangleDiagonals(nodePosMap, disableScale);
   drawTriangleLabels(nodePosMap, disableScale);
   drawTriangleHover(nodePosMap, disableScale);
@@ -5949,6 +6142,7 @@ function draw() {
   const lightDir = getLightDir2D();
   nodeRenderList.forEach(({ node, pos }) => {
     const isHovered = node.id === hoverNodeId;
+    const isGuide = guideNodes.has(node.id);
     const canShowInactive = isInactiveNodeAvailable(node);
     const canInteractInactive = !is3DMode || isAddMode;
     const amplitude = nodeAmplitudes.get(node.id) || 0;
@@ -5958,8 +6152,12 @@ function draw() {
       node.active ||
       node.isCustom ||
       brightness > 0.01 ||
+      isGuide ||
       (isHovered && canShowInactive && canInteractInactive);
     let alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
+    if (isGuide) {
+      alpha = guideNodes.get(node.id);
+    }
     if (node.isCustom && !node.active) {
       alpha = 0.25;
     }
@@ -7427,6 +7625,8 @@ function onPointerMove(event) {
     if (nextHoverId !== hoverNodeId) {
       hoverNodeId = nextHoverId;
       scheduleDraw();
+    } else if (shiftHeld || capsLockOn) {
+      scheduleDraw();
     }
     return;
   }
@@ -7665,6 +7865,7 @@ function onPointerLeave() {
   layoutCustomLabelDrag = null;
   triangleHover = null;
   view.rotating = false;
+  view.lastPointer = null;
   if (view.dragging) {
     view.dragging = false;
   }
@@ -7701,7 +7902,7 @@ function onWheel(event) {
 
 function isInactiveNodeAvailable(node) {
   if (!is3DMode) {
-    return shiftHeld && (node.gridZ || 0) === gridCenterZ;
+    return (shiftHeld || capsLockOn) && (node.gridZ || 0) === gridCenterZ;
   }
   const z = node.gridZ || 0;
   if (zModeActive && zModeAnchor) {
@@ -8850,7 +9051,7 @@ function updateAddModeFromShift() {
   if (!is3DMode) {
     isAddMode = false;
   } else {
-    isAddMode = shiftHeld || zModeActive;
+    isAddMode = shiftHeld || capsLockOn || zModeActive;
   }
   if (navAddModeToggle) {
     navAddModeToggle.checked = isAddMode;
@@ -14623,6 +14824,7 @@ window.addEventListener("keydown", enableAudioFromGesture);
 window.addEventListener("keydown", handleKeyDown);
 window.addEventListener("keyup", handleKeyUp);
 window.addEventListener("keydown", (event) => {
+  syncCapsLockState(event);
   if (event.metaKey || event.ctrlKey) {
     return;
   }
@@ -14778,6 +14980,7 @@ window.addEventListener("pointerdown", (event) => {
   keyboardMapPopover.hidden = true;
 });
 window.addEventListener("keyup", (event) => {
+  syncCapsLockState(event);
   if (event.key === "Shift") {
     shiftHeld = false;
     updateAddModeFromShift();

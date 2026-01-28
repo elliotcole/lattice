@@ -876,6 +876,23 @@ button:active {
   padding: 6px 8px;
   font-size: 12px;
 }
+.layout-float .nav-3d-accordion-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  opacity: 0.7;
+  cursor: pointer;
+}
 
 .layout-float .control-inline button {
   flex: 1 1 72px;

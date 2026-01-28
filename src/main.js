@@ -78,8 +78,6 @@ const layoutLineLabelsToggle = document.getElementById("layout-line-labels-toggl
 const layoutResetButton = document.getElementById("layout-reset");
 const exportSvgButton = document.getElementById("export-svg");
 const exportPdfButton = document.getElementById("export-pdf");
-const exportCheckButton = document.getElementById("export-check");
-const exportCheckStatus = document.getElementById("export-check-status");
 const midiEnable = document.getElementById("midi-enable");
 const midiPortSelect = document.getElementById("midi-port");
 const midiChannelSelect = document.getElementById("midi-channel");
@@ -151,6 +149,7 @@ const envelopeTimeModeInputs = document.querySelectorAll(
 const featureModeButtons = document.querySelectorAll("[data-feature-mode]");
 const spellingModeButtons = document.querySelectorAll("[data-spelling-mode]");
 const showHzToggle = document.getElementById("show-hz");
+const showCentsDeviationToggle = document.getElementById("show-cents-deviation");
 const showCentsSignToggle = document.getElementById("show-cents-sign");
 const hejiEnabledToggle = document.getElementById("heji-enabled");
 const enharmonicsEnabledToggle = document.getElementById("enharmonics-enabled");
@@ -187,7 +186,15 @@ const navKeyMappingsToggle = document.getElementById("nav-key-mappings");
 const lineLabelsToggle = document.getElementById("line-labels-toggle");
 const nav3dNavigationToggle = document.getElementById("nav-3d-navigation-toggle");
 const nav3dNavigationBody = document.getElementById("nav-3d-navigation-body");
+const layoutShowToggle = document.getElementById("layout-show-toggle");
+const layoutShowBody = document.getElementById("layout-show-body");
 const layoutKeyMappingsGroup = document.getElementById("layout-key-mappings-group");
+const layoutHejiEnabledToggle = document.getElementById("layout-heji-enabled");
+const layoutEnharmonicsEnabledToggle = document.getElementById("layout-enharmonics-enabled");
+const layoutShowHzToggle = document.getElementById("layout-show-hz");
+const layoutShowCentsDeviationToggle = document.getElementById("layout-show-cents-deviation");
+const layoutCirclesToggle = document.getElementById("layout-circles");
+const layoutKeyMappingsToggle = document.getElementById("layout-key-mappings-toggle");
 const nav3dButtons = nav3dPanel ? nav3dPanel.querySelectorAll("button[data-view], button[data-action]") : [];
 const viewPanelToggle = document.getElementById("view-panel-toggle");
 const viewsPanel = nav3dPanel ? nav3dPanel.querySelector(".nav-3d-panel") : null;
@@ -294,11 +301,25 @@ function getLayoutNoteLabelHitbox(node, pos, radius) {
   let width = 0;
   let height = layoutNoteTextSize;
   if (featureMode === "ratio") {
+    const displayInfo = getCachedDisplayInfo(node);
+    const centsLabel = getCachedCentsReadout(
+      node,
+      {
+        wrap: enharmonicsEnabled,
+        requireHejiDetail: true,
+        baseTextForHeji: displayInfo.pitchClass,
+      },
+      displayInfo
+    );
     ctx.save();
     ctx.font = `${layoutNoteFontWeight} ${layoutNoteTextSize}px ${layoutNoteFont}`;
-    const metrics = ctx.measureText(getNodeNoteLabel(node));
+    const noteWidth = ctx.measureText(displayInfo.pitchClass || "").width;
+    const centsWidth = centsLabel ? ctx.measureText(centsLabel).width : 0;
     ctx.restore();
-    width = metrics.width;
+    width = Math.max(noteWidth, centsWidth);
+    if (hejiEnabled && centsLabel) {
+      height += layoutNoteTextSize + 4;
+    }
   } else {
     const ratioText = `${node.numerator}:${node.denominator}`;
     const displayInfo = getCachedDisplayInfo(node);
@@ -321,7 +342,7 @@ function getLayoutNoteLabelHitbox(node, pos, radius) {
         layoutNoteFontWeight
       )
     );
-    height = layoutNoteTextSize * 2 + 4;
+    height = centsLabel ? layoutNoteTextSize * 2 + 4 : layoutNoteTextSize;
   }
   const padding = Math.max(4, Math.round(layoutNoteTextSize * 0.25));
   return {
@@ -374,6 +395,56 @@ function serializeLayoutPositionOffsets() {
       offsetY: offset.y,
       offsetZ: offset.z,
     };
+  });
+}
+
+function serializeLayoutCustomNodePositions() {
+  return customNodes
+    .map((node) => {
+      const coord = layoutPositions.get(node.id);
+      if (!coord) {
+        return null;
+      }
+      return {
+        sourceNodeId: node.sourceNodeId,
+        customSlot: node.customSlot,
+        x: coord.x,
+        y: coord.y,
+        z: coord.z,
+      };
+    })
+    .filter(Boolean);
+}
+
+function applyLayoutCustomNodePositions(entries) {
+  if (!Array.isArray(entries)) {
+    return;
+  }
+  const lookup = new Map();
+  entries.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const sourceNodeId = Number(entry.sourceNodeId);
+    const customSlot = Number(entry.customSlot);
+    const x = Number(entry.x);
+    const y = Number(entry.y);
+    const z = Number.isFinite(entry.z) ? Number(entry.z) : 0;
+    if (!Number.isFinite(sourceNodeId) || !Number.isFinite(customSlot)) {
+      return;
+    }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return;
+    }
+    lookup.set(`${sourceNodeId}|${customSlot}`, { x, y, z });
+  });
+  customNodes.forEach((node) => {
+    const key = `${node.sourceNodeId}|${node.customSlot}`;
+    if (!lookup.has(key)) {
+      layoutPositions.delete(node.id);
+      return;
+    }
+    layoutPositions.set(node.id, lookup.get(key));
   });
 }
 
@@ -628,6 +699,7 @@ const MAX_SEQUENCE_LFO_WAIT_BEATS = 32;
 let nodes = [];
 let nodeById = new Map();
 let edges = [];
+let lineLabelOverrides = new Map();
 let voices = [];
 let pitchInstances = [];
 let nextVoiceId = 1;
@@ -697,6 +769,7 @@ let layoutKeyMappingOffsets = new Map();
 let pendingLayoutLabelOffsets = null;
 let pendingLayoutPositionOffsets = null;
 let pendingLayoutKeyMappingOffsets = null;
+let pendingLayoutCustomPositions = null;
 let pendingLayoutSpacing = null;
 let customNodeDrag = null;
 let layoutNodeShapes = new Map();
@@ -775,6 +848,7 @@ let spellingHintActive = false;
 let fundamentalSpelling = "sharp";
 let featureMode = "ratio";
 let showHz = false;
+let showCentsDeviation = true;
 let showCentsSign = false;
 let hejiEnabled = true;
 let enharmonicsEnabled = true;
@@ -1652,6 +1726,7 @@ function randomizeLfosForActiveNodes() {
   if (!activeNodes.length) {
     return;
   }
+  const waitScale = Math.min(1, 3 / activeNodes.length);
   activeNodes.forEach((node) => {
     if (node.baseVoiceId) {
       const baseVoice = findVoiceById(node.baseVoiceId);
@@ -1666,7 +1741,7 @@ function randomizeLfosForActiveNodes() {
       }
     });
     const duration = 2 + Math.random() * 8;
-    const phaseOffset = Math.random() * duration * 1000;
+    const waitOffset = Math.random() * duration * 1000 * waitScale;
     const curve = 0.5 + Math.random() * 2.2;
     const voice = startVoice({
       nodeId: node.id,
@@ -1674,7 +1749,7 @@ function randomizeLfosForActiveNodes() {
       freq: node.freq,
       lfoActive: true,
       lfoHalfPeriod: duration,
-      lfoStartMs: now - phaseOffset,
+      lfoStartMs: now + waitOffset,
       lfoCurve: curve,
       source: "random-lfo",
     });
@@ -2139,7 +2214,7 @@ function scheduleLfoStopsAtCycleEnd() {
       return;
     }
     const timer = setTimeout(() => {
-      stopVoice(voice, false);
+      stopVoice(voice, true);
       const node = nodeById.get(voice.nodeId);
       if (node && node.baseVoiceId === voice.id) {
         node.baseVoiceId = null;
@@ -3571,6 +3646,9 @@ function getNodeNoteLabel(node) {
     },
     info
   );
+  if (!centsText) {
+    return noteText;
+  }
   const hasAccidental = /[#b]/.test(noteText);
   const hasParen = centsText.startsWith("(");
   const separator = !hasAccidental && !hasParen ? "" : " ";
@@ -3857,7 +3935,8 @@ function getCentsCacheKey(options) {
   const wrap = options && options.wrap ? "w1" : "w0";
   const detail = options && options.requireHejiDetail ? "d1" : "d0";
   const baseText = options && options.baseTextForHeji ? options.baseTextForHeji : "";
-  return `${wrap}|${detail}|${baseText}`;
+  const show = showCentsDeviation ? "s1" : "s0";
+  return `${wrap}|${detail}|${show}|${baseText}`;
 }
 
 function getCachedCentsReadout(node, options, displayInfo) {
@@ -3905,6 +3984,9 @@ function buildCentsReadout(
     displayInfo = null,
   } = {}
 ) {
+  if (!showCentsDeviation) {
+    return "";
+  }
   const info = displayInfo || getDisplayNoteInfo(node);
   if (!hejiEnabled && !enharmonicsEnabled) {
     const text = formatCents(info.cents);
@@ -5749,6 +5831,9 @@ function drawTriangleHover(nodePosMap, disableScale = false) {
 
 function getGuideRevealInfo(nodePosMap) {
   const empty = { guideNodes: new Map(), guideAnchorId: null };
+  if (layoutMode) {
+    return empty;
+  }
   if (!shiftHeld && !capsLockOn) {
     return empty;
   }
@@ -6116,6 +6201,43 @@ function getEdgeLabelText(a, b) {
   return null;
 }
 
+function getEdgeKey(a, b) {
+  if (!a || !b) {
+    return "";
+  }
+  const aKey = `${a.exponentX},${a.exponentY},${a.exponentZ || 0}`;
+  const bKey = `${b.exponentX},${b.exponentY},${b.exponentZ || 0}`;
+  return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+}
+
+function getLineLabelOverride(a, b) {
+  const key = getEdgeKey(a, b);
+  if (!key) {
+    return null;
+  }
+  return lineLabelOverrides.has(key) ? lineLabelOverrides.get(key) : null;
+}
+
+function shouldShowEdgeLabel(a, b) {
+  const override = getLineLabelOverride(a, b);
+  return override == null ? showLineLabels : override;
+}
+
+function toggleEdgeLabelOverride(a, b) {
+  const key = getEdgeKey(a, b);
+  if (!key) {
+    return;
+  }
+  const override = getLineLabelOverride(a, b);
+  const currentVisible = override == null ? showLineLabels : override;
+  const nextVisible = !currentVisible;
+  if (nextVisible === showLineLabels) {
+    lineLabelOverrides.delete(key);
+  } else {
+    lineLabelOverrides.set(key, nextVisible);
+  }
+}
+
 function drawCanvasEdgeSegment({
   start,
   end,
@@ -6145,7 +6267,7 @@ function drawCanvasEdgeSegment({
     y: end.y - uy * endRadius,
   };
   const lineLen = Math.max(0, dist - startRadius - endRadius);
-  const shouldLabel = (forceLabel || showLineLabels) && label;
+  const shouldLabel = Boolean(label);
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
   if (shouldLabel && lineLen > 0) {
@@ -6219,16 +6341,20 @@ function computeEdgeLabelLayoutFromWidth({ baseSize, baseWidth, lineLen, minSize
   return { size, gap };
 }
 
-function getNodeEdgeRadius(node, ux, uy, radius) {
-  if (!Number.isFinite(ux) || !Number.isFinite(uy)) {
-    return radius;
-  }
-  const shape = layoutMode ? getLayoutNodeShape(node) : node.isCustom ? "diamond" : "circle";
+function getShapeEdgeRadius(shape, ux, uy, radius) {
   if (shape === "none") {
-    return 0;
+    return radius;
   }
   if (shape === "circle") {
     return radius;
+  }
+  if (shape === "diamond") {
+    const denom = Math.abs(ux) + Math.abs(uy);
+    return denom > 0 ? radius / denom : radius;
+  }
+  if (shape === "square") {
+    const denom = Math.max(Math.abs(ux), Math.abs(uy));
+    return denom > 0 ? radius / denom : radius;
   }
   const vertices = [];
   if (shape === "square") {
@@ -6259,6 +6385,14 @@ function getNodeEdgeRadius(node, ux, uy, radius) {
     }
   }
   return Number.isFinite(best) ? best : radius;
+}
+
+function getNodeEdgeRadius(node, ux, uy, radius) {
+  if (!Number.isFinite(ux) || !Number.isFinite(uy)) {
+    return radius;
+  }
+  const shape = layoutMode ? getLayoutNodeShape(node) : node.isCustom ? "diamond" : "circle";
+  return getShapeEdgeRadius(shape, ux, uy, radius);
 }
 
 function draw3DEdges(nodePosMap) {
@@ -6295,13 +6429,15 @@ function draw3DEdges(nodePosMap) {
     } else if (a.gridZ !== b.gridZ) {
       color = AXIS_EDGE_COLORS.z;
     }
+    const labelText = getEdgeLabelText(a, b);
+    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
     drawCanvasEdgeSegment({
       start,
       end,
       startRadius,
       endRadius,
       color,
-      label: showLineLabels ? getEdgeLabelText(a, b) : null,
+      label,
       labelFont,
       labelWeight,
       labelSize,
@@ -6469,7 +6605,12 @@ function getAxisLegendSettings() {
   };
 }
 
-function getAxisLegendAngle(dir) {
+function getAxisLegendAngle(dir, centerX = null, pageCenterX = null) {
+  if (Number.isFinite(centerX) && Number.isFinite(pageCenterX)) {
+    if (Math.abs(dir.x) < 1e-3) {
+      return centerX < pageCenterX ? Math.PI / 2 : -Math.PI / 2;
+    }
+  }
   let angle = Math.atan2(dir.y, dir.x);
   if (angle > Math.PI / 2) {
     angle -= Math.PI;
@@ -6484,6 +6625,7 @@ function getAxisLegendInfo(axis, settings = getAxisLegendSettings()) {
     return null;
   }
   const { left, top, width, height } = getLayoutPageRect();
+  const pageCenterX = left + width / 2;
   const offset = layoutAxisOffsets[axis] || { x: 0, y: 0 };
   let center = { x: left + width / 2, y: top + height - settings.margin };
   let label = settings.xLabel;
@@ -6510,6 +6652,7 @@ function getAxisLegendInfo(axis, settings = getAxisLegendSettings()) {
   const segLen = 20;
   const gapVec = { x: dir.x * (gap / 2), y: dir.y * (gap / 2) };
   const segVec = { x: dir.x * segLen, y: dir.y * segLen };
+  const textAngle = getAxisLegendAngle(dir, center.x, pageCenterX);
   return {
     axis,
     center,
@@ -6518,7 +6661,7 @@ function getAxisLegendInfo(axis, settings = getAxisLegendSettings()) {
     gapVec,
     segVec,
     fontSize: settings.fontSize,
-    textAngle: getAxisLegendAngle(dir),
+    textAngle,
     leftEnd: {
       x: center.x - gapVec.x - segVec.x,
       y: center.y - gapVec.y - segVec.y,
@@ -6718,13 +6861,15 @@ function draw() {
       const uy = dy / dist;
       const startRadius = getNodeEdgeRadius(a, ux, uy, radiusA);
       const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
+    const labelText = getEdgeLabelText(a, b);
+    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
     drawCanvasEdgeSegment({
       start,
       end,
       startRadius,
       endRadius,
       color: themeColors.edge,
-      label: showLineLabels ? getEdgeLabelText(a, b) : null,
+      label,
       labelFont,
       labelWeight,
       labelSize,
@@ -6736,7 +6881,7 @@ function drawCustomConnections(nodePosMap) {
   if (!customNodes.length) {
     return;
   }
-  const edgeInset = 1;
+  const edgeOutset = 1;
   const labelFont = layoutMode
     ? layoutAxisLegendFont
     : is3DMode
@@ -6777,11 +6922,12 @@ function drawCustomConnections(nodePosMap) {
     const uy = dy / dist;
     const startRadius = Math.max(
       0,
-      getNodeEdgeRadius(source, ux, uy, startEntry.radius) - edgeInset
+      getNodeEdgeRadius(source, ux, uy, startEntry.radius) + edgeOutset
     );
+    const customEdgeInset = Math.max(0, Math.round(endEntry.radius * 0.03));
     const endRadius = Math.max(
       0,
-      getNodeEdgeRadius(node, ux, uy, endEntry.radius) - edgeInset
+      getNodeEdgeRadius(node, ux, uy, endEntry.radius) + edgeOutset - customEdgeInset
     );
     drawCanvasEdgeSegment({
       start,
@@ -6958,7 +7104,7 @@ function drawCustomConnections(nodePosMap) {
       if (hejiEnabled && nodeHasHighPrime(node)) {
         const displayInfo = getCachedDisplayInfo(node);
         const base = getHejiBaseAndDefaults(displayInfo.pitchClass);
-        const centsText = formatCents(displayInfo.cents);
+        const centsText = showCentsDeviation ? formatCents(displayInfo.cents) : "";
         const suffixParts = centsText
           ? [
               ...base.suffixParts,
@@ -7060,21 +7206,23 @@ function drawCustomConnections(nodePosMap) {
       let lineOffset = 0;
       ctx.fillText(ratioText, ratioX, ratioY + lineOffset);
       lineOffset += detailSize + 4;
-      drawTextWithSmallCent({
-        text: centsLabel,
-        x: ratioX,
-        y: ratioY + lineOffset,
-        font: noteLabelFont,
-        size: detailSize,
-        fontWeight: noteLabelWeight,
-        align: "left",
-        baseline: "top",
-        hejiAccidentals: hejiEnabled,
-        hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
-        context: ctx,
-        color: themeColors.textSecondary,
-      });
-      lineOffset += detailSize + 4;
+      if (centsLabel) {
+        drawTextWithSmallCent({
+          text: centsLabel,
+          x: ratioX,
+          y: ratioY + lineOffset,
+          font: noteLabelFont,
+          size: detailSize,
+          fontWeight: noteLabelWeight,
+          align: "left",
+          baseline: "top",
+          hejiAccidentals: hejiEnabled,
+          hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
+          context: ctx,
+          color: themeColors.textSecondary,
+        });
+        lineOffset += detailSize + 4;
+      }
       if (showHz && Number.isFinite(node.freq)) {
         ctx.fillText(`${node.freq.toFixed(2)} Hz`, ratioX, ratioY + lineOffset);
       }
@@ -7096,7 +7244,7 @@ function drawCustomConnections(nodePosMap) {
         },
         displayInfo
       );
-      const hasParen = centsLabel.includes("(");
+      const hasParen = centsLabel && centsLabel.includes("(");
       const restGapScale =
         hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
       const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
@@ -7108,7 +7256,7 @@ function drawCustomConnections(nodePosMap) {
         y: labelPos.y,
         baseText: annotation.baseText,
         suffixParts: annotation.suffixParts,
-        restText: ` ${centsLabel}`,
+        restText: hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "",
         size: detailSize,
         font: noteLabelFont,
         align: "left",
@@ -7120,6 +7268,23 @@ function drawCustomConnections(nodePosMap) {
         color: themeColors.textSecondary,
       });
       lineOffset += detailSize + 4;
+      if (hejiEnabled && centsLabel) {
+        drawTextWithSmallCent({
+          text: centsLabel,
+          x: labelPos.x,
+          y: labelPos.y + lineOffset,
+          font: noteLabelFont,
+          size: detailSize,
+          fontWeight: noteLabelWeight,
+          align: "left",
+          baseline: "top",
+          hejiAccidentals: hejiEnabled,
+          hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
+          context: ctx,
+          color: themeColors.textSecondary,
+        });
+        lineOffset += detailSize + 4;
+      }
       if (octaveLabel) {
         ctx.save();
         ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
@@ -7394,10 +7559,9 @@ function stopVoice(voice, immediate = false) {
   const lfoGain = voice.lfoGain;
   voice.oscillator = null;
   voice.releasing = true;
+  const nowMs = performance.now();
+  const lfoLevel = voice.lfoActive ? getLfoGainValue(voice, nowMs) : 1;
   voice.lfoActive = false;
-  if (lfoGain) {
-    lfoGain.gain.value = 1;
-  }
 
   const now = audioCtx.currentTime;
   const release = immediate ? 0.02 : getEnvelopeReleaseSeconds() || 0.6;
@@ -7408,7 +7572,12 @@ function stopVoice(voice, immediate = false) {
   ensureLfoLoop();
   if (envGain) {
     envGain.gain.cancelScheduledValues(now);
-    envGain.gain.setValueAtTime(Math.max(envGain.gain.value, 0.0001), now);
+    const currentEnv = Math.max(envGain.gain.value, 0.0001);
+    envGain.gain.setValueAtTime(currentEnv * lfoLevel, now);
+    if (lfoGain) {
+      lfoGain.gain.cancelScheduledValues(now);
+      lfoGain.gain.setValueAtTime(1, now);
+    }
     envGain.gain.exponentialRampToValueAtTime(0.0001, now + release);
     osc.stop(now + release + 0.05);
   } else {
@@ -7790,6 +7959,80 @@ function onPointerDown(event) {
   }
 
   if (layoutMode) {
+    if (event.altKey) {
+      const handleHit = hitTestAxisLegendHandle(screenPoint);
+      if (handleHit && layoutAxisOffsets[handleHit.axis]) {
+        pushLayoutUndoState();
+        layoutAxisOffsets[handleHit.axis] = { x: 0, y: 0 };
+        layoutAxisAngles[handleHit.axis] = null;
+        schedulePresetUrlUpdate();
+        draw();
+        return;
+      }
+      const customLabelHit = hitTestLayoutCustomLabel(screenPoint);
+      if (customLabelHit) {
+        pushLayoutUndoState();
+        const entry = layoutCustomLabels.find((label) => label.id === customLabelHit.entry.id);
+        if (entry) {
+          entry.position = null;
+        }
+        schedulePresetUrlUpdate();
+        draw();
+        return;
+      }
+      const titleHit = hitTestLayoutTitle(screenPoint);
+      if (titleHit) {
+        pushLayoutUndoState();
+        layoutTitlePosition = null;
+        schedulePresetUrlUpdate();
+        draw();
+        return;
+      }
+      const creatorHit = hitTestLayoutCreator(screenPoint);
+      if (creatorHit) {
+        pushLayoutUndoState();
+        layoutCreatorPosition = null;
+        schedulePresetUrlUpdate();
+        draw();
+        return;
+      }
+      const axisHit = hitTestAxisLegend(screenPoint);
+      if (axisHit && layoutAxisOffsets[axisHit.axis]) {
+        pushLayoutUndoState();
+        layoutAxisOffsets[axisHit.axis] = { x: 0, y: 0 };
+        layoutAxisAngles[axisHit.axis] = null;
+        schedulePresetUrlUpdate();
+        draw();
+        return;
+      }
+      const keyMappingHit = hitTestLayoutKeyMappingLabel(screenPoint);
+      if (keyMappingHit) {
+        pushLayoutUndoState();
+        layoutKeyMappingOffsets.delete(keyMappingHit.node.id);
+        schedulePresetUrlUpdate();
+        draw();
+        return;
+      }
+      const labelHit = hitTestNoteLabel(screenPoint);
+      if (labelHit) {
+        pushLayoutUndoState();
+        layoutLabelOffsets.delete(labelHit.node.id);
+        schedulePresetUrlUpdate();
+        draw();
+        return;
+      }
+      if (hit) {
+        pushLayoutUndoState();
+        layoutPositions.delete(hit.id);
+        if (!hit.isCustom) {
+          const key = `${hit.exponentX},${hit.exponentY},${hit.exponentZ || 0}`;
+          layoutPositionOffsets.delete(key);
+        }
+        schedulePresetUrlUpdate();
+        draw();
+        return;
+      }
+    }
     if (lHeld) {
       if (layoutCustomLabelDialog && !layoutCustomLabelDialog.open) {
         const { left, top } = getLayoutPageRect();
@@ -8003,6 +8246,12 @@ function onCanvasDoubleClick(event) {
     }
   }
   const screenPoint = { x: event.offsetX, y: event.offsetY };
+  const edgeHit = hitTestEdgeLabel(screenPoint);
+  if (edgeHit) {
+    toggleEdgeLabelOverride(edgeHit.a, edgeHit.b);
+    draw();
+    return;
+  }
   if (!layoutMode) {
     const hit = hitTestScreen(screenPoint);
     if (hit && hit.isCustom) {
@@ -8650,6 +8899,63 @@ function hitTestScreen(screenPoint) {
   return best;
 }
 
+function hitTestEdgeLabel(screenPoint) {
+  const disableScale = layoutMode && layoutUnifyNodeSize;
+  const nodePosMap = new Map();
+  nodes.forEach((node) => {
+    const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+    const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
+    nodePosMap.set(node.id, { pos, radius: baseRadius * (pos.scale || 1) });
+  });
+  let best = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  const hitThreshold = 6;
+  edges.forEach(([a, b]) => {
+    if (!a.active || !b.active) {
+      return;
+    }
+    const labelText = getEdgeLabelText(a, b);
+    if (!labelText) {
+      return;
+    }
+    const startEntry = nodePosMap.get(a.id);
+    const endEntry = nodePosMap.get(b.id);
+    if (!startEntry || !endEntry) {
+      return;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+    const lineStart = {
+      x: start.x + ux * startRadius,
+      y: start.y + uy * startRadius,
+    };
+    const lineEnd = {
+      x: end.x - ux * endRadius,
+      y: end.y - uy * endRadius,
+    };
+    const lineLen = Math.max(0, dist - startRadius - endRadius);
+    if (lineLen <= 0) {
+      return;
+    }
+    const distance = distanceToSegment(screenPoint, lineStart, lineEnd);
+    if (distance <= hitThreshold && distance < bestDistance) {
+      best = { a, b };
+      bestDistance = distance;
+    }
+  });
+  return best;
+}
+
 function hitTestNoteLabel(screenPoint) {
   if (!layoutMode) {
     return null;
@@ -9068,6 +9374,9 @@ function getLfoGainValue(voice, nowMs) {
   if (!voice.lfoActive) {
     return 1;
   }
+  if (voice.source === "random-lfo" && nowMs < voice.lfoStartMs) {
+    return 0;
+  }
   const value = getLfoValue(voice, nowMs);
   return (1 - lfoDepth) + lfoDepth * value;
 }
@@ -9467,7 +9776,7 @@ function updateUiHint() {
   }
   if (layoutMode) {
     uiHint.textContent =
-      "Layout mode: Drag to adjust positions. \nHold Shift to lock moves to 1 direction.\nHold L and click to add custom text.\nClick Space to adjust per-axis spacing.\nDouble-click a node to change its shape.\nDouble-click an axis legend to adjust angle.\n(click to hide)";
+      "Layout mode: Drag to adjust positions. \nOption-click to reset adjustments\nHold Shift to lock moves to 1 direction.\nHold L and click to add custom text.\nClick Space to adjust per-axis spacing.\nDouble-click a node to change its shape.\nDouble-click an axis legend to adjust angle.\nDouble-click a connection to show ratio\n(click to hide)";
     return;
   }
 
@@ -11368,6 +11677,9 @@ function getPresetState() {
           rotX: view.rotX,
           rotY: view.rotY,
         };
+  const lineLabelOverridesState = Array.from(lineLabelOverrides.entries()).map(
+    ([key, value]) => [key, Boolean(value)]
+  );
   return {
     v: 1,
     active,
@@ -11383,6 +11695,7 @@ function getPresetState() {
     axes: showAxes,
     grid: showGrid,
     lineLabels: showLineLabels,
+    lineLabelOverrides: lineLabelOverridesState,
     circles: showCircles,
     keyMappings: showKeyMappings,
     ratios: [
@@ -11439,6 +11752,7 @@ function getPresetState() {
         position: entry.position ? { ...entry.position } : null,
       })),
       positionOffsets: serializeLayoutPositionOffsets(),
+      customNodePositions: serializeLayoutCustomNodePositions(),
       labelOffsets: serializeLayoutLabelOffsets(),
       keyMappingOffsets: serializeLayoutKeyMappingOffsets(),
       axisOffsets: layoutAxisOffsets,
@@ -11472,6 +11786,7 @@ function getPresetState() {
     featureMode,
     spellingMode,
     showHz,
+    showCentsDeviation,
     showCentsSign,
     hejiEnabled,
     enharmonicsEnabled,
@@ -11610,6 +11925,8 @@ function applyPresetState(state) {
     return;
   }
   pendingLayoutSpacing = null;
+  pendingLayoutCustomPositions = null;
+  lineLabelOverrides.clear();
   if (typeof state.axes === "boolean") {
     showAxes = state.axes;
     if (navAxesToggle) {
@@ -11639,16 +11956,34 @@ function applyPresetState(state) {
       layoutLineLabelsToggle.checked = showLineLabels;
     }
   }
+  if (Array.isArray(state.lineLabelOverrides)) {
+    state.lineLabelOverrides.forEach((entry) => {
+      if (!Array.isArray(entry) || entry.length < 2) {
+        return;
+      }
+      const key = String(entry[0] || "");
+      if (!key) {
+        return;
+      }
+      lineLabelOverrides.set(key, Boolean(entry[1]));
+    });
+  }
   if (typeof state.circles === "boolean") {
     showCircles = state.circles;
     if (navCirclesToggle) {
       navCirclesToggle.checked = showCircles;
+    }
+    if (layoutCirclesToggle) {
+      layoutCirclesToggle.checked = showCircles;
     }
   }
   if (typeof state.keyMappings === "boolean") {
     showKeyMappings = state.keyMappings;
     if (navKeyMappingsToggle) {
       navKeyMappingsToggle.checked = showKeyMappings;
+    }
+    if (layoutKeyMappingsToggle) {
+      layoutKeyMappingsToggle.checked = showKeyMappings;
     }
   }
   const viewState = state.view && typeof state.view === "object" ? state.view : null;
@@ -11828,6 +12163,9 @@ function applyPresetState(state) {
       : null;
     pendingLayoutPositionOffsets = Array.isArray(layoutState.positionOffsets)
       ? layoutState.positionOffsets
+      : null;
+    pendingLayoutCustomPositions = Array.isArray(layoutState.customNodePositions)
+      ? layoutState.customNodePositions
       : null;
     if (typeof layoutState.title === "string") {
       layoutTitle = layoutState.title;
@@ -12223,6 +12561,26 @@ function applyPresetState(state) {
     if (showHzToggle) {
       showHzToggle.checked = showHz;
     }
+    if (layoutShowHzToggle) {
+      layoutShowHzToggle.checked = showHz;
+    }
+  }
+  if (typeof state.showCentsDeviation === "boolean") {
+    showCentsDeviation = state.showCentsDeviation;
+    if (showCentsDeviationToggle) {
+      showCentsDeviationToggle.checked = showCentsDeviation;
+    }
+    if (layoutShowCentsDeviationToggle) {
+      layoutShowCentsDeviationToggle.checked = showCentsDeviation;
+    }
+  } else {
+    showCentsDeviation = true;
+    if (showCentsDeviationToggle) {
+      showCentsDeviationToggle.checked = showCentsDeviation;
+    }
+    if (layoutShowCentsDeviationToggle) {
+      layoutShowCentsDeviationToggle.checked = showCentsDeviation;
+    }
   }
   if (typeof state.showCentsSign === "boolean") {
     showCentsSign = state.showCentsSign;
@@ -12235,11 +12593,17 @@ function applyPresetState(state) {
     if (hejiEnabledToggle) {
       hejiEnabledToggle.checked = hejiEnabled;
     }
+    if (layoutHejiEnabledToggle) {
+      layoutHejiEnabledToggle.checked = hejiEnabled;
+    }
   }
   if (typeof state.enharmonicsEnabled === "boolean") {
     enharmonicsEnabled = state.enharmonicsEnabled;
     if (enharmonicsEnabledToggle) {
       enharmonicsEnabledToggle.checked = enharmonicsEnabled;
+    }
+    if (layoutEnharmonicsEnabledToggle) {
+      layoutEnharmonicsEnabledToggle.checked = enharmonicsEnabled;
     }
   }
   if (Number.isFinite(state.centsPrecision)) {
@@ -12269,6 +12633,7 @@ function applyPresetState(state) {
   refreshPatternFromActiveNodes();
   triangleDiagonals.clear();
   triangleLabels.clear();
+  lineLabelOverrides.clear();
   if (presetTriangles) {
     presetTriangles.forEach((entry) => {
       if (!entry || typeof entry !== "object") {
@@ -12369,6 +12734,11 @@ function applyPresetState(state) {
   if (pendingLayoutPositionOffsets) {
     applyLayoutPositionOffsets(pendingLayoutPositionOffsets);
     pendingLayoutPositionOffsets = null;
+    draw();
+  }
+  if (pendingLayoutCustomPositions) {
+    applyLayoutCustomNodePositions(pendingLayoutCustomPositions);
+    pendingLayoutCustomPositions = null;
     draw();
   }
   draw();
@@ -12757,13 +13127,6 @@ function formatBytes(bytes) {
     return `${kb.toFixed(1)} KB`;
   }
   return `${(kb / 1024).toFixed(2)} MB`;
-}
-
-function setExportCheckStatus(message) {
-  if (!exportCheckStatus) {
-    return;
-  }
-  exportCheckStatus.textContent = message;
 }
 
 function getExportMetadataLabel() {
@@ -13333,7 +13696,8 @@ async function buildLayoutSvgString(
       y: end.y - uy * endRadius - top,
     };
     const lineLen = Math.max(0, dist - startRadius - endRadius);
-    const label = showLineLabels ? getEdgeLabelText(a, b) : null;
+    const labelText = getEdgeLabelText(a, b);
+    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
     const pushLine = (from, to) => {
       parts.push(
         `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" ${svgStroke(
@@ -13400,7 +13764,7 @@ async function buildLayoutSvgString(
     }
   }
 
-  const customEdgeInset = 1;
+  const customEdgeOutset = 1;
   for (const customNode of customNodes) {
     const source = nodeById.get(customNode.sourceNodeId);
     if (!source) {
@@ -13418,8 +13782,12 @@ async function buildLayoutSvgString(
     }
     const ux = dx / dist;
     const uy = dy / dist;
-    const startRadius = Math.max(0, getNodeEdgeRadius(source, ux, uy, radiusA) - customEdgeInset);
-    const endRadius = Math.max(0, getNodeEdgeRadius(customNode, ux, uy, radiusB) - customEdgeInset);
+    const startRadius = Math.max(0, getNodeEdgeRadius(source, ux, uy, radiusA) + customEdgeOutset);
+    const customEdgeInset = Math.max(0, Math.round(radiusB * 0.03));
+    const endRadius = Math.max(
+      0,
+      getNodeEdgeRadius(customNode, ux, uy, radiusB) + customEdgeOutset - customEdgeInset
+    );
     const edgeStart = {
       x: start.x + ux * startRadius - left,
       y: start.y + uy * startRadius - top,
@@ -13636,7 +14004,7 @@ async function buildLayoutSvgString(
       if (hejiEnabled && nodeHasHighPrime(node)) {
         const displayInfo = getDisplayNoteInfo(node);
         const base = getHejiBaseAndDefaults(displayInfo.pitchClass);
-        const centsText = formatCents(displayInfo.cents);
+        const centsText = showCentsDeviation ? formatCents(displayInfo.cents) : "";
         const suffixParts = centsText
           ? [
               ...base.suffixParts,
@@ -13702,21 +14070,23 @@ async function buildLayoutSvgString(
           color: themeColors.textSecondary,
         })
       );
-      parts.push(
-        await buildSvgTextWithSmallCent({
-          text: centsLabel,
-          x: ratioX,
-          y: ratioY + detailSize + 4 + svgNoteBaselineOffset,
-          font: layoutNoteFont,
-          size: detailSize,
-          fontWeight: layoutNoteFontWeight,
-          align: "left",
-          baseline: "alphabetic",
-          hejiAccidentals: hejiEnabled,
-          hejiYOffset: svgDetailHejiYOffset,
-          color: themeColors.textSecondary,
-        })
-      );
+      if (centsLabel) {
+        parts.push(
+          await buildSvgTextWithSmallCent({
+            text: centsLabel,
+            x: ratioX,
+            y: ratioY + detailSize + 4 + svgNoteBaselineOffset,
+            font: layoutNoteFont,
+            size: detailSize,
+            fontWeight: layoutNoteFontWeight,
+            align: "left",
+            baseline: "alphabetic",
+            hejiAccidentals: hejiEnabled,
+            hejiYOffset: svgDetailHejiYOffset,
+            color: themeColors.textSecondary,
+          })
+        );
+      }
     } else {
       const maxWidth = radius * 1.6;
       const layout = computeRatioLabelLayout(
@@ -13804,7 +14174,7 @@ async function buildLayoutSvgString(
         requireHejiDetail: true,
         baseTextForHeji: displayInfo.pitchClass,
       });
-      const hasParen = centsLabel.includes("(");
+      const hasParen = centsLabel && centsLabel.includes("(");
       const restGapScale =
         hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
       const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
@@ -13815,7 +14185,7 @@ async function buildLayoutSvgString(
           y: labelY + svgNoteBaselineOffset,
           baseText: annotation.baseText,
           suffixParts: annotation.suffixParts,
-          restText: ` ${centsLabel}`,
+          restText: hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "",
           font: layoutNoteFont,
           size: detailSize,
           align: "left",
@@ -13827,6 +14197,23 @@ async function buildLayoutSvgString(
           color: themeColors.textSecondary,
         })
       );
+      if (hejiEnabled && centsLabel) {
+        parts.push(
+          await buildSvgTextWithSmallCent({
+            text: centsLabel,
+            x: labelX,
+            y: labelY + detailSize + 4 + svgNoteBaselineOffset,
+            font: layoutNoteFont,
+            size: detailSize,
+            fontWeight: layoutNoteFontWeight,
+            align: "left",
+            baseline: "alphabetic",
+            hejiAccidentals: hejiEnabled,
+            hejiYOffset: svgDetailHejiYOffset,
+            color: themeColors.textSecondary,
+          })
+        );
+      }
     }
   }
 
@@ -13835,65 +14222,6 @@ async function buildLayoutSvgString(
   return parts.join("\n");
 }
 
-async function runExportSelfCheck() {
-  if (!exportCheckStatus) {
-    return;
-  }
-  if (!layoutMode) {
-    setExportCheckStatus("Enable Page Layout mode to check exports.");
-    return;
-  }
-  setExportCheckStatus("Checking export fonts...");
-  const hejiFontUrl = getHejiFontUrl();
-  const hejiFontDataUrl = await buildFontDataUrl(hejiFontUrl, "font/otf");
-  const exportFontCss = await getExportFontCss(hejiFontDataUrl || hejiFontUrl);
-  const fontAnalysis = analyzeExportFontCss(exportFontCss);
-  const svgDetailHejiYOffset = await getSvgHejiYOffset(
-    layoutNoteTextSize,
-    layoutNoteFont,
-    layoutNoteFontWeight
-  );
-  const svgLabelHejiYOffset = await getSvgHejiYOffset(
-    layoutRatioTextSize,
-    layoutRatioFont,
-    layoutRatioFontWeight
-  );
-  const svgNoteBaselineOffset = getSvgTopBaselineOffset(
-    layoutNoteTextSize,
-    layoutNoteFont,
-    layoutNoteFontWeight
-  );
-  const svg = await buildLayoutSvgString(
-    hejiFontDataUrl || hejiFontUrl,
-    svgDetailHejiYOffset,
-    exportFontCss,
-    svgNoteBaselineOffset,
-    svgLabelHejiYOffset
-  );
-  const byteSize = new TextEncoder().encode(svg).length;
-  const fonts = [
-    layoutTitleFont,
-    layoutCreatorFont,
-    layoutRatioFont,
-    layoutNoteFont,
-    layoutTriangleLabelFont,
-    layoutCustomLabelFont,
-    layoutKeyMappingFont,
-    layoutAxisLegendFont,
-    "HEJI2Text",
-  ].filter(Boolean);
-  const uniqueFonts = Array.from(new Set(fonts));
-  const fontSummary = uniqueFonts.join(", ");
-  const embedSummary = fontAnalysis.hasImport
-    ? "Google fonts: external import"
-    : `Google fonts: embedded (${fontAnalysis.embeddedFonts})`;
-  const hejiSummary = hejiFontDataUrl
-    ? "HEJI: embedded"
-    : "HEJI: external";
-  setExportCheckStatus(
-    `SVG size ${formatBytes(byteSize)} · ${embedSummary} · ${hejiSummary} · Fonts: ${fontSummary}`
-  );
-}
 
 async function exportLayoutSvg() {
   if (!layoutMode) {
@@ -14221,6 +14549,7 @@ onFundamentalNoteChange();
 initLayoutFonts();
 setLayoutPanelCollapsed(false);
 setViewsCollapsed(false);
+setLayoutShowCollapsed(true);
 if (layoutNodeSizeInput) {
   layoutNodeSizeInput.value = String(layoutNodeSize);
   updateLayoutNodeSizeReadout();
@@ -14339,17 +14668,35 @@ syncSpellingModeControls();
 if (showHzToggle) {
   showHzToggle.checked = showHz;
 }
+if (layoutShowHzToggle) {
+  layoutShowHzToggle.checked = showHz;
+}
+if (showCentsDeviationToggle) {
+  showCentsDeviationToggle.checked = showCentsDeviation;
+}
+if (layoutShowCentsDeviationToggle) {
+  layoutShowCentsDeviationToggle.checked = showCentsDeviation;
+}
 if (showCentsSignToggle) {
   showCentsSignToggle.checked = showCentsSign;
 }
 if (hejiEnabledToggle) {
   hejiEnabledToggle.checked = hejiEnabled;
 }
+if (layoutHejiEnabledToggle) {
+  layoutHejiEnabledToggle.checked = hejiEnabled;
+}
 if (enharmonicsEnabledToggle) {
   enharmonicsEnabledToggle.checked = enharmonicsEnabled;
 }
+if (layoutEnharmonicsEnabledToggle) {
+  layoutEnharmonicsEnabledToggle.checked = enharmonicsEnabled;
+}
 if (navCirclesToggle) {
   navCirclesToggle.checked = showCircles;
+}
+if (layoutCirclesToggle) {
+  layoutCirclesToggle.checked = showCircles;
 }
 syncCentsPrecisionControls();
 syncLayoutKeyMappingControls();
@@ -14440,6 +14787,19 @@ if (navGridToggle) {
 if (navCirclesToggle) {
   navCirclesToggle.addEventListener("change", () => {
     showCircles = navCirclesToggle.checked;
+    if (layoutCirclesToggle) {
+      layoutCirclesToggle.checked = showCircles;
+    }
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutCirclesToggle) {
+  layoutCirclesToggle.addEventListener("change", () => {
+    showCircles = layoutCirclesToggle.checked;
+    if (navCirclesToggle) {
+      navCirclesToggle.checked = showCircles;
+    }
     draw();
     schedulePresetUrlUpdate();
   });
@@ -14468,6 +14828,20 @@ if (navKeyMappingsToggle) {
   navKeyMappingsToggle.checked = showKeyMappings;
   navKeyMappingsToggle.addEventListener("change", () => {
     showKeyMappings = navKeyMappingsToggle.checked;
+    if (layoutKeyMappingsToggle) {
+      layoutKeyMappingsToggle.checked = showKeyMappings;
+    }
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutKeyMappingsToggle) {
+  layoutKeyMappingsToggle.checked = showKeyMappings;
+  layoutKeyMappingsToggle.addEventListener("change", () => {
+    showKeyMappings = layoutKeyMappingsToggle.checked;
+    if (navKeyMappingsToggle) {
+      navKeyMappingsToggle.checked = showKeyMappings;
+    }
     draw();
     schedulePresetUrlUpdate();
   });
@@ -14482,6 +14856,12 @@ if (nav3dNavigationToggle) {
   nav3dNavigationToggle.addEventListener("click", () => {
     const isCollapsed = nav3dNavigationToggle.classList.contains("is-collapsed");
     setNavigationCollapsed(!isCollapsed);
+  });
+}
+if (layoutShowToggle) {
+  layoutShowToggle.addEventListener("click", () => {
+    const isCollapsed = layoutShowToggle.classList.contains("is-collapsed");
+    setLayoutShowCollapsed(!isCollapsed);
   });
 }
 if (nav3dButtons && nav3dButtons.length) {
@@ -14604,6 +14984,42 @@ function applyFundamentalSpelling(nextSpelling) {
 if (showHzToggle) {
   showHzToggle.addEventListener("change", () => {
     showHz = showHzToggle.checked;
+    if (layoutShowHzToggle) {
+      layoutShowHzToggle.checked = showHz;
+    }
+    invalidateLabelCache();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutShowHzToggle) {
+  layoutShowHzToggle.addEventListener("change", () => {
+    showHz = layoutShowHzToggle.checked;
+    if (showHzToggle) {
+      showHzToggle.checked = showHz;
+    }
+    invalidateLabelCache();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (showCentsDeviationToggle) {
+  showCentsDeviationToggle.addEventListener("change", () => {
+    showCentsDeviation = showCentsDeviationToggle.checked;
+    if (layoutShowCentsDeviationToggle) {
+      layoutShowCentsDeviationToggle.checked = showCentsDeviation;
+    }
+    invalidateLabelCache();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutShowCentsDeviationToggle) {
+  layoutShowCentsDeviationToggle.addEventListener("change", () => {
+    showCentsDeviation = layoutShowCentsDeviationToggle.checked;
+    if (showCentsDeviationToggle) {
+      showCentsDeviationToggle.checked = showCentsDeviation;
+    }
     invalidateLabelCache();
     draw();
     schedulePresetUrlUpdate();
@@ -14620,6 +15036,21 @@ if (showCentsSignToggle) {
 if (hejiEnabledToggle) {
   hejiEnabledToggle.addEventListener("change", () => {
     hejiEnabled = hejiEnabledToggle.checked;
+    if (layoutHejiEnabledToggle) {
+      layoutHejiEnabledToggle.checked = hejiEnabled;
+    }
+    refreshCustomNodes();
+    invalidateLabelCache();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutHejiEnabledToggle) {
+  layoutHejiEnabledToggle.addEventListener("change", () => {
+    hejiEnabled = layoutHejiEnabledToggle.checked;
+    if (hejiEnabledToggle) {
+      hejiEnabledToggle.checked = hejiEnabled;
+    }
     refreshCustomNodes();
     invalidateLabelCache();
     draw();
@@ -14629,6 +15060,21 @@ if (hejiEnabledToggle) {
 if (enharmonicsEnabledToggle) {
   enharmonicsEnabledToggle.addEventListener("change", () => {
     enharmonicsEnabled = enharmonicsEnabledToggle.checked;
+    if (layoutEnharmonicsEnabledToggle) {
+      layoutEnharmonicsEnabledToggle.checked = enharmonicsEnabled;
+    }
+    refreshCustomNodes();
+    invalidateLabelCache();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutEnharmonicsEnabledToggle) {
+  layoutEnharmonicsEnabledToggle.addEventListener("change", () => {
+    enharmonicsEnabled = layoutEnharmonicsEnabledToggle.checked;
+    if (enharmonicsEnabledToggle) {
+      enharmonicsEnabledToggle.checked = enharmonicsEnabled;
+    }
     refreshCustomNodes();
     invalidateLabelCache();
     draw();
@@ -15378,9 +15824,6 @@ if (exportSvgButton) {
 if (exportPdfButton) {
   exportPdfButton.addEventListener("click", exportLayoutPdf);
 }
-if (exportCheckButton) {
-  exportCheckButton.addEventListener("click", runExportSelfCheck);
-}
 if (midiEnable) {
   midiEnable.addEventListener("change", async () => {
     midiEnabled = midiEnable.checked;
@@ -16024,6 +16467,15 @@ function setNavigationCollapsed(collapsed) {
   nav3dNavigationToggle.classList.toggle("is-collapsed", collapsed);
   nav3dNavigationToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
   nav3dNavigationBody.hidden = collapsed;
+}
+
+function setLayoutShowCollapsed(collapsed) {
+  if (!layoutShowToggle || !layoutShowBody) {
+    return;
+  }
+  layoutShowToggle.classList.toggle("is-collapsed", collapsed);
+  layoutShowToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  layoutShowBody.hidden = collapsed;
 }
 
 function setLayoutPanelCollapsed(collapsed) {

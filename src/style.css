@@ -266,9 +266,9 @@ body.theme-dark {
 
 .banner-message {
   position: fixed;
-  top: 110px;
+  top: 10%;
   left: 50%;
-  transform: translate(-50%, -45%);
+  transform: translate(-50%, 0);
   z-index: 10;
   width: min(70vw, 360px);
   max-width: 80vw;

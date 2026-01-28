@@ -711,10 +711,10 @@ let showAxes = true;
 let showGrid = true;
 let gridDepth = 1;
 let gridCenterZ = 0;
-let zModeActive = false;
-let zModeAnchor = null;
-let wasZModeActive = false;
+const axisStack = [];
 let zKeyHeld = false;
+let xKeyHeld = false;
+let yKeyHeld = false;
 let isAddMode = false;
 let shiftHeld = false;
 let capsLockOn = false;
@@ -730,6 +730,144 @@ function syncCapsLockState(event) {
   capsLockOn = nextState;
   updateAddModeFromShift();
   draw();
+}
+const AXIS_DIM_FACTOR = 0.35;
+
+function getGridCoord(node, coord) {
+  if (!node) {
+    return 0;
+  }
+  const value = node[`grid${coord.toUpperCase()}`];
+  if (Number.isFinite(value)) {
+    return value;
+  }
+  if (coord === "z") {
+    return gridCenterZ;
+  }
+  return 0;
+}
+
+function getActiveAxisEntry() {
+  return axisStack.length ? axisStack[axisStack.length - 1] : null;
+}
+
+function axisModeActive() {
+  return axisStack.length > 0;
+}
+
+function createAxisEntry(axis, node) {
+  const anchor = {
+    x: getGridCoord(node, "x"),
+    y: getGridCoord(node, "y"),
+    z: getGridCoord(node, "z"),
+  };
+  const coordinate = node ? getNodeDisplayCoordinate(node) : gridCoordToWorld(anchor);
+  return { axis, anchor, nodeId: node && node.id ? node.id : null, coordinate };
+}
+
+function clearAxisStack() {
+  if (!axisStack.length) {
+    return;
+  }
+  axisStack.length = 0;
+}
+
+function popAxisStack() {
+  if (!axisStack.length) {
+    return;
+  }
+  axisStack.pop();
+}
+
+function pushAxisStack(axis, node) {
+  axisStack.push(createAxisEntry(axis, node));
+}
+
+function gridCoordToWorld(coord) {
+  const centerX = Math.floor(GRID_COLS / 2);
+  const centerY = Math.floor(GRID_ROWS / 2);
+  const centerZ = gridCenterZ;
+  return {
+    x: (coord.x - centerX) * GRID_SPACING,
+    y: (coord.y - centerY) * GRID_SPACING,
+    z: (coord.z - centerZ) * GRID_SPACING,
+  };
+}
+
+function getAxisAnchorWorld(entry) {
+  if (!entry) {
+    return null;
+  }
+  return entry.coordinate || gridCoordToWorld(entry.anchor);
+}
+
+function isNodeOnAxisEntry(node, entry) {
+  if (!entry) {
+    return true;
+  }
+  const gridX = getGridCoord(node, "x");
+  const gridY = getGridCoord(node, "y");
+  const gridZ = getGridCoord(node, "z");
+  if (entry.axis === "z") {
+    return gridX === entry.anchor.x && gridY === entry.anchor.y;
+  }
+  if (entry.axis === "x") {
+    return gridY === entry.anchor.y && gridZ === entry.anchor.z;
+  }
+  return gridX === entry.anchor.x && gridZ === entry.anchor.z;
+}
+
+function isEdgeOnAxisEntry(a, b, entry) {
+  if (!entry) {
+    return true;
+  }
+  return isNodeOnAxisEntry(a, entry) && isNodeOnAxisEntry(b, entry);
+}
+
+function getRequestedAxisKey() {
+  if (zKeyHeld) {
+    return "z";
+  }
+  if (xKeyHeld) {
+    return "x";
+  }
+  if (yKeyHeld) {
+    return "y";
+  }
+  return null;
+}
+
+function activateAxisFromHit(axis, node) {
+  if (!axis || !node) {
+    return false;
+  }
+  const activeAxis = getActiveAxisEntry();
+  if (activeAxis && !isNodeOnAxisEntry(node, activeAxis)) {
+    return false;
+  }
+  const entry = createAxisEntry(axis, node);
+  if (activeAxis && activeAxis.axis === axis) {
+    axisStack[axisStack.length - 1] = entry;
+  } else {
+    pushAxisStack(axis, node);
+  }
+  updateAddModeFromShift();
+  updateUiHint();
+  schedulePresetUrlUpdate();
+  draw();
+  return true;
+}
+
+function deactivateAxisMode() {
+  if (!axisModeActive()) {
+    return false;
+  }
+  popAxisStack();
+  updateAddModeFromShift();
+  updateUiHint();
+  schedulePresetUrlUpdate();
+  draw();
+  return true;
 }
 let isomorphicKeyMap = null;
 let isomorphicLayout = null;
@@ -5829,7 +5967,7 @@ function drawTriangleHover(nodePosMap, disableScale = false) {
 
 }
 
-function getGuideRevealInfo(nodePosMap) {
+function getGuideRevealInfo(nodePosMap, axisEntry = null) {
   const empty = { guideNodes: new Map(), guideAnchorId: null };
   if (layoutMode) {
     return empty;
@@ -5841,15 +5979,18 @@ function getGuideRevealInfo(nodePosMap) {
   if (!pointer) {
     return empty;
   }
-  return getClusterGuideInfo(pointer, nodePosMap);
+  return getClusterGuideInfo(pointer, nodePosMap, axisEntry);
 }
 
-function getClusterGuideInfo(pointer, nodePosMap) {
+function getClusterGuideInfo(pointer, nodePosMap, axisEntry = null) {
   const guideNodes = new Map();
   let anchor = null;
   let anchorDist = Infinity;
   nodes.forEach((node) => {
     if (node.isCustom) {
+      return;
+    }
+    if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
       return;
     }
     const z = Number.isFinite(node.gridZ) ? node.gridZ : gridCenterZ;
@@ -5876,6 +6017,9 @@ function getClusterGuideInfo(pointer, nodePosMap) {
   const gridMap = new Map();
   nodes.forEach((node) => {
     if (node.isCustom) {
+      return;
+    }
+    if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
       return;
     }
     const z = Number.isFinite(node.gridZ) ? node.gridZ : gridCenterZ;
@@ -6125,37 +6269,43 @@ function findTriangleHit(screenPoint) {
       }
     }
   }
-  if (zModeActive && zModeAnchor) {
-    const fixedY = zModeAnchor.y;
-    const fixedX = zModeAnchor.x;
-    for (let z = 0; z < gridDepth - 1; z += 1) {
-      for (let x = 0; x < GRID_COLS - 1; x += 1) {
-        evaluateCell(
-          { plane: "xz", x, y: fixedY, z },
-          allMap.get(`${x},${fixedY},${z}`),
-          allMap.get(`${x + 1},${fixedY},${z}`),
-          allMap.get(`${x},${fixedY},${z + 1}`),
-          allMap.get(`${x + 1},${fixedY},${z + 1}`),
-          activeMap.get(`${x},${fixedY},${z}`),
-          activeMap.get(`${x + 1},${fixedY},${z}`),
-          activeMap.get(`${x},${fixedY},${z + 1}`),
-          activeMap.get(`${x + 1},${fixedY},${z + 1}`)
-        );
+  const axisEntry = getActiveAxisEntry();
+  if (axisEntry && gridDepth > 1) {
+    const { axis, anchor } = axisEntry;
+    const fixedX = anchor.x;
+    const fixedY = anchor.y;
+    if (axis === "z" || axis === "x") {
+      for (let z = 0; z < gridDepth - 1; z += 1) {
+        for (let x = 0; x < GRID_COLS - 1; x += 1) {
+          evaluateCell(
+            { plane: "xz", x, y: fixedY, z },
+            allMap.get(`${x},${fixedY},${z}`),
+            allMap.get(`${x + 1},${fixedY},${z}`),
+            allMap.get(`${x},${fixedY},${z + 1}`),
+            allMap.get(`${x + 1},${fixedY},${z + 1}`),
+            activeMap.get(`${x},${fixedY},${z}`),
+            activeMap.get(`${x + 1},${fixedY},${z}`),
+            activeMap.get(`${x},${fixedY},${z + 1}`),
+            activeMap.get(`${x + 1},${fixedY},${z + 1}`)
+          );
+        }
       }
     }
-    for (let z = 0; z < gridDepth - 1; z += 1) {
-      for (let y = 0; y < GRID_ROWS - 1; y += 1) {
-        evaluateCell(
-          { plane: "yz", x: fixedX, y, z },
-          allMap.get(`${fixedX},${y},${z}`),
-          allMap.get(`${fixedX},${y + 1},${z}`),
-          allMap.get(`${fixedX},${y},${z + 1}`),
-          allMap.get(`${fixedX},${y + 1},${z + 1}`),
-          activeMap.get(`${fixedX},${y},${z}`),
-          activeMap.get(`${fixedX},${y + 1},${z}`),
-          activeMap.get(`${fixedX},${y},${z + 1}`),
-          activeMap.get(`${fixedX},${y + 1},${z + 1}`)
-        );
+    if (axis === "z" || axis === "y") {
+      for (let z = 0; z < gridDepth - 1; z += 1) {
+        for (let y = 0; y < GRID_ROWS - 1; y += 1) {
+          evaluateCell(
+            { plane: "yz", x: fixedX, y, z },
+            allMap.get(`${fixedX},${y},${z}`),
+            allMap.get(`${fixedX},${y + 1},${z}`),
+            allMap.get(`${fixedX},${y},${z + 1}`),
+            allMap.get(`${fixedX},${y + 1},${z + 1}`),
+            activeMap.get(`${fixedX},${y},${z}`),
+            activeMap.get(`${fixedX},${y + 1},${z}`),
+            activeMap.get(`${fixedX},${y},${z + 1}`),
+            activeMap.get(`${fixedX},${y + 1},${z + 1}`)
+          );
+        }
       }
     }
   }
@@ -6249,6 +6399,7 @@ function drawCanvasEdgeSegment({
   labelWeight,
   labelSize,
   forceLabel = false,
+  alpha = 1,
 }) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -6256,6 +6407,8 @@ function drawCanvasEdgeSegment({
   if (dist === 0) {
     return;
   }
+  ctx.save();
+  ctx.globalAlpha = alpha;
   const ux = dx / dist;
   const uy = dy / dist;
   const lineStart = {
@@ -6326,6 +6479,7 @@ function drawCanvasEdgeSegment({
     ctx.lineTo(lineEnd.x, lineEnd.y);
     ctx.stroke();
   }
+  ctx.restore();
 }
 
 function computeEdgeLabelLayoutFromWidth({ baseSize, baseWidth, lineLen, minSize = 4 }) {
@@ -6399,10 +6553,11 @@ function getNodeEdgeRadius(node, ux, uy, radius) {
   return getShapeEdgeRadius(shape, ux, uy, radius);
 }
 
-function draw3DEdges(nodePosMap) {
+function draw3DEdges(nodePosMap, axisEntry = null) {
   const labelFont = layoutRatioFont;
   const labelWeight = layoutRatioFontWeight;
   const labelSize = Math.max(10, Math.round(layoutRatioTextSize * 0.6));
+  const axisActive = Boolean(axisEntry);
   edges.forEach(([a, b]) => {
     if (!a.active || !b.active) {
       return;
@@ -6435,6 +6590,8 @@ function draw3DEdges(nodePosMap) {
     }
     const labelText = getEdgeLabelText(a, b);
     const label = shouldShowEdgeLabel(a, b) ? labelText : null;
+    const edgeAlpha =
+      axisActive && !isEdgeOnAxisEntry(a, b, axisEntry) ? AXIS_DIM_FACTOR : 1;
     drawCanvasEdgeSegment({
       start,
       end,
@@ -6445,6 +6602,7 @@ function draw3DEdges(nodePosMap) {
       labelFont,
       labelWeight,
       labelSize,
+      alpha: edgeAlpha,
     });
   });
 }
@@ -6826,17 +6984,21 @@ function draw() {
     const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
     nodePosMap.set(node.id, { pos, radius: baseRadius * (pos.scale || 1) });
   });
+  const axisEntry = getActiveAxisEntry();
+  const axisModeActive = Boolean(axisEntry);
+  const shouldDrawAxisLine =
+    (is3DMode && (showAxes || (axisModeActive && isAddMode))) || (!is3DMode && axisModeActive);
 
   if (is3DMode && showGrid) {
     drawGrid();
   }
 
-  if (is3DMode && (showAxes || (zModeActive && isAddMode))) {
-    drawAxes();
+  if (shouldDrawAxisLine) {
+    drawAxes(axisEntry);
   }
 
   if (is3DMode) {
-    draw3DEdges(nodePosMap);
+    draw3DEdges(nodePosMap, axisEntry);
   } else {
     const labelFont = layoutMode ? layoutAxisLegendFont : "Noto Serif";
     const labelWeight = layoutMode ? layoutAxisLegendFontWeight : 400;
@@ -6905,6 +7067,8 @@ function drawCustomConnections(nodePosMap) {
     : is3DMode
     ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
     : 14;
+  const axisEntry = getActiveAxisEntry();
+  const axisActive = Boolean(axisEntry);
   customNodes.forEach((node) => {
     if (!node.active) {
       return;
@@ -6937,6 +7101,8 @@ function drawCustomConnections(nodePosMap) {
       0,
       getNodeEdgeRadius(node, ux, uy, endEntry.radius) + edgeOutset - customEdgeInset
     );
+    const connectionAlpha =
+      axisActive && !isEdgeOnAxisEntry(source, node, axisEntry) ? AXIS_DIM_FACTOR : 1;
     drawCanvasEdgeSegment({
       start,
       end,
@@ -6948,11 +7114,12 @@ function drawCustomConnections(nodePosMap) {
       labelWeight,
       labelSize,
       forceLabel: true,
+      alpha: connectionAlpha,
     });
   });
   }
   drawCustomConnections(nodePosMap);
-  const { guideNodes } = getGuideRevealInfo(nodePosMap);
+  const { guideNodes } = getGuideRevealInfo(nodePosMap, axisEntry);
   drawGuideEdges(nodePosMap, guideNodes);
   drawTriangleDiagonals(nodePosMap, disableScale);
   drawTriangleLabels(nodePosMap, disableScale);
@@ -7000,11 +7167,8 @@ function drawCustomConnections(nodePosMap) {
     if (node.isCustom && !node.active) {
       alpha = 0.25;
     }
-    if (zModeActive && zModeAnchor) {
-      const inZLine = node.gridX === zModeAnchor.x && node.gridY === zModeAnchor.y;
-      if (!inZLine) {
-        alpha *= 0.3;
-      }
+    if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
+      alpha *= AXIS_DIM_FACTOR;
     }
 
     if (!isVisible) {
@@ -8743,19 +8907,17 @@ function onPointerUp(event) {
         }
         return;
       }
-      if (zKeyHeld) {
-        if (!is3DMode) {
+      const requestedAxis = getRequestedAxisKey();
+      if (requestedAxis) {
+        if (requestedAxis === "z" && !is3DMode) {
           if (mode3dCheckbox) {
             mode3dCheckbox.checked = true;
           }
           set3DMode(true);
         }
-        zModeActive = true;
-        zModeAnchor = { x: hit.gridX, y: hit.gridY };
-        updateAddModeFromShift();
-        draw();
-        schedulePresetUrlUpdate();
-        return;
+        if (activateAxisFromHit(requestedAxis, hit)) {
+          return;
+        }
       }
       if (is3DMode && !isAddMode && !hit.active && !hit.isCenter && !hit.isCustom) {
         return;
@@ -8851,10 +9013,11 @@ function isInactiveNodeAvailable(node) {
   if (!is3DMode) {
     return (shiftHeld || capsLockOn) && (node.gridZ || 0) === gridCenterZ;
   }
-  const z = node.gridZ || 0;
-  if (zModeActive && zModeAnchor) {
-    return node.gridX === zModeAnchor.x && node.gridY === zModeAnchor.y;
+  const axisEntry = getActiveAxisEntry();
+  if (axisEntry) {
+    return isNodeOnAxisEntry(node, axisEntry);
   }
+  const z = getGridCoord(node, "z");
   return z === gridCenterZ;
 }
 
@@ -8863,9 +9026,13 @@ function hitTestScreen(screenPoint) {
   let best = null;
   let bestDistance = Number.POSITIVE_INFINITY;
   let bestDepth = Number.NEGATIVE_INFINITY;
+  const axisEntry = getActiveAxisEntry();
 
   nodes.forEach((node) => {
     if (layoutMode && !node.isCustom && !node.isCenter && !node.active) {
+      return;
+    }
+    if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
       return;
     }
     if (
@@ -9256,27 +9423,48 @@ function updateLfoDepth() {
   }
 }
 
-function drawAxes() {
+function drawAxes(axisEntry) {
   const axisLengthXY = GRID_SPACING * (GRID_COLS / 2);
   const axisLengthZ = GRID_SPACING * (gridDepth / 2);
   ctx.lineWidth = 1.5;
 
-  if (zModeActive && zModeAnchor) {
-    const centerX = Math.floor(GRID_COLS / 2);
-    const centerY = Math.floor(GRID_ROWS / 2);
-    const anchorPoint = {
-      x: (zModeAnchor.x - centerX) * GRID_SPACING,
-      y: (zModeAnchor.y - centerY) * GRID_SPACING,
-      z: 0,
-    };
-    const start = worldToScreen({ ...anchorPoint, z: -axisLengthZ });
-    const end = worldToScreen({ ...anchorPoint, z: axisLengthZ });
-    ctx.strokeStyle = AXIS_EDGE_COLORS.z;
-    ctx.beginPath();
-    ctx.moveTo(start.x, start.y);
-    ctx.lineTo(end.x, end.y);
-    ctx.stroke();
-    return;
+  if (axisEntry) {
+    const anchorWorld = getAxisAnchorWorld(axisEntry);
+    if (!anchorWorld) {
+      return;
+    }
+    let startScreen = null;
+    let endScreen = null;
+    if (axisEntry.axis === "z") {
+      startScreen = worldToScreen(
+        { x: anchorWorld.x, y: anchorWorld.y, z: anchorWorld.z - axisLengthZ }
+      );
+      endScreen = worldToScreen(
+        { x: anchorWorld.x, y: anchorWorld.y, z: anchorWorld.z + axisLengthZ }
+      );
+    } else if (axisEntry.axis === "x") {
+      startScreen = worldToScreen(
+        { x: anchorWorld.x - axisLengthXY, y: anchorWorld.y, z: anchorWorld.z }
+      );
+      endScreen = worldToScreen(
+        { x: anchorWorld.x + axisLengthXY, y: anchorWorld.y, z: anchorWorld.z }
+      );
+    } else if (axisEntry.axis === "y") {
+      startScreen = worldToScreen(
+        { x: anchorWorld.x, y: anchorWorld.y - axisLengthXY, z: anchorWorld.z }
+      );
+      endScreen = worldToScreen(
+        { x: anchorWorld.x, y: anchorWorld.y + axisLengthXY, z: anchorWorld.z }
+      );
+    }
+    if (startScreen && endScreen) {
+      ctx.strokeStyle = AXIS_EDGE_COLORS[axisEntry.axis] || AXIS_EDGE_COLORS.z;
+      ctx.beginPath();
+      ctx.moveTo(startScreen.x, startScreen.y);
+      ctx.lineTo(endScreen.x, endScreen.y);
+      ctx.stroke();
+      return;
+    }
   }
 
   const axes = [
@@ -9768,42 +9956,42 @@ function updateUiHint() {
     uiHintKey = nextKey;
     uiHintDismissed = false;
   }
-  if (!showHelpEnabled || uiHintDismissed || (zModeActive && zModeAnchor)) {
+  if (!showHelpEnabled || uiHintDismissed || axisModeActive()) {
     setUiHintVisibility(false);
     return;
   }
   setUiHintVisibility(true);
   if (layoutMode) {
     if (layoutAxisEdit) {
-      uiHint.textContent = "Editing axis legend. Press ESC to exit.\n(click to hide)";
+      uiHint.textContent = "Editing axis legend. Press ESC to exit.";
       return;
     }
     if (tHeld) {
       uiHint.textContent =
-        "Creating triangles (T)\nClick to add a diagonal, click again to label.\nClick line to rotate or remove.\n(click to hide)";
+        "Creating triangles (T)\nClick to add a diagonal, click again to label.\nClick line to rotate or remove.";
       return;
     }
   }
   if (spellingHintActive) {
     uiHint.textContent =
       spellingMode === "true"
-        ? "Diatonic spellings up to 3 sharps / flats, after which nearest enharmonic equivalents are used.\n(click to hide)"
-        : "Manual spelling: hold R and click on a node to cycle.\n(click to hide)";
+        ? "Diatonic spellings up to 3 sharps / flats, after which nearest enharmonic equivalents are used."
+        : "Manual spelling: hold R and click on a node to cycle.";
     return;
   }
   if (layoutMode) {
     uiHint.textContent =
-      "Layout mode: Drag to adjust positions. \nOption-click to reset adjustments\nHold Shift to lock moves to 1 direction.\nHold L and click to add custom text.\nClick Space to adjust per-axis spacing.\nDouble-click a node to change its shape.\nDouble-click an axis legend to adjust angle.\nDouble-click a connection to show ratio\n(click to hide)";
+      "Layout mode: Drag to adjust positions. \nOption-click to reset adjustments\nHold Shift to lock moves to 1 direction.\nHold L and click to add custom text.\nClick Space to adjust per-axis spacing.\nDouble-click a node to change its shape.\nDouble-click an axis legend to adjust angle.\nDouble-click a connection to show ratio";
     return;
   }
 
   if (!is3DMode) {
     uiHint.textContent =
-      "2D Mode\nShift-click to add a node. \nOption-click to remove. \nShift double-click & hold to start LFO.\nHold T to label triangles\nHold O and click a node to change playback octave.\nDrag to pan. Scroll to zoom.\n(click to hide)";
+      "2D Mode\nShift-click to add a node. \nOption-click to remove. \nShift double-click & hold to start LFO.\nHold T to label triangles\nHold O and click a node to change playback octave.\nDrag to pan. Scroll to zoom.";
     return;
   }
   uiHint.textContent =
-    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis\nShift double-click & hold for LFO\nHold T to label triangles\nHold O and click a node to change playback octave.\nDrag to rotate\nArrow keys to pan\nScroll to zoom\n(click to hide)";
+    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis\nShift double-click & hold for LFO\nHold T to label triangles\nHold O and click a node to change playback octave.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
 }
 
 function resetUiHintToDefault() {
@@ -10044,37 +10232,55 @@ function showKeyboardModeHelp(message) {
   }, 5000);
 }
 
+function formatAxisBannerText(entry) {
+  if (!entry) {
+    return "";
+  }
+  const centerX = Math.floor(GRID_COLS / 2);
+  const centerY = Math.floor(GRID_ROWS / 2);
+  const centerZ = gridCenterZ;
+  const label = entry.axis.toUpperCase();
+  let coordA = 0;
+  let coordB = 0;
+  switch (entry.axis) {
+    case "z":
+      coordA = entry.anchor.x - centerX;
+      coordB = centerY - entry.anchor.y;
+      break;
+    case "x":
+      coordA = centerY - entry.anchor.y;
+      coordB = entry.anchor.z - centerZ;
+      break;
+    case "y":
+      coordA = entry.anchor.x - centerX;
+      coordB = entry.anchor.z - centerZ;
+      break;
+    default:
+      coordA = entry.anchor.x - centerX;
+      coordB = centerY - entry.anchor.y;
+  }
+  return `Editing ${label} axis for node [${coordA},${coordB}]: press Escape to return`;
+}
+
 function updateBannerMessage() {
   if (!bannerMessage) {
     return;
   }
-  if (!zModeActive || !zModeAnchor) {
-    if (wasZModeActive) {
-      resetUiHintToDefault();
-      wasZModeActive = false;
-      updateUiHint();
-    }
+  const activeAxis = getActiveAxisEntry();
+  if (!activeAxis) {
     bannerMessage.hidden = true;
     bannerMessage.textContent = "";
     return;
   }
-  const centerX = Math.floor(GRID_COLS / 2);
-  const centerY = Math.floor(GRID_ROWS / 2);
-  const coordX = zModeAnchor.x - centerX;
-  const coordY = centerY - zModeAnchor.y;
-  bannerMessage.textContent = `Editing Z axis for node [${coordX},${coordY}]: press Escape to return`;
+  bannerMessage.textContent = formatAxisBannerText(activeAxis);
   bannerMessage.hidden = false;
-  if (uiHint) {
-    uiHint.hidden = true;
-  }
-  wasZModeActive = true;
 }
 
 function updateAddModeFromShift() {
   if (!is3DMode) {
     isAddMode = false;
   } else {
-    isAddMode = shiftHeld || capsLockOn || zModeActive;
+    isAddMode = shiftHeld || capsLockOn || axisModeActive();
   }
   if (navAddModeToggle) {
     navAddModeToggle.checked = isAddMode;
@@ -10808,6 +11014,7 @@ function setLayoutMode(enabled, { force = false } = {}) {
     };
   }
   layoutMode = enabled;
+  refreshThemeColors();
   if (layoutModeToggle) {
     layoutModeToggle.checked = enabled;
   }
@@ -10904,8 +11111,7 @@ function set3DMode(enabled, { preserveDepth = false } = {}) {
     ratioZSelect.hidden = false;
   }
   if (!enabled) {
-    zModeActive = false;
-    zModeAnchor = null;
+    clearAxisStack();
   }
   if (enabled && uiHint && showHelpEnabled && !uiHintDismissed) {
     setUiHintVisibility(true);
@@ -11222,9 +11428,8 @@ function ensureLfoLoop() {
   }
 }
 
-function refreshThemeColors() {
-  const styles = getComputedStyle(document.body);
-  themeColors = {
+function readThemeColorsFromStyles(styles) {
+  return {
     edge: styles.getPropertyValue("--edge").trim() || "rgba(0, 0, 0, 0.18)",
     nodeStroke: styles.getPropertyValue("--node-stroke").trim() || "rgba(0, 0, 0, 0.35)",
     nodeActive: styles.getPropertyValue("--node-active").trim() || "#c94b3d",
@@ -11237,11 +11442,23 @@ function refreshThemeColors() {
       styles.getPropertyValue("--page-shadow").trim() || "rgba(16, 19, 22, 0.18)",
     lfo: styles.getPropertyValue("--lfo").trim() || "#3b82f6",
     playFill: styles.getPropertyValue("--play-fill").trim() || "#f3d64d",
-    looperFill: styles.getPropertyValue("--looper-fill").trim() || "#f1c94a",
+    looperFill: styles.getPropertyValue("--looper-fill").trim() || "#f0bf3a",
     wheelLine: styles.getPropertyValue("--wheel-line").trim() || "rgba(16, 19, 22, 0.65)",
     wheelRing: styles.getPropertyValue("--wheel-ring").trim() || "rgba(16, 19, 22, 0.2)",
     wheelText: styles.getPropertyValue("--wheel-text").trim() || "#000000",
   };
+}
+
+const rootThemeStyles = getComputedStyle(document.documentElement);
+const layoutLightThemeColors = readThemeColorsFromStyles(rootThemeStyles);
+
+function refreshThemeColors() {
+  if (layoutMode && document.body.classList.contains("theme-dark")) {
+    themeColors = { ...layoutLightThemeColors };
+    return;
+  }
+  const styles = getComputedStyle(document.body);
+  themeColors = readThemeColorsFromStyles(styles);
 }
 
 function initLayoutFonts() {
@@ -12033,8 +12250,7 @@ function applyPresetState(state) {
     ratioZSelect.hidden = false;
   }
   if (!wants3D) {
-    zModeActive = false;
-    zModeAnchor = null;
+    clearAxisStack();
   }
   updateAddModeFromShift();
   updateUiHint();
@@ -15891,6 +16107,10 @@ if (fileToggle) {
 if (uiHint) {
   uiHint.addEventListener("click", () => {
     uiHintDismissed = true;
+    showHelpEnabled = false;
+    if (showHelpToggle) {
+      showHelpToggle.checked = false;
+    }
     setUiHintVisibility(false);
   });
 }
@@ -16352,6 +16572,12 @@ if (triangleLabelDialog) {
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = true;
   }
+  if (event.key.toLowerCase() === "x") {
+    xKeyHeld = true;
+  }
+  if (event.key.toLowerCase() === "y") {
+    yKeyHeld = true;
+  }
   if (event.key.toLowerCase() === "c") {
     cHeld = true;
   }
@@ -16383,10 +16609,11 @@ if (triangleLabelDialog) {
       draw();
       return;
     }
-    zModeActive = false;
-    zModeAnchor = null;
-    updateAddModeFromShift();
-    draw();
+    if (axisModeActive()) {
+      deactivateAxisMode();
+      return;
+    }
+    return;
   }
 });
 window.addEventListener("pointerdown", (event) => {
@@ -16467,6 +16694,12 @@ window.addEventListener("keyup", (event) => {
   }
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = false;
+  }
+  if (event.key.toLowerCase() === "x") {
+    xKeyHeld = false;
+  }
+  if (event.key.toLowerCase() === "y") {
+    yKeyHeld = false;
   }
   if (event.key.toLowerCase() === "c") {
     cHeld = false;

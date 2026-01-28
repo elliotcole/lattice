@@ -6303,10 +6303,14 @@ function drawCanvasEdgeSegment({
     ctx.lineTo(lineEnd.x, lineEnd.y);
     ctx.stroke();
     let angle = 0;
-    if (Math.abs(dx) > 1e-6) {
+    if (Math.abs(dx) > 1e-6 || Math.abs(dy) > 1e-6) {
       angle = Math.atan2(dy, dx);
-      if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
-        angle += Math.PI;
+      if (!shouldUseHorizontalText(angle)) {
+        if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+          angle += Math.PI;
+        }
+      } else {
+        angle = 0;
       }
     }
     ctx.save();
@@ -6606,13 +6610,17 @@ function getAxisLegendSettings() {
   };
 }
 
+const VERTICAL_TEXT_THRESHOLD = (15 * Math.PI) / 180;
+
+function shouldUseHorizontalText(angle) {
+  return Math.abs(Math.abs(angle) - Math.PI / 2) <= VERTICAL_TEXT_THRESHOLD;
+}
+
 function getAxisLegendAngle(dir, centerX = null, pageCenterX = null) {
-  if (Number.isFinite(centerX) && Number.isFinite(pageCenterX)) {
-    if (Math.abs(dir.x) < 1e-3) {
-      return centerX < pageCenterX ? Math.PI / 2 : -Math.PI / 2;
-    }
-  }
   let angle = Math.atan2(dir.y, dir.x);
+  if (shouldUseHorizontalText(angle)) {
+    return 0;
+  }
   if (angle > Math.PI / 2) {
     angle -= Math.PI;
   } else if (angle < -Math.PI / 2) {
@@ -13742,10 +13750,14 @@ async function buildLayoutSvgString(
         pushLine(edgeStart, gapStart);
         pushLine(gapEnd, edgeEnd);
         let angle = 0;
-        if (Math.abs(edgeEnd.x - edgeStart.x) > 1e-6) {
+        if (Math.abs(edgeEnd.x - edgeStart.x) > 1e-6 || Math.abs(edgeEnd.y - edgeStart.y) > 1e-6) {
           angle = Math.atan2(edgeEnd.y - edgeStart.y, edgeEnd.x - edgeStart.x);
-          if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
-            angle += Math.PI;
+          if (!shouldUseHorizontalText(angle)) {
+            if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+              angle += Math.PI;
+            }
+          } else {
+            angle = 0;
           }
         }
         const rotation = (angle * 180) / Math.PI;
@@ -13837,10 +13849,14 @@ async function buildLayoutSvgString(
         pushLine(edgeStart, gapStart);
         pushLine(gapEnd, edgeEnd);
         let angle = 0;
-        if (Math.abs(edgeEnd.x - edgeStart.x) > 1e-6) {
+        if (Math.abs(edgeEnd.x - edgeStart.x) > 1e-6 || Math.abs(edgeEnd.y - edgeStart.y) > 1e-6) {
           angle = Math.atan2(edgeEnd.y - edgeStart.y, edgeEnd.x - edgeStart.x);
-          if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
-            angle += Math.PI;
+          if (!shouldUseHorizontalText(angle)) {
+            if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+              angle += Math.PI;
+            }
+          } else {
+            angle = 0;
           }
         }
         const rotation = (angle * 180) / Math.PI;

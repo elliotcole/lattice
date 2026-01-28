@@ -800,6 +800,7 @@ let labelCacheKey = "";
 let labelCacheDataVersion = 0;
 const textWidthCache = new Map();
 let drawPending = false;
+const DEBUG_CENTS = false;
 
 const LAYOUT_PX_PER_IN = 96;
 const LAYOUT_PAGE_SIZES = {
@@ -1852,7 +1853,8 @@ function getCustomNodeDisplayInfo(node) {
   }
   const a4 = Number(a4Input.value) || 440;
   const nearest = getNearestEtInfo(freq, a4);
-  const nearestPitchClass = noteNames[nearest.midi % 12];
+  const preferredNames = getNoteNamesForNode(node);
+  const nearestPitchClass = preferredNames[nearest.midi % 12];
   const nearestName = `${nearestPitchClass}${Math.floor(nearest.midi / 12) - 1}`;
   const nearestCents = Number.isFinite(node.cents_from_et) ? node.cents_from_et : nearest.cents;
   if (spellingMode === "true" || hejiEnabled) {
@@ -1924,7 +1926,6 @@ function refreshCustomNodes() {
     if (derivedInfo) {
       customNode.note_name = derivedInfo.name;
       customNode.pitch_class = derivedInfo.pitchClass;
-      customNode.cents_from_et = derivedInfo.cents;
     }
   });
   invalidateLabelCache();
@@ -3290,6 +3291,25 @@ function getNearestEtInfo(freq, a4) {
   return { midi, etFreq, cents, name, pitchClass };
 }
 
+function getCentsForPitchClass(freq, a4, pitchClass) {
+  if (!Number.isFinite(freq) || !Number.isFinite(a4)) {
+    return 0;
+  }
+  const parsed = parsePitchClass(pitchClass);
+  if (!Number.isFinite(parsed.letterIndex) || !Number.isFinite(parsed.accidental)) {
+    return 0;
+  }
+  const targetPc = mod(
+    LETTER_TO_SEMITONE[LETTERS[parsed.letterIndex]] + parsed.accidental,
+    12
+  );
+  const midiFloat = 69 + 12 * Math.log2(freq / a4);
+  const midiBase = Math.round((midiFloat - targetPc) / 12);
+  const midi = targetPc + 12 * midiBase;
+  const etFreq = a4 * Math.pow(2, (midi - 69) / 12);
+  return 1200 * Math.log2(freq / etFreq);
+}
+
 function getNodeRadius(node) {
   if (node.isCustom) {
     return 35;
@@ -3915,7 +3935,26 @@ function buildCentsReadout(
       targetPc,
       nearest.pitchClass
     );
-    const fallbackBase = `${preferredFallback}${formatCents(nearest.cents)}`;
+    const freq = Number(node && node.freq);
+    const a4 = Number(a4Input.value) || 440;
+    const fallbackCents = preferredFallback
+      ? getCentsForPitchClass(freq, a4, preferredFallback)
+      : nearest.cents;
+    if (DEBUG_CENTS) {
+      console.log("Cents debug", {
+        nodeId: node && node.id,
+        isCustom: Boolean(node && node.isCustom),
+        freq,
+        baseText,
+        infoPitchClass: info.pitchClass,
+        infoCents: info.cents,
+        nearestPitchClass: nearest.pitchClass,
+        nearestCents: nearest.cents,
+        preferredFallback,
+        fallbackCents,
+      });
+    }
+    const fallbackBase = `${preferredFallback}${formatCents(fallbackCents)}`;
     if (wrap) {
       const primary = formatCents(info.cents);
       const fallback = includePitchClass ? fallbackBase : preferredFallback;

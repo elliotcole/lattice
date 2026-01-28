@@ -673,7 +673,7 @@ noteNamesFlat.forEach((name, index) => {
 });
 const KEYBOARD_BASE_MIDI = 60;
 const HEJI_SUFFIX_Y_OFFSET = -0.52;
-const HEJI_SVG_EXTRA_Y_OFFSET = 0.21;
+const HEJI_SVG_EXTRA_Y_OFFSET = 0.54;
 const HEJI_REST_GAP = 0.08;
 const HEJI_REST_GAP_PLAIN = -0.2;
 const CENTS_CHAR = "¢";
@@ -866,6 +866,7 @@ let customPianoMapMode = false;
 let customPianoSelectedKey = null;
 let customPianoPreviewVoices = new Map();
 let customPianoLabelMap = null;
+let layoutPrevTheme = null;
 let customPianoLabelDirty = true;
 let customPianoMapClickActive = false;
 const customPianoActiveKeys = new Map();
@@ -10796,6 +10797,7 @@ function setLayoutMode(enabled, { force = false } = {}) {
       rotX: view.rotX,
       rotY: view.rotY,
     };
+    layoutPrevTheme = document.body.classList.contains("theme-dark") ? "dark" : "light";
   }
   layoutMode = enabled;
   if (layoutModeToggle) {
@@ -10813,6 +10815,7 @@ function setLayoutMode(enabled, { force = false } = {}) {
   }
   updateNavPanelVisibility();
   if (enabled) {
+    applyTheme("light");
     if (mode3dCheckbox) {
       mode3dCheckbox.checked = false;
     }
@@ -10873,6 +10876,10 @@ function setLayoutMode(enabled, { force = false } = {}) {
     }
     set3DMode(layoutPrevState.is3DMode);
     layoutPrevState = null;
+    if (layoutPrevTheme === "dark") {
+      applyTheme("dark");
+    }
+    layoutPrevTheme = null;
   } else {
     draw();
   }

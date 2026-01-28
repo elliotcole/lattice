@@ -81,7 +81,7 @@ body {
   margin: 0;
   font-family: "Lexend", "Helvetica Neue", sans-serif;
   background: radial-gradient(circle at top left, #ffffff, var(--bg));
-  color: var(--ink);
+  color: var(--muted-ink);
   transition: background 0.3s ease, color 0.3s ease;
 }
 

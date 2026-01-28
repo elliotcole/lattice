@@ -32,10 +32,28 @@
         <section class="panel controls">
         <div class="control-group">
           <div class="control-inline fundamental-inline">
-            <label for="fundamental" class="inline-label">Fundamental</label>
+            <label for="fundamental" class="inline-label">Fundamental:</label>
             <select id="fundamental-note"></select>
             <input id="fundamental" type="number" min="20" max="2000" step="1" value="261.63" />
+            <span class="hz-suffix">Hz</span>
           </div>
+          <div class="ratios-inline">
+            <span class="ratios-label">Ratios:</span>
+            <span class="ratio-axis-label">X</span>
+            <label for="ratio-x" class="visually-hidden">X Ratio</label>
+            <select id="ratio-x" class="narrow-select"></select>
+            <span class="ratio-axis-label">Y</span>
+            <label for="ratio-y" class="visually-hidden">Y Ratio</label>
+            <select id="ratio-y" class="narrow-select"></select>
+            <span class="ratio-axis-label">Z</span>
+            <label for="ratio-z" class="visually-hidden">Z Ratio</label>
+            <select id="ratio-z" class="narrow-select ratio-z"></select>
+          </div>
+        </div>
+        <div class="help-toggle">
+          <input id="show-help" type="checkbox" checked />
+          <label for="show-help">Show help</label>
+        </div>
         </div>
         <dialog id="fundamental-spelling-dialog" class="custom-ratio-dialog">
           <div class="dialog-content">
@@ -47,18 +65,6 @@
           </div>
         </dialog>
         
-        <div class="control-group ratios-inline">
-          <span class="ratios-label">Ratios:</span>
-          <span class="ratio-axis-label">X</span>
-          <label for="ratio-x" class="visually-hidden">X Ratio</label>
-          <select id="ratio-x" class="narrow-select"></select>
-          <span class="ratio-axis-label">Y</span>
-          <label for="ratio-y" class="visually-hidden">Y Ratio</label>
-          <select id="ratio-y" class="narrow-select"></select>
-          <span class="ratio-axis-label">Z</span>
-          <label for="ratio-z" class="visually-hidden">Z Ratio</label>
-          <select id="ratio-z" class="narrow-select ratio-z"></select>
-        </div>
         <div class="control-actions">
           <div class="control-actions-group">
             <div class="control-group file-toggle">
@@ -87,7 +93,6 @@
                 Options
               </button>
               <div id="options-panel" class="panel options-panel" hidden>
-                <button id="add-custom-ratio" type="button" class="button-full">Custom Ratio (C+Click)</button>
                 <div class="control-group">
                   <label for="a4">A4 Reference (Hz)</label>
                   <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
@@ -98,12 +103,6 @@
                     <option value="light">Light Mode</option>
                     <option value="dark">Dark Mode</option>
                   </select>
-                </div>
-                <div class="control-group">
-                  <div class="control-inline">
-                    <input id="show-help" type="checkbox" checked />
-                    <label for="show-help">Show help</label>
-                  </div>
                 </div>
                 <div class="control-group control-group-inline">
                   <label>¢ Decimals</label>
@@ -136,7 +135,7 @@
         </div>
         <div class="hint-row">
           <div id="ui-hint" class="ui-hint"></div>
-          <div id="z-mode-message" class="ui-hint z-mode-message" hidden></div>
+          <div id="banner-message" class="ui-hint banner-message" hidden></div>
         </div>
       </div>
     </main>

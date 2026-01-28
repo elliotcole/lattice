@@ -103,7 +103,7 @@ const ratioWheelPanel = document.getElementById("ratio-wheel-panel");
 const ratioWheelLarge = document.getElementById("ratio-wheel-large");
 const ratioWheelMini = document.getElementById("ratio-wheel-mini");
 const uiHint = document.getElementById("ui-hint");
-const zModeMessage = document.getElementById("z-mode-message");
+const bannerMessage = document.getElementById("banner-message");
 const showHelpToggle = document.getElementById("show-help");
 const keyboardHelp = document.getElementById("keyboard-help");
 const keyboardMapPopover = document.getElementById("keyboard-map-popover");
@@ -866,7 +866,6 @@ let customPianoMapMode = false;
 let customPianoSelectedKey = null;
 let customPianoPreviewVoices = new Map();
 let customPianoLabelMap = null;
-let layoutPrevTheme = null;
 let customPianoLabelDirty = true;
 let customPianoMapClickActive = false;
 const customPianoActiveKeys = new Map();
@@ -7433,7 +7432,7 @@ function drawCustomConnections(nodePosMap) {
     ctx.restore();
   }
 
-  updateZModeMessage();
+  updateBannerMessage();
 
   updateRatioWheels();
 }
@@ -9751,6 +9750,15 @@ function getUiHintKey() {
   return "mode-3d";
 }
 
+function setUiHintVisibility(isVisible) {
+  if (!uiHint) {
+    return;
+  }
+  const hidden = !isVisible;
+  uiHint.hidden = hidden;
+  uiHint.style.display = hidden ? "none" : "";
+}
+
 function updateUiHint() {
   if (!uiHint) {
     return;
@@ -9761,10 +9769,10 @@ function updateUiHint() {
     uiHintDismissed = false;
   }
   if (!showHelpEnabled || uiHintDismissed || (zModeActive && zModeAnchor)) {
-    uiHint.hidden = true;
+    setUiHintVisibility(false);
     return;
   }
-  uiHint.hidden = false;
+  setUiHintVisibility(true);
   if (layoutMode) {
     if (layoutAxisEdit) {
       uiHint.textContent = "Editing axis legend. Press ESC to exit.\n(click to hide)";
@@ -10036,8 +10044,8 @@ function showKeyboardModeHelp(message) {
   }, 5000);
 }
 
-function updateZModeMessage() {
-  if (!zModeMessage) {
+function updateBannerMessage() {
+  if (!bannerMessage) {
     return;
   }
   if (!zModeActive || !zModeAnchor) {
@@ -10046,23 +10054,16 @@ function updateZModeMessage() {
       wasZModeActive = false;
       updateUiHint();
     }
-    zModeMessage.hidden = true;
-    zModeMessage.textContent = "";
-    if (uiHint) {
-      if (showHelpEnabled) {
-        updateUiHint();
-      } else {
-        uiHint.hidden = true;
-      }
-    }
+    bannerMessage.hidden = true;
+    bannerMessage.textContent = "";
     return;
   }
   const centerX = Math.floor(GRID_COLS / 2);
   const centerY = Math.floor(GRID_ROWS / 2);
   const coordX = zModeAnchor.x - centerX;
   const coordY = centerY - zModeAnchor.y;
-  zModeMessage.textContent = `Editing Z axis for node [${coordX},${coordY}]: press Escape to return`;
-  zModeMessage.hidden = false;
+  bannerMessage.textContent = `Editing Z axis for node [${coordX},${coordY}]: press Escape to return`;
+  bannerMessage.hidden = false;
   if (uiHint) {
     uiHint.hidden = true;
   }
@@ -10805,7 +10806,6 @@ function setLayoutMode(enabled, { force = false } = {}) {
       rotX: view.rotX,
       rotY: view.rotY,
     };
-    layoutPrevTheme = document.body.classList.contains("theme-dark") ? "dark" : "light";
   }
   layoutMode = enabled;
   if (layoutModeToggle) {
@@ -10823,7 +10823,6 @@ function setLayoutMode(enabled, { force = false } = {}) {
   }
   updateNavPanelVisibility();
   if (enabled) {
-    applyTheme("light");
     if (mode3dCheckbox) {
       mode3dCheckbox.checked = false;
     }
@@ -10884,10 +10883,6 @@ function setLayoutMode(enabled, { force = false } = {}) {
     }
     set3DMode(layoutPrevState.is3DMode);
     layoutPrevState = null;
-    if (layoutPrevTheme === "dark") {
-      applyTheme("dark");
-    }
-    layoutPrevTheme = null;
   } else {
     draw();
   }
@@ -10913,7 +10908,7 @@ function set3DMode(enabled, { preserveDepth = false } = {}) {
     zModeAnchor = null;
   }
   if (enabled && uiHint && showHelpEnabled && !uiHintDismissed) {
-    uiHint.hidden = false;
+    setUiHintVisibility(true);
   }
   updateAddModeFromShift();
   updateUiHint();
@@ -11592,7 +11587,20 @@ async function loadPresets() {
       const [name, uri] = entry;
       const item = document.createElement("li");
       const link = document.createElement("a");
-      link.textContent = String(name);
+      const nameString = String(name);
+      const match = nameString.match(/^(.*?)\s*(\(([^()]*)\))?$/);
+      const mainLabelText = match && match[1] ? match[1].trim() : nameString;
+      const metaText = match && match[3] ? match[3].trim() : "";
+      const labelSpan = document.createElement("span");
+      labelSpan.className = "preset-label";
+      labelSpan.textContent = mainLabelText;
+      link.appendChild(labelSpan);
+      if (metaText) {
+        const metaSpan = document.createElement("span");
+        metaSpan.className = "preset-meta";
+        metaSpan.textContent = metaText;
+        link.appendChild(metaSpan);
+      }
       const uriString = String(uri);
       if (uriString.startsWith("http://") || uriString.startsWith("https://")) {
         try {
@@ -15110,7 +15118,7 @@ if (showHelpToggle) {
     showHelpEnabled = showHelpToggle.checked;
     if (!showHelpEnabled) {
       if (uiHint) {
-        uiHint.hidden = true;
+        setUiHintVisibility(false);
       }
       return;
     }
@@ -15883,7 +15891,7 @@ if (fileToggle) {
 if (uiHint) {
   uiHint.addEventListener("click", () => {
     uiHintDismissed = true;
-    uiHint.hidden = true;
+    setUiHintVisibility(false);
   });
 }
 fundamentalInput.addEventListener("input", () => {

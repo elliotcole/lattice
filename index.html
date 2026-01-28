@@ -16,8 +16,8 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/index-B-1_fZAy.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/style-D43bXKUd.css">
+    <script type="module" crossorigin src="./assets/index-1MH1KJnJ.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/style-CUj5_mdy.css">
   </head>
   <body>
     <canvas id="lattice" tabindex="0" aria-label="Tuning lattice"></canvas>
@@ -199,12 +199,6 @@
             <span>Unify Node Size</span>
           </div>
         </div>
-        <div class="control-group">
-          <div class="control-inline">
-            <input id="layout-line-labels-toggle" type="checkbox" checked />
-            <label for="layout-line-labels-toggle">Line labels</label>
-          </div>
-        </div>
         <div class="control-group control-group-inline layout-space-group">
           <label id="layout-space-trigger" class="layout-space-trigger" for="layout-scale">Spacing</label>
           <input id="layout-scale" type="range" min="0.5" max="3" step="0.01" value="1" aria-label="Spacing" />
@@ -265,14 +259,62 @@
             </div>
           </div>
         </div>
+        <div class="nav-3d-section">
+          <button
+            id="layout-show-toggle"
+            class="nav-3d-accordion-toggle is-collapsed"
+            type="button"
+            aria-expanded="false"
+            aria-controls="layout-show-body"
+          >
+            <span>Show</span>
+            <span class="nav-3d-accordion-chevron">▾</span>
+          </button>
+          <div id="layout-show-body" class="nav-3d-accordion-body" hidden>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="layout-heji-enabled" type="checkbox" checked />
+                <label for="layout-heji-enabled">HEJI</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="layout-enharmonics-enabled" type="checkbox" checked />
+                <label for="layout-enharmonics-enabled">Enharmonics</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="layout-show-cents-deviation" type="checkbox" checked />
+                <label for="layout-show-cents-deviation">Cents from ET</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="layout-show-hz" type="checkbox" />
+                <label for="layout-show-hz">Hz</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="layout-circles" type="checkbox" checked />
+                <label for="layout-circles">Circles</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="layout-line-labels-toggle" type="checkbox" checked />
+                <label for="layout-line-labels-toggle">Line labels</label>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="nav-3d-title">Export</div>
         <div class="control-group">
           <div class="control-inline">
             <button id="export-svg" type="button">SVG</button>
             <button id="export-pdf" type="button">PDF</button>
-            <button id="export-check" type="button">Check</button>
           </div>
-          <div id="export-check-status" class="export-check-status" aria-live="polite"></div>
         </div>
         <div class="nav-3d-title">Reset</div>
         <div class="control-group">
@@ -873,6 +915,12 @@
               <div class="control-inline">
                 <input id="enharmonics-enabled" type="checkbox" checked />
                 <label for="enharmonics-enabled">Enharmonics</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="show-cents-deviation" type="checkbox" checked />
+                <label for="show-cents-deviation">Cents from ET</label>
               </div>
             </div>
             <div class="control-group">

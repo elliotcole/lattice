@@ -6653,41 +6653,37 @@ function findTriangleHit(screenPoint) {
       }
     }
   }
-  const axisEntry = getActiveAxisEntry();
-  if (axisEntry && gridDepth > 1) {
-    const { axis, anchor } = axisEntry;
-    const fixedX = anchor.x;
-    const fixedY = anchor.y;
-    if (axis === "z" || axis === "x") {
+  if (gridDepth > 1) {
+    for (let y = 0; y < GRID_ROWS; y += 1) {
       for (let z = 0; z < gridDepth - 1; z += 1) {
         for (let x = 0; x < GRID_COLS - 1; x += 1) {
           evaluateCell(
-            { plane: "xz", x, y: fixedY, z },
-            allMap.get(`${x},${fixedY},${z}`),
-            allMap.get(`${x + 1},${fixedY},${z}`),
-            allMap.get(`${x},${fixedY},${z + 1}`),
-            allMap.get(`${x + 1},${fixedY},${z + 1}`),
-            activeMap.get(`${x},${fixedY},${z}`),
-            activeMap.get(`${x + 1},${fixedY},${z}`),
-            activeMap.get(`${x},${fixedY},${z + 1}`),
-            activeMap.get(`${x + 1},${fixedY},${z + 1}`)
+            { plane: "xz", x, y, z },
+            allMap.get(`${x},${y},${z}`),
+            allMap.get(`${x + 1},${y},${z}`),
+            allMap.get(`${x},${y},${z + 1}`),
+            allMap.get(`${x + 1},${y},${z + 1}`),
+            activeMap.get(`${x},${y},${z}`),
+            activeMap.get(`${x + 1},${y},${z}`),
+            activeMap.get(`${x},${y},${z + 1}`),
+            activeMap.get(`${x + 1},${y},${z + 1}`)
           );
         }
       }
     }
-    if (axis === "z" || axis === "y") {
+    for (let x = 0; x < GRID_COLS; x += 1) {
       for (let z = 0; z < gridDepth - 1; z += 1) {
         for (let y = 0; y < GRID_ROWS - 1; y += 1) {
           evaluateCell(
-            { plane: "yz", x: fixedX, y, z },
-            allMap.get(`${fixedX},${y},${z}`),
-            allMap.get(`${fixedX},${y + 1},${z}`),
-            allMap.get(`${fixedX},${y},${z + 1}`),
-            allMap.get(`${fixedX},${y + 1},${z + 1}`),
-            activeMap.get(`${fixedX},${y},${z}`),
-            activeMap.get(`${fixedX},${y + 1},${z}`),
-            activeMap.get(`${fixedX},${y},${z + 1}`),
-            activeMap.get(`${fixedX},${y + 1},${z + 1}`)
+            { plane: "yz", x, y, z },
+            allMap.get(`${x},${y},${z}`),
+            allMap.get(`${x},${y + 1},${z}`),
+            allMap.get(`${x},${y},${z + 1}`),
+            allMap.get(`${x},${y + 1},${z + 1}`),
+            activeMap.get(`${x},${y},${z}`),
+            activeMap.get(`${x},${y + 1},${z}`),
+            activeMap.get(`${x},${y},${z + 1}`),
+            activeMap.get(`${x},${y + 1},${z + 1}`)
           );
         }
       }
@@ -9527,6 +9523,14 @@ function onPointerUp(event) {
             mode3dCheckbox.checked = true;
           }
           set3DMode(true);
+        }
+        if (
+          requestedAxis === "z" &&
+          Math.abs(view.rotX) < 0.01 &&
+          Math.abs(view.rotY) < 0.01
+        ) {
+          view.rotX = -0.35;
+          view.rotY = 0.45;
         }
         if (activateAxisFromHit(requestedAxis, hit)) {
           return;

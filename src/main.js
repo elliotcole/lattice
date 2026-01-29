@@ -1,4 +1,4 @@
-import { customOscillatorTypes, customOscillators } from "web-audio-oscillators";
+import { customOscillatorTypes, customOscillators } from "./custom-oscillators";
 import opentype from "opentype.js";
 const canvas = document.getElementById("lattice");
 const ctx = canvas.getContext("2d");
@@ -1615,6 +1615,8 @@ function buildPatternStates(preserveIndices = false) {
     order = getSpiralInOrderIndices();
   } else if (sequencePattern === "merukhand") {
     order = getMerukhandOrderIndices(count);
+  } else if (sequencePattern === "near-triads") {
+    order = buildNearTriadSequenceOrder();
   }
   if (sequencePattern === "plain-bob-minor") {
     patternSequenceState = {
@@ -1699,19 +1701,36 @@ function maybeMutateSequence(state, count) {
   }
 }
 
+function normalizeSequenceStepValue(value) {
+  const indices = [];
+  const collect = (entry) => {
+    if (Array.isArray(entry)) {
+      entry.forEach(collect);
+      return;
+    }
+    if (Number.isFinite(entry)) {
+      indices.push(entry);
+    }
+  };
+  collect(value);
+  return indices;
+}
+
 function nextSequenceStep() {
   if (!patternSequenceState || !patternActiveNodes.length) {
     return null;
   }
   if (patternSequenceState.type === "random") {
-    return { index: Math.floor(Math.random() * patternActiveNodes.length), octaveOffset: 0 };
+    const index = Math.floor(Math.random() * patternActiveNodes.length);
+    return { indices: [index], octaveOffsets: [0] };
   }
   if (patternSequenceState.type === "plain-bob-minor") {
     const row = patternSequenceState.row;
     if (!row || row.length === 0) {
       return null;
     }
-    const index = row[patternSequenceState.posInRow];
+    const value = row[patternSequenceState.posInRow];
+    const indices = normalizeSequenceStepValue(value);
     patternSequenceState.posInRow += 1;
     if (patternSequenceState.posInRow >= row.length) {
       const op = patternSequenceState.ops[patternSequenceState.stepInLead];
@@ -1720,7 +1739,7 @@ function nextSequenceStep() {
         (patternSequenceState.stepInLead + 1) % patternSequenceState.ops.length;
       patternSequenceState.posInRow = 0;
     }
-    return { index, octaveOffset: 0 };
+    return indices.length ? { indices, octaveOffsets: indices.map(() => 0) } : null;
   }
   if (
     patternSequenceState.type === "left-right" &&
@@ -1734,6 +1753,12 @@ function nextSequenceStep() {
   ) {
     patternSequenceState.order = getSpiralInOrderIndices();
   }
+  if (
+    patternSequenceState.type === "near-triads" &&
+    patternSequenceState.index % patternSequenceState.order.length === 0
+  ) {
+    patternSequenceState.order = buildNearTriadSequenceOrder();
+  }
   if (patternSequenceState.type === "mutate") {
     if (patternSequenceState.index % patternSequenceState.order.length === 0) {
       if (patternSequenceState.index > 0) {
@@ -1744,15 +1769,18 @@ function nextSequenceStep() {
     const stepIndex =
       patternSequenceState.index % patternSequenceState.order.length;
     const value = patternSequenceState.order[stepIndex];
+    const indices = normalizeSequenceStepValue(value);
     const octaveOffset = patternSequenceState.octaveOffsets[stepIndex] || 0;
     patternSequenceState.index += 1;
-    return { index: value, octaveOffset };
+    return indices.length
+      ? { indices, octaveOffsets: indices.map(() => octaveOffset) }
+      : null;
   }
-  const value = patternSequenceState.order[
-    patternSequenceState.index % patternSequenceState.order.length
-  ];
+  const value =
+    patternSequenceState.order[patternSequenceState.index % patternSequenceState.order.length];
+  const indices = normalizeSequenceStepValue(value);
   patternSequenceState.index += 1;
-  return { index: value, octaveOffset: 0 };
+  return indices.length ? { indices, octaveOffsets: indices.map(() => 0) } : null;
 }
 
 function nextRhythmBeats() {
@@ -1805,48 +1833,53 @@ function scheduleNextPatternEvent(delayMs) {
     }
     const isOneShot = Boolean(oneShotCheckbox && oneShotCheckbox.checked);
     const step = nextSequenceStep();
-    const nextIndex = step ? step.index : null;
     const durationBeats = nextRhythmBeats();
-    const octave = nextOctaveOffset() + (step ? step.octaveOffset : 0);
-    if (nextIndex != null) {
+    const baseOctave = nextOctaveOffset();
+    const indices = step && Array.isArray(step.indices) ? step.indices : [];
+    const octaveOffsets = step && Array.isArray(step.octaveOffsets) ? step.octaveOffsets : [];
+    indices.forEach((nextIndex, idx) => {
+      if (nextIndex == null) {
+        return;
+      }
       const nodeId = patternActiveNodes[nextIndex];
       const node = nodeById.get(nodeId);
-      if (node) {
-        const freq = node.freq * Math.pow(2, octave);
-        const voice = startVoice({
-          nodeId: node.id,
-          octave,
-          freq,
-          source: "pattern",
-        });
-        if (voice) {
-          patternVoices.add(voice);
-          draw();
-          if (isOneShot) {
-            const attack = getEnvelopeAttackSeconds() || 0.02;
-            const decay = getEnvelopeDecaySeconds() || 0.2;
-            const release = getEnvelopeReleaseSeconds() || 0.6;
-            const cleanupMs = (attack + decay + release) * 1000 + 60;
-            const cleanupTimer = setTimeout(() => {
-              patternVoices.delete(voice);
-              draw();
-            }, Math.max(0, cleanupMs));
-            patternOffTimers.push(cleanupTimer);
-          } else {
-            const lengthBeats =
-              patternLengthMode === "gate"
-                ? durationBeats * patternLengthValue
-                : patternLengthValue;
-            const offTimer = setTimeout(() => {
-              stopVoice(voice);
-              patternVoices.delete(voice);
-              draw();
-            }, Math.max(0, beatsToMs(lengthBeats)));
-            patternOffTimers.push(offTimer);
-          }
-        }
+      if (!node) {
+        return;
       }
-    }
+      const octave = baseOctave + (octaveOffsets[idx] || 0);
+      const freq = node.freq * Math.pow(2, octave);
+      const voice = startVoice({
+        nodeId: node.id,
+        octave,
+        freq,
+        source: "pattern",
+      });
+      if (!voice) {
+        return;
+      }
+      patternVoices.add(voice);
+      draw();
+      if (isOneShot) {
+        const attack = getEnvelopeAttackSeconds() || 0.02;
+        const decay = getEnvelopeDecaySeconds() || 0.2;
+        const release = getEnvelopeReleaseSeconds() || 0.6;
+        const cleanupMs = (attack + decay + release) * 1000 + 60;
+        const cleanupTimer = setTimeout(() => {
+          patternVoices.delete(voice);
+          draw();
+        }, Math.max(0, cleanupMs));
+        patternOffTimers.push(cleanupTimer);
+      } else {
+        const lengthBeats =
+          patternLengthMode === "gate" ? durationBeats * patternLengthValue : patternLengthValue;
+        const offTimer = setTimeout(() => {
+          stopVoice(voice);
+          patternVoices.delete(voice);
+          draw();
+        }, Math.max(0, beatsToMs(lengthBeats)));
+        patternOffTimers.push(offTimer);
+      }
+    });
     scheduleNextPatternEvent(beatsToMs(durationBeats));
   }, Math.max(0, delayMs));
 }
@@ -1935,12 +1968,25 @@ function getSequenceOrderIndices() {
   if (!patternSequenceState || !patternActiveNodes.length) {
     return [];
   }
+  const flattenEntry = (entry, result) => {
+    if (Array.isArray(entry)) {
+      entry.forEach((item) => flattenEntry(item, result));
+      return;
+    }
+    if (Number.isFinite(entry)) {
+      result.push(entry);
+    }
+  };
   const type = patternSequenceState.type;
   if (type === "plain-bob-minor" && Array.isArray(patternSequenceState.row)) {
-    return [...patternSequenceState.row];
+    const flattened = [];
+    patternSequenceState.row.forEach((entry) => flattenEntry(entry, flattened));
+    return flattened;
   }
   if (Array.isArray(patternSequenceState.order)) {
-    return [...patternSequenceState.order];
+    const flattened = [];
+    patternSequenceState.order.forEach((entry) => flattenEntry(entry, flattened));
+    return flattened;
   }
   return Array.from({ length: patternActiveNodes.length }, (_, index) => index);
 }
@@ -1967,6 +2013,111 @@ function getSequenceNodeOrder() {
     result.push(nodeId);
   });
   return result;
+}
+
+function buildNearTriadSequenceOrder() {
+  if (!patternActiveNodes.length) {
+    return [];
+  }
+  const indexByNodeId = new Map(
+    patternActiveNodes.map((id, index) => [id, index])
+  );
+  const gridMap = new Map();
+  nodes.forEach((node) => {
+    if (node.active && !node.isCustom && node.gridX != null && node.gridY != null) {
+      gridMap.set(`${node.gridX},${node.gridY},${node.gridZ || 0}`, node);
+    }
+  });
+  const centerNode =
+    nodes.find((node) => node.isCenter) ||
+    nodes.find((node) => node.exponentX === 0 && node.exponentY === 0);
+  const centerScreen = centerNode
+    ? worldToScreen(getNodeDisplayCoordinate(centerNode))
+    : { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 };
+  const entries = [];
+  const seen = new Set();
+  const addTriangle = (nodesForTri) => {
+    if (nodesForTri.some((node) => !node || !node.active)) {
+      return;
+    }
+    const indices = nodesForTri
+      .map((node) => indexByNodeId.get(node.id))
+      .filter((idx) => idx != null);
+    if (indices.length !== 3) {
+      return;
+    }
+    const key = indices.slice().sort((a, b) => a - b).join(",");
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    const points = nodesForTri.map((node) =>
+      worldToScreen(getNodeDisplayCoordinate(node))
+    );
+    const cx = (points[0].x + points[1].x + points[2].x) / 3;
+    const cy = (points[0].y + points[1].y + points[2].y) / 3;
+    const dx = cx - centerScreen.x;
+    const dy = cy - centerScreen.y;
+    entries.push({
+      indices,
+      dist: Math.hypot(dx, dy),
+      angle: Math.atan2(dy, dx),
+    });
+  };
+  for (let z = 0; z < gridDepth; z += 1) {
+    for (let y = 0; y < GRID_ROWS - 1; y += 1) {
+      for (let x = 0; x < GRID_COLS - 1; x += 1) {
+        const cell = getTriangleCellNodes({ plane: "xy", x, y, z }, gridMap);
+        if (!cell) {
+          continue;
+        }
+        const { a, b, c, d } = cell;
+        addTriangle([a, b, c]);
+        addTriangle([b, c, d]);
+        addTriangle([a, b, d]);
+        addTriangle([a, c, d]);
+      }
+    }
+  }
+  if (gridDepth > 1) {
+    for (let y = 0; y < GRID_ROWS; y += 1) {
+      for (let z = 0; z < gridDepth - 1; z += 1) {
+        for (let x = 0; x < GRID_COLS - 1; x += 1) {
+          const cell = getTriangleCellNodes({ plane: "xz", x, y, z }, gridMap);
+          if (!cell) {
+            continue;
+          }
+          const { a, b, c, d } = cell;
+          addTriangle([a, b, c]);
+          addTriangle([b, c, d]);
+          addTriangle([a, b, d]);
+          addTriangle([a, c, d]);
+        }
+      }
+    }
+    for (let x = 0; x < GRID_COLS; x += 1) {
+      for (let z = 0; z < gridDepth - 1; z += 1) {
+        for (let y = 0; y < GRID_ROWS - 1; y += 1) {
+          const cell = getTriangleCellNodes({ plane: "yz", x, y, z }, gridMap);
+          if (!cell) {
+            continue;
+          }
+          const { a, b, c, d } = cell;
+          addTriangle([a, b, c]);
+          addTriangle([b, c, d]);
+          addTriangle([a, b, d]);
+          addTriangle([a, c, d]);
+        }
+      }
+    }
+  }
+  entries.sort((left, right) => {
+    if (left.dist !== right.dist) {
+      return left.dist - right.dist;
+    }
+    return left.angle - right.angle;
+  });
+  return entries.map((entry) => entry.indices);
 }
 
 const CUSTOM_SLOT_VECTORS = [
@@ -3654,7 +3805,15 @@ function populateWaveformOptions() {
   const extras = customOscillatorTypes
     ? customOscillatorTypes.filter((type) => !BUILTIN_WAVEFORMS.includes(type))
     : [];
-  const waveforms = [...BUILTIN_WAVEFORMS, ...extras];
+  const waveforms = [...BUILTIN_WAVEFORMS];
+  const semisineIndex = extras.indexOf("semisine");
+  if (semisineIndex >= 0) {
+    extras.splice(semisineIndex, 1);
+    const sineIndex = waveforms.indexOf("sine");
+    const insertAt = sineIndex >= 0 ? sineIndex + 1 : 0;
+    waveforms.splice(insertAt, 0, "semisine");
+  }
+  waveforms.push(...extras);
   waveforms.forEach((type) => {
     const option = document.createElement("option");
     option.value = type;
@@ -9044,6 +9203,10 @@ function onWheel(event) {
 
 function isInactiveNodeAvailable(node) {
   if (!is3DMode) {
+    const axisEntry = getActiveAxisEntry();
+    if (axisEntry && (axisEntry.axis === "x" || axisEntry.axis === "y")) {
+      return isNodeOnAxisEntry(node, axisEntry) && (node.gridZ || 0) === gridCenterZ;
+    }
     return (shiftHeld || capsLockOn) && (node.gridZ || 0) === gridCenterZ;
   }
   const axisEntry = getActiveAxisEntry();

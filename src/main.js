@@ -92,6 +92,7 @@ const saveLatticeButton = document.getElementById("save-lattice");
 const loadLatticeButton = document.getElementById("load-lattice");
 const loadLatticeInput = document.getElementById("load-lattice-input");
 const topBar = document.querySelector(".top-bar");
+const controlActionsPanel = document.querySelector(".control-actions-panel");
 const controlsPanel = document.querySelector(".controls");
 const synthPanel = document.querySelector(".synth-panel");
 const envelopeToggle = document.getElementById("envelope-toggle");
@@ -260,8 +261,6 @@ let lHeld = false;
 let oHeld = false;
 let suppressClickAfterRespell = false;
 const midiActiveNotes = new Map();
-let lastLfoTapTime = 0;
-let lastLfoTapId = null;
 const activeKeys = new Map();
 const triangleDiagonals = new Map();
 let triangleHover = null;
@@ -8385,18 +8384,13 @@ function onPointerDown(event) {
     return;
   }
 
-  if (event.shiftKey && hit) {
-    const isDoubleTap = lastLfoTapId === hit.id && now - lastLfoTapTime < 320;
-    lastLfoTapId = hit.id;
-    lastLfoTapTime = now;
-    if (isDoubleTap) {
-      lfoArmingId = hit.id;
-      lfoArmingStart = now;
-      ensureLfoLoop();
-      canvas.setPointerCapture(event.pointerId);
-      draw();
-      return;
-    }
+  if (!layoutMode && lHeld && hit) {
+    lfoArmingId = hit.id;
+    lfoArmingStart = now;
+    ensureLfoLoop();
+    canvas.setPointerCapture(event.pointerId);
+    draw();
+    return;
   }
 
   if (
@@ -10042,11 +10036,11 @@ function updateUiHint() {
 
   if (!is3DMode) {
     uiHint.textContent =
-      "2D Mode\nShift-click to add a node. \nOption-click to remove. \nShift double-click & hold to start LFO.\nHold T to label triangles\nHold O and click a node to change playback octave.\nDrag to pan. Scroll to zoom.";
+      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nHold L and press & hold to start LFO.\nHold T to label triangles\nHold O and click a node to change playback octave.\nDrag to pan. Scroll to zoom.";
     return;
   }
   uiHint.textContent =
-    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis\nShift double-click & hold for LFO\nHold T to label triangles\nHold O and click a node to change playback octave.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
+    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nHold L and press & hold to start LFO\nHold T to label triangles\nHold O and click a node to change playback octave.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
 }
 
 function resetUiHintToDefault() {
@@ -11810,15 +11804,13 @@ function closeBottomMenus(except = "") {
 }
 
 function syncTopMenuPanelState() {
-  if (!controlsPanel) {
-    return;
-  }
-  const anyOpen =
+  const topMenusOpen =
     (optionsPanel && !optionsPanel.hidden) ||
     (presetPanel && !presetPanel.hidden) ||
-    (filePanel && !filePanel.hidden) ||
-    (ratioWheelPanel && !ratioWheelPanel.hidden);
-  controlsPanel.classList.toggle("panel-open", anyOpen);
+    (filePanel && !filePanel.hidden);
+  if (controlActionsPanel) {
+    controlActionsPanel.classList.toggle("panel-open", topMenusOpen);
+  }
 }
 
 function syncBottomMenuPanelState() {
@@ -14775,6 +14767,10 @@ function resetLattice() {
   customPianoActiveKeys.clear();
   customPianoMap = new Map();
   customPianoSelectedKey = null;
+  customNodes = [];
+  nextCustomNodeId = 200000;
+  pendingCustomAction = null;
+  customNodeDrag = null;
   setCustomPianoMapMode(false);
   markCustomPianoMapDirty();
   updateCustomPianoKeyStyles();
@@ -14787,12 +14783,16 @@ function resetLattice() {
   fundamentalNoteSelect.value = "60";
   onFundamentalNoteChange();
   resetLayoutState();
+  setLayoutMode(false);
   view.zoom = 1;
   view.offsetX = 0;
   view.offsetY = 0;
   view.rotX = 0;
   view.rotY = 0;
+  cameraDistance = 0;
   hoverNodeId = null;
+  set3DMode(false, { preserveDepth: false });
+  isFlattened2D = false;
   rebuildLattice();
   updateUiHint();
   schedulePresetUrlUpdate();

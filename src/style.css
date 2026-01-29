@@ -309,6 +309,26 @@ body.theme-dark .banner-message:not([hidden]) {
   align-items: center;
 }
 
+.control-actions-panel {
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  opacity: 0.25;
+  transition: opacity 0.2s ease;
+}
+
+.control-actions-panel:hover,
+.control-actions-panel:focus-within {
+  opacity: 1;
+}
+
+.control-actions-panel.panel-open {
+  opacity: 1;
+  transition: none;
+}
+
 .control-actions-divider {
   width: 1px;
   height: 22px;

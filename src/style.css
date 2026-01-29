@@ -1727,6 +1727,34 @@ body.map-mode-active::before {
   color: var(--ink);
 }
 
+.credits-dialog {
+  width: min(420px, 92vw);
+}
+
+.credits-content {
+  display: grid;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.credits-content a,
+.credits-content a:visited {
+  color: inherit;
+}
+
+.credits-contact {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.credits-close {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
 .custom-ratio-dialog::backdrop {
   background: rgba(10, 15, 20, 0.45);
 }

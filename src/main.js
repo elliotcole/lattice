@@ -105,6 +105,8 @@ const ratioWheelLarge = document.getElementById("ratio-wheel-large");
 const ratioWheelMini = document.getElementById("ratio-wheel-mini");
 const uiHint = document.getElementById("ui-hint");
 const bannerMessage = document.getElementById("banner-message");
+const creditsTrigger = document.getElementById("credits-trigger");
+const creditsDialog = document.getElementById("credits-dialog");
 const showHelpToggle = document.getElementById("show-help");
 const keyboardHelp = document.getElementById("keyboard-help");
 const keyboardMapPopover = document.getElementById("keyboard-map-popover");
@@ -16508,6 +16510,19 @@ if (layoutKeyMappingTextDialog) {
 document.querySelectorAll("dialog").forEach((dialog) => {
   setupDialogKeyDefaults(dialog);
 });
+if (creditsTrigger && creditsDialog) {
+  creditsTrigger.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (!creditsDialog.open) {
+      creditsDialog.showModal();
+    }
+  });
+  creditsDialog.addEventListener("click", () => {
+    if (creditsDialog.open) {
+      creditsDialog.close("dismiss");
+    }
+  });
+}
 if (layoutTitleFontSelect) {
   layoutTitleFontSelect.addEventListener("change", () => {
     pushLayoutUndoState();

@@ -258,6 +258,7 @@ let midiEnabled = false;
 let rHeld = false;
 let tHeld = false;
 let lHeld = false;
+let fHeld = false;
 let oHeld = false;
 let suppressClickAfterRespell = false;
 const midiActiveNotes = new Map();
@@ -738,6 +739,7 @@ let showAxes = true;
 let showGrid = true;
 let gridDepth = 1;
 let gridCenterZ = 0;
+let latticeExponentOffset = { x: 0, y: 0, z: 0 };
 const axisStack = [];
 let zKeyHeld = false;
 let xKeyHeld = false;
@@ -1040,6 +1042,7 @@ let labelCacheDataVersion = 0;
 const textWidthCache = new Map();
 let drawPending = false;
 const DEBUG_CENTS = false;
+const DEBUG_R_CLICK = false;
 
 const LAYOUT_PX_PER_IN = 96;
 const LAYOUT_PAGE_SIZES = {
@@ -1642,9 +1645,13 @@ function buildPatternStates(preserveIndices = false) {
     };
   }
 
-  let rhythmValues = [0.5];
+  let rhythmValues = [1];
   if (rhythmPattern === "random") {
     rhythmValues = [0.25, 0.25, 0.5, 1, 2];
+  } else if (rhythmPattern === "half-beat") {
+    rhythmValues = [0.5];
+  } else if (rhythmPattern === "four-beats") {
+    rhythmValues = [4];
   } else if (rhythmPattern === "euclidean") {
     rhythmValues = buildEuclideanDurations(count);
   } else if (rhythmPattern === "golden") {
@@ -2036,8 +2043,16 @@ function buildNearTriadSequenceOrder() {
     : { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 };
   const entries = [];
   const seen = new Set();
+  const seenRatios = new Set();
   const addTriangle = (nodesForTri) => {
     if (nodesForTri.some((node) => !node || !node.active)) {
+      return;
+    }
+    const ratioKey = nodesForTri
+      .map((node) => `${node.numerator}:${node.denominator}`)
+      .sort()
+      .join("|");
+    if (seenRatios.has(ratioKey)) {
       return;
     }
     const indices = nodesForTri
@@ -2051,6 +2066,7 @@ function buildNearTriadSequenceOrder() {
       return;
     }
     seen.add(key);
+    seenRatios.add(ratioKey);
     const points = nodesForTri.map((node) =>
       worldToScreen(getNodeDisplayCoordinate(node))
     );
@@ -2680,6 +2696,9 @@ function buildLattice() {
   const ratioZ = Number(ratioZSelect.value) || 7;
   const centerX = Math.floor(cols / 2);
   const centerY = Math.floor(rows / 2);
+  const offsetX = Number(latticeExponentOffset.x) || 0;
+  const offsetY = Number(latticeExponentOffset.y) || 0;
+  const offsetZ = Number(latticeExponentOffset.z) || 0;
   const depth = is3DMode || isFlattened2D ? GRID_DEPTH : 1;
   gridDepth = depth;
   gridCenterZ = Math.floor(depth / 2);
@@ -2687,9 +2706,9 @@ function buildLattice() {
   for (let z = 0; z < depth; z += 1) {
     for (let y = 0; y < rows; y += 1) {
       for (let x = 0; x < cols; x += 1) {
-        const exponentX = x - centerX;
-        const exponentY = centerY - y;
-        const exponentZ = gridCenterZ - z;
+        const exponentX = x - centerX - offsetX;
+        const exponentY = centerY - y - offsetY;
+        const exponentZ = gridCenterZ - z - offsetZ;
         const baseRatio = buildRatioComponents(
           ratioX,
           ratioY,
@@ -2791,6 +2810,79 @@ function updateNodeRatios() {
   updateVoiceFrequencies();
   draw();
   schedulePresetUrlUpdate();
+}
+
+function recomputeNodeRatiosFromExponents() {
+  const fundamental = Number(fundamentalInput.value) || 220;
+  const a4 = Number(a4Input.value) || 440;
+  const ratioX = Number(ratioXSelect.value) || 3;
+  const ratioY = Number(ratioYSelect.value) || 5;
+  const ratioZ = Number(ratioZSelect.value) || 7;
+
+  nodes.forEach((node) => {
+    if (node.isCustom) {
+      return;
+    }
+    const baseRatio = buildRatioComponents(
+      ratioX,
+      ratioY,
+      ratioZ,
+      node.exponentX,
+      node.exponentY,
+      node.exponentZ || 0
+    );
+    const reduced = reduceToOctave(baseRatio.numerator, baseRatio.denominator);
+    node.numerator = reduced.numerator;
+    node.denominator = reduced.denominator;
+    node.freq = fundamental * reduced.ratio;
+    const etInfo = getNearestEtInfo(node.freq, a4);
+    node.cents_from_et = etInfo.cents;
+    node.note_name = etInfo.name;
+    node.pitch_class = etInfo.pitchClass;
+  });
+
+  refreshCustomNodes();
+  bumpLabelDataVersion();
+  updatePitchInstances();
+  updateVoiceFrequencies();
+  draw();
+  schedulePresetUrlUpdate();
+}
+
+function rebaseLatticeFromNode(node) {
+  if (!node || node.isCustom) {
+    return false;
+  }
+  const deltaX = Number(node.exponentX) || 0;
+  const deltaY = Number(node.exponentY) || 0;
+  const deltaZ = Number(node.exponentZ) || 0;
+  if (!deltaX && !deltaY && !deltaZ) {
+    return false;
+  }
+  latticeExponentOffset = {
+    x: (Number(latticeExponentOffset.x) || 0) + deltaX,
+    y: (Number(latticeExponentOffset.y) || 0) + deltaY,
+    z: (Number(latticeExponentOffset.z) || 0) + deltaZ,
+  };
+  nodeOctaveOffsets = shiftExponentMap(nodeOctaveOffsets, deltaX, deltaY, deltaZ);
+  shiftLineLabelOverrides(deltaX, deltaY, deltaZ);
+  nodes.forEach((entry) => {
+    if (entry.isCustom) {
+      return;
+    }
+    entry.exponentX -= deltaX;
+    entry.exponentY -= deltaY;
+    entry.exponentZ = (Number(entry.exponentZ) || 0) - deltaZ;
+    const isCenter = entry.exponentX === 0 && entry.exponentY === 0 && entry.exponentZ === 0;
+    entry.isCenter = isCenter;
+    if (isCenter) {
+      entry.active = true;
+    }
+  });
+  applyNodeOctaveOffsets();
+  recomputeNodeRatiosFromExponents();
+  markIsomorphicDirty();
+  return true;
 }
 
 function updateVoiceFrequencies() {
@@ -3721,6 +3813,19 @@ function midiToFundamentalNoteName(midi) {
   return `${names[midi % 12]}${Math.floor(midi / 12) - 1}`;
 }
 
+function getFundamentalSpellingFromPitchClass(pitchClass) {
+  if (typeof pitchClass !== "string") {
+    return fundamentalSpelling;
+  }
+  if (pitchClass.includes("b")) {
+    return "flat";
+  }
+  if (pitchClass.includes("#") || pitchClass.includes("x")) {
+    return "sharp";
+  }
+  return fundamentalSpelling;
+}
+
 function getEnharmonicOptions(midi) {
   const pc = mod(midi, 12);
   const sharp = noteNamesSharp[pc];
@@ -4226,6 +4331,69 @@ function getOctaveOffsetKey(node) {
   return `${node.exponentX},${node.exponentY},${z}`;
 }
 
+function parseExponentKey(key) {
+  if (typeof key !== "string") {
+    return null;
+  }
+  const parts = key.split(",");
+  if (parts.length < 2) {
+    return null;
+  }
+  const x = Number(parts[0]);
+  const y = Number(parts[1]);
+  const z = Number(parts.length > 2 ? parts[2] : 0);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return null;
+  }
+  return { x, y, z };
+}
+
+function shiftExponentKey(key, deltaX, deltaY, deltaZ) {
+  const parsed = parseExponentKey(key);
+  if (!parsed) {
+    return null;
+  }
+  return `${parsed.x - deltaX},${parsed.y - deltaY},${parsed.z - deltaZ}`;
+}
+
+function shiftExponentMap(map, deltaX, deltaY, deltaZ) {
+  if (!map || !map.size) {
+    return map;
+  }
+  const next = new Map();
+  map.forEach((value, key) => {
+    const nextKey = shiftExponentKey(key, deltaX, deltaY, deltaZ);
+    if (nextKey) {
+      next.set(nextKey, value);
+    }
+  });
+  return next;
+}
+
+function shiftLineLabelOverrides(deltaX, deltaY, deltaZ) {
+  if (!lineLabelOverrides.size) {
+    return;
+  }
+  const next = new Map();
+  lineLabelOverrides.forEach((value, key) => {
+    if (typeof key !== "string") {
+      return;
+    }
+    const [aKey, bKey] = key.split("|");
+    if (!aKey || !bKey) {
+      return;
+    }
+    const nextA = shiftExponentKey(aKey, deltaX, deltaY, deltaZ);
+    const nextB = shiftExponentKey(bKey, deltaX, deltaY, deltaZ);
+    if (!nextA || !nextB) {
+      return;
+    }
+    const nextKey = nextA < nextB ? `${nextA}|${nextB}` : `${nextB}|${nextA}`;
+    next.set(nextKey, value);
+  });
+  lineLabelOverrides = next;
+}
+
 function applyNodeOctaveOffsets() {
   nodes.forEach((node) => {
     if (node.isCustom) {
@@ -4412,6 +4580,25 @@ function getDisplayNoteInfo(node) {
       return customInfo;
     }
   }
+  if (
+    spellingMode === "true" &&
+    !node.isCustom &&
+    Number.isFinite(node.numerator) &&
+    Number.isFinite(node.denominator) &&
+    node.numerator === node.denominator
+  ) {
+    const a4 = Number(a4Input.value) || 440;
+    let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
+    if (!Number.isFinite(fundamentalMidi)) {
+      const fallback = getNearestEtInfo(Number(fundamentalInput.value) || 220, a4);
+      fundamentalMidi = fallback.midi;
+    }
+    const targetPc = mod(fundamentalMidi, 12);
+    const pitchClass = getFundamentalNoteNames()[targetPc];
+    const name = `${pitchClass}${Math.floor(fundamentalMidi / 12) - 1}`;
+    const cents = getCentsForPitchClass(Number(node.freq), a4, pitchClass);
+    return { name, pitchClass, cents };
+  }
   const a4 = Number(a4Input.value) || 440;
   const freq = Number(node.freq);
   const nearest = getNearestEtInfo(freq, a4);
@@ -4499,11 +4686,13 @@ function getDisplayNoteInfo(node) {
     totalOffset += axis.exp * step;
   });
   if (!hasOffsetAxis) {
-    return {
-      name: nearestName,
-      pitchClass: nearestPitchClass,
-      cents: nearestCents,
-    };
+    const targetPc = nearest.midi % 12;
+    const pitchClass =
+      spellingMode === "simple"
+        ? getManualSpellingForNode(node, targetPc)
+        : getFundamentalNoteNames()[mod(targetPc, 12)];
+    const name = `${pitchClass}${Math.floor(nearest.midi / 12) - 1}`;
+    return { name, pitchClass, cents: nearestCents };
   }
   const rawPc = basePc + totalOffset;
   const targetPc = ((rawPc % 12) + 12) % 12;
@@ -8177,6 +8366,19 @@ function onPointerDown(event) {
     draw();
   }
   const hit = hitTestScreen(screenPoint);
+  if (DEBUG_R_CLICK) {
+    console.log("R-click debug: pointerdown", {
+      rHeld,
+      hitId: hit ? hit.id : null,
+      hitCenter: hit ? Boolean(hit.isCenter) : null,
+      hitRatio: hit ? `${hit.numerator}/${hit.denominator}` : null,
+      isCustom: hit ? Boolean(hit.isCustom) : null,
+      spellingMode,
+      customPianoMapMode: isCustomPianoMapModeActive(),
+      layoutMode,
+      isAddMode,
+    });
+  }
   const now = performance.now();
   if (isCustomPianoMapModeActive()) {
     if (hit) {
@@ -8206,50 +8408,81 @@ function onPointerDown(event) {
     return;
   }
 
-  if (rHeld && hit && spellingMode === "simple") {
-    const a4 = Number(a4Input.value) || 440;
-    const nearest = getNearestEtInfo(Number(hit.freq), a4);
-    let targetPc = nearest.midi % 12;
-    if (hejiEnabled) {
-      const ratioX = Number(ratioXSelect.value);
-      const ratioY = Number(ratioYSelect.value);
-      const ratioZ = Number(ratioZSelect.value);
-      const axisRatios = [
-        { ratio: ratioX, exp: Number(hit.exponentX) || 0 },
-        { ratio: ratioY, exp: Number(hit.exponentY) || 0 },
-        { ratio: ratioZ, exp: Number(hit.exponentZ) || 0 },
-      ];
-      let totalOffset = 0;
-      let hasOffsetAxis = false;
-      axisRatios.forEach((axis) => {
-        if (!axis.exp) {
-          return;
+  if (rHeld && hit) {
+    const isOneToOne = hit.isCenter || (!hit.isCustom && hit.numerator === hit.denominator);
+    if (isOneToOne && spellingMode !== "simple") {
+      const a4 = Number(a4Input.value) || 440;
+      const nearest = getNearestEtInfo(Number(hit.freq), a4);
+      const targetPc = nearest.midi % 12;
+      const options = getManualSpellingOptions(targetPc);
+      const currentName = getFundamentalNoteNames()[targetPc];
+      const allowed = options.filter(
+        (option) =>
+          option.pitchClass === noteNamesSharp[targetPc] ||
+          option.pitchClass === noteNamesFlat[targetPc]
+      );
+      if (allowed.length) {
+        let currentIndex = allowed.findIndex((option) => option.pitchClass === currentName);
+        if (currentIndex < 0) {
+          currentIndex = 0;
         }
-        const step = HEJI_STEP_OFFSETS[axis.ratio];
-        if (!Number.isFinite(step)) {
-          return;
+        const nextOption = allowed[(currentIndex + 1) % allowed.length];
+        fundamentalSpelling = nextOption.pitchClass.includes("b") ? "flat" : "sharp";
+        updateFundamentalNotes();
+        if (spellingMode === "simple") {
+          nodeSpellingOverrides.clear();
         }
-        hasOffsetAxis = true;
-        totalOffset += axis.exp * step;
-      });
-      if (hasOffsetAxis) {
-        let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
-        if (!Number.isFinite(fundamentalMidi)) {
-          const fallback = getNearestEtInfo(Number(fundamentalInput.value) || 220, a4);
-          fundamentalMidi = fallback.midi;
-        }
-        const basePc = ((fundamentalMidi % 12) + 12) % 12;
-        targetPc = ((basePc + totalOffset) % 12 + 12) % 12;
+        invalidateLabelCache();
+        draw();
+        schedulePresetUrlUpdate();
       }
+      suppressClickAfterRespell = true;
+      return;
     }
-    const options = getManualSpellingOptions(targetPc);
-    const currentKey = nodeSpellingOverrides.get(hit.id);
-    let currentIndex = options.findIndex((option) => option.key === currentKey);
-    if (currentIndex < 0) {
-      currentIndex = -1;
-    }
-    const nextIndex = (currentIndex + 1) % options.length;
-    const nextKey = options[nextIndex].key;
+    if (spellingMode === "simple") {
+      const a4 = Number(a4Input.value) || 440;
+      const nearest = getNearestEtInfo(Number(hit.freq), a4);
+      let targetPc = nearest.midi % 12;
+      if (hejiEnabled) {
+        const ratioX = Number(ratioXSelect.value);
+        const ratioY = Number(ratioYSelect.value);
+        const ratioZ = Number(ratioZSelect.value);
+        const axisRatios = [
+          { ratio: ratioX, exp: Number(hit.exponentX) || 0 },
+          { ratio: ratioY, exp: Number(hit.exponentY) || 0 },
+          { ratio: ratioZ, exp: Number(hit.exponentZ) || 0 },
+        ];
+        let totalOffset = 0;
+        let hasOffsetAxis = false;
+        axisRatios.forEach((axis) => {
+          if (!axis.exp) {
+            return;
+          }
+          const step = HEJI_STEP_OFFSETS[axis.ratio];
+          if (!Number.isFinite(step)) {
+            return;
+          }
+          hasOffsetAxis = true;
+          totalOffset += axis.exp * step;
+        });
+        if (hasOffsetAxis) {
+          let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
+          if (!Number.isFinite(fundamentalMidi)) {
+            const fallback = getNearestEtInfo(Number(fundamentalInput.value) || 220, a4);
+            fundamentalMidi = fallback.midi;
+          }
+          const basePc = ((fundamentalMidi % 12) + 12) % 12;
+          targetPc = ((basePc + totalOffset) % 12 + 12) % 12;
+        }
+      }
+      const options = getManualSpellingOptions(targetPc);
+      const currentKey = nodeSpellingOverrides.get(hit.id);
+      let currentIndex = options.findIndex((option) => option.key === currentKey);
+      if (currentIndex < 0) {
+        currentIndex = -1;
+      }
+      const nextIndex = (currentIndex + 1) % options.length;
+      const nextKey = options[nextIndex].key;
       if (nextKey === "base") {
         nodeSpellingOverrides.delete(hit.id);
       } else {
@@ -8260,6 +8493,7 @@ function onPointerDown(event) {
       draw();
       schedulePresetUrlUpdate();
       return;
+    }
   }
   if (tHeld) {
     const triangle = findTriangleHit(screenPoint);
@@ -9067,6 +9301,193 @@ function onPointerUp(event) {
   if (moved < 4) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const hit = hitTestScreen(screenPoint);
+    if (!layoutMode && fHeld && hit) {
+      const freq = Number(hit.freq);
+      if (Number.isFinite(freq)) {
+        const a4 = Number(a4Input.value) || 440;
+        let prevMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
+        if (!Number.isFinite(prevMidi)) {
+          const fallback = getNearestEtInfo(Number(fundamentalInput.value) || 220, a4);
+          prevMidi = fallback.midi;
+        }
+        const nearest = getNearestEtInfo(freq, a4);
+        const prevOctave = Math.floor(prevMidi / 12);
+        let targetMidi = prevOctave * 12 + (nearest.midi % 12);
+        targetMidi = Math.max(0, Math.min(96, targetMidi));
+        const targetFreq = midiToFrequency(targetMidi, a4);
+        const displayInfo = getDisplayNoteInfo(hit);
+        if (displayInfo && displayInfo.pitchClass) {
+          fundamentalSpelling = getFundamentalSpellingFromPitchClass(displayInfo.pitchClass);
+        }
+        fundamentalInput.value = String(targetFreq);
+        fundamentalNoteSelect.value = String(targetMidi);
+        updateFundamentalNotes();
+        if (spellingMode === "simple") {
+          nodeSpellingOverrides.clear();
+          invalidateLabelCache();
+        }
+        const rebased = rebaseLatticeFromNode(hit);
+        if (!rebased) {
+          updateNodeFrequencies();
+        }
+        hideFundamentalSpellingDialog();
+      }
+      return;
+    }
+    if (
+      !layoutMode &&
+      !tHeld &&
+      !hit &&
+      !event.altKey &&
+      !event.shiftKey &&
+      !cHeld &&
+      !oHeld &&
+      !lHeld
+    ) {
+      const triangle = findTriangleHit(screenPoint);
+      if (triangle && triangle.tri) {
+        const key = triangleKey(triangle);
+        if (triangleDiagonals.has(key)) {
+          const gridMap = new Map();
+          nodes.forEach((node) => {
+            if (!node.isCustom) {
+              gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
+            }
+          });
+          const cellNodes = getTriangleCellNodes(triangle, gridMap);
+          const triNodes = getTriangleLabelPoints(triangle.tri, cellNodes);
+          if (triNodes && triNodes.length === 3) {
+            let handled = false;
+            const triNodeIds = new Set(triNodes.map((node) => node.id));
+            const allSounding = triNodes.every((node) => {
+              const voice = node.baseVoiceId ? findVoiceById(node.baseVoiceId) : null;
+              return Boolean(voice);
+            });
+            if (allSounding) {
+              triNodes.forEach((node) => {
+                const voice = node.baseVoiceId ? findVoiceById(node.baseVoiceId) : null;
+                if (voice) {
+                  stopVoice(voice);
+                }
+                node.baseVoiceId = null;
+              });
+              draw();
+              return;
+            }
+            const triHasPlaying = triNodes.some((node) => {
+              const voice = node.baseVoiceId ? findVoiceById(node.baseVoiceId) : null;
+              return Boolean(voice);
+            });
+            if (triHasPlaying) {
+              const clickedKey = `${triangleKey(triangle)}:${triangle.tri}`;
+              const trianglesToStop = [];
+              const triIdsForDiag = (diag) =>
+                diag === "backslash" ? ["abd", "acd"] : ["abc", "bcd"];
+              triangleDiagonals.forEach((entry) => {
+                const ids = triIdsForDiag(entry.diag);
+                ids.forEach((triId) => {
+                  const triKey = `${triangleKey(entry)}:${triId}`;
+                  if (triKey === clickedKey) {
+                    return;
+                  }
+                  const entryCell = getTriangleCellNodes(entry, gridMap);
+                  const nodesForTri = getTriangleLabelPoints(triId, entryCell);
+                  if (!nodesForTri || nodesForTri.length !== 3) {
+                    return;
+                  }
+                  const sharesPlaying = nodesForTri.some((node) => {
+                    if (!triNodeIds.has(node.id)) {
+                      return false;
+                    }
+                    const voice = node.baseVoiceId ? findVoiceById(node.baseVoiceId) : null;
+                    return Boolean(voice);
+                  });
+                  if (sharesPlaying) {
+                    trianglesToStop.push(nodesForTri);
+                  }
+                });
+              });
+              if (trianglesToStop.length) {
+                trianglesToStop.forEach((nodesForTri) => {
+                  nodesForTri.forEach((node) => {
+                    const voice = node.baseVoiceId ? findVoiceById(node.baseVoiceId) : null;
+                    if (voice) {
+                      stopVoice(voice);
+                    }
+                    node.baseVoiceId = null;
+                  });
+                });
+                let activated = false;
+                triNodes.forEach((node) => {
+                  if (!node.active) {
+                    node.active = true;
+                    syncCustomNodesWithSource(node.id, true);
+                    activated = true;
+                  }
+                });
+                triNodes.forEach((node) => {
+                  if (node.baseVoiceId && findVoiceById(node.baseVoiceId)) {
+                    return;
+                  }
+                  const voice = startVoice({
+                    nodeId: node.id,
+                    octave: 0,
+                    freq: node.freq,
+                    source: "node",
+                  });
+                  if (voice) {
+                    node.baseVoiceId = voice.id;
+                  }
+                });
+                if (activated) {
+                  updatePitchInstances();
+                  refreshPatternFromActiveNodes();
+                  updateUiHint();
+                  markIsomorphicDirty();
+                  schedulePresetUrlUpdate();
+                }
+                handled = true;
+              }
+            }
+            if (!handled) {
+              {
+                let activated = false;
+                triNodes.forEach((node) => {
+                  if (!node.active) {
+                    node.active = true;
+                    syncCustomNodesWithSource(node.id, true);
+                    activated = true;
+                  }
+                });
+                triNodes.forEach((node) => {
+                  if (node.baseVoiceId && findVoiceById(node.baseVoiceId)) {
+                    return;
+                  }
+                  const voice = startVoice({
+                    nodeId: node.id,
+                    octave: 0,
+                    freq: node.freq,
+                    source: "node",
+                  });
+                  if (voice) {
+                    node.baseVoiceId = voice.id;
+                  }
+                });
+                if (activated) {
+                  updatePitchInstances();
+                  refreshPatternFromActiveNodes();
+                  updateUiHint();
+                  markIsomorphicDirty();
+                  schedulePresetUrlUpdate();
+                }
+              }
+            }
+            draw();
+            return;
+          }
+        }
+      }
+    }
     if (cHeld && hit && hit.active) {
       openCustomRatioDialog({ type: "create", sourceId: hit.id });
       return;
@@ -10187,7 +10608,7 @@ function updateUiHint() {
   if (spellingHintActive) {
     uiHint.textContent =
       spellingMode === "true"
-        ? "Diatonic spellings up to 3 sharps / flats, after which nearest enharmonic equivalents are used."
+        ? "Diatonic spellings up to 3 sharps / flats, after which nearest enharmonic equivalents are used. \nHold R and click 1:1 to re-spell the fundamental."
         : "Manual spelling: hold R and click on a node to cycle.";
     return;
   }
@@ -10199,11 +10620,11 @@ function updateUiHint() {
 
   if (!is3DMode) {
     uiHint.textContent =
-      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nHold L and press & hold to start LFO.\nHold T to label triangles\nHold O and click a node to change playback octave.\nDrag to pan. Scroll to zoom.";
+      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nHold L and press & hold to start LFO.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to pan. Scroll to zoom.";
     return;
   }
   uiHint.textContent =
-    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nHold L and press & hold to start LFO\nHold T to label triangles\nHold O and click a node to change playback octave.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
+    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nHold L and press & hold to start LFO\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
 }
 
 function resetUiHintToDefault() {
@@ -12153,6 +12574,11 @@ function getPresetState() {
       Number(ratioYSelect.value) || 5,
       Number(ratioZSelect.value) || 7,
     ],
+    exponentOffset: {
+      x: Number(latticeExponentOffset.x) || 0,
+      y: Number(latticeExponentOffset.y) || 0,
+      z: Number(latticeExponentOffset.z) || 0,
+    },
     noteSpellings: Array.from(nodeSpellingOverrides.entries()),
     octaveOffsets: Array.from(nodeOctaveOffsets.entries()),
     triangles: Array.from(triangleDiagonals.values()).map((entry) => ({
@@ -12484,6 +12910,15 @@ function applyPresetState(state) {
     if (Number.isFinite(z) && ratioZSelect) {
       ratioZSelect.value = String(z);
     }
+  }
+  if (state.exponentOffset && typeof state.exponentOffset === "object") {
+    latticeExponentOffset = {
+      x: Number(state.exponentOffset.x) || 0,
+      y: Number(state.exponentOffset.y) || 0,
+      z: Number(state.exponentOffset.z) || 0,
+    };
+  } else {
+    latticeExponentOffset = { x: 0, y: 0, z: 0 };
   }
   if (Array.isArray(state.noteSpellings)) {
     nodeSpellingOverrides = new Map();
@@ -14953,6 +15388,7 @@ function resetLattice() {
   view.rotX = 0;
   view.rotY = 0;
   cameraDistance = 0;
+  latticeExponentOffset = { x: 0, y: 0, z: 0 };
   hoverNodeId = null;
   set3DMode(false, { preserveDepth: false });
   isFlattened2D = false;
@@ -15438,8 +15874,8 @@ if (spellingModeButtons.length) {
       updateUiHint();
       if (spellingMode !== "true") {
         hideFundamentalSpellingDialog();
-      } else if (fundamentalNoteSelect) {
-        showFundamentalSpellingDialog(Number(fundamentalNoteSelect.value));
+      } else {
+        hideFundamentalSpellingDialog();
       }
       refreshCustomNodes();
       invalidateLabelCache();
@@ -16737,7 +17173,7 @@ window.addEventListener("keydown", (event) => {
   }
   if (isCustomPianoMapModeActive()) {
     const heldKey = event.key.toLowerCase();
-    if (heldKey === "t" || heldKey === "r" || heldKey === "l") {
+    if (heldKey === "t" || heldKey === "r" || heldKey === "l" || heldKey === "f") {
       return;
     }
   }
@@ -16752,6 +17188,9 @@ window.addEventListener("keydown", (event) => {
   }
   if (event.key.toLowerCase() === "l") {
     lHeld = true;
+  }
+  if (event.key.toLowerCase() === "f") {
+    fHeld = true;
   }
   if (event.key.toLowerCase() === "o") {
     oHeld = true;
@@ -16799,6 +17238,14 @@ if (triangleLabelDialog) {
   }
   if (event.key.toLowerCase() === "r") {
     rHeld = true;
+    if (DEBUG_R_CLICK) {
+      console.log("R-click debug: keydown", {
+        target: event.target && event.target.tagName ? event.target.tagName : null,
+        customPianoMapMode: isCustomPianoMapModeActive(),
+        layoutMode,
+        spellingMode,
+      });
+    }
   }
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = true;
@@ -16910,6 +17357,14 @@ window.addEventListener("keyup", (event) => {
   }
   if (event.key.toLowerCase() === "r") {
     rHeld = false;
+    if (DEBUG_R_CLICK) {
+      console.log("R-click debug: keyup", {
+        target: event.target && event.target.tagName ? event.target.tagName : null,
+        customPianoMapMode: isCustomPianoMapModeActive(),
+        layoutMode,
+        spellingMode,
+      });
+    }
   }
   if (event.key.toLowerCase() === "t") {
     tHeld = false;
@@ -16919,6 +17374,9 @@ window.addEventListener("keyup", (event) => {
   }
   if (event.key.toLowerCase() === "l") {
     lHeld = false;
+  }
+  if (event.key.toLowerCase() === "f") {
+    fHeld = false;
   }
   if (event.key.toLowerCase() === "o") {
     oHeld = false;

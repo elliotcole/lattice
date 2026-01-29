@@ -186,6 +186,8 @@ const navKeyMappingsToggle = document.getElementById("nav-key-mappings");
 const lineLabelsToggle = document.getElementById("line-labels-toggle");
 const nav3dNavigationToggle = document.getElementById("nav-3d-navigation-toggle");
 const nav3dNavigationBody = document.getElementById("nav-3d-navigation-body");
+const navZoomInput = document.getElementById("nav-zoom");
+const navDistanceInput = document.getElementById("nav-distance");
 const layoutShowToggle = document.getElementById("layout-show-toggle");
 const layoutShowBody = document.getElementById("layout-show-body");
 const layoutKeyMappingsGroup = document.getElementById("layout-key-mappings-group");
@@ -217,9 +219,27 @@ const view = {
   rotX: 0,
   rotY: 0,
 };
+let cameraDistance = 0;
 let bestViewCandidates = [];
 let bestViewIndex = 0;
 let bestViewSignature = "";
+
+function clampZoom(value) {
+  return Math.min(2.2, Math.max(0.5, value));
+}
+
+function clampCameraDistance(value) {
+  return Math.min(600, Math.max(0, value));
+}
+
+function syncNavViewSliders() {
+  if (navZoomInput) {
+    navZoomInput.value = String(clampZoom(view.zoom));
+  }
+  if (navDistanceInput) {
+    navDistanceInput.value = String(clampCameraDistance(cameraDistance));
+  }
+}
 
 let audioCtx = null;
 let masterGain = null;
@@ -280,13 +300,21 @@ function computeTriangleLabelLayout(text, font, baseSize, points, fontWeight = 4
   });
   const boxWidth = maxX - minX;
   const boxHeight = maxY - minY;
-  const maxWidth = Math.max(8, Math.min(boxWidth, boxHeight) * 0.75);
+  const maxBox = Math.min(boxWidth, boxHeight);
+  const baseWidth = measureTextWidthWithWeight(text, baseSize, font, fontWeight);
+  const minSize = Math.max(2, baseSize * 0.25);
+  const a = points[0];
+  const b = points[1];
+  const c = points[2];
+  const ab = Math.hypot(b.x - a.x, b.y - a.y);
+  const bc = Math.hypot(c.x - b.x, c.y - b.y);
+  const ca = Math.hypot(a.x - c.x, a.y - c.y);
+  const avgEdge = (ab + bc + ca) / 3;
+  const maxWidth = Math.max(8, Math.min(maxBox * 0.45, avgEdge * 0.5));
   let size = baseSize;
-  const minSize = Math.max(2, Math.round(baseSize * 0.25));
-  let width = measureTextWidthWithWeight(text, size, font, fontWeight);
-  while (width > maxWidth && size > minSize) {
-    size -= 4;
-    width = measureTextWidthWithWeight(text, size, font, fontWeight);
+  if (baseWidth > maxWidth) {
+    const scale = Math.max(minSize / baseSize, maxWidth / baseWidth);
+    size = baseSize * scale;
   }
   return { size };
 }
@@ -3652,7 +3680,7 @@ function onFundamentalNoteChange() {
 
 function projectPoint(point, disableScale = false) {
   if (!is3DMode && !isFlattened2D) {
-    return { x: point.x, y: point.y, depth: 0, scale: 1 };
+    return { x: point.x, y: point.y, depth: 0, scale: 1, scaleRaw: 1, denom: 1, visible: true };
   }
   const cosY = Math.cos(view.rotY);
   const sinY = Math.sin(view.rotY);
@@ -3664,9 +3692,12 @@ function projectPoint(point, disableScale = false) {
   const y1 = point.y * cosX - z1 * sinX;
   const z2 = point.y * sinX + z1 * cosX;
 
-  const scaleRaw = disableScale ? 1 : 1 / (1 + z2 * 0.002);
+  const adjustedZ = z2 + cameraDistance;
+  const denom = disableScale ? 1 : 1 + adjustedZ * 0.002;
+  const scaleRaw = disableScale ? 1 : 1 / denom;
   const scale = disableScale ? 1 : Math.max(0.15, scaleRaw);
-  return { x: x1 * scale, y: y1 * scale, depth: z2, scale };
+  const visible = disableScale ? true : denom > 0.02;
+  return { x: x1 * scale, y: y1 * scale, depth: z2, scale, scaleRaw, denom, visible };
 }
 
 function projectPointWithAngles(point, rotX, rotY, disableScale = false) {
@@ -3680,9 +3711,12 @@ function projectPointWithAngles(point, rotX, rotY, disableScale = false) {
   const y1 = point.y * cosX - z1 * sinX;
   const z2 = point.y * sinX + z1 * cosX;
 
-  const scaleRaw = disableScale ? 1 : 1 / (1 + z2 * 0.002);
+  const adjustedZ = z2 + cameraDistance;
+  const denom = disableScale ? 1 : 1 + adjustedZ * 0.002;
+  const scaleRaw = disableScale ? 1 : 1 / denom;
   const scale = disableScale ? 1 : Math.max(0.15, scaleRaw);
-  return { x: x1 * scale, y: y1 * scale, depth: z2, scale };
+  const visible = disableScale ? true : denom > 0.02;
+  return { x: x1 * scale, y: y1 * scale, depth: z2, scale, scaleRaw, denom, visible };
 }
 
 function worldToScreen(point, disableScale = false) {
@@ -3692,6 +3726,9 @@ function worldToScreen(point, disableScale = false) {
     y: (projected.y + view.offsetY) * view.zoom + canvas.clientHeight / 2,
     depth: projected.depth,
     scale: projected.scale,
+    scaleRaw: projected.scaleRaw,
+    denom: projected.denom,
+    visible: projected.visible,
   };
 }
 
@@ -7596,6 +7633,8 @@ function drawCustomConnections(nodePosMap) {
     ctx.restore();
   }
 
+  syncNavViewSliders();
+
   updateBannerMessage();
 
   updateRatioWheels();
@@ -9424,88 +9463,109 @@ function updateLfoDepth() {
 }
 
 function drawAxes(axisEntry) {
-  const axisLengthXY = GRID_SPACING * (GRID_COLS / 2);
-  const axisLengthZ = GRID_SPACING * (gridDepth / 2);
   ctx.lineWidth = 1.5;
 
   if (axisEntry) {
-    const anchorWorld = getAxisAnchorWorld(axisEntry);
-    if (!anchorWorld) {
-      return;
+    const anchor = axisEntry.anchor || null;
+    const axis = axisEntry.axis;
+    const points = [];
+    if (axis === "x" && anchor) {
+      for (let x = 0; x < GRID_COLS; x += 1) {
+        points.push(gridCoordToWorld({ x, y: anchor.y, z: anchor.z }));
+      }
+    } else if (axis === "y" && anchor) {
+      for (let y = 0; y < GRID_ROWS; y += 1) {
+        points.push(gridCoordToWorld({ x: anchor.x, y, z: anchor.z }));
+      }
+    } else if (axis === "z" && anchor) {
+      for (let z = 0; z < gridDepth; z += 1) {
+        points.push(gridCoordToWorld({ x: anchor.x, y: anchor.y, z }));
+      }
     }
-    let startScreen = null;
-    let endScreen = null;
-    if (axisEntry.axis === "z") {
-      startScreen = worldToScreen(
-        { x: anchorWorld.x, y: anchorWorld.y, z: anchorWorld.z - axisLengthZ }
-      );
-      endScreen = worldToScreen(
-        { x: anchorWorld.x, y: anchorWorld.y, z: anchorWorld.z + axisLengthZ }
-      );
-    } else if (axisEntry.axis === "x") {
-      startScreen = worldToScreen(
-        { x: anchorWorld.x - axisLengthXY, y: anchorWorld.y, z: anchorWorld.z }
-      );
-      endScreen = worldToScreen(
-        { x: anchorWorld.x + axisLengthXY, y: anchorWorld.y, z: anchorWorld.z }
-      );
-    } else if (axisEntry.axis === "y") {
-      startScreen = worldToScreen(
-        { x: anchorWorld.x, y: anchorWorld.y - axisLengthXY, z: anchorWorld.z }
-      );
-      endScreen = worldToScreen(
-        { x: anchorWorld.x, y: anchorWorld.y + axisLengthXY, z: anchorWorld.z }
-      );
-    }
-    if (startScreen && endScreen) {
-      ctx.strokeStyle = AXIS_EDGE_COLORS[axisEntry.axis] || AXIS_EDGE_COLORS.z;
+    if (points.length > 1) {
+      ctx.strokeStyle = AXIS_EDGE_COLORS[axis] || AXIS_EDGE_COLORS.z;
+      let hasPath = false;
+      let active = false;
       ctx.beginPath();
-      ctx.moveTo(startScreen.x, startScreen.y);
-      ctx.lineTo(endScreen.x, endScreen.y);
-      ctx.stroke();
+      points.forEach((point) => {
+        const screen = worldToScreen(point);
+        if (!screen.visible) {
+          active = false;
+          return;
+        }
+        if (!active) {
+          ctx.moveTo(screen.x, screen.y);
+          active = true;
+          hasPath = true;
+        } else {
+          ctx.lineTo(screen.x, screen.y);
+        }
+      });
+      if (hasPath) {
+        ctx.stroke();
+      }
       return;
     }
   }
 
+  const centerX = Math.floor(GRID_COLS / 2);
+  const centerY = Math.floor(GRID_ROWS / 2);
+  const centerZ = gridCenterZ;
   const axes = [
     {
-      start: { x: -axisLengthXY, y: 0, z: 0 },
-      end: { x: axisLengthXY, y: 0, z: 0 },
-      color: AXIS_EDGE_COLORS.x,
+      axis: "x",
+      points: Array.from({ length: GRID_COLS }, (_, x) =>
+        gridCoordToWorld({ x, y: centerY, z: centerZ })
+      ),
     },
     {
-      start: { x: 0, y: -axisLengthXY, z: 0 },
-      end: { x: 0, y: axisLengthXY, z: 0 },
-      color: AXIS_EDGE_COLORS.y,
+      axis: "y",
+      points: Array.from({ length: GRID_ROWS }, (_, y) =>
+        gridCoordToWorld({ x: centerX, y, z: centerZ })
+      ),
     },
     {
-      start: { x: 0, y: 0, z: -axisLengthZ },
-      end: { x: 0, y: 0, z: axisLengthZ },
-      color: AXIS_EDGE_COLORS.z,
+      axis: "z",
+      points: Array.from({ length: gridDepth }, (_, z) =>
+        gridCoordToWorld({ x: centerX, y: centerY, z })
+      ),
     },
   ];
 
   axes.forEach((axis) => {
-    const start = worldToScreen(axis.start, true);
-    const end = worldToScreen(axis.end, true);
-    ctx.strokeStyle = axis.color;
+    ctx.strokeStyle = AXIS_EDGE_COLORS[axis.axis] || AXIS_EDGE_COLORS.z;
+    let hasPath = false;
+    let active = false;
     ctx.beginPath();
-    ctx.moveTo(start.x, start.y);
-    ctx.lineTo(end.x, end.y);
-    ctx.stroke();
+    axis.points.forEach((point) => {
+      const screen = worldToScreen(point);
+      if (!screen.visible) {
+        active = false;
+        return;
+      }
+      if (!active) {
+        ctx.moveTo(screen.x, screen.y);
+        active = true;
+        hasPath = true;
+      } else {
+        ctx.lineTo(screen.x, screen.y);
+      }
+    });
+    if (hasPath) {
+      ctx.stroke();
+    }
   });
 }
 
 function drawGrid() {
-  const size = GRID_SPACING * (GRID_COLS / 2);
-  const sizeZ = GRID_SPACING * (gridDepth / 2);
-  const step = GRID_SPACING;
-  const coarseStep = GRID_SPACING * 2;
   ctx.save();
   ctx.strokeStyle = themeColors.edge;
   ctx.lineWidth = 1;
 
   const drawLine = (start, end, baseAlpha) => {
+    if (!start.visible || !end.visible) {
+      return;
+    }
     const avgDepth = (start.depth + end.depth) / 2;
     const depthFade = Number.isFinite(avgDepth)
       ? Math.max(0.12, Math.min(1, 1 - Math.max(0, avgDepth) / 2000))
@@ -9517,37 +9577,32 @@ function drawGrid() {
     ctx.stroke();
   };
 
-  const drawPlaneGrid = (plane, planeAlpha) => {
-    const [axisA, axisB, axisConst] = plane;
-    const limitA = axisA === "z" ? sizeZ : size;
-    const limitB = axisB === "z" ? sizeZ : size;
-    const stepA = axisA === "z" ? step : coarseStep;
-    const stepB = axisB === "z" ? step : coarseStep;
-    for (let a = -limitA; a <= limitA; a += stepA) {
-      const start = { x: 0, y: 0, z: 0 };
-      const end = { x: 0, y: 0, z: 0 };
-      start[axisA] = a;
-      end[axisA] = a;
-      start[axisB] = -limitB;
-      end[axisB] = limitB;
-      start[axisConst.axis] = axisConst.value;
-      end[axisConst.axis] = axisConst.value;
-      drawLine(worldToScreen(start), worldToScreen(end), planeAlpha);
+  const drawPlaneGrid = (planeAlpha) => {
+    const coarseStep = 2;
+    const centerZ = gridCenterZ;
+    for (let x = 0; x < GRID_COLS; x += coarseStep) {
+      let previous = null;
+      for (let y = 0; y < GRID_ROWS; y += 1) {
+        const screen = worldToScreen(gridCoordToWorld({ x, y, z: centerZ }));
+        if (previous) {
+          drawLine(previous, screen, planeAlpha);
+        }
+        previous = screen;
+      }
     }
-    for (let b = -limitB; b <= limitB; b += stepB) {
-      const start = { x: 0, y: 0, z: 0 };
-      const end = { x: 0, y: 0, z: 0 };
-      start[axisB] = b;
-      end[axisB] = b;
-      start[axisA] = -limitA;
-      end[axisA] = limitA;
-      start[axisConst.axis] = axisConst.value;
-      end[axisConst.axis] = axisConst.value;
-      drawLine(worldToScreen(start), worldToScreen(end), planeAlpha);
+    for (let y = 0; y < GRID_ROWS; y += coarseStep) {
+      let previous = null;
+      for (let x = 0; x < GRID_COLS; x += 1) {
+        const screen = worldToScreen(gridCoordToWorld({ x, y, z: centerZ }));
+        if (previous) {
+          drawLine(previous, screen, planeAlpha);
+        }
+        previous = screen;
+      }
     }
   };
 
-  drawPlaneGrid(["x", "y", { axis: "z", value: 0 }], 0.35);
+  drawPlaneGrid(0.35);
   ctx.restore();
 }
 
@@ -15122,6 +15177,19 @@ if (nav3dButtons && nav3dButtons.length) {
         applyNavAction(action);
       }
     });
+  });
+}
+if (navZoomInput) {
+  navZoomInput.addEventListener("input", () => {
+    view.zoom = clampZoom(Number(navZoomInput.value) || 1);
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (navDistanceInput) {
+  navDistanceInput.addEventListener("input", () => {
+    cameraDistance = clampCameraDistance(Number(navDistanceInput.value) || 0);
+    draw();
   });
 }
 exportScaleButton.addEventListener("click", exportToScaleWorkshop);

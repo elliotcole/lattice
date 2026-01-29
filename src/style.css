@@ -687,6 +687,22 @@ button:active {
   opacity: 0.55;
 }
 
+.nav-3d-inline-slider {
+  gap: 6px;
+}
+
+.nav-3d-inline-slider label {
+  font-size: 11px;
+  color: var(--muted-ink);
+  min-width: 62px;
+}
+
+.nav-3d-inline-slider input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  height: 14px;
+}
+
 .nav-3d button {
   background: transparent;
   color: var(--ink);

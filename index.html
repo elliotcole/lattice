@@ -880,9 +880,20 @@
               </div>
               <div class="nav-3d-subsection">
                 <div class="nav-3d-subtitle">Zoom</div>
-                <div class="nav-3d-buttons">
-                  <button type="button" data-action="zoom-in">+</button>
-                  <button type="button" data-action="zoom-out">-</button>
+                <div class="control-inline nav-3d-inline-slider">
+                  <label for="nav-zoom">Zoom</label>
+                  <input
+                    id="nav-zoom"
+                    type="range"
+                    min="0.5"
+                    max="2.2"
+                    step="0.01"
+                    value="1"
+                  />
+                </div>
+                <div class="control-inline nav-3d-inline-slider">
+                  <label for="nav-distance">Distance</label>
+                  <input id="nav-distance" type="range" min="0" max="600" step="1" value="0" />
                 </div>
               </div>
             </div>

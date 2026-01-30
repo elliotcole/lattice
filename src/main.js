@@ -391,6 +391,25 @@ function serializeLayoutLabelOffsets() {
       if (!node) {
         return null;
       }
+      if (node.isCustom) {
+        const source = nodeById.get(node.sourceNodeId);
+        const sourceExponents = Array.isArray(node.sourceExponents)
+          ? node.sourceExponents
+          : source
+          ? [source.exponentX, source.exponentY, source.exponentZ || 0]
+          : null;
+        if (!sourceExponents) {
+          return null;
+        }
+        return {
+          sourceExponents,
+          customSlot: node.customSlot,
+          factorNumerator: node.factorNumerator,
+          factorDenominator: node.factorDenominator,
+          x: offset.x,
+          y: offset.y,
+        };
+      }
       return {
         exponents: [node.exponentX, node.exponentY, node.exponentZ || 0],
         x: offset.x,
@@ -406,6 +425,25 @@ function serializeLayoutKeyMappingOffsets() {
       const node = nodeById.get(id);
       if (!node) {
         return null;
+      }
+      if (node.isCustom) {
+        const source = nodeById.get(node.sourceNodeId);
+        const sourceExponents = Array.isArray(node.sourceExponents)
+          ? node.sourceExponents
+          : source
+          ? [source.exponentX, source.exponentY, source.exponentZ || 0]
+          : null;
+        if (!sourceExponents) {
+          return null;
+        }
+        return {
+          sourceExponents,
+          customSlot: node.customSlot,
+          factorNumerator: node.factorNumerator,
+          factorDenominator: node.factorDenominator,
+          x: offset.x,
+          y: offset.y,
+        };
       }
       return {
         exponents: [node.exponentX, node.exponentY, node.exponentZ || 0],
@@ -435,9 +473,20 @@ function serializeLayoutCustomNodePositions() {
       if (!coord) {
         return null;
       }
+      const source = nodeById.get(node.sourceNodeId);
+      const sourceExponents = Array.isArray(node.sourceExponents)
+        ? node.sourceExponents
+        : source
+        ? [source.exponentX, source.exponentY, source.exponentZ || 0]
+        : null;
+      if (!sourceExponents) {
+        return null;
+      }
       return {
-        sourceNodeId: node.sourceNodeId,
+        sourceExponents,
         customSlot: node.customSlot,
+        factorNumerator: node.factorNumerator,
+        factorDenominator: node.factorDenominator,
         x: coord.x,
         y: coord.y,
         z: coord.z,
@@ -451,6 +500,7 @@ function applyLayoutCustomNodePositions(entries) {
     return;
   }
   const lookup = new Map();
+  const legacyLookup = new Map();
   entries.forEach((entry) => {
     if (!entry || typeof entry !== "object") {
       return;
@@ -466,15 +516,42 @@ function applyLayoutCustomNodePositions(entries) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
       return;
     }
-    lookup.set(`${sourceNodeId}|${customSlot}`, { x, y, z });
+    const sourceExponents = Array.isArray(entry.sourceExponents)
+      ? entry.sourceExponents.map(Number)
+      : null;
+    if (sourceExponents && sourceExponents.length >= 2) {
+      const [expX, expY, expZ = 0] = sourceExponents;
+      if (Number.isFinite(expX) && Number.isFinite(expY) && Number.isFinite(expZ)) {
+        lookup.set(`${expX},${expY},${expZ}|${customSlot}`, { x, y, z });
+      }
+    }
+    if (Number.isFinite(sourceNodeId)) {
+      legacyLookup.set(`${sourceNodeId}|${customSlot}`, { x, y, z });
+    }
   });
   customNodes.forEach((node) => {
-    const key = `${node.sourceNodeId}|${node.customSlot}`;
-    if (!lookup.has(key)) {
-      layoutPositions.delete(node.id);
+    const source = nodeById.get(node.sourceNodeId);
+    const fallbackExponents = Array.isArray(node.sourceExponents)
+      ? node.sourceExponents
+      : null;
+    const expX = source ? source.exponentX : fallbackExponents ? fallbackExponents[0] : null;
+    const expY = source ? source.exponentY : fallbackExponents ? fallbackExponents[1] : null;
+    const expZ = source
+      ? source.exponentZ || 0
+      : fallbackExponents && Number.isFinite(fallbackExponents[2])
+      ? fallbackExponents[2]
+      : 0;
+    const key = `${expX},${expY},${expZ}|${node.customSlot}`;
+    if (lookup.has(key)) {
+      layoutPositions.set(node.id, lookup.get(key));
       return;
     }
-    layoutPositions.set(node.id, lookup.get(key));
+    const legacyKey = `${node.sourceNodeId}|${node.customSlot}`;
+    if (legacyLookup.has(legacyKey)) {
+      layoutPositions.set(node.id, legacyLookup.get(legacyKey));
+      return;
+    }
+    layoutPositions.delete(node.id);
   });
 }
 
@@ -484,12 +561,20 @@ function applyLayoutLabelOffsets(entries) {
     return;
   }
   const exponentMap = new Map();
+  const customMap = new Map();
+  const customMapBySourceId = new Map();
   nodes.forEach((node) => {
     if (!node.isCustom) {
       exponentMap.set(
         `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`,
         node
       );
+    } else if (Array.isArray(node.sourceExponents)) {
+      const [expX, expY, expZ = 0] = node.sourceExponents;
+      customMap.set(`${expX},${expY},${expZ}|${node.customSlot}`, node);
+    }
+    if (node.isCustom && Number.isFinite(node.sourceNodeId)) {
+      customMapBySourceId.set(`${node.sourceNodeId}|${node.customSlot}`, node);
     }
   });
   entries.forEach((entry) => {
@@ -499,6 +584,28 @@ function applyLayoutLabelOffsets(entries) {
     const x = Number(entry.x);
     const y = Number(entry.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return;
+    }
+    const customSlot = Number(entry.customSlot);
+    if (Number.isFinite(customSlot)) {
+      const sourceExponents = Array.isArray(entry.sourceExponents)
+        ? entry.sourceExponents
+        : null;
+      if (sourceExponents && sourceExponents.length >= 2) {
+        const [expX, expY, expZ = 0] = sourceExponents.map(Number);
+        const node = customMap.get(`${expX},${expY},${expZ}|${customSlot}`);
+        if (node) {
+          layoutLabelOffsets.set(node.id, { x, y });
+        }
+        return;
+      }
+      const sourceNodeId = Number(entry.sourceNodeId);
+      if (Number.isFinite(sourceNodeId)) {
+        const node = customMapBySourceId.get(`${sourceNodeId}|${customSlot}`);
+        if (node) {
+          layoutLabelOffsets.set(node.id, { x, y });
+        }
+      }
       return;
     }
     if (Array.isArray(entry.exponents) && entry.exponents.length >= 2) {
@@ -525,12 +632,20 @@ function applyLayoutKeyMappingOffsets(entries) {
     return;
   }
   const exponentMap = new Map();
+  const customMap = new Map();
+  const customMapBySourceId = new Map();
   nodes.forEach((node) => {
     if (!node.isCustom) {
       exponentMap.set(
         `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`,
         node
       );
+    } else if (Array.isArray(node.sourceExponents)) {
+      const [expX, expY, expZ = 0] = node.sourceExponents;
+      customMap.set(`${expX},${expY},${expZ}|${node.customSlot}`, node);
+    }
+    if (node.isCustom && Number.isFinite(node.sourceNodeId)) {
+      customMapBySourceId.set(`${node.sourceNodeId}|${node.customSlot}`, node);
     }
   });
   entries.forEach((entry) => {
@@ -540,6 +655,28 @@ function applyLayoutKeyMappingOffsets(entries) {
     const x = Number(entry.x);
     const y = Number(entry.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return;
+    }
+    const customSlot = Number(entry.customSlot);
+    if (Number.isFinite(customSlot)) {
+      const sourceExponents = Array.isArray(entry.sourceExponents)
+        ? entry.sourceExponents
+        : null;
+      if (sourceExponents && sourceExponents.length >= 2) {
+        const [expX, expY, expZ = 0] = sourceExponents.map(Number);
+        const node = customMap.get(`${expX},${expY},${expZ}|${customSlot}`);
+        if (node) {
+          layoutKeyMappingOffsets.set(node.id, { x, y });
+        }
+        return;
+      }
+      const sourceNodeId = Number(entry.sourceNodeId);
+      if (Number.isFinite(sourceNodeId)) {
+        const node = customMapBySourceId.get(`${sourceNodeId}|${customSlot}`);
+        if (node) {
+          layoutKeyMappingOffsets.set(node.id, { x, y });
+        }
+      }
       return;
     }
     if (Array.isArray(entry.exponents) && entry.exponents.length >= 2) {
@@ -1031,6 +1168,7 @@ let uiHintDismissed = false;
 let uiHintKey = "";
 let keyboardHelpTimer = null;
 let customPianoMap = new Map();
+let pendingCustomPianoMap = null;
 let customPianoMapMode = false;
 let customPianoSelectedKey = null;
 let customPianoPreviewVoices = new Map();
@@ -2191,6 +2329,7 @@ function createCustomNodeFromSource(sourceNode, slot, factorNumerator, factorDen
   const node = {
     id: nextCustomNodeId++,
     sourceNodeId: sourceNode.id,
+    sourceExponents: [sourceNode.exponentX, sourceNode.exponentY, sourceNode.exponentZ || 0],
     customSlot: slot,
     factorNumerator: Math.max(1, Number(factorNumerator) || 1),
     factorDenominator: Math.max(1, Number(factorDenominator) || 1),
@@ -10626,11 +10765,11 @@ function updateUiHint() {
 
   if (!is3DMode) {
     uiHint.textContent =
-      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nHold L and press & hold to start LFO.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to pan. Scroll to zoom.";
+      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold L and press & hold to start LFO.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to pan. Scroll to zoom.";
     return;
   }
   uiHint.textContent =
-    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nHold L and press & hold to start LFO\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
+    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold L and press & hold to start LFO\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
 }
 
 function resetUiHintToDefault() {
@@ -10825,13 +10964,39 @@ function stopCustomPianoMappedVoices(voiceIds) {
 function serializeCustomPianoMap() {
   return Array.from(customPianoMap.entries()).map(([key, nodes]) => [
     key,
-    Array.from(nodes),
+    Array.from(nodes).map((nodeId) => {
+      const node = nodeById.get(nodeId);
+      if (!node || !node.isCustom) {
+        return nodeId;
+      }
+      const source = nodeById.get(node.sourceNodeId);
+      const sourceExponents = Array.isArray(node.sourceExponents)
+        ? node.sourceExponents
+        : source
+        ? [source.exponentX, source.exponentY, source.exponentZ || 0]
+        : null;
+      return {
+        sourceExponents,
+        customSlot: node.customSlot,
+        factorNumerator: node.factorNumerator,
+        factorDenominator: node.factorDenominator,
+      };
+    }),
   ]);
 }
 
 function applyCustomPianoMap(serialized) {
   customPianoMap = new Map();
   if (Array.isArray(serialized)) {
+    const customByKey = new Map();
+    customNodes.forEach((node) => {
+      if (!Array.isArray(node.sourceExponents)) {
+        return;
+      }
+      const [expX, expY, expZ = 0] = node.sourceExponents;
+      const slotKey = `${expX},${expY},${expZ}|${node.customSlot}`;
+      customByKey.set(slotKey, node);
+    });
     serialized.forEach((entry) => {
       if (!Array.isArray(entry) || entry.length < 2) {
         return;
@@ -10842,9 +11007,31 @@ function applyCustomPianoMap(serialized) {
       }
       const nodes = Array.isArray(entry[1]) ? entry[1] : [];
       const set = new Set();
-      nodes.forEach((nodeId) => {
-        if (Number.isFinite(nodeId)) {
-          set.add(nodeId);
+      nodes.forEach((nodeRef) => {
+        if (Number.isFinite(nodeRef)) {
+          set.add(nodeRef);
+          return;
+        }
+        if (!nodeRef || typeof nodeRef !== "object") {
+          return;
+        }
+        const slot = Number(nodeRef.customSlot);
+        if (!Number.isFinite(slot)) {
+          return;
+        }
+        const sourceExponents = Array.isArray(nodeRef.sourceExponents)
+          ? nodeRef.sourceExponents
+          : null;
+        if (!sourceExponents || sourceExponents.length < 2) {
+          return;
+        }
+        const [expX, expY, expZ = 0] = sourceExponents.map(Number);
+        if (!Number.isFinite(expX) || !Number.isFinite(expY) || !Number.isFinite(expZ)) {
+          return;
+        }
+        const resolved = customByKey.get(`${expX},${expY},${expZ}|${slot}`);
+        if (resolved) {
+          set.add(resolved.id);
         }
       });
       if (set.size) {
@@ -12537,7 +12724,14 @@ function getPresetState() {
     .filter((node) => node.active && !node.isCustom)
     .map((node) => [node.exponentX, node.exponentY, node.exponentZ || 0]);
   const customState = customNodes.map((node) => ({
-    sourceNodeId: node.sourceNodeId,
+    sourceExponents: Array.isArray(node.sourceExponents)
+      ? node.sourceExponents
+      : (() => {
+          const source = nodeById.get(node.sourceNodeId);
+          return source
+            ? [source.exponentX, source.exponentY, source.exponentZ || 0]
+            : null;
+        })(),
     customSlot: node.customSlot,
     factorNumerator: node.factorNumerator,
     factorDenominator: node.factorDenominator,
@@ -12694,11 +12888,34 @@ function applyPresetCustomNodes(entries) {
   if (!Array.isArray(entries)) {
     return;
   }
+  const sourceByExponent = new Map();
+  nodes.forEach((node) => {
+    if (node && !node.isCustom) {
+      sourceByExponent.set(
+        `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`,
+        node
+      );
+    }
+  });
   entries.forEach((entry) => {
     if (!entry || typeof entry !== "object") {
       return;
     }
-    const source = nodeById.get(entry.sourceNodeId);
+    let source = null;
+    const sourceExponents = Array.isArray(entry.sourceExponents)
+      ? entry.sourceExponents
+      : Array.isArray(entry.exponents)
+      ? entry.exponents
+      : null;
+    if (sourceExponents && sourceExponents.length >= 2) {
+      const [expX, expY, expZ = 0] = sourceExponents.map(Number);
+      if (Number.isFinite(expX) && Number.isFinite(expY) && Number.isFinite(expZ)) {
+        source = sourceByExponent.get(`${expX},${expY},${expZ}`) || null;
+      }
+    }
+    if (!source && entry.sourceNodeId != null) {
+      source = nodeById.get(entry.sourceNodeId);
+    }
     if (!source) {
       return;
     }
@@ -12808,6 +13025,7 @@ function applyPresetState(state) {
   }
   pendingLayoutSpacing = null;
   pendingLayoutCustomPositions = null;
+  pendingCustomPianoMap = null;
   lineLabelOverrides.clear();
   if (typeof state.axes === "boolean") {
     showAxes = state.axes;
@@ -12990,11 +13208,9 @@ function applyPresetState(state) {
       markIsomorphicDirty();
     }
     if (Array.isArray(state.synth.customPianoMap)) {
-      applyCustomPianoMap(state.synth.customPianoMap);
+      pendingCustomPianoMap = state.synth.customPianoMap;
     } else {
-      customPianoMap = new Map();
-      markCustomPianoMapDirty();
-      updateCustomPianoKeyStyles();
+      pendingCustomPianoMap = [];
     }
     if (waveformSelect && typeof state.synth.waveform === "string") {
       waveformSelect.value = state.synth.waveform;
@@ -13520,6 +13736,10 @@ function applyPresetState(state) {
   customNodes = [];
   rebuildLattice(activeKeys, { remapTriangles: false, remapLayoutOffsets: false });
   applyPresetCustomNodes(state.customNodes);
+  if (pendingCustomPianoMap) {
+    applyCustomPianoMap(pendingCustomPianoMap);
+    pendingCustomPianoMap = null;
+  }
   refreshPatternFromActiveNodes();
   triangleDiagonals.clear();
   triangleLabels.clear();

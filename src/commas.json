@@ -1,0 +1,81 @@
+{
+  "commas": [
+    {
+      "name": "syntonic comma",
+      "numerator": 81,
+      "denominator": 80,
+      "color": "#4B7BE5",
+      "description": ""
+    },
+    {
+      "name": "septimal comma",
+      "numerator": 64,
+      "denominator": 63,
+      "color": "#2AA876",
+      "description": ""
+    },
+    {
+      "name": "undecimal quartertone",
+      "numerator": 33,
+      "denominator": 32,
+      "color": "#F08A5D",
+      "description": ""
+    },
+    {
+      "name": "tridecimal thirdtone",
+      "numerator": 27,
+      "denominator": 26,
+      "color": "#9B5DE5",
+      "description": ""
+    },
+    {
+      "name": "17-limit schisma",
+      "numerator": 2187,
+      "denominator": 2176,
+      "color": "#F9C74F",
+      "description": ""
+    },
+    {
+      "name": "19-limit schisma",
+      "numerator": 513,
+      "denominator": 512,
+      "color": "#577590",
+      "description": ""
+    },
+    {
+      "name": "23-limit comma",
+      "numerator": 736,
+      "denominator": 729,
+      "color": "#E63946",
+      "description": ""
+    },
+    {
+      "name": "lesser diesis",
+      "numerator": 128,
+      "denominator": 125,
+      "color": "#00AFB9",
+      "description": ""
+    },
+    {
+      "name": "greater diesis",
+      "numerator": 648,
+      "denominator": 625,
+      "color": "#F15BB5",
+      "description": ""
+    },
+    {
+      "name": "greater limma",
+      "numerator": 135,
+      "denominator": 128,
+      "color": "#6C757D",
+      "description": ""
+    },
+    {
+      "name": "pythagorean comma",
+      "numerator": 531441,
+      "denominator": 524288,
+      "color": "#3A86FF",
+      "description": ""
+    }
+  ]
+}

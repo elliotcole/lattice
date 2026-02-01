@@ -98,6 +98,18 @@
                 <ul id="preset-list" class="preset-list"></ul>
               </div>
             </div>
+            <div class="control-group analysis-toggle">
+              <button id="analysis-toggle" type="button" aria-expanded="false" aria-controls="analysis-panel">
+                Analysis
+              </button>
+              <div id="analysis-panel" class="panel analysis-panel" hidden>
+                <div class="analysis-mode-buttons">
+                  <button type="button" data-analysis-mode="none" class="is-active">None</button>
+                  <button type="button" data-analysis-mode="distances">Distances</button>
+                  <button type="button" data-analysis-mode="commas">Microtonal Intervals</button>
+                </div>
+              </div>
+            </div>
             <div class="control-group options-toggle">
               <button id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel">
                 Options

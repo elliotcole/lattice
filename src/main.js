@@ -84,6 +84,9 @@ const midiChannelSelect = document.getElementById("midi-channel");
 const presetToggle = document.getElementById("preset-toggle");
 const presetPanel = document.getElementById("preset-panel");
 const presetList = document.getElementById("preset-list");
+const analysisToggle = document.getElementById("analysis-toggle");
+const analysisPanel = document.getElementById("analysis-panel");
+const analysisModeButtons = document.querySelectorAll("[data-analysis-mode]");
 const fileToggle = document.getElementById("file-toggle");
 const filePanel = document.getElementById("file-panel");
 const sharePresetButton = document.getElementById("share-preset");
@@ -226,6 +229,15 @@ let cameraDistance = 0;
 let bestViewCandidates = [];
 let bestViewIndex = 0;
 let bestViewSignature = "";
+let analysisMode = "none";
+const distanceSelectedNodeIds = new Set();
+const commaEdges = [];
+const commaNodeRings = new Map();
+const commaRatioMap = new Map();
+let commaEntries = [];
+const DISTANCE_MODE_BANNER = "Select nodes to measure distance. ESC to return.";
+const COMMA_MODE_BANNER = "Labeling microtonal intervals. ESC to exit.";
+const DISTANCE_RING_COLOR = "rgba(72, 146, 255, 0.9)";
 
 function clampZoom(value) {
   return Math.min(2.2, Math.max(0.5, value));
@@ -6921,6 +6933,8 @@ function drawCanvasEdgeSegment({
   labelSize,
   forceLabel = false,
   alpha = 1,
+  dash = null,
+  lineWidth = 1.5,
 }) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -6943,7 +6957,12 @@ function drawCanvasEdgeSegment({
   const lineLen = Math.max(0, dist - startRadius - endRadius);
   const shouldLabel = Boolean(label);
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = lineWidth;
+  if (dash && dash.length) {
+    ctx.setLineDash(dash);
+  } else {
+    ctx.setLineDash([]);
+  }
   if (shouldLabel && lineLen > 0) {
     ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
     const baseWidth = ctx.measureText(label).width;
@@ -7474,93 +7493,177 @@ function scheduleDraw() {
   });
 }
 
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  if (!themeColors) {
-    refreshThemeColors();
+function drawDistanceConnections(nodePosMap) {
+  if (!distanceSelectedNodeIds.size) {
+    return;
   }
-
-  if (layoutMode) {
-    drawLayoutPage({ drawAxes: !layoutAxisEdit });
-  }
-
-  const disableScale = layoutMode && layoutUnifyNodeSize;
-  const nodeRenderList = nodes
-    .map((node) => ({
-      node,
-      pos: worldToScreen(getNodeDisplayCoordinate(node), disableScale),
-    }))
-    .sort((a, b) => {
-      if (a.node.isCustom && !b.node.isCustom) {
-        return 1;
-      }
-      if (!a.node.isCustom && b.node.isCustom) {
-        return -1;
-      }
-      return a.pos.depth - b.pos.depth;
-    });
-  const nodePosMap = new Map();
-  nodeRenderList.forEach(({ node, pos }) => {
-    const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
-    nodePosMap.set(node.id, { pos, radius: baseRadius * (pos.scale || 1) });
+  const selectedNodes = [];
+  distanceSelectedNodeIds.forEach((id) => {
+    const node = nodeById.get(id);
+    if (node && node.active) {
+      selectedNodes.push(node);
+    } else {
+      distanceSelectedNodeIds.delete(id);
+    }
   });
-  const axisEntry = getActiveAxisEntry();
-  const axisModeActive = Boolean(axisEntry);
-  const shouldDrawAxisLine =
-    (is3DMode && (showAxes || (axisModeActive && isAddMode))) || (!is3DMode && axisModeActive);
-
-  if (is3DMode && showGrid) {
-    drawGrid();
+  if (selectedNodes.length < 2) {
+    return;
   }
-
-  if (shouldDrawAxisLine) {
-    drawAxes(axisEntry);
-  }
-
-  if (is3DMode) {
-    draw3DEdges(nodePosMap, axisEntry);
-  } else {
-    const labelFont = layoutMode ? layoutAxisLegendFont : "Noto Serif";
-    const labelWeight = layoutMode ? layoutAxisLegendFontWeight : 400;
-    const labelSize = layoutMode ? Math.max(10, Math.round(layoutRatioTextSize * 0.6)) : 14;
-    edges.forEach(([a, b]) => {
-      if (!a.active || !b.active) {
-        return;
-      }
-      const startEntry = nodePosMap.get(a.id);
+  const labelFont = layoutMode
+    ? layoutAxisLegendFont
+    : is3DMode
+    ? layoutRatioFont
+    : "Noto Serif";
+  const labelWeight = layoutMode
+    ? layoutAxisLegendFontWeight
+    : is3DMode
+    ? layoutRatioFontWeight
+    : 400;
+  const labelSize = layoutMode
+    ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
+    : is3DMode
+    ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
+    : 14;
+  for (let i = 0; i < selectedNodes.length; i += 1) {
+    const a = selectedNodes[i];
+    const startEntry = nodePosMap.get(a.id);
+    if (!startEntry) {
+      continue;
+    }
+    for (let j = i + 1; j < selectedNodes.length; j += 1) {
+      const b = selectedNodes[j];
       const endEntry = nodePosMap.get(b.id);
-      const start = startEntry
-        ? startEntry.pos
-        : worldToScreen(getNodeDisplayCoordinate(a), disableScale);
-      const end = endEntry
-        ? endEntry.pos
-        : worldToScreen(getNodeDisplayCoordinate(b), disableScale);
-      const radiusA = startEntry
-        ? startEntry.radius
-        : (layoutMode ? layoutNodeSize : getNodeRadius(a)) * (start.scale || 1);
-      const radiusB = endEntry
-        ? endEntry.radius
-        : (layoutMode ? layoutNodeSize : getNodeRadius(b)) * (end.scale || 1);
+      if (!endEntry) {
+        continue;
+      }
+      const label = getDistanceRatioLabel(a, b);
+      if (!label) {
+        continue;
+      }
+      const start = startEntry.pos;
+      const end = endEntry.pos;
       const dx = end.x - start.x;
       const dy = end.y - start.y;
       const dist = Math.hypot(dx, dy);
-      if (dist === 0) {
-        return;
+      if (!dist) {
+        continue;
       }
       const ux = dx / dist;
       const uy = dy / dist;
-      const startRadius = getNodeEdgeRadius(a, ux, uy, radiusA);
-      const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
-    const labelText = getEdgeLabelText(a, b);
-    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
+      const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+      const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+      drawCanvasEdgeSegment({
+        start,
+        end,
+        startRadius,
+        endRadius,
+        color: themeColors.edge,
+        label,
+        labelFont,
+        labelWeight,
+        labelSize,
+        dash: [6, 6],
+      });
+    }
+  }
+}
+
+function buildCommaConnections(nodePosMap) {
+  commaEdges.length = 0;
+  commaNodeRings.clear();
+  if (!commaEntries.length) {
+    return;
+  }
+  const activeNodes = nodes.filter((node) => node.active);
+  for (let i = 0; i < activeNodes.length; i += 1) {
+    const a = activeNodes[i];
+    const aNum = Number(a.numerator);
+    const aDen = Number(a.denominator);
+    if (!Number.isFinite(aNum) || !Number.isFinite(aDen) || aDen === 0) {
+      continue;
+    }
+    for (let j = i + 1; j < activeNodes.length; j += 1) {
+      const b = activeNodes[j];
+      const bNum = Number(b.numerator);
+      const bDen = Number(b.denominator);
+      if (!Number.isFinite(bNum) || !Number.isFinite(bDen) || bDen === 0) {
+        continue;
+      }
+      const num = aNum * bDen;
+      const den = aDen * bNum;
+      const normalized = normalizeCommaRatio(num, den);
+      if (!normalized) {
+        continue;
+      }
+      const key = `${normalized.numerator}:${normalized.denominator}`;
+      const matches = commaRatioMap.get(key);
+      if (!matches || !matches.length) {
+        continue;
+      }
+      matches.forEach((entry) => {
+        commaEdges.push({ a, b, entry });
+        [a.id, b.id].forEach((nodeId) => {
+          if (!commaNodeRings.has(nodeId)) {
+            commaNodeRings.set(nodeId, []);
+          }
+          const list = commaNodeRings.get(nodeId);
+          if (!list.find((ring) => ring.name === entry.name)) {
+            list.push({ name: entry.name, color: entry.color });
+          }
+        });
+      });
+    }
+  }
+  commaNodeRings.forEach((rings) => {
+    rings.sort((left, right) => left.name.localeCompare(right.name));
+  });
+}
+
+function drawCommaConnections(nodePosMap) {
+  buildCommaConnections(nodePosMap);
+  if (!commaEdges.length) {
+    return;
+  }
+  const labelFont = layoutMode
+    ? layoutAxisLegendFont
+    : is3DMode
+    ? layoutRatioFont
+    : "Noto Serif";
+  const labelWeight = layoutMode
+    ? layoutAxisLegendFontWeight
+    : is3DMode
+    ? layoutRatioFontWeight
+    : 400;
+  const labelSize = layoutMode
+    ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
+    : is3DMode
+    ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
+    : 14;
+  commaEdges.forEach(({ a, b, entry }) => {
+    const startEntry = nodePosMap.get(a.id);
+    const endEntry = nodePosMap.get(b.id);
+    if (!startEntry || !endEntry) {
+      return;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
     drawCanvasEdgeSegment({
       start,
       end,
       startRadius,
       endRadius,
-      color: themeColors.edge,
-      label,
+      color: entry.color,
+      label: entry.name,
       labelFont,
       labelWeight,
       labelSize,
@@ -7638,13 +7741,114 @@ function drawCustomConnections(nodePosMap) {
       alpha: connectionAlpha,
     });
   });
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!themeColors) {
+    refreshThemeColors();
   }
-  drawCustomConnections(nodePosMap);
+
+  if (layoutMode) {
+    drawLayoutPage({ drawAxes: !layoutAxisEdit });
+  }
+
+  const disableScale = layoutMode && layoutUnifyNodeSize;
+  const nodeRenderList = nodes
+    .map((node) => ({
+      node,
+      pos: worldToScreen(getNodeDisplayCoordinate(node), disableScale),
+    }))
+    .sort((a, b) => {
+      if (a.node.isCustom && !b.node.isCustom) {
+        return 1;
+      }
+      if (!a.node.isCustom && b.node.isCustom) {
+        return -1;
+      }
+      return a.pos.depth - b.pos.depth;
+    });
+  const nodePosMap = new Map();
+  nodeRenderList.forEach(({ node, pos }) => {
+    const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
+    nodePosMap.set(node.id, { pos, radius: baseRadius * (pos.scale || 1) });
+  });
+  const axisEntry = getActiveAxisEntry();
+  const axisModeActive = Boolean(axisEntry);
+  const shouldDrawAxisLine =
+    (is3DMode && (showAxes || (axisModeActive && isAddMode))) || (!is3DMode && axisModeActive);
+
+  if (is3DMode && showGrid) {
+    drawGrid();
+  }
+
+  if (shouldDrawAxisLine) {
+    drawAxes(axisEntry);
+  }
+
   const { guideNodes } = getGuideRevealInfo(nodePosMap, axisEntry);
-  drawGuideEdges(nodePosMap, guideNodes);
-  drawTriangleDiagonals(nodePosMap, disableScale);
-  drawTriangleLabels(nodePosMap, disableScale);
-  drawTriangleHover(nodePosMap, disableScale);
+  if (analysisMode === "distances") {
+    drawDistanceConnections(nodePosMap);
+  } else if (analysisMode === "commas") {
+    drawCommaConnections(nodePosMap);
+  } else if (is3DMode) {
+    draw3DEdges(nodePosMap, axisEntry);
+  } else {
+    const labelFont = layoutMode ? layoutAxisLegendFont : "Noto Serif";
+    const labelWeight = layoutMode ? layoutAxisLegendFontWeight : 400;
+    const labelSize = layoutMode ? Math.max(10, Math.round(layoutRatioTextSize * 0.6)) : 14;
+    edges.forEach(([a, b]) => {
+      if (!a.active || !b.active) {
+        return;
+      }
+      const startEntry = nodePosMap.get(a.id);
+      const endEntry = nodePosMap.get(b.id);
+      const start = startEntry
+        ? startEntry.pos
+        : worldToScreen(getNodeDisplayCoordinate(a), disableScale);
+      const end = endEntry
+        ? endEntry.pos
+        : worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+      const radiusA = startEntry
+        ? startEntry.radius
+        : (layoutMode ? layoutNodeSize : getNodeRadius(a)) * (start.scale || 1);
+      const radiusB = endEntry
+        ? endEntry.radius
+        : (layoutMode ? layoutNodeSize : getNodeRadius(b)) * (end.scale || 1);
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist === 0) {
+        return;
+      }
+      const ux = dx / dist;
+      const uy = dy / dist;
+      const startRadius = getNodeEdgeRadius(a, ux, uy, radiusA);
+      const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
+      const labelText = getEdgeLabelText(a, b);
+      const label = shouldShowEdgeLabel(a, b) ? labelText : null;
+      drawCanvasEdgeSegment({
+        start,
+        end,
+        startRadius,
+        endRadius,
+        color: themeColors.edge,
+        label,
+        labelFont,
+        labelWeight,
+        labelSize,
+      });
+    });
+  }
+
+  if (analysisMode === "none") {
+    drawCustomConnections(nodePosMap);
+    drawGuideEdges(nodePosMap, guideNodes);
+    drawTriangleDiagonals(nodePosMap, disableScale);
+    drawTriangleLabels(nodePosMap, disableScale);
+    drawTriangleHover(nodePosMap, disableScale);
+  }
 
   const nowMs = performance.now();
   const nowSec = audioCtx ? audioCtx.currentTime : nowMs / 1000;
@@ -7690,6 +7894,12 @@ function drawCustomConnections(nodePosMap) {
     }
     if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
       alpha *= AXIS_DIM_FACTOR;
+    }
+    if (analysisMode === "distances" && !distanceSelectedNodeIds.has(node.id)) {
+      alpha *= 0.18;
+    }
+    if (analysisMode === "commas" && !commaNodeRings.has(node.id)) {
+      alpha *= 0.18;
     }
 
     if (!isVisible) {
@@ -7784,6 +7994,32 @@ function drawCustomConnections(nodePosMap) {
       ctx.arc(pos.x, pos.y, radius + 4, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
+    }
+
+    if (analysisMode === "distances" && distanceSelectedNodeIds.has(node.id)) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0.4, alpha);
+      ctx.strokeStyle = DISTANCE_RING_COLOR;
+      ctx.lineWidth = Math.max(2, radius * 0.14);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius + 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (analysisMode === "commas") {
+      const rings = commaNodeRings.get(node.id);
+      if (rings && rings.length) {
+        rings.forEach((ring, index) => {
+          ctx.save();
+          ctx.globalAlpha = Math.max(0.5, alpha);
+          ctx.strokeStyle = ring.color;
+          ctx.lineWidth = Math.max(2, radius * 0.1);
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, radius + 6 + index * 4, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        });
+      }
     }
 
     ctx.fillStyle = themeColors.textPrimary;
@@ -8516,6 +8752,9 @@ function onPointerDown(event) {
       isAddMode,
     });
   }
+  if (analysisMode === "distances" && hit) {
+    return;
+  }
   const now = performance.now();
   if (isCustomPianoMapModeActive()) {
     if (hit) {
@@ -8972,6 +9211,9 @@ function onPointerDown(event) {
 }
 
 function onCanvasDoubleClick(event) {
+  if (analysisMode === "distances") {
+    return;
+  }
   if (isCustomPianoMapModeActive()) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const hit = hitTestScreen(screenPoint);
@@ -9438,6 +9680,21 @@ function onPointerUp(event) {
   if (moved < 4) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const hit = hitTestScreen(screenPoint);
+    if (analysisMode === "distances") {
+      if (hit && hit.active) {
+        toggleDistanceSelection(hit.id);
+        draw();
+      }
+      return;
+    }
+    if (analysisMode === "commas") {
+      const edgeHit = hitTestCommaEdge(screenPoint);
+      if (edgeHit) {
+        toggleCommaEdgeVoices(edgeHit.a, edgeHit.b);
+        draw();
+        return;
+      }
+    }
     if (!layoutMode && fHeld && hit) {
       const freq = Number(hit.freq);
       if (Number.isFinite(freq)) {
@@ -9738,6 +9995,94 @@ function onPointerLeave() {
   }
   view.reducedEffects = false;
   scheduleDraw();
+}
+
+function hitTestCommaEdge(screenPoint) {
+  if (!commaEdges.length) {
+    return null;
+  }
+  const disableScale = layoutMode && layoutUnifyNodeSize;
+  const nodePosMap = new Map();
+  nodes.forEach((node) => {
+    if (!node.active) {
+      return;
+    }
+    const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+    const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
+    nodePosMap.set(node.id, { pos, radius: baseRadius * (pos.scale || 1) });
+  });
+  let best = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  const hitThreshold = 6;
+  commaEdges.forEach(({ a, b }) => {
+    const startEntry = nodePosMap.get(a.id);
+    const endEntry = nodePosMap.get(b.id);
+    if (!startEntry || !endEntry) {
+      return;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+    const lineStart = {
+      x: start.x + ux * startRadius,
+      y: start.y + uy * startRadius,
+    };
+    const lineEnd = {
+      x: end.x - ux * endRadius,
+      y: end.y - uy * endRadius,
+    };
+    const distance = distanceToSegment(screenPoint, lineStart, lineEnd);
+    if (distance <= hitThreshold && distance < bestDistance) {
+      best = { a, b };
+      bestDistance = distance;
+    }
+  });
+  return best;
+}
+
+function toggleCommaEdgeVoices(a, b) {
+  const nodesToToggle = [a, b].filter(Boolean);
+  if (!nodesToToggle.length) {
+    return;
+  }
+  const playing = nodesToToggle.every((node) => {
+    const voice = node.baseVoiceId ? findVoiceById(node.baseVoiceId) : null;
+    return Boolean(voice);
+  });
+  if (playing) {
+    nodesToToggle.forEach((node) => {
+      const voice = node.baseVoiceId ? findVoiceById(node.baseVoiceId) : null;
+      if (voice) {
+        stopVoice(voice);
+      }
+      node.baseVoiceId = null;
+    });
+    return;
+  }
+  nodesToToggle.forEach((node) => {
+    const voice = node.baseVoiceId ? findVoiceById(node.baseVoiceId) : null;
+    if (voice) {
+      return;
+    }
+    const nextVoice = startVoice({
+      nodeId: node.id,
+      octave: 0,
+      freq: node.freq,
+      source: "node",
+    });
+    if (nextVoice) {
+      node.baseVoiceId = nextVoice.id;
+    }
+  });
 }
 
 function onWheel(event) {
@@ -10425,12 +10770,60 @@ function formatIntervalRatio(numerator, denominator) {
   return `${numerator / divisor}:${denominator / divisor}`;
 }
 
+function getDistanceRatioLabel(a, b) {
+  if (!a || !b) {
+    return null;
+  }
+  const aNum = Number(a.numerator);
+  const aDen = Number(a.denominator);
+  const bNum = Number(b.numerator);
+  const bDen = Number(b.denominator);
+  if (
+    !Number.isFinite(aNum) ||
+    !Number.isFinite(aDen) ||
+    !Number.isFinite(bNum) ||
+    !Number.isFinite(bDen) ||
+    aDen === 0 ||
+    bDen === 0
+  ) {
+    return null;
+  }
+  const aRatio = aNum / aDen;
+  const bRatio = bNum / bDen;
+  if (!Number.isFinite(aRatio) || !Number.isFinite(bRatio) || aRatio === 0 || bRatio === 0) {
+    return null;
+  }
+  if (aRatio >= bRatio) {
+    return formatIntervalRatio(aNum * bDen, aDen * bNum);
+  }
+  return formatIntervalRatio(bNum * aDen, bDen * aNum);
+}
+
 function reduceFraction(numerator, denominator) {
   const divisor = gcd(numerator, denominator);
   return {
     numerator: numerator / divisor,
     denominator: denominator / divisor,
   };
+}
+
+function normalizeCommaRatio(numerator, denominator) {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return null;
+  }
+  const reduced = reduceFraction(numerator, denominator);
+  const octaveReduced = reduceToOctave(reduced.numerator, reduced.denominator);
+  let num = octaveReduced.numerator;
+  let den = octaveReduced.denominator;
+  const ratio = octaveReduced.ratio;
+  if (Number.isFinite(ratio) && ratio > 0) {
+    const inverse = 2 / ratio;
+    if (inverse < ratio) {
+      num = den * 2;
+      den = octaveReduced.numerator;
+    }
+  }
+  return reduceFraction(num, den);
 }
 
 function resizeWheelCanvas(canvasEl) {
@@ -11090,6 +11483,16 @@ function formatAxisBannerText(entry) {
 
 function updateBannerMessage() {
   if (!bannerMessage) {
+    return;
+  }
+  if (analysisMode === "distances") {
+    bannerMessage.textContent = DISTANCE_MODE_BANNER;
+    bannerMessage.hidden = false;
+    return;
+  }
+  if (analysisMode === "commas") {
+    bannerMessage.textContent = COMMA_MODE_BANNER;
+    bannerMessage.hidden = false;
     return;
   }
   const activeAxis = getActiveAxisEntry();
@@ -12496,6 +12899,24 @@ function toggleRatioWheelPanel() {
   syncTopMenuPanelState();
 }
 
+function toggleAnalysisPanel() {
+  if (!analysisToggle || !analysisPanel) {
+    return;
+  }
+  const isOpen = analysisToggle.getAttribute("aria-expanded") === "true";
+  if (!isOpen) {
+    closeTopMenus("analysis");
+  }
+  analysisToggle.setAttribute("aria-expanded", String(!isOpen));
+  analysisPanel.hidden = isOpen;
+  analysisPanel.classList.toggle("panel-open", !isOpen);
+  const parentPanel = analysisToggle.closest(".panel");
+  if (parentPanel) {
+    parentPanel.classList.toggle("panel-open", !isOpen);
+  }
+  syncTopMenuPanelState();
+}
+
 function closeOptionsPanel() {
   if (!optionsToggle || !optionsPanel) {
     return;
@@ -12517,6 +12938,19 @@ function closePresetPanel() {
   presetPanel.hidden = true;
   presetPanel.classList.remove("panel-open");
   const parentPanel = presetToggle.closest(".panel");
+  if (parentPanel) {
+    parentPanel.classList.remove("panel-open");
+  }
+}
+
+function closeAnalysisPanel() {
+  if (!analysisToggle || !analysisPanel) {
+    return;
+  }
+  analysisToggle.setAttribute("aria-expanded", "false");
+  analysisPanel.hidden = true;
+  analysisPanel.classList.remove("panel-open");
+  const parentPanel = analysisToggle.closest(".panel");
   if (parentPanel) {
     parentPanel.classList.remove("panel-open");
   }
@@ -12561,6 +12995,9 @@ function closeTopMenus(except = "") {
   if (except !== "presets") {
     closePresetPanel();
   }
+  if (except !== "analysis") {
+    closeAnalysisPanel();
+  }
   if (except !== "file") {
     closeFilePanel();
   }
@@ -12584,6 +13021,7 @@ function syncTopMenuPanelState() {
   const topMenusOpen =
     (optionsPanel && !optionsPanel.hidden) ||
     (presetPanel && !presetPanel.hidden) ||
+    (analysisPanel && !analysisPanel.hidden) ||
     (filePanel && !filePanel.hidden);
   if (controlActionsPanel) {
     controlActionsPanel.classList.toggle("panel-open", topMenusOpen);
@@ -12598,6 +13036,40 @@ function syncBottomMenuPanelState() {
     (envelopePanel && !envelopePanel.hidden) ||
     (animationPanel && !animationPanel.hidden);
   synthPanel.classList.toggle("panel-open", anyOpen);
+}
+
+function syncAnalysisModeButtons() {
+  if (!analysisModeButtons.length) {
+    return;
+  }
+  analysisModeButtons.forEach((button) => {
+    const mode = button.dataset.analysisMode;
+    const isActive = mode === analysisMode;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+}
+
+function setAnalysisMode(mode) {
+  const nextMode = mode || "none";
+  if (analysisMode === nextMode) {
+    return;
+  }
+  analysisMode = nextMode;
+  if (analysisMode !== "distances") {
+    distanceSelectedNodeIds.clear();
+  }
+  syncAnalysisModeButtons();
+  updateBannerMessage();
+  draw();
+}
+
+function toggleDistanceSelection(nodeId) {
+  if (distanceSelectedNodeIds.has(nodeId)) {
+    distanceSelectedNodeIds.delete(nodeId);
+  } else {
+    distanceSelectedNodeIds.add(nodeId);
+  }
 }
 
 async function loadPresets() {
@@ -12672,6 +13144,48 @@ async function loadPresets() {
     errorItem.textContent = "Failed to load presets.";
     presetList.appendChild(errorItem);
     console.warn(error);
+  }
+}
+
+async function loadCommas() {
+  commaEntries = [];
+  commaRatioMap.clear();
+  try {
+    const response = await fetch(new URL("./commas.json", import.meta.url));
+    if (!response.ok) {
+      throw new Error(`Comma fetch failed: ${response.status}`);
+    }
+    const data = await response.json();
+    const entries = Array.isArray(data && data.commas) ? data.commas : [];
+    entries.forEach((entry) => {
+      if (!entry) {
+        return;
+      }
+      const name = String(entry.name || "").trim();
+      const numerator = Number(entry.numerator);
+      const denominator = Number(entry.denominator);
+      if (!name || !Number.isFinite(numerator) || !Number.isFinite(denominator)) {
+        return;
+      }
+      const normalizedRatio = normalizeCommaRatio(numerator, denominator);
+      if (!normalizedRatio) {
+        return;
+      }
+      const key = `${normalizedRatio.numerator}:${normalizedRatio.denominator}`;
+      const normalized = {
+        name,
+        numerator: normalizedRatio.numerator,
+        denominator: normalizedRatio.denominator,
+        color: entry.color || themeColors?.edge || "#999999",
+      };
+      commaEntries.push(normalized);
+      if (!commaRatioMap.has(key)) {
+        commaRatioMap.set(key, []);
+      }
+      commaRatioMap.get(key).push(normalized);
+    });
+  } catch (error) {
+    console.warn("Failed to load commas", error);
   }
 }
 
@@ -16024,6 +16538,16 @@ if (themeSelect) {
 if (optionsToggle) {
   optionsToggle.addEventListener("click", toggleOptionsPanel);
 }
+if (analysisToggle) {
+  analysisToggle.addEventListener("click", toggleAnalysisPanel);
+}
+if (analysisModeButtons.length) {
+  analysisModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      setAnalysisMode(button.dataset.analysisMode || "none");
+    });
+  });
+}
 if (layoutModeToggle && !viewModeInputs.length && !viewModeButtons.length) {
   layoutModeToggle.addEventListener("change", () => {
     setLayoutMode(layoutModeToggle.checked);
@@ -17291,12 +17815,14 @@ updateTempoReadout();
 updatePatternLengthReadout();
 updatePatternLengthAvailability();
 initTheme();
+syncAnalysisModeButtons();
 updateLooperButton();
 updateScoreButton();
 updateLfoPlayButton();
 buildPatternStates();
 populateMidiChannels();
 loadPresets();
+loadCommas();
 if (document.fonts && document.fonts.load) {
   document.fonts
     .load('16px "HEJI2Text"', "v")
@@ -17517,6 +18043,10 @@ if (triangleLabelDialog) {
   if (event.key === "Escape") {
     if (layoutFontPopover && !layoutFontPopover.hidden) {
       closeLayoutFontPopover();
+      return;
+    }
+    if (analysisMode === "distances" || analysisMode === "commas") {
+      setAnalysisMode("none");
       return;
     }
     if (layoutAxisEdit) {

@@ -364,6 +364,9 @@ function getLayoutNoteLabelHitbox(node, pos, radius) {
   let width = 0;
   let height = layoutNoteTextSize;
   if (featureMode === "ratio") {
+    if (!node.active && !node.isCustom && !node.isCenter) {
+      return;
+    }
     const displayInfo = getCachedDisplayInfo(node);
     const centsLabel = getCachedCentsReadout(
       node,
@@ -6843,12 +6846,32 @@ function drawTriangleHover(nodePosMap, disableScale = false) {
 
 }
 
-function drawOrphanGuideEdges(nodePosMap) {
+function getNodeGuideAlpha(node, guideNodes, axisEntry) {
+  let alpha = node.active || node.isCenter ? 1 : 0;
+  if (node.isCustom && !node.active) {
+    alpha = 0.25;
+  }
+  if (guideNodes && guideNodes.has(node.id)) {
+    alpha = guideNodes.get(node.id);
+  }
+  const isOrphanGuide = connectOrphansEnabled && orphanGuideNodes.has(node.id);
+  if (isOrphanGuide && !(guideNodes && guideNodes.has(node.id))) {
+    alpha = 0.08;
+  }
+  if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
+    alpha *= AXIS_DIM_FACTOR;
+  }
+  if (analysisLayers.microtonal && !commaNodeRings.has(node.id)) {
+    alpha *= 0.18;
+  }
+  return alpha;
+}
+
+function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
   if (!connectOrphansEnabled || !orphanGuideEdges.size) {
     return;
   }
   ctx.save();
-  ctx.strokeStyle = colorWithAlpha(themeColors.edge, 0.7);
   ctx.lineWidth = 1.5;
   orphanGuideEdges.forEach((edgeKey) => {
     const parts = edgeKey.split("|");
@@ -6865,6 +6888,18 @@ function drawOrphanGuideEdges(nodePosMap) {
     if (!startEntry || !endEntry) {
       return;
     }
+    const isOrphanA = connectOrphansEnabled && orphanGuideNodes.has(a.id);
+    const isOrphanB = connectOrphansEnabled && orphanGuideNodes.has(b.id);
+    if (!isOrphanA && !isOrphanB) {
+      return;
+    }
+    const alphaA = isOrphanA ? 0.08 : getNodeGuideAlpha(a, guideNodes, axisEntry);
+    const alphaB = isOrphanB ? 0.08 : getNodeGuideAlpha(b, guideNodes, axisEntry);
+    const edgeAlpha = Math.min(alphaA, alphaB);
+    if (edgeAlpha <= 0) {
+      return;
+    }
+    ctx.strokeStyle = colorWithAlpha(themeColors.nodeStroke, edgeAlpha);
     const start = startEntry.pos;
     const end = endEntry.pos;
     const dx = end.x - start.x;
@@ -8895,7 +8930,7 @@ function draw() {
   }
 
   drawCustomConnections(nodePosMap);
-  drawOrphanGuideEdges(nodePosMap);
+  drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry);
   drawGuideEdges(nodePosMap, guideNodes);
   drawTriangleDiagonals(nodePosMap, disableScale);
   drawTriangleLabels(nodePosMap, disableScale);
@@ -8942,8 +8977,8 @@ function draw() {
     if (isGuide) {
       alpha = guideNodes.get(node.id);
     }
-    if (isOrphanGuide) {
-      alpha = 0.18;
+    if (isOrphanGuide && !isGuide) {
+      alpha = 0.08;
     }
     if (node.isCustom && !node.active) {
       alpha = 0.25;
@@ -8954,6 +8989,9 @@ function draw() {
     if (showMicrotonal && !commaNodeRings.has(node.id)) {
       alpha *= 0.18;
     }
+    const textAlpha = alpha;
+    const textColorPrimary = colorWithAlpha(themeColors.textPrimary, textAlpha);
+    const textColorSecondary = colorWithAlpha(themeColors.textSecondary, textAlpha);
 
     if (!isVisible) {
       return;
@@ -8984,6 +9022,9 @@ function draw() {
       ctx.beginPath();
       ctx.strokeStyle = themeColors.nodeStroke;
       ctx.lineWidth = 2;
+      if (isOrphanGuide) {
+        ctx.setLineDash([6, 4]);
+      }
       if (is3DMode) {
         const inactiveFill = node.isCustom
           ? "rgba(210, 210, 210, 0.12)"
@@ -9036,6 +9077,9 @@ function draw() {
         ctx.fill();
       }
       ctx.stroke();
+      if (isOrphanGuide) {
+        ctx.setLineDash([]);
+      }
     }
 
     if (selectedCustomNodes && selectedCustomNodes.has(node.id)) {
@@ -9079,7 +9123,8 @@ function draw() {
       }
     }
 
-    ctx.fillStyle = themeColors.textPrimary;
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = textColorPrimary;
     const baseLabelSize = layoutMode ? layoutRatioTextSize : 21;
     const labelSize = node.isCustom ? baseLabelSize * 0.85 : baseLabelSize;
     const labelFont = layoutMode ? layoutRatioFont : "Noto Serif";
@@ -9114,7 +9159,7 @@ function draw() {
           fontWeight: labelWeight,
           align: "center",
           baseline: "middle",
-          color: themeColors.textPrimary,
+          color: textColorPrimary,
         });
       } else {
         const annotation = getCachedHejiAnnotation(node, getNodePitchLabel(node));
@@ -9129,7 +9174,7 @@ function draw() {
           fontWeight: labelWeight,
           align: "center",
           baseline: "middle",
-          color: themeColors.textPrimary,
+          color: textColorPrimary,
         });
       }
     } else {
@@ -9167,6 +9212,13 @@ function draw() {
       }
     }
 
+    if (
+      isOrphanGuide ||
+      isGuide ||
+      (!node.active && !node.isCustom && !node.isCenter)
+    ) {
+      return;
+    }
     const detailSize = layoutMode ? layoutNoteTextSize : 14;
     const noteLabelFont = layoutMode ? layoutNoteFont : "Lexend, sans-serif";
     const noteLabelWeight = layoutMode ? layoutNoteFontWeight : 200;
@@ -9175,7 +9227,7 @@ function draw() {
       ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
-      ctx.fillStyle = themeColors.textSecondary;
+      ctx.fillStyle = textColorSecondary;
       const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
       const ratioText = `${node.numerator}:${node.denominator}${octaveLabel}`;
       const centsLabel = getCachedCentsReadout(
@@ -9233,7 +9285,7 @@ function draw() {
           hejiAccidentals: hejiEnabled,
           hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
           context: ctx,
-          color: themeColors.textSecondary,
+          color: textColorSecondary,
         });
         lineOffset += detailSize + 4;
       }
@@ -9241,7 +9293,7 @@ function draw() {
         ctx.fillText(`${node.freq.toFixed(2)} Hz`, ratioX, ratioY + lineOffset);
       }
     } else {
-      ctx.fillStyle = themeColors.textSecondary;
+      ctx.fillStyle = textColorSecondary;
       const centsLabel = getCachedCentsReadout(
         node,
         {
@@ -9313,7 +9365,7 @@ function draw() {
         restGapScale,
         restHejiAccidentals: hejiEnabled && hasParen,
         fontWeight: noteLabelWeight,
-        color: themeColors.textSecondary,
+        color: textColorSecondary,
       });
       lineOffset += detailSize + 4;
       if (hejiEnabled && centsLabel) {
@@ -9329,7 +9381,7 @@ function draw() {
           hejiAccidentals: hejiEnabled,
           hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
           context: ctx,
-          color: themeColors.textSecondary,
+          color: textColorSecondary,
         });
         lineOffset += detailSize + 4;
       }
@@ -9338,7 +9390,7 @@ function draw() {
         ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
-        ctx.fillStyle = themeColors.textSecondary;
+        ctx.fillStyle = textColorSecondary;
         ctx.fillText(octaveLabel, labelPos.x, labelPos.y + lineOffset);
         ctx.restore();
         lineOffset += detailSize + 4;
@@ -9348,7 +9400,7 @@ function draw() {
         ctx.font = `200 ${detailSize}px "Lexend", sans-serif`;
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
-        ctx.fillStyle = themeColors.textSecondary;
+        ctx.fillStyle = textColorSecondary;
         const hzY = labelPos.y + lineOffset;
         ctx.fillText(`${node.freq.toFixed(2)} Hz`, labelPos.x, hzY);
         ctx.restore();
@@ -11448,7 +11500,9 @@ function hitTestScreen(screenPoint) {
 
   nodes.forEach((node) => {
     if (connectOrphansEnabled && orphanGuideNodes.has(node.id)) {
-      return;
+      if (!shiftHeld && !capsLockOn) {
+        return;
+      }
     }
     if (layoutMode && !node.isCustom && !node.isCenter && !node.active) {
       return;

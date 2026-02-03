@@ -1,185 +1,171 @@
 {
-  "commas": [
+  "intervals": [
     {
       "name": "syntonic comma",
       "numerator": 81,
       "denominator": 80,
-      "color": "#4B7BE5",
-      "description": ""
-    },
-    {
-      "name": "syntonic schisma",
-      "numerator": 32805,
-      "denominator": 32768,
-      "color": "#4A7BE5",
+      "color": "#E55050",
       "description": ""
     },
     {
       "name": "septimal comma",
       "numerator": 64,
       "denominator": 63,
-      "color": "#2AA876",
+      "color": "#E57550",
       "description": ""
     },
     {
       "name": "undecimal quartertone",
       "numerator": 33,
       "denominator": 32,
-      "color": "#F08A5D",
+      "color": "#E59A50",
       "description": ""
     },
     {
       "name": "tridecimal thirdtone",
       "numerator": 27,
       "denominator": 26,
-      "color": "#9B5DE5",
+      "color": "#E5C050",
       "description": ""
     },
     {
       "name": "17-limit schisma",
       "numerator": 2187,
       "denominator": 2176,
-      "color": "#F9C74F",
+      "color": "#E5E550",
       "description": ""
     },
     {
       "name": "19-limit schisma",
       "numerator": 513,
       "denominator": 512,
-      "color": "#577590",
+      "color": "#C0E550",
       "description": ""
     },
     {
       "name": "23-limit comma",
       "numerator": 736,
       "denominator": 729,
-      "color": "#E63946",
+      "color": "#9AE550",
       "description": ""
     },
     {
       "name": "lesser diesis",
       "numerator": 128,
       "denominator": 125,
-      "color": "#00AFB9",
+      "color": "#75E550",
       "description": ""
     },
     {
       "name": "greater diesis",
       "numerator": 648,
       "denominator": 625,
-      "color": "#F15BB5",
+      "color": "#50E550",
       "description": ""
     },
     {
       "name": "greater limma",
       "numerator": 135,
       "denominator": 128,
-      "color": "#6C757D",
+      "color": "#50E575",
       "description": ""
     },
     {
       "name": "pythagorean comma",
       "numerator": 531441,
       "denominator": 524288,
-      "color": "#3A86FF",
+      "color": "#50E59A",
       "description": ""
     },
     {
       "name": "minor 5-limit half step",
       "numerator": 25,
       "denominator": 24,
-      "color": "#3A86FF",
+      "color": "#50E5C0",
       "description": ""
     },
-        {
+    {
       "name": "37-limit quartertone",
       "numerator": 37,
       "denominator": 36,
-      "color": "#3A86FF",
+      "color": "#50E5E5",
       "description": ""
     },
     {
       "name": "41-limit comma",
       "numerator": 82,
       "denominator": 81,
-      "color": "#3A86FF",
+      "color": "#50C0E5",
       "description": ""
     },
-        {
+    {
       "name": "43-limit comma",
       "numerator": 129,
       "denominator": 128,
-      "color": "#3A86FF",
+      "color": "#509AE5",
       "description": ""
     },
-        {
+    {
       "name": "47-limit quartertone",
       "numerator": 752,
       "denominator": 729,
-      "color": "#3A86FF",
+      "color": "#5075E5",
       "description": ""
     },
-        {
+    {
       "name": "schisma",
       "numerator": 32805,
       "denominator": 32768,
-      "color": "#3A86FF",
+      "color": "#5050E5",
       "description": "Kyle Gann"
     },
-        {
+    {
       "name": "superparticular Pythagorean comma approx.",
       "numerator": 74,
       "denominator": 73,
-      "color": "#3A86FF",
+      "color": "#7550E5",
       "description": "Kyle Gann"
     },
     {
       "name": "Ptolemy's enharmonic",
       "numerator": 56,
       "denominator": 55,
-      "color": "#3A86FF",
+      "color": "#9A50E5",
       "description": "Kyle Gann"
     },
     {
       "name": "hard half-step (Ptolemy, Avicenna, Safiud)",
       "numerator": 56,
       "denominator": 55,
-      "color": "#3A86FF",
+      "color": "#C050E5",
       "description": "Kyle Gann"
     },
     {
       "name": "septimal semitone",
       "numerator": 21,
       "denominator": 20,
-      "color": "#3A86FF",
+      "color": "#E550E5",
       "description": "Kyle Gann"
     },
     {
       "name": "limma ascendant",
       "numerator": 135,
       "denominator": 128,
-      "color": "#3A86FF",
+      "color": "#E550C0",
       "description": "Kyle Gann"
     },
     {
       "name": "septimal whole tone",
       "numerator": 8,
       "denominator": 7,
-      "color": "#3A86FF",
+      "color": "#E5509A",
       "description": "Kyle Gann"
     },
     {
       "name": "ragisma",
       "numerator": 4375,
       "denominator": 4374,
-      "color": "#3A86FF",
-      "description": ""
-    },
-     {
-      "name": "kleisma",
-      "numerator": 15625,
-      "denominator": 15552,
-      "color": "#3A86FF",
+      "color": "#E55075",
       "description": ""
     }
   ]

@@ -20,6 +20,7 @@
   </head>
   <body>
     <canvas id="lattice" tabindex="0" aria-label="Tuning lattice"></canvas>
+    <div id="layout-overlay" class="layout-overlay" hidden></div>
 
     <main class="app">
       <div class="top-bar">
@@ -60,10 +61,6 @@
             <select id="ratio-z" class="narrow-select ratio-z"></select>
           </div>
         </div>
-        <div class="help-toggle">
-          <input id="show-help" type="checkbox" checked />
-          <label for="show-help">Show help</label>
-        </div>
         </div>
         <dialog id="fundamental-spelling-dialog" class="custom-ratio-dialog">
           <div class="dialog-content">
@@ -98,18 +95,6 @@
                 <ul id="preset-list" class="preset-list"></ul>
               </div>
             </div>
-            <div class="control-group analysis-toggle">
-              <button id="analysis-toggle" type="button" aria-expanded="false" aria-controls="analysis-panel">
-                Analysis
-              </button>
-              <div id="analysis-panel" class="panel analysis-panel" hidden>
-                <div class="analysis-mode-buttons">
-                  <button type="button" data-analysis-mode="none" class="is-active">None</button>
-                  <button type="button" data-analysis-mode="distances">Distances</button>
-                  <button type="button" data-analysis-mode="commas">Microtonal Intervals</button>
-                </div>
-              </div>
-            </div>
             <div class="control-group options-toggle">
               <button id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel">
                 Options
@@ -132,6 +117,12 @@
                     <button type="button" data-cents-precision="0">0</button>
                     <button type="button" data-cents-precision="1">1</button>
                     <button type="button" data-cents-precision="2">2</button>
+                  </div>
+                </div>
+                <div class="control-group">
+                  <div class="control-inline">
+                    <input id="directional-ratio-labels" type="checkbox" />
+                    <label for="directional-ratio-labels">Directional ratio labels</label>
                   </div>
                 </div>
                
@@ -158,6 +149,10 @@
         <div class="hint-row">
           <div id="ui-hint" class="ui-hint"></div>
           <div id="banner-message" class="ui-hint banner-message" hidden></div>
+        </div>
+        <div class="help-toggle help-toggle-right">
+          <input id="show-help" type="checkbox" checked />
+          <label for="show-help">Show help</label>
         </div>
       </div>
     </main>
@@ -190,9 +185,12 @@
           </select>
         </div>
         <div class="control-group">
+          <button id="layout-freeze" type="button" class="button-full">Freeze &amp; Edit Layout</button>
+        </div>
+        <div class="control-group">
           <div class="control-inline">
-            <input id="layout-lock-position" type="checkbox" checked />
-            <span>Separate Layout</span>
+            <input id="layout-freeze-flatten" type="checkbox" checked />
+            <span>Flatten on Freeze</span>
           </div>
         </div>
         <div class="control-group">
@@ -326,6 +324,18 @@
                 <input id="layout-line-labels-toggle" type="checkbox" checked />
                 <label for="layout-line-labels-toggle">Line labels</label>
               </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="layout-show-distances" type="checkbox" checked />
+                <label for="layout-show-distances">Distances</label>
+                <button type="button" class="inline-link" data-distance-select>edit</button>
+              </div>
+            </div>
+            <div class="control-group">
+              <button id="layout-analysis-reset" type="button" class="button-full">
+                Reset Analysis
+              </button>
             </div>
           </div>
         </div>
@@ -973,6 +983,19 @@
               <div class="control-inline">
                 <input id="line-labels-toggle" type="checkbox" checked />
                 <label for="line-labels-toggle">Line labels</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="analysis-show-distances" type="checkbox" checked />
+                <label for="analysis-show-distances">Distances</label>
+                <button type="button" class="inline-link" data-distance-select>edit</button>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="analysis-show-microtonal" type="checkbox" />
+                <label for="analysis-show-microtonal">Microtonal intervals</label>
               </div>
             </div>
             <div class="control-group" hidden>

@@ -39,7 +39,7 @@ const octaveShiftDialog = document.getElementById("octave-shift-dialog");
 const octaveShiftInput = document.getElementById("octave-shift-input");
 const layoutKeyMappingPrefixInput = document.getElementById("layout-key-mapping-prefix");
 const layoutKeyMappingSuffixInput = document.getElementById("layout-key-mapping-suffix");
-const layoutLockPositionToggle = document.getElementById("layout-lock-position");
+const layoutFreezeButton = document.getElementById("layout-freeze");
 const layoutNodeSizeInput = document.getElementById("layout-node-size");
 const layoutNodeSizeReadout = document.getElementById("layout-node-size-readout");
 const layoutRatioTextSizeInput = document.getElementById("layout-ratio-text-size");
@@ -76,6 +76,7 @@ const layoutCustomFontGroup = document.getElementById("layout-custom-font-group"
 const layoutUnifySizeToggle = document.getElementById("layout-unify-size");
 const layoutLineLabelsToggle = document.getElementById("layout-line-labels-toggle");
 const layoutResetButton = document.getElementById("layout-reset");
+const layoutFreezeFlattenToggle = document.getElementById("layout-freeze-flatten");
 const exportSvgButton = document.getElementById("export-svg");
 const exportPdfButton = document.getElementById("export-pdf");
 const midiEnable = document.getElementById("midi-enable");
@@ -84,9 +85,7 @@ const midiChannelSelect = document.getElementById("midi-channel");
 const presetToggle = document.getElementById("preset-toggle");
 const presetPanel = document.getElementById("preset-panel");
 const presetList = document.getElementById("preset-list");
-const analysisToggle = document.getElementById("analysis-toggle");
-const analysisPanel = document.getElementById("analysis-panel");
-const analysisModeButtons = document.querySelectorAll("[data-analysis-mode]");
+const distanceSelectTriggers = document.querySelectorAll("[data-distance-select]");
 const fileToggle = document.getElementById("file-toggle");
 const filePanel = document.getElementById("file-panel");
 const sharePresetButton = document.getElementById("share-preset");
@@ -108,6 +107,7 @@ const ratioWheelLarge = document.getElementById("ratio-wheel-large");
 const ratioWheelMini = document.getElementById("ratio-wheel-mini");
 const uiHint = document.getElementById("ui-hint");
 const bannerMessage = document.getElementById("banner-message");
+const layoutOverlay = document.getElementById("layout-overlay");
 const creditsTrigger = document.getElementById("credits-trigger");
 const creditsDialog = document.getElementById("credits-dialog");
 const showHelpToggle = document.getElementById("show-help");
@@ -157,6 +157,7 @@ const spellingModeButtons = document.querySelectorAll("[data-spelling-mode]");
 const showHzToggle = document.getElementById("show-hz");
 const showCentsDeviationToggle = document.getElementById("show-cents-deviation");
 const showCentsSignToggle = document.getElementById("show-cents-sign");
+const directionalRatioLabelsToggle = document.getElementById("directional-ratio-labels");
 const hejiEnabledToggle = document.getElementById("heji-enabled");
 const enharmonicsEnabledToggle = document.getElementById("enharmonics-enabled");
 const centsPrecisionButtons = document.querySelectorAll("[data-cents-precision]");
@@ -190,6 +191,8 @@ const navGridToggle = document.getElementById("nav-grid");
 const navCirclesToggle = document.getElementById("nav-circles");
 const navKeyMappingsToggle = document.getElementById("nav-key-mappings");
 const lineLabelsToggle = document.getElementById("line-labels-toggle");
+const analysisShowDistancesToggle = document.getElementById("analysis-show-distances");
+const analysisShowMicrotonalToggle = document.getElementById("analysis-show-microtonal");
 const nav3dNavigationToggle = document.getElementById("nav-3d-navigation-toggle");
 const nav3dNavigationBody = document.getElementById("nav-3d-navigation-body");
 const navZoomInput = document.getElementById("nav-zoom");
@@ -203,6 +206,9 @@ const layoutShowHzToggle = document.getElementById("layout-show-hz");
 const layoutShowCentsDeviationToggle = document.getElementById("layout-show-cents-deviation");
 const layoutCirclesToggle = document.getElementById("layout-circles");
 const layoutKeyMappingsToggle = document.getElementById("layout-key-mappings-toggle");
+const layoutShowDistancesToggle = document.getElementById("layout-show-distances");
+const layoutShowMicrotonalToggle = document.getElementById("layout-show-microtonal");
+const layoutAnalysisResetButton = document.getElementById("layout-analysis-reset");
 const nav3dButtons = nav3dPanel ? nav3dPanel.querySelectorAll("button[data-view], button[data-action]") : [];
 const viewPanelToggle = document.getElementById("view-panel-toggle");
 const viewsPanel = nav3dPanel ? nav3dPanel.querySelector(".nav-3d-panel") : null;
@@ -229,15 +235,23 @@ let cameraDistance = 0;
 let bestViewCandidates = [];
 let bestViewIndex = 0;
 let bestViewSignature = "";
-let analysisMode = "none";
-const distanceSelectedNodeIds = new Set();
+const analysisLayers = { distances: false, microtonal: false };
+let distanceSelectMode = false;
+const distanceSelectedNodeKeys = new Set();
+const distanceSelectedEdges = new Set();
 const commaEdges = [];
 const commaNodeRings = new Map();
 const commaRatioMap = new Map();
 let commaEntries = [];
-const DISTANCE_MODE_BANNER = "Select nodes to measure distance. ESC to return.";
+const DISTANCE_MODE_BANNER = "Drag between nodes to create distance lines. ESC to return.";
 const COMMA_MODE_BANNER = "Labeling microtonal intervals. ESC to exit.";
 const DISTANCE_RING_COLOR = "rgba(72, 146, 255, 0.9)";
+const GUIDE_DEPTH_DENOM_MAX = 3.2;
+const distanceEdges = [];
+const distanceEdgeOverrides = new Map();
+let distanceLabelDrag = null;
+let distanceSelectDrag = null;
+let distanceCurveDrag = null;
 
 function clampZoom(value) {
   return Math.min(2.2, Math.max(0.5, value));
@@ -778,6 +792,101 @@ function syncLayoutViewFromCurrent() {
   };
 }
 
+function updateLayoutLinkControls() {
+  if (layoutFreezeButton) {
+    layoutFreezeButton.textContent = layoutLockPosition
+      ? "Unfreeze"
+      : "Freeze & Edit Layout";
+  }
+  if (layoutOverlay) {
+    layoutOverlay.hidden = !(layoutMode && !layoutLockPosition);
+  }
+  if (layoutMode && !layoutLockPosition && distanceSelectMode) {
+    setDistanceSelectMode(false);
+  }
+}
+
+function refreshLayoutFromView({ flatten = false } = {}) {
+  const preservedAxisOffsets = {
+    x: { ...layoutAxisOffsets.x },
+    y: { ...layoutAxisOffsets.y },
+    z: { ...layoutAxisOffsets.z },
+  };
+  const preservedAxisAngles = { ...layoutAxisAngles };
+  const preservedCustomLabels = layoutCustomLabels.map((entry) => ({
+    ...entry,
+    position: entry.position ? { ...entry.position } : null,
+  }));
+  const preservedCustomLabelId = layoutCustomLabelId;
+  const preservedTitle = layoutTitle;
+  const preservedCreator = layoutCreator;
+  const preservedTitlePos = layoutTitlePosition ? { ...layoutTitlePosition } : null;
+  const preservedCreatorPos = layoutCreatorPosition ? { ...layoutCreatorPosition } : null;
+
+  layoutPositions.clear();
+  layoutPositionOffsets.clear();
+  layoutLabelOffsets.clear();
+  layoutKeyMappingOffsets.clear();
+  layoutNodeShapes.clear();
+
+  layoutAxisOffsets = preservedAxisOffsets;
+  layoutAxisAngles = preservedAxisAngles;
+  layoutCustomLabels = preservedCustomLabels;
+  layoutCustomLabelId = preservedCustomLabelId;
+  layoutTitle = preservedTitle;
+  layoutCreator = preservedCreator;
+  layoutTitlePosition = preservedTitlePos;
+  layoutCreatorPosition = preservedCreatorPos;
+
+  if (flatten) {
+    const sourceView = {
+      zoom: view.zoom,
+      offsetX: view.offsetX,
+      offsetY: view.offsetY,
+      rotX: view.rotX,
+      rotY: view.rotY,
+    };
+    layoutSourceView = { ...sourceView };
+    layoutView = {
+      zoom: sourceView.zoom,
+      offsetX: sourceView.offsetX,
+      offsetY: sourceView.offsetY,
+      rotX: 0,
+      rotY: 0,
+    };
+    const centerX = canvas.clientWidth / 2;
+    const centerY = canvas.clientHeight / 2;
+    nodes.forEach((node) => {
+      const coord = layoutMode ? getLayoutBaseCoordinate(node) : node.coordinate;
+      const screen = worldToScreen(coord, false);
+      const scale = Number.isFinite(screen.scale) ? screen.scale : 1;
+      const safeScale = Math.max(0.15, scale);
+      const projectedX = (screen.x - centerX) / sourceView.zoom - sourceView.offsetX;
+      const projectedY = (screen.y - centerY) / sourceView.zoom - sourceView.offsetY;
+      const worldX = projectedX / safeScale;
+      const worldY = projectedY / safeScale;
+      const z = (1 / safeScale - 1) / 0.002 - cameraDistance;
+      layoutPositions.set(node.id, { x: worldX, y: worldY, z });
+    });
+    if (layoutMode) {
+      view.zoom = layoutView.zoom;
+      view.offsetX = layoutView.offsetX;
+      view.offsetY = layoutView.offsetY;
+      view.rotX = 0;
+      view.rotY = 0;
+      syncLayoutScaleInput();
+    }
+  } else {
+    syncLayoutViewFromCurrent();
+    if (layoutMode) {
+      nodes.forEach((node) => ensureLayoutPosition(node));
+    }
+  }
+  updateLayoutCustomLabelControls();
+  draw();
+  schedulePresetUrlUpdate();
+}
+
 const noteNamesSharp = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const noteNamesFlat = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
 const noteNames = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "G#", "A", "Bb", "B"];
@@ -1033,6 +1142,7 @@ function activateAxisFromHit(axis, node) {
   }
   updateAddModeFromShift();
   updateUiHint();
+  syncAnalysisLayerToggles();
   schedulePresetUrlUpdate();
   draw();
   return true;
@@ -1114,11 +1224,13 @@ let layoutTitleMargin = 32;
 let layoutTitlePosition = null;
 let layoutCreatorPosition = null;
 let layoutUnifyNodeSize = true;
+let layoutFreezeFlatten = true;
 let layoutPageSize = "letter";
 let layoutOrientation = "landscape";
-let layoutLockPosition = true;
+let layoutLockPosition = false;
 let layoutView = { zoom: 1, offsetX: 0, offsetY: 0, rotX: 0, rotY: 0 };
 let layoutPrevState = null;
+let layoutSourceView = null;
 let layoutTitleFont = "Lexend";
 let layoutRatioFont = "Noto Serif";
 let layoutNoteFont = "Lexend";
@@ -1168,6 +1280,7 @@ let featureMode = "ratio";
 let showHz = false;
 let showCentsDeviation = true;
 let showCentsSign = false;
+let directionalRatioLabels = false;
 let hejiEnabled = true;
 let enharmonicsEnabled = true;
 let centsPrecision = 0;
@@ -1221,10 +1334,11 @@ const LAYOUT_DEFAULTS = {
   titleMargin: 32,
   keyMappingsMode: "hide",
   unifyNodeSize: true,
+  freezeFlatten: true,
   pageSize: "letter",
   orientation: "landscape",
   zoom: 1,
-  lockPosition: true,
+  lockPosition: false,
   view: { zoom: 1, offsetX: 0, offsetY: 0, rotX: 0, rotY: 0 },
   titleFont: "Lexend",
   ratioFont: "Noto Serif",
@@ -2463,7 +2577,8 @@ function refreshCustomNodes() {
     if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
       return;
     }
-    const reduced = reduceFraction(numerator, denominator);
+    const octaveReduced = reduceToOctave(numerator, denominator);
+    const reduced = reduceFraction(octaveReduced.numerator, octaveReduced.denominator);
     customNode.numerator = reduced.numerator;
     customNode.denominator = reduced.denominator;
     customNode.derivedNumerator = reduced.numerator;
@@ -2538,6 +2653,9 @@ function applyCustomDialogResult(numerator, denominator) {
 }
 
 function syncCustomNodesWithSource(sourceId, active) {
+  if (!active) {
+    return;
+  }
   customNodes.forEach((node) => {
     if (node.sourceNodeId === sourceId) {
       node.active = active;
@@ -4155,6 +4273,74 @@ function screenToWorld(point) {
   };
 }
 
+function shouldDisableLayoutScale() {
+  return false;
+}
+
+function getLayoutNodeScreenScale(pos) {
+  return layoutUnifyNodeSize ? 1 : pos.scale || 1;
+}
+
+function getLayoutNodeRadius(pos) {
+  return layoutNodeSize * getLayoutNodeScreenScale(pos);
+}
+
+function worldToCamera(point, disableScale = false) {
+  const safePoint = {
+    x: Number.isFinite(point.x) ? point.x : 0,
+    y: Number.isFinite(point.y) ? point.y : 0,
+    z: Number.isFinite(point.z) ? point.z : 0,
+  };
+  const cosY = Math.cos(view.rotY);
+  const sinY = Math.sin(view.rotY);
+  const cosX = Math.cos(view.rotX);
+  const sinX = Math.sin(view.rotX);
+  const x1 = safePoint.x * cosY + safePoint.z * sinY;
+  const z1 = -safePoint.x * sinY + safePoint.z * cosY;
+  const y1 = safePoint.y * cosX - z1 * sinX;
+  const z2 = safePoint.y * sinX + z1 * cosX;
+  const adjustedZ = z2 + cameraDistance;
+  const denom = disableScale ? 1 : 1 + adjustedZ * 0.002;
+  const scaleRaw = disableScale ? 1 : 1 / denom;
+  const scale = disableScale ? 1 : Math.max(0.15, scaleRaw);
+  return { x1, y1, z2, scale };
+}
+
+function cameraToWorld(camera) {
+  const cosX = Math.cos(view.rotX);
+  const sinX = Math.sin(view.rotX);
+  const cosY = Math.cos(view.rotY);
+  const sinY = Math.sin(view.rotY);
+  const y = camera.y1 * cosX + camera.z2 * sinX;
+  const z1 = -camera.y1 * sinX + camera.z2 * cosX;
+  const x = camera.x1 * cosY - z1 * sinY;
+  const z = camera.x1 * sinY + z1 * cosY;
+  return { x, y, z };
+}
+
+function screenDeltaToWorldDelta(delta, baseCoord, disableScale = false) {
+  const safeBase = {
+    x: Number.isFinite(baseCoord.x) ? baseCoord.x : 0,
+    y: Number.isFinite(baseCoord.y) ? baseCoord.y : 0,
+    z: Number.isFinite(baseCoord.z) ? baseCoord.z : 0,
+  };
+  const camera = worldToCamera(safeBase, disableScale);
+  const scale = camera.scale || 1;
+  const dx1 = delta.x / (view.zoom * scale);
+  const dy1 = delta.y / (view.zoom * scale);
+  const nextCamera = {
+    x1: camera.x1 + dx1,
+    y1: camera.y1 + dy1,
+    z2: camera.z2,
+  };
+  const nextWorld = cameraToWorld(nextCamera);
+  return {
+    x: nextWorld.x - safeBase.x,
+    y: nextWorld.y - safeBase.y,
+    z: nextWorld.z - safeBase.z,
+  };
+}
+
 function ensureLayoutPosition(node) {
   if (!layoutMode) {
     return node.coordinate;
@@ -5364,6 +5550,10 @@ function drawHejiInline({
   ctx.restore();
 }
 
+function getDefaultNoteDetailOffset(radius, scale = 1) {
+  return { x: (radius + 5) * scale, y: (radius - 20) * scale };
+}
+
 function getLayoutNoteOffset(node, radius, scale = 1) {
   const override = layoutLabelOffsets.get(node.id);
   if (override) {
@@ -5372,12 +5562,143 @@ function getLayoutNoteOffset(node, radius, scale = 1) {
       y: override.y * view.zoom * scale,
     };
   }
-  return { x: radius + 6, y: radius - 10 };
+  return getDefaultNoteDetailOffset(radius, 1);
 }
 
 function getLayoutNoteLabelPosition(node, pos, radius) {
   const offset = getLayoutNoteOffset(node, radius, pos.scale || 1);
   return { x: pos.x + offset.x, y: pos.y + offset.y };
+}
+
+function rectIntersectsRect(a, b) {
+  return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
+}
+
+function rectIntersectsCircle(rect, circle, padding = 0) {
+  const left = rect.left - padding;
+  const right = rect.right + padding;
+  const top = rect.top - padding;
+  const bottom = rect.bottom + padding;
+  const closestX = Math.max(left, Math.min(circle.x, right));
+  const closestY = Math.max(top, Math.min(circle.y, bottom));
+  const dx = circle.x - closestX;
+  const dy = circle.y - closestY;
+  return dx * dx + dy * dy < (circle.r + padding) * (circle.r + padding);
+}
+
+function rectIntersectsSegment(rect, segment, padding = 0) {
+  const left = rect.left - padding;
+  const right = rect.right + padding;
+  const top = rect.top - padding;
+  const bottom = rect.bottom + padding;
+  const { x1, y1, x2, y2 } = segment;
+  const inside =
+    (x1 >= left && x1 <= right && y1 >= top && y1 <= bottom) ||
+    (x2 >= left && x2 <= right && y2 >= top && y2 <= bottom);
+  if (inside) {
+    return true;
+  }
+  const intersects = (ax, ay, bx, by, cx, cy, dx, dy) => {
+    const r1x = bx - ax;
+    const r1y = by - ay;
+    const r2x = dx - cx;
+    const r2y = dy - cy;
+    const denom = r1x * r2y - r1y * r2x;
+    if (Math.abs(denom) < 1e-6) {
+      return false;
+    }
+    const t = ((cx - ax) * r2y - (cy - ay) * r2x) / denom;
+    const u = ((cx - ax) * r1y - (cy - ay) * r1x) / denom;
+    return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+  };
+  return (
+    intersects(x1, y1, x2, y2, left, top, right, top) ||
+    intersects(x1, y1, x2, y2, right, top, right, bottom) ||
+    intersects(x1, y1, x2, y2, right, bottom, left, bottom) ||
+    intersects(x1, y1, x2, y2, left, bottom, left, top)
+  );
+}
+
+function getDetailLabelPosition({
+  center,
+  baseOffset,
+  width,
+  height,
+  circles,
+  placedRects,
+  segments,
+  ignoreId = null,
+}) {
+  const baseAngle = Math.atan2(baseOffset.y, baseOffset.x);
+  const baseDist = Math.hypot(baseOffset.x, baseOffset.y);
+  const candidates = [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4, Math.PI];
+  const getAnchoredRect = (anchorX, anchorY, dx, dy) => {
+    const rightSide = dx >= 0;
+    const bottomSide = dy >= 0;
+    let left = anchorX;
+    let top = anchorY;
+    if (rightSide && bottomSide) {
+      left = anchorX;
+      top = anchorY;
+    } else if (!rightSide && !bottomSide) {
+      left = anchorX - width;
+      top = anchorY - height;
+    } else if (rightSide && !bottomSide) {
+      left = anchorX;
+      top = anchorY - height;
+    } else {
+      left = anchorX - width;
+      top = anchorY;
+    }
+    return { left, top, right: left + width, bottom: top + height };
+  };
+  for (let i = 0; i < candidates.length; i += 1) {
+    const angle = baseAngle + candidates[i];
+    const dx = Math.cos(angle) * baseDist;
+    const dy = Math.sin(angle) * baseDist;
+    const anchorX = center.x + dx;
+    const anchorY = center.y + dy;
+    const rect = getAnchoredRect(anchorX, anchorY, dx, dy);
+    let collision = false;
+    for (let j = 0; j < circles.length; j += 1) {
+      const circle = circles[j];
+      if (ignoreId != null && circle.id === ignoreId) {
+        continue;
+      }
+      if (rectIntersectsCircle(rect, circle, 2)) {
+        collision = true;
+        break;
+      }
+    }
+    if (collision) {
+      continue;
+    }
+    for (let k = 0; k < placedRects.length; k += 1) {
+      if (rectIntersectsRect(rect, placedRects[k])) {
+        collision = true;
+        break;
+      }
+    }
+    if (!collision && segments && segments.length) {
+      for (let m = 0; m < segments.length; m += 1) {
+        if (rectIntersectsSegment(rect, segments[m], 2)) {
+          collision = true;
+          break;
+        }
+      }
+    }
+    if (!collision) {
+      placedRects.push(rect);
+      return { x: rect.left, y: rect.top };
+    }
+  }
+  const fallbackDx = baseOffset.x;
+  const fallbackDy = baseOffset.y;
+  const anchorX = center.x + fallbackDx;
+  const anchorY = center.y + fallbackDy;
+  const fallbackRect = getAnchoredRect(anchorX, anchorY, fallbackDx, fallbackDy);
+  placedRects.push(fallbackRect);
+  return { x: fallbackRect.left, y: fallbackRect.top };
 }
 
 function getLayoutKeyMappingOffset(node, radius, scale = 1) {
@@ -5419,7 +5740,7 @@ function getLayoutKeyMappingLabelHitbox(labelText, node, pos, radius) {
 
 function getLayoutTitleY() {
   const { top } = getLayoutPageRect();
-  const disableScale = layoutUnifyNodeSize;
+  const disableScale = shouldDisableLayoutScale();
   let maxY = Number.NEGATIVE_INFINITY;
   for (const [a, b] of edges) {
     if (!a.active || !b.active) {
@@ -5427,8 +5748,8 @@ function getLayoutTitleY() {
     }
     const start = worldToScreen(getNodeDisplayCoordinate(a), disableScale);
     const end = worldToScreen(getNodeDisplayCoordinate(b), disableScale);
-    const radiusA = layoutNodeSize * (start.scale || 1);
-    const radiusB = layoutNodeSize * (end.scale || 1);
+    const radiusA = getLayoutNodeRadius(start);
+    const radiusB = getLayoutNodeRadius(end);
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const dist = Math.hypot(dx, dy);
@@ -6067,8 +6388,12 @@ function getTriangleDiagonalHit(screenPoint, entry, gridMap, disableScale) {
     }
     const start = worldToScreen(getNodeDisplayCoordinate(startNode), disableScale);
     const end = worldToScreen(getNodeDisplayCoordinate(endNode), disableScale);
-    const radiusA = (layoutMode ? layoutNodeSize : getNodeRadius(startNode)) * (start.scale || 1);
-    const radiusB = (layoutMode ? layoutNodeSize : getNodeRadius(endNode)) * (end.scale || 1);
+    const radiusA = layoutMode
+      ? getLayoutNodeRadius(start)
+      : getNodeRadius(startNode) * (start.scale || 1);
+    const radiusB = layoutMode
+      ? getLayoutNodeRadius(end)
+      : getNodeRadius(endNode) * (end.scale || 1);
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const dist = Math.hypot(dx, dy);
@@ -6354,10 +6679,14 @@ function drawTriangleDiagonals(nodePosMap, disableScale = false) {
       : worldToScreen(getNodeDisplayCoordinate(b), disableScale);
     const radiusA = startEntry
       ? startEntry.radius
-      : (layoutMode ? layoutNodeSize : getNodeRadius(a)) * (start.scale || 1);
+      : layoutMode
+        ? getLayoutNodeRadius(start)
+        : getNodeRadius(a) * (start.scale || 1);
     const radiusB = endEntry
       ? endEntry.radius
-      : (layoutMode ? layoutNodeSize : getNodeRadius(b)) * (end.scale || 1);
+      : layoutMode
+        ? getLayoutNodeRadius(end)
+        : getNodeRadius(b) * (end.scale || 1);
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const dist = Math.hypot(dx, dy);
@@ -6538,6 +6867,12 @@ function getClusterGuideInfo(pointer, nodePosMap, axisEntry = null) {
     if (!entry) {
       return;
     }
+    if (is3DMode) {
+      const denom = entry.pos && Number.isFinite(entry.pos.denom) ? entry.pos.denom : 1;
+      if (!entry.pos.visible || denom > GUIDE_DEPTH_DENOM_MAX) {
+        return;
+      }
+    }
     const dx = entry.pos.x - pointer.x;
     const dy = entry.pos.y - pointer.y;
     const dist = dx * dx + dy * dy;
@@ -6562,6 +6897,13 @@ function getClusterGuideInfo(pointer, nodePosMap, axisEntry = null) {
     const z = Number.isFinite(node.gridZ) ? node.gridZ : gridCenterZ;
     if (z !== anchorZ) {
       return;
+    }
+    const entry = nodePosMap.get(node.id);
+    if (is3DMode && entry) {
+      const denom = entry.pos && Number.isFinite(entry.pos.denom) ? entry.pos.denom : 1;
+      if (!entry.pos.visible || denom > GUIDE_DEPTH_DENOM_MAX) {
+        return;
+      }
     }
     gridMap.set(`${node.gridX},${node.gridY}`, node);
   });
@@ -6723,7 +7065,7 @@ function findTriangleHit(screenPoint) {
   if (!activeMap.size) {
     return null;
   }
-  const disableScale = layoutMode && layoutUnifyNodeSize;
+  const disableScale = shouldDisableLayoutScale();
   let best = null;
   let bestDist = Number.POSITIVE_INFINITY;
   const updateBest = (entry, center) => {
@@ -6856,6 +7198,20 @@ function formatAxisRatioLabel(ratioValue) {
   return `${reduced.numerator}:${reduced.denominator}`;
 }
 
+function formatAxisRatioLabelDirectional(ratioValue, direction) {
+  if (!Number.isFinite(ratioValue) || ratioValue === 0) {
+    return null;
+  }
+  const reduced = reduceToOctave(Math.abs(ratioValue), 1);
+  if (!Number.isFinite(reduced.numerator) || !Number.isFinite(reduced.denominator)) {
+    return null;
+  }
+  if (direction < 0) {
+    return `${reduced.denominator}:${reduced.numerator}`;
+  }
+  return `${reduced.numerator}:${reduced.denominator}`;
+}
+
 function getEdgeLabelText(a, b) {
   if (!a || !b) {
     return null;
@@ -6863,23 +7219,54 @@ function getEdgeLabelText(a, b) {
   const dx = (b.gridX ?? 0) - (a.gridX ?? 0);
   const dy = (b.gridY ?? 0) - (a.gridY ?? 0);
   const dz = (b.gridZ ?? 0) - (a.gridZ ?? 0);
+  const dirFromExponent = (value, fallback) => {
+    if (value > 0) {
+      return 1;
+    }
+    if (value < 0) {
+      return -1;
+    }
+    if (fallback > 0) {
+      return 1;
+    }
+    if (fallback < 0) {
+      return -1;
+    }
+    return 1;
+  };
+  const dirX = dirFromExponent(b.exponentX ?? 0, a.exponentX ?? 0);
+  const dirY = dirFromExponent(b.exponentY ?? 0, a.exponentY ?? 0);
+  const dirZ = dirFromExponent(b.exponentZ ?? 0, a.exponentZ ?? 0);
+  const useDirectional = directionalRatioLabels;
   if (dx === 1 && dy === 0 && dz === 0) {
-    return formatAxisRatioLabel(Number(ratioXSelect.value));
+    return useDirectional
+      ? formatAxisRatioLabelDirectional(Number(ratioXSelect.value), dirX)
+      : formatAxisRatioLabel(Number(ratioXSelect.value));
   }
   if (dx === -1 && dy === 0 && dz === 0) {
-    return formatAxisRatioLabel(1 / Number(ratioXSelect.value));
+    return useDirectional
+      ? formatAxisRatioLabelDirectional(Number(ratioXSelect.value), dirX)
+      : formatAxisRatioLabel(Number(ratioXSelect.value));
   }
   if (dy === 1 && dx === 0 && dz === 0) {
-    return formatAxisRatioLabel(Number(ratioYSelect.value));
+    return useDirectional
+      ? formatAxisRatioLabelDirectional(Number(ratioYSelect.value), dirY)
+      : formatAxisRatioLabel(Number(ratioYSelect.value));
   }
   if (dy === -1 && dx === 0 && dz === 0) {
-    return formatAxisRatioLabel(1 / Number(ratioYSelect.value));
+    return useDirectional
+      ? formatAxisRatioLabelDirectional(Number(ratioYSelect.value), dirY)
+      : formatAxisRatioLabel(Number(ratioYSelect.value));
   }
   if (dz === 1 && dx === 0 && dy === 0) {
-    return formatAxisRatioLabel(Number(ratioZSelect.value));
+    return useDirectional
+      ? formatAxisRatioLabelDirectional(Number(ratioZSelect.value), dirZ)
+      : formatAxisRatioLabel(Number(ratioZSelect.value));
   }
   if (dz === -1 && dx === 0 && dy === 0) {
-    return formatAxisRatioLabel(1 / Number(ratioZSelect.value));
+    return useDirectional
+      ? formatAxisRatioLabelDirectional(Number(ratioZSelect.value), dirZ)
+      : formatAxisRatioLabel(Number(ratioZSelect.value));
   }
   return null;
 }
@@ -6935,6 +7322,7 @@ function drawCanvasEdgeSegment({
   alpha = 1,
   dash = null,
   lineWidth = 1.5,
+  labelT = 0.5,
 }) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -6978,8 +7366,9 @@ function drawCanvasEdgeSegment({
       ctx.font = `${labelWeight} ${size}px ${labelFont}`;
     }
     const gapHalf = gap / 2;
-    const midX = (lineStart.x + lineEnd.x) / 2;
-    const midY = (lineStart.y + lineEnd.y) / 2;
+    const clampedT = Math.min(1, Math.max(0, labelT));
+    const midX = lineStart.x + (lineEnd.x - lineStart.x) * clampedT;
+    const midY = lineStart.y + (lineEnd.y - lineStart.y) * clampedT;
     const gapStart = {
       x: midX - ux * gapHalf,
       y: midY - uy * gapHalf,
@@ -7037,6 +7426,190 @@ function computeEdgeLabelLayoutFromWidth({ baseSize, baseWidth, lineLen, minSize
   }
   const gap = Math.min(total, maxGap);
   return { size, gap };
+}
+
+function getQuadraticPoint(p0, p1, p2, t) {
+  const oneMinus = 1 - t;
+  const a = oneMinus * oneMinus;
+  const b = 2 * oneMinus * t;
+  const c = t * t;
+  return {
+    x: a * p0.x + b * p1.x + c * p2.x,
+    y: a * p0.y + b * p1.y + c * p2.y,
+  };
+}
+
+function getQuadraticTangent(p0, p1, p2, t) {
+  return {
+    x: 2 * (1 - t) * (p1.x - p0.x) + 2 * t * (p2.x - p1.x),
+    y: 2 * (1 - t) * (p1.y - p0.y) + 2 * t * (p2.y - p1.y),
+  };
+}
+
+function lerpPoint(a, b, t) {
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+  };
+}
+
+function splitQuadratic(p0, p1, p2, t) {
+  const p01 = lerpPoint(p0, p1, t);
+  const p12 = lerpPoint(p1, p2, t);
+  const p012 = lerpPoint(p01, p12, t);
+  return {
+    left: { p0, p1: p01, p2: p012 },
+    right: { p0: p012, p1: p12, p2 },
+  };
+}
+
+function getQuadraticSubcurve(p0, p1, p2, t0, t1) {
+  if (t0 <= 0 && t1 >= 1) {
+    return { p0, p1, p2 };
+  }
+  const clampedT0 = Math.max(0, Math.min(1, t0));
+  const clampedT1 = Math.max(0, Math.min(1, t1));
+  if (clampedT1 <= clampedT0) {
+    return null;
+  }
+  const splitEnd = splitQuadratic(p0, p1, p2, clampedT1);
+  const leftCurve = splitEnd.left;
+  if (clampedT0 <= 0) {
+    return leftCurve;
+  }
+  const localT = clampedT0 / clampedT1;
+  const splitStart = splitQuadratic(leftCurve.p0, leftCurve.p1, leftCurve.p2, localT);
+  return splitStart.right;
+}
+
+function buildQuadraticCurveInfo(p0, p1, p2, steps = 40) {
+  const samples = [];
+  let total = 0;
+  let prev = getQuadraticPoint(p0, p1, p2, 0);
+  samples.push({ t: 0, len: 0, point: prev });
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    const point = getQuadraticPoint(p0, p1, p2, t);
+    total += Math.hypot(point.x - prev.x, point.y - prev.y);
+    samples.push({ t, len: total, point });
+    prev = point;
+  }
+  const tAtLength = (targetLen) => {
+    if (!Number.isFinite(targetLen) || targetLen <= 0) {
+      return 0;
+    }
+    if (targetLen >= total) {
+      return 1;
+    }
+    for (let i = 1; i < samples.length; i += 1) {
+      if (samples[i].len >= targetLen) {
+        const prevSample = samples[i - 1];
+        const nextSample = samples[i];
+        const span = nextSample.len - prevSample.len || 1;
+        const ratio = (targetLen - prevSample.len) / span;
+        return prevSample.t + (nextSample.t - prevSample.t) * ratio;
+      }
+    }
+    return 1;
+  };
+  return {
+    total,
+    samples,
+    tAtRatio: (ratio) => tAtLength(Math.min(1, Math.max(0, ratio)) * total),
+    tAtLength,
+  };
+}
+
+function getNearestQuadraticT(p0, p1, p2, point) {
+  const info = buildQuadraticCurveInfo(p0, p1, p2, 50);
+  let bestT = 0;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < info.samples.length; i += 1) {
+    const sample = info.samples[i];
+    const dx = sample.point.x - point.x;
+    const dy = sample.point.y - point.y;
+    const dist = dx * dx + dy * dy;
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestT = sample.t;
+    }
+  }
+  return bestT;
+}
+
+
+function getAutoDistanceControl(lineStart, lineEnd, nodePosMap, a, b) {
+  const dx = lineEnd.x - lineStart.x;
+  const dy = lineEnd.y - lineStart.y;
+  const dist = Math.hypot(dx, dy);
+  if (!dist) {
+    return { x: (lineStart.x + lineEnd.x) / 2, y: (lineStart.y + lineEnd.y) / 2 };
+  }
+  const ux = dx / dist;
+  const uy = dy / dist;
+  const perp = { x: -uy, y: ux };
+  const padding = 8;
+  let axisSteps = 0;
+  let isSameAxis = false;
+  if (a && b) {
+    const sameX = (a.exponentX ?? 0) === (b.exponentX ?? 0);
+    const sameY = (a.exponentY ?? 0) === (b.exponentY ?? 0);
+    const sameZ = (a.exponentZ ?? 0) === (b.exponentZ ?? 0);
+    if (sameY && sameZ) {
+      axisSteps = Math.abs((a.exponentX ?? 0) - (b.exponentX ?? 0));
+      isSameAxis = true;
+    } else if (sameX && sameZ) {
+      axisSteps = Math.abs((a.exponentY ?? 0) - (b.exponentY ?? 0));
+      isSameAxis = true;
+    } else if (sameX && sameY) {
+      axisSteps = Math.abs((a.exponentZ ?? 0) - (b.exponentZ ?? 0));
+      isSameAxis = true;
+    }
+  }
+  if (axisSteps === 1) {
+    return { x: (lineStart.x + lineEnd.x) / 2, y: (lineStart.y + lineEnd.y) / 2 };
+  }
+  let axisBoost = 1;
+  if (axisSteps === 2) {
+    axisBoost = 1.8;
+  } else if (axisSteps === 3) {
+    axisBoost = 2.6;
+  } else if (axisSteps >= 4) {
+    axisBoost = 3.4;
+  }
+  let best = null;
+  nodePosMap.forEach((entry, nodeId) => {
+    if (a && b && (nodeId === a.id || nodeId === b.id)) {
+      return;
+    }
+    const node = nodeById.get(nodeId);
+    if (!node || (!node.active && !node.isCenter && !node.isCustom)) {
+      return;
+    }
+    const clearance = entry.radius + padding;
+    const distance = distanceToSegment(entry.pos, lineStart, lineEnd);
+    if (distance >= clearance) {
+      return;
+    }
+    const severity = clearance - distance;
+    if (!best || severity > best.severity) {
+      best = { nodePos: entry.pos, severity, clearance };
+    }
+  });
+  if (!best && !isSameAxis) {
+    return { x: (lineStart.x + lineEnd.x) / 2, y: (lineStart.y + lineEnd.y) / 2 };
+  }
+  const bestSide = best
+    ? Math.sign(dx * (best.nodePos.y - lineStart.y) - dy * (best.nodePos.x - lineStart.x)) || 1
+    : 1;
+  const paritySide = axisSteps % 2 === 0 ? 1 : -1;
+  const side = isSameAxis && axisSteps > 1 ? paritySide : bestSide;
+  const baseSeverity = best ? best.severity + padding : padding;
+  const magnitude = Math.min(dist * 0.5, baseSeverity * axisBoost);
+  return {
+    x: (lineStart.x + lineEnd.x) / 2 + perp.x * magnitude * side,
+    y: (lineStart.y + lineEnd.y) / 2 + perp.y * magnitude * side,
+  };
 }
 
 function getShapeEdgeRadius(shape, ux, uy, radius) {
@@ -7281,7 +7854,7 @@ function getAxisLegendSettings() {
   const xLabel = `${xReduced.numerator}:${xReduced.denominator}`;
   const yLabel = `${yReduced.numerator}:${yReduced.denominator}`;
   const zLabel = `${zReduced.numerator}:${zReduced.denominator}`;
-  const disableScale = layoutUnifyNodeSize;
+  const disableScale = shouldDisableLayoutScale();
   const origin = worldToScreen({ x: 0, y: 0, z: 0 }, disableScale);
   const xAxisPoint = worldToScreen({ x: GRID_SPACING, y: 0, z: 0 }, disableScale);
   const yAxisPoint = worldToScreen({ x: 0, y: GRID_SPACING, z: 0 }, disableScale);
@@ -7494,19 +8067,37 @@ function scheduleDraw() {
 }
 
 function drawDistanceConnections(nodePosMap) {
-  if (!distanceSelectedNodeIds.size) {
+  if (!distanceSelectedEdges.size) {
+    distanceEdges.length = 0;
+    distanceSelectedNodeKeys.clear();
     return;
   }
-  const selectedNodes = [];
-  distanceSelectedNodeIds.forEach((id) => {
-    const node = nodeById.get(id);
-    if (node && node.active) {
-      selectedNodes.push(node);
-    } else {
-      distanceSelectedNodeIds.delete(id);
+  distanceEdges.length = 0;
+  const selectedEdges = [];
+  const resolvedEdges = new Set();
+  const resolvedNodeKeys = new Set();
+  distanceSelectedEdges.forEach((edgeKey) => {
+    if (!edgeKey) {
+      return;
     }
+    const parts = edgeKey.split("|");
+    if (parts.length !== 2) {
+      return;
+    }
+    const [aKey, bKey] = parts;
+    const a = getNodeByDistanceKey(aKey);
+    const b = getNodeByDistanceKey(bKey);
+    if (!a || !b || !a.active || !b.active) {
+      return;
+    }
+    resolvedEdges.add(edgeKey);
+    resolvedNodeKeys.add(aKey);
+    resolvedNodeKeys.add(bKey);
+    selectedEdges.push({ a, b, aKey, bKey, edgeKey });
   });
-  if (selectedNodes.length < 2) {
+  distanceSelectedNodeKeys.clear();
+  resolvedNodeKeys.forEach((key) => distanceSelectedNodeKeys.add(key));
+  if (!selectedEdges.length) {
     return;
   }
   const labelFont = layoutMode
@@ -7524,48 +8115,225 @@ function drawDistanceConnections(nodePosMap) {
     : is3DMode
     ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
     : 14;
-  for (let i = 0; i < selectedNodes.length; i += 1) {
-    const a = selectedNodes[i];
+  for (let i = 0; i < selectedEdges.length; i += 1) {
+    const { a, b, aKey, bKey, edgeKey } = selectedEdges[i];
     const startEntry = nodePosMap.get(a.id);
     if (!startEntry) {
       continue;
     }
-    for (let j = i + 1; j < selectedNodes.length; j += 1) {
-      const b = selectedNodes[j];
-      const endEntry = nodePosMap.get(b.id);
-      if (!endEntry) {
-        continue;
+    const endEntry = nodePosMap.get(b.id);
+    if (!endEntry) {
+      continue;
+    }
+    const override = getDistanceEdgeOverride(edgeKey);
+    if (override && override.hidden) {
+      continue;
+    }
+    const dimOthers = false;
+    const ratioInfo = getDistanceRatioLabel(a, b);
+    if (!ratioInfo) {
+      continue;
+    }
+    const showName = !override || override.showName !== false;
+    const commaName = showName
+      ? getDistanceCommaName(ratioInfo.numerator, ratioInfo.denominator)
+      : "";
+    const label = commaName ? `${ratioInfo.label} (${commaName})` : ratioInfo.label;
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      continue;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const straightStartRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+    const straightEndRadius = getNodeEdgeRadius(b, -ux, -uy, endEntry.radius);
+    let lineStart = {
+      x: start.x + ux * straightStartRadius,
+      y: start.y + uy * straightStartRadius,
+    };
+    let lineEnd = {
+      x: end.x - ux * straightEndRadius,
+      y: end.y - uy * straightEndRadius,
+    };
+    const autoControl = getAutoDistanceControl(lineStart, lineEnd, nodePosMap, a, b);
+    const defaultControl = autoControl;
+    let controlOffset = override && override.controlOffset ? override.controlOffset : null;
+    if (!controlOffset && override && override.control) {
+      controlOffset = {
+        x: override.control.x - defaultControl.x,
+        y: override.control.y - defaultControl.y,
+      };
+    }
+    const control = controlOffset
+      ? { x: defaultControl.x + controlOffset.x, y: defaultControl.y + controlOffset.y }
+      : defaultControl;
+    const startVector = { x: control.x - start.x, y: control.y - start.y };
+    const endVector = { x: control.x - end.x, y: control.y - end.y };
+    const startLen = Math.hypot(startVector.x, startVector.y);
+    const endLen = Math.hypot(endVector.x, endVector.y);
+    const startUx = startLen > 0 ? startVector.x / startLen : ux;
+    const startUy = startLen > 0 ? startVector.y / startLen : uy;
+    const endUx = endLen > 0 ? endVector.x / endLen : -ux;
+    const endUy = endLen > 0 ? endVector.y / endLen : -uy;
+    const startRadius = getNodeEdgeRadius(a, startUx, startUy, startEntry.radius);
+    const endRadius = getNodeEdgeRadius(b, endUx, endUy, endEntry.radius);
+    lineStart = {
+      x: start.x + startUx * startRadius,
+      y: start.y + startUy * startRadius,
+    };
+    lineEnd = {
+      x: end.x + endUx * endRadius,
+      y: end.y + endUy * endRadius,
+    };
+    const labelT = override && Number.isFinite(override.labelT) ? override.labelT : 0.5;
+    const curveInfo = buildQuadraticCurveInfo(lineStart, control, lineEnd);
+    const t = curveInfo.tAtRatio(labelT);
+    const labelPos = getQuadraticPoint(lineStart, control, lineEnd, t);
+    const tangent = getQuadraticTangent(lineStart, control, lineEnd, t);
+    distanceEdges.push({
+      a,
+      b,
+      key: edgeKey,
+      lineStart,
+      lineEnd,
+      defaultControl,
+      control,
+      curveInfo,
+      label,
+      labelFont,
+      labelWeight,
+      labelSize,
+      labelT,
+      labelPos,
+      tangent,
+    });
+    ctx.save();
+    ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
+    const baseWidth = ctx.measureText(label).width;
+    let angle = 0;
+    let useHorizontal = false;
+    if (Math.abs(tangent.x) > 1e-6 || Math.abs(tangent.y) > 1e-6) {
+      angle = Math.atan2(tangent.y, tangent.x);
+      useHorizontal = shouldUseHorizontalText(angle);
+      if (!useHorizontal) {
+        if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+          angle += Math.PI;
+        }
+      } else {
+        angle = 0;
       }
-      const label = getDistanceRatioLabel(a, b);
-      if (!label) {
-        continue;
+    }
+    const gapWidth = useHorizontal ? labelSize * 0.9 : baseWidth;
+    const layout = computeEdgeLabelLayoutFromWidth({
+      baseSize: labelSize,
+      baseWidth: gapWidth,
+      lineLen: curveInfo.total,
+      minSize: 4,
+    });
+    const size = layout.size;
+    const gap = layout.gap;
+    ctx.restore();
+
+    const gapHalf = gap / 2;
+    const labelArcLen = curveInfo.total * Math.min(1, Math.max(0, labelT));
+    const tLeft = curveInfo.tAtLength(labelArcLen - gapHalf);
+    const tRight = curveInfo.tAtLength(labelArcLen + gapHalf);
+
+    const leftSegment = getQuadraticSubcurve(lineStart, control, lineEnd, 0, tLeft);
+    const rightSegment = getQuadraticSubcurve(lineStart, control, lineEnd, tRight, 1);
+    ctx.save();
+    ctx.strokeStyle = themeColors.edge;
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([6, 6]);
+    if (leftSegment) {
+      ctx.beginPath();
+      ctx.moveTo(leftSegment.p0.x, leftSegment.p0.y);
+      ctx.quadraticCurveTo(leftSegment.p1.x, leftSegment.p1.y, leftSegment.p2.x, leftSegment.p2.y);
+      ctx.stroke();
+    }
+    if (rightSegment) {
+      ctx.beginPath();
+      ctx.moveTo(rightSegment.p0.x, rightSegment.p0.y);
+      ctx.quadraticCurveTo(
+        rightSegment.p1.x,
+        rightSegment.p1.y,
+        rightSegment.p2.x,
+        rightSegment.p2.y
+      );
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.font = `${labelWeight} ${size}px ${labelFont}`;
+    ctx.translate(labelPos.x, labelPos.y);
+    ctx.rotate(angle);
+    ctx.fillStyle = themeColors.textSecondary;
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+  }
+}
+
+function drawDistanceDragPreview(nodePosMap) {
+  if (!distanceSelectMode || !analysisLayers.distances || !distanceSelectDrag) {
+    return;
+  }
+  const startNode = nodeById.get(distanceSelectDrag.startNodeId);
+  if (!startNode) {
+    return;
+  }
+  const startEntry = nodePosMap.get(startNode.id);
+  if (!startEntry) {
+    return;
+  }
+  let endPoint = distanceSelectDrag.lastPoint;
+  let endNode = null;
+  let endEntry = null;
+  if (distanceSelectDrag.hoverNodeId != null) {
+    endNode = nodeById.get(distanceSelectDrag.hoverNodeId);
+    if (endNode) {
+      endEntry = nodePosMap.get(endNode.id);
+      if (endEntry) {
+        endPoint = endEntry.pos;
       }
-      const start = startEntry.pos;
-      const end = endEntry.pos;
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const dist = Math.hypot(dx, dy);
-      if (!dist) {
-        continue;
-      }
-      const ux = dx / dist;
-      const uy = dy / dist;
-      const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-      const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-      drawCanvasEdgeSegment({
-        start,
-        end,
-        startRadius,
-        endRadius,
-        color: themeColors.edge,
-        label,
-        labelFont,
-        labelWeight,
-        labelSize,
-        dash: [6, 6],
-      });
     }
   }
+  if (!endPoint) {
+    return;
+  }
+  const start = startEntry.pos;
+  const end = endPoint;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const dist = Math.hypot(dx, dy);
+  if (!dist) {
+    return;
+  }
+  const ux = dx / dist;
+  const uy = dy / dist;
+  const startRadius = getNodeEdgeRadius(startNode, ux, uy, startEntry.radius);
+  const endRadius =
+    endNode && endEntry ? getNodeEdgeRadius(endNode, -ux, -uy, endEntry.radius) : 0;
+  const lineStart = { x: start.x + ux * startRadius, y: start.y + uy * startRadius };
+  const lineEnd = { x: end.x - ux * endRadius, y: end.y - uy * endRadius };
+  ctx.save();
+  ctx.strokeStyle = DISTANCE_RING_COLOR;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([5, 6]);
+  ctx.beginPath();
+  ctx.moveTo(lineStart.x, lineStart.y);
+  ctx.lineTo(lineEnd.x, lineEnd.y);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function buildCommaConnections(nodePosMap) {
@@ -7743,6 +8511,175 @@ function drawCustomConnections(nodePosMap) {
   });
 }
 
+function addCustomConnectionSegments(nodePosMap, segments) {
+  if (!customNodes.length) {
+    return;
+  }
+  const edgeOutset = 1;
+  customNodes.forEach((node) => {
+    if (!node.active) {
+      return;
+    }
+    const source = nodeById.get(node.sourceNodeId);
+    if (!source) {
+      return;
+    }
+    const startEntry = nodePosMap.get(source.id);
+    const endEntry = nodePosMap.get(node.id);
+    if (!startEntry || !endEntry) {
+      return;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const startRadius = Math.max(
+      0,
+      getNodeEdgeRadius(source, ux, uy, startEntry.radius) + edgeOutset
+    );
+    const customEdgeInset = Math.max(0, Math.round(endEntry.radius * 0.03));
+    const endRadius = Math.max(
+      0,
+      getNodeEdgeRadius(node, ux, uy, endEntry.radius) + edgeOutset - customEdgeInset
+    );
+    segments.push({
+      x1: start.x + ux * startRadius,
+      y1: start.y + uy * startRadius,
+      x2: end.x - ux * endRadius,
+      y2: end.y - uy * endRadius,
+    });
+  });
+}
+
+function addTriangleDiagonalSegments(nodePosMap, segments) {
+  if (!triangleDiagonals.size) {
+    return;
+  }
+  const gridMap = new Map();
+  nodes.forEach((node) => {
+    if (node.active && !node.isCustom) {
+      gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
+    }
+  });
+  triangleDiagonals.forEach((entry) => {
+    const { a, b } = getTriangleDiagonalNodes(entry, gridMap);
+    if (!a || !b) {
+      return;
+    }
+    const startEntry = nodePosMap.get(a.id);
+    const endEntry = nodePosMap.get(b.id);
+    if (!startEntry || !endEntry) {
+      return;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+    segments.push({
+      x1: start.x + ux * startRadius,
+      y1: start.y + uy * startRadius,
+      x2: end.x - ux * endRadius,
+      y2: end.y - uy * endRadius,
+    });
+  });
+}
+
+function addDistanceLineSegments(nodePosMap, segments) {
+  if (!analysisLayers.distances || !distanceSelectedEdges.size) {
+    return;
+  }
+  for (const edgeKey of distanceSelectedEdges) {
+    if (!edgeKey) {
+      continue;
+    }
+    const partsKey = edgeKey.split("|");
+    if (partsKey.length !== 2) {
+      continue;
+    }
+    const [aKey, bKey] = partsKey;
+    const a = getNodeByDistanceKey(aKey);
+    const b = getNodeByDistanceKey(bKey);
+    if (!a || !b || !a.active || !b.active) {
+      continue;
+    }
+    const startEntry = nodePosMap.get(a.id);
+    const endEntry = nodePosMap.get(b.id);
+    if (!startEntry || !endEntry) {
+      continue;
+    }
+    const override = getDistanceEdgeOverride(edgeKey);
+    if (override && override.hidden) {
+      continue;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      continue;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const straightStartRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+    const straightEndRadius = getNodeEdgeRadius(b, -ux, -uy, endEntry.radius);
+    let lineStart = {
+      x: start.x + ux * straightStartRadius,
+      y: start.y + uy * straightStartRadius,
+    };
+    let lineEnd = {
+      x: end.x - ux * straightEndRadius,
+      y: end.y - uy * straightEndRadius,
+    };
+    const autoControl = getAutoDistanceControl(lineStart, lineEnd, nodePosMap, a, b);
+    const defaultControl = { x: autoControl.x, y: autoControl.y };
+    let controlOffset = override && override.controlOffset ? override.controlOffset : null;
+    if (!controlOffset && override && override.control) {
+      controlOffset = {
+        x: override.control.x - defaultControl.x,
+        y: override.control.y - defaultControl.y,
+      };
+    }
+    const control = controlOffset
+      ? { x: defaultControl.x + controlOffset.x, y: defaultControl.y + controlOffset.y }
+      : defaultControl;
+    const startVector = { x: control.x - lineStart.x, y: control.y - lineStart.y };
+    const endVector = { x: control.x - lineEnd.x, y: control.y - lineEnd.y };
+    const startLen = Math.hypot(startVector.x, startVector.y);
+    const endLen = Math.hypot(endVector.x, endVector.y);
+    const startUx = startLen > 0 ? startVector.x / startLen : ux;
+    const startUy = startLen > 0 ? startVector.y / startLen : uy;
+    const endUx = endLen > 0 ? endVector.x / endLen : -ux;
+    const endUy = endLen > 0 ? endVector.y / endLen : -uy;
+    const startRadius = getNodeEdgeRadius(a, startUx, startUy, startEntry.radius);
+    const endRadius = getNodeEdgeRadius(b, endUx, endUy, endEntry.radius);
+    lineStart = {
+      x: start.x + startUx * startRadius,
+      y: start.y + startUy * startRadius,
+    };
+    lineEnd = {
+      x: end.x + endUx * endRadius,
+      y: end.y + endUy * endRadius,
+    };
+    segments.push({ x1: lineStart.x, y1: lineStart.y, x2: control.x, y2: control.y });
+    segments.push({ x1: control.x, y1: control.y, x2: lineEnd.x, y2: lineEnd.y });
+  }
+}
+
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -7754,7 +8691,7 @@ function draw() {
     drawLayoutPage({ drawAxes: !layoutAxisEdit });
   }
 
-  const disableScale = layoutMode && layoutUnifyNodeSize;
+  const disableScale = shouldDisableLayoutScale();
   const nodeRenderList = nodes
     .map((node) => ({
       node,
@@ -7772,8 +8709,53 @@ function draw() {
   const nodePosMap = new Map();
   nodeRenderList.forEach(({ node, pos }) => {
     const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
-    nodePosMap.set(node.id, { pos, radius: baseRadius * (pos.scale || 1) });
+    const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
+    nodePosMap.set(node.id, { pos, radius });
   });
+  const detailLabelSegments = [];
+  edges.forEach(([a, b]) => {
+    if (!a.active || !b.active) {
+      return;
+    }
+    const startEntry = nodePosMap.get(a.id);
+    const endEntry = nodePosMap.get(b.id);
+    if (!startEntry || !endEntry) {
+      return;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+    detailLabelSegments.push({
+      x1: start.x + ux * startRadius,
+      y1: start.y + uy * startRadius,
+      x2: end.x - ux * endRadius,
+      y2: end.y - uy * endRadius,
+    });
+  });
+  addCustomConnectionSegments(nodePosMap, detailLabelSegments);
+  addTriangleDiagonalSegments(nodePosMap, detailLabelSegments);
+  addDistanceLineSegments(nodePosMap, detailLabelSegments);
+  const detailLabelCollision = {
+    circles: nodeRenderList
+      .filter(({ node }) => node.isCenter || node.active || node.isCustom)
+      .map(({ node, pos }) => ({
+        id: node.id,
+        x: pos.x,
+        y: pos.y,
+        r: layoutMode ? getLayoutNodeRadius(pos) : getNodeRadius(node) * (pos.scale || 1),
+      })),
+    segments: detailLabelSegments,
+    rects: [],
+  };
   const axisEntry = getActiveAxisEntry();
   const axisModeActive = Boolean(axisEntry);
   const shouldDrawAxisLine =
@@ -7788,11 +8770,12 @@ function draw() {
   }
 
   const { guideNodes } = getGuideRevealInfo(nodePosMap, axisEntry);
-  if (analysisMode === "distances") {
-    drawDistanceConnections(nodePosMap);
-  } else if (analysisMode === "commas") {
-    drawCommaConnections(nodePosMap);
-  } else if (is3DMode) {
+  if (distanceSelectMode) {
+    guideNodes.clear();
+  }
+  const showDistances = analysisLayers.distances;
+  const showMicrotonal = analysisLayers.microtonal;
+  if (is3DMode) {
     draw3DEdges(nodePosMap, axisEntry);
   } else {
     const labelFont = layoutMode ? layoutAxisLegendFont : "Noto Serif";
@@ -7812,10 +8795,14 @@ function draw() {
         : worldToScreen(getNodeDisplayCoordinate(b), disableScale);
       const radiusA = startEntry
         ? startEntry.radius
-        : (layoutMode ? layoutNodeSize : getNodeRadius(a)) * (start.scale || 1);
+        : layoutMode
+          ? getLayoutNodeRadius(start)
+          : getNodeRadius(a) * (start.scale || 1);
       const radiusB = endEntry
         ? endEntry.radius
-        : (layoutMode ? layoutNodeSize : getNodeRadius(b)) * (end.scale || 1);
+        : layoutMode
+          ? getLayoutNodeRadius(end)
+          : getNodeRadius(b) * (end.scale || 1);
       const dx = end.x - start.x;
       const dy = end.y - start.y;
       const dist = Math.hypot(dx, dy);
@@ -7842,13 +8829,21 @@ function draw() {
     });
   }
 
-  if (analysisMode === "none") {
-    drawCustomConnections(nodePosMap);
-    drawGuideEdges(nodePosMap, guideNodes);
-    drawTriangleDiagonals(nodePosMap, disableScale);
-    drawTriangleLabels(nodePosMap, disableScale);
-    drawTriangleHover(nodePosMap, disableScale);
+  if (showDistances) {
+    drawDistanceConnections(nodePosMap);
   }
+  if (distanceSelectMode && analysisLayers.distances) {
+    drawDistanceDragPreview(nodePosMap);
+  }
+  if (showMicrotonal) {
+    drawCommaConnections(nodePosMap);
+  }
+
+  drawCustomConnections(nodePosMap);
+  drawGuideEdges(nodePosMap, guideNodes);
+  drawTriangleDiagonals(nodePosMap, disableScale);
+  drawTriangleLabels(nodePosMap, disableScale);
+  drawTriangleHover(nodePosMap, disableScale);
 
   const nowMs = performance.now();
   const nowSec = audioCtx ? audioCtx.currentTime : nowMs / 1000;
@@ -7874,8 +8869,8 @@ function draw() {
   nodeRenderList.forEach(({ node, pos }) => {
     const isHovered = node.id === hoverNodeId;
     const isGuide = guideNodes.has(node.id);
-    const canShowInactive = isInactiveNodeAvailable(node);
-    const canInteractInactive = !is3DMode || isAddMode;
+  const canShowInactive = isInactiveNodeAvailable(node);
+  const canInteractInactive = !is3DMode || isAddMode || distanceSelectMode;
     const amplitude = nodeAmplitudes.get(node.id) || 0;
     const brightness = Math.min(1, amplitude);
     const isVisible =
@@ -7895,10 +8890,7 @@ function draw() {
     if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
       alpha *= AXIS_DIM_FACTOR;
     }
-    if (analysisMode === "distances" && !distanceSelectedNodeIds.has(node.id)) {
-      alpha *= 0.18;
-    }
-    if (analysisMode === "commas" && !commaNodeRings.has(node.id)) {
+    if (showMicrotonal && !commaNodeRings.has(node.id)) {
       alpha *= 0.18;
     }
 
@@ -7907,7 +8899,7 @@ function draw() {
     }
 
     const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
-    const radius = baseRadius * (pos.scale || 1);
+    const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
     const layoutShape = layoutMode
       ? getLayoutNodeShape(node)
       : node.isCustom
@@ -7996,17 +8988,21 @@ function draw() {
       ctx.restore();
     }
 
-    if (analysisMode === "distances" && distanceSelectedNodeIds.has(node.id)) {
-      ctx.save();
-      ctx.globalAlpha = Math.max(0.4, alpha);
-      ctx.strokeStyle = DISTANCE_RING_COLOR;
-      ctx.lineWidth = Math.max(2, radius * 0.14);
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, radius + 6, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
+    if (distanceSelectMode && distanceSelectDrag) {
+      const isStart = node.id === distanceSelectDrag.startNodeId;
+      const isHover = node.id === distanceSelectDrag.hoverNodeId;
+      if (isStart || isHover) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0.4, alpha);
+        ctx.strokeStyle = DISTANCE_RING_COLOR;
+        ctx.lineWidth = Math.max(2, radius * 0.14);
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, radius + 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
     }
-    if (analysisMode === "commas") {
+    if (showMicrotonal) {
       const rings = commaNodeRings.get(node.id);
       if (rings && rings.length) {
         rings.forEach((ring, index) => {
@@ -8126,11 +9122,39 @@ function draw() {
         { wrap: enharmonicsEnabled },
         displayInfo
       );
-      const rawLabelPos = layoutMode
-        ? getLayoutNoteLabelPosition(node, pos, radius)
-        : { x: pos.x + radius + 6, y: pos.y + radius - 10 };
-      const labelOffsetX = rawLabelPos.x - pos.x;
-      const ratioX = layoutMode ? pos.x + labelOffsetX * 0.7 : rawLabelPos.x;
+      const defaultOffset = getDefaultNoteDetailOffset(radius, 1);
+      const lineWidth = ctx.measureText(ratioText).width;
+      const centsWidth = centsLabel ? ctx.measureText(centsLabel).width : 0;
+      const hzWidth =
+        showHz && Number.isFinite(node.freq)
+          ? ctx.measureText(`${node.freq.toFixed(2)} Hz`).width
+          : 0;
+      const labelWidth = Math.max(lineWidth, centsWidth, hzWidth);
+      const lineCount =
+        1 + (centsLabel ? 1 : 0) + (showHz && Number.isFinite(node.freq) ? 1 : 0);
+      const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
+      const rawLabelPos =
+        layoutMode && layoutLabelOffsets.has(node.id)
+          ? getLayoutNoteLabelPosition(node, pos, radius)
+          : getDetailLabelPosition({
+              center: pos,
+              baseOffset: defaultOffset,
+              width: labelWidth,
+              height: labelHeight,
+              circles: detailLabelCollision.circles,
+              placedRects: detailLabelCollision.rects,
+              segments: detailLabelCollision.segments,
+              ignoreId: node.id,
+            });
+      if (layoutMode && layoutLabelOffsets.has(node.id)) {
+        detailLabelCollision.rects.push({
+          left: rawLabelPos.x,
+          top: rawLabelPos.y,
+          right: rawLabelPos.x + labelWidth,
+          bottom: rawLabelPos.y + labelHeight,
+        });
+      }
+      const ratioX = rawLabelPos.x;
       const ratioY = rawLabelPos.y;
       let lineOffset = 0;
       ctx.fillText(ratioText, ratioX, ratioY + lineOffset);
@@ -8157,13 +9181,6 @@ function draw() {
       }
     } else {
       ctx.fillStyle = themeColors.textSecondary;
-      const rawLabelPos = layoutMode
-        ? getLayoutNoteLabelPosition(node, pos, radius)
-        : { x: pos.x + radius + 6, y: pos.y + radius - 10 };
-      const labelOffsetX = rawLabelPos.x - pos.x;
-      const labelPos = layoutMode
-        ? { x: pos.x + labelOffsetX * 0.7, y: rawLabelPos.y }
-        : { x: rawLabelPos.x, y: rawLabelPos.y };
       const centsLabel = getCachedCentsReadout(
         node,
         {
@@ -8174,11 +9191,52 @@ function draw() {
         displayInfo
       );
       const hasParen = centsLabel && centsLabel.includes("(");
-      const restGapScale =
-        hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
       const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
       const annotation = getCachedHejiAnnotation(node, baseLabel || node.note_name);
       const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
+      const defaultOffset = getDefaultNoteDetailOffset(radius, 1);
+      const suffixText = annotation.suffixParts
+        .map((part) => (part && part.text ? part.text : ""))
+        .join("");
+      const restText = hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "";
+      const line1 = `${annotation.baseText || ""}${suffixText}${restText}`;
+      const lineWidth = line1 ? ctx.measureText(line1).width : 0;
+      const centsWidth = hejiEnabled && centsLabel ? ctx.measureText(centsLabel).width : 0;
+      const octaveWidth = octaveLabel ? ctx.measureText(octaveLabel).width : 0;
+      const hzWidth =
+        showHz && Number.isFinite(node.freq)
+          ? ctx.measureText(`${node.freq.toFixed(2)} Hz`).width
+          : 0;
+      const labelWidth = Math.max(lineWidth, centsWidth, octaveWidth, hzWidth);
+      const lineCount =
+        1 +
+        (hejiEnabled && centsLabel ? 1 : 0) +
+        (octaveLabel ? 1 : 0) +
+        (showHz && Number.isFinite(node.freq) ? 1 : 0);
+      const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
+      const rawLabelPos =
+        layoutMode && layoutLabelOffsets.has(node.id)
+          ? getLayoutNoteLabelPosition(node, pos, radius)
+          : getDetailLabelPosition({
+              center: pos,
+              baseOffset: defaultOffset,
+              width: labelWidth,
+              height: labelHeight,
+              circles: detailLabelCollision.circles,
+              placedRects: detailLabelCollision.rects,
+              segments: detailLabelCollision.segments,
+              ignoreId: node.id,
+            });
+      if (layoutMode && layoutLabelOffsets.has(node.id)) {
+        detailLabelCollision.rects.push({
+          left: rawLabelPos.x,
+          top: rawLabelPos.y,
+          right: rawLabelPos.x + labelWidth,
+          bottom: rawLabelPos.y + labelHeight,
+        });
+      }
+      const labelPos = { x: rawLabelPos.x, y: rawLabelPos.y };
+      const restGapScale = hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
       let lineOffset = 0;
       drawHejiInline({
         x: labelPos.x,
@@ -8739,6 +9797,35 @@ function onPointerDown(event) {
     draw();
   }
   const hit = hitTestScreen(screenPoint);
+  if (layoutMode && !layoutLockPosition) {
+    const use3dNav = Boolean(layoutPrevState && layoutPrevState.is3DMode);
+    if (use3dNav) {
+      if (event.shiftKey) {
+        view.dragging = true;
+        view.dragStart = { x: event.offsetX, y: event.offsetY };
+        view.dragOffsetStart = { x: view.offsetX, y: view.offsetY };
+      } else {
+        view.rotating = true;
+        view.rotateStart = { x: event.offsetX, y: event.offsetY };
+        view.rotateAnglesStart = { x: view.rotX, y: view.rotY };
+      }
+      view.reducedEffects = false;
+      view.interactionStart = {
+        x: event.offsetX,
+        y: event.offsetY,
+        time: performance.now(),
+      };
+      view.lastPointer = { x: event.offsetX, y: event.offsetY };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+    view.dragging = true;
+    view.dragStart = { x: event.offsetX, y: event.offsetY };
+    view.dragOffsetStart = { x: view.offsetX, y: view.offsetY };
+    view.lastPointer = { x: event.offsetX, y: event.offsetY };
+    canvas.setPointerCapture(event.pointerId);
+    return;
+  }
   if (DEBUG_R_CLICK) {
     console.log("R-click debug: pointerdown", {
       rHeld,
@@ -8752,8 +9839,62 @@ function onPointerDown(event) {
       isAddMode,
     });
   }
-  if (analysisMode === "distances" && hit) {
-    return;
+  if (analysisLayers.distances && (distanceSelectMode || layoutMode)) {
+    if (distanceSelectMode && event.altKey) {
+      const labelHit = hitTestDistanceLabel(screenPoint);
+      const lineHit = hitTestDistanceLine(screenPoint);
+      const key = (labelHit && labelHit.key) || (lineHit && lineHit.key);
+      if (key) {
+        distanceSelectedEdges.delete(key);
+        distanceEdgeOverrides.delete(key);
+        scheduleDraw();
+        schedulePresetUrlUpdate();
+      }
+      return;
+    }
+    const labelHit = hitTestDistanceLabel(screenPoint);
+    if (labelHit) {
+      distanceLabelDrag = {
+        key: labelHit.key,
+        lineStart: labelHit.lineStart,
+        lineEnd: labelHit.lineEnd,
+        control: labelHit.control || labelHit.defaultControl,
+      };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+    const lineHit = hitTestDistanceLine(screenPoint);
+    if (lineHit) {
+      const startControl = lineHit.control || lineHit.defaultControl;
+      distanceCurveDrag = {
+        key: lineHit.key,
+        startControlOffset: {
+          x: startControl.x - lineHit.defaultControl.x,
+          y: startControl.y - lineHit.defaultControl.y,
+        },
+        defaultControl: { ...lineHit.defaultControl },
+        startPoint: { x: event.offsetX, y: event.offsetY },
+      };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (layoutMode) {
+      // allow normal layout dragging when no distance line/label is hit
+    }
+    if (hit && hit.active) {
+      distanceSelectDrag = {
+        startNodeId: hit.id,
+        startKey: getDistanceNodeKey(hit),
+        startPoint: { x: event.offsetX, y: event.offsetY },
+        hoverNodeId: null,
+        lastPoint: { x: event.offsetX, y: event.offsetY },
+      };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (hit) {
+      return;
+    }
   }
   const now = performance.now();
   if (isCustomPianoMapModeActive()) {
@@ -8875,7 +10016,7 @@ function onPointerDown(event) {
     const triangle = findTriangleHit(screenPoint);
     if (triangle) {
       const keys = triangleCellKeys(triangle);
-      const disableScale = layoutMode && layoutUnifyNodeSize;
+      const disableScale = shouldDisableLayoutScale();
       const gridMap = new Map();
       nodes.forEach((node) => {
         if (node.active && !node.isCustom) {
@@ -9137,6 +10278,7 @@ function onPointerDown(event) {
         offsetX: coord.x - worldPoint.x,
         offsetY: coord.y - worldPoint.y,
         startCoord: { x: coord.x, y: coord.y },
+        startScreen: { x: event.offsetX, y: event.offsetY },
         lockAxis: null,
         lockOriginX: event.offsetX,
         lockOriginY: event.offsetY,
@@ -9211,8 +10353,43 @@ function onPointerDown(event) {
 }
 
 function onCanvasDoubleClick(event) {
-  if (analysisMode === "distances") {
-    return;
+  if (distanceSelectMode) {
+    const screenPoint = { x: event.offsetX, y: event.offsetY };
+    const labelHit = hitTestDistanceLabel(screenPoint);
+    if (labelHit) {
+      const override = getDistanceEdgeOverride(labelHit.key) || {};
+      distanceEdgeOverrides.set(labelHit.key, {
+        ...override,
+        showName: override.showName === false,
+      });
+      draw();
+      return;
+    }
+    if (!hitTestScreen(screenPoint)) {
+      setDistanceSelectMode(false);
+      return;
+    }
+  }
+  if (!distanceSelectMode && analysisLayers.distances && !layoutMode) {
+    const screenPoint = { x: event.offsetX, y: event.offsetY };
+    const lineHit = hitTestDistanceLine(screenPoint);
+    if (lineHit) {
+      setDistanceSelectMode(true);
+      return;
+    }
+  }
+  if (layoutMode && analysisLayers.distances) {
+    const screenPoint = { x: event.offsetX, y: event.offsetY };
+    const labelHit = hitTestDistanceLabel(screenPoint);
+    if (labelHit) {
+      const override = getDistanceEdgeOverride(labelHit.key) || {};
+      distanceEdgeOverrides.set(labelHit.key, {
+        ...override,
+        showName: override.showName === false,
+      });
+      draw();
+      return;
+    }
   }
   if (isCustomPianoMapModeActive()) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
@@ -9290,6 +10467,45 @@ function onCanvasDoubleClick(event) {
 
 function onPointerMove(event) {
   view.lastPointer = { x: event.offsetX, y: event.offsetY };
+  if (distanceSelectDrag) {
+    const screenPoint = { x: event.offsetX, y: event.offsetY };
+    const hit = hitTestScreen(screenPoint);
+    const nextHoverId = hit && hit.active ? hit.id : null;
+    if (nextHoverId !== distanceSelectDrag.hoverNodeId) {
+      distanceSelectDrag.hoverNodeId = nextHoverId;
+      scheduleDraw();
+    }
+    distanceSelectDrag.lastPoint = { x: event.offsetX, y: event.offsetY };
+    return;
+  }
+  if (distanceLabelDrag) {
+    const { lineStart, lineEnd, key, control } = distanceLabelDrag;
+    const t = getNearestQuadraticT(lineStart, control, lineEnd, {
+      x: event.offsetX,
+      y: event.offsetY,
+    });
+    const override = getDistanceEdgeOverride(key) || {};
+    distanceEdgeOverrides.set(key, {
+      ...override,
+      labelT: t,
+    });
+    scheduleDraw();
+    return;
+  }
+  if (distanceCurveDrag) {
+    const { key, startControlOffset, startPoint, defaultControl } = distanceCurveDrag;
+    const controlOffset = {
+      x: startControlOffset.x + (event.offsetX - startPoint.x),
+      y: startControlOffset.y + (event.offsetY - startPoint.y),
+    };
+    const override = getDistanceEdgeOverride(key) || {};
+    distanceEdgeOverrides.set(key, {
+      ...override,
+      controlOffset,
+    });
+    scheduleDraw();
+    return;
+  }
   if (customNodeDrag) {
     const node = nodeById.get(customNodeDrag.nodeId);
     if (node) {
@@ -9412,7 +10628,7 @@ function onPointerMove(event) {
   if (layoutMode && layoutKeyMappingDrag) {
     const node = nodeById.get(layoutKeyMappingDrag.nodeId);
     if (node) {
-      const disableScale = layoutUnifyNodeSize;
+      const disableScale = shouldDisableLayoutScale();
       const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
       const lockAxis = updateDragLock(layoutKeyMappingDrag, event);
       let labelX = event.offsetX + layoutKeyMappingDrag.offsetX;
@@ -9438,7 +10654,7 @@ function onPointerMove(event) {
   if (layoutMode && layoutLabelDrag) {
     const node = nodeById.get(layoutLabelDrag.nodeId);
     if (node) {
-      const disableScale = layoutUnifyNodeSize;
+      const disableScale = shouldDisableLayoutScale();
       const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
       const lockAxis = updateDragLock(layoutLabelDrag, event);
       let labelX = event.offsetX + layoutLabelDrag.offsetX;
@@ -9464,12 +10680,20 @@ function onPointerMove(event) {
   if (layoutMode && layoutDrag) {
     const node = nodeById.get(layoutDrag.nodeId);
     if (node) {
-      const worldPoint = screenToWorld({ x: event.offsetX, y: event.offsetY });
       const coord = getNodeDisplayCoordinate(node);
       const lockAxis = updateDragLock(layoutDrag, event);
+      const delta = {
+        x: event.offsetX - layoutDrag.startScreen.x,
+        y: event.offsetY - layoutDrag.startScreen.y,
+      };
+      const deltaWorld = screenDeltaToWorldDelta(
+        delta,
+        layoutDrag.startCoord,
+        shouldDisableLayoutScale()
+      );
       const nextCoord = {
-        x: worldPoint.x + layoutDrag.offsetX,
-        y: worldPoint.y + layoutDrag.offsetY,
+        x: layoutDrag.startCoord.x + deltaWorld.x,
+        y: layoutDrag.startCoord.y + deltaWorld.y,
         z: Number.isFinite(coord.z) ? coord.z : 0,
       };
       if (lockAxis === "x") {
@@ -9479,6 +10703,7 @@ function onPointerMove(event) {
       }
       if (!event.shiftKey) {
         layoutDrag.startCoord = { x: nextCoord.x, y: nextCoord.y };
+        layoutDrag.startScreen = { x: event.offsetX, y: event.offsetY };
       }
       layoutPositions.set(node.id, nextCoord);
       if (!node.isCustom) {
@@ -9562,6 +10787,21 @@ function onPointerUp(event) {
     suppressClickAfterRespell = false;
     return;
   }
+  if (distanceSelectDrag) {
+    const screenPoint = { x: event.offsetX, y: event.offsetY };
+    const hit = hitTestScreen(screenPoint);
+    if (hit && hit.active && hit.id !== distanceSelectDrag.startNodeId) {
+      const startNode = nodeById.get(distanceSelectDrag.startNodeId);
+      if (startNode) {
+        const added = addDistanceEdgeBetweenNodes(startNode, hit);
+        if (added) {
+          draw();
+        }
+      }
+    }
+    distanceSelectDrag = null;
+    return;
+  }
   if (customPianoMapClickActive) {
     customPianoMapClickActive = false;
     return;
@@ -9611,6 +10851,14 @@ function onPointerUp(event) {
   }
   if (layoutDrag) {
     layoutDrag = null;
+    return;
+  }
+  if (distanceLabelDrag) {
+    distanceLabelDrag = null;
+    return;
+  }
+  if (distanceCurveDrag) {
+    distanceCurveDrag = null;
     return;
   }
   if (layoutMode) {
@@ -9680,14 +10928,10 @@ function onPointerUp(event) {
   if (moved < 4) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const hit = hitTestScreen(screenPoint);
-    if (analysisMode === "distances") {
-      if (hit && hit.active) {
-        toggleDistanceSelection(hit.id);
-        draw();
-      }
+    if (distanceSelectMode && analysisLayers.distances) {
       return;
     }
-    if (analysisMode === "commas") {
+    if (analysisLayers.microtonal) {
       const edgeHit = hitTestCommaEdge(screenPoint);
       if (edgeHit) {
         toggleCommaEdgeVoices(edgeHit.a, edgeHit.b);
@@ -9987,6 +11231,8 @@ function onPointerLeave() {
   layoutTitleDrag = null;
   layoutCreatorDrag = null;
   layoutCustomLabelDrag = null;
+  distanceLabelDrag = null;
+  distanceCurveDrag = null;
   triangleHover = null;
   view.rotating = false;
   view.lastPointer = null;
@@ -10001,7 +11247,7 @@ function hitTestCommaEdge(screenPoint) {
   if (!commaEdges.length) {
     return null;
   }
-  const disableScale = layoutMode && layoutUnifyNodeSize;
+  const disableScale = shouldDisableLayoutScale();
   const nodePosMap = new Map();
   nodes.forEach((node) => {
     if (!node.active) {
@@ -10009,7 +11255,8 @@ function hitTestCommaEdge(screenPoint) {
     }
     const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
     const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
-    nodePosMap.set(node.id, { pos, radius: baseRadius * (pos.scale || 1) });
+    const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
+    nodePosMap.set(node.id, { pos, radius });
   });
   let best = null;
   let bestDistance = Number.POSITIVE_INFINITY;
@@ -10113,12 +11360,15 @@ function onWheel(event) {
 }
 
 function isInactiveNodeAvailable(node) {
+  if (distanceSelectMode) {
+    return true;
+  }
   if (!is3DMode) {
     const axisEntry = getActiveAxisEntry();
     if (axisEntry && (axisEntry.axis === "x" || axisEntry.axis === "y")) {
       return isNodeOnAxisEntry(node, axisEntry) && (node.gridZ || 0) === gridCenterZ;
     }
-    return (shiftHeld || capsLockOn) && (node.gridZ || 0) === gridCenterZ;
+    return !distanceSelectMode && (shiftHeld || capsLockOn) && (node.gridZ || 0) === gridCenterZ;
   }
   const axisEntry = getActiveAxisEntry();
   if (axisEntry) {
@@ -10151,13 +11401,16 @@ function hitTestScreen(screenPoint) {
     }
     const projected = worldToScreen(
       getNodeDisplayCoordinate(node),
-      layoutMode && layoutUnifyNodeSize
+      shouldDisableLayoutScale()
     );
     const dx = projected.x - screenPoint.x;
     const dy = projected.y - screenPoint.y;
     const distance = Math.hypot(dx, dy);
     const nodeRadius = baseRadius != null ? baseRadius : getNodeRadius(node);
-    const adjustedRadius = nodeRadius * (projected.scale || 1);
+    const adjustedRadius =
+      baseRadius != null
+        ? getLayoutNodeRadius(projected)
+        : nodeRadius * (projected.scale || 1);
     let hitRadius = adjustedRadius;
     if (distance > 0) {
       const ux = dx / distance;
@@ -10182,12 +11435,13 @@ function hitTestScreen(screenPoint) {
 }
 
 function hitTestEdgeLabel(screenPoint) {
-  const disableScale = layoutMode && layoutUnifyNodeSize;
+  const disableScale = shouldDisableLayoutScale();
   const nodePosMap = new Map();
   nodes.forEach((node) => {
     const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
     const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
-    nodePosMap.set(node.id, { pos, radius: baseRadius * (pos.scale || 1) });
+    const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
+    nodePosMap.set(node.id, { pos, radius });
   });
   let best = null;
   let bestDistance = Number.POSITIVE_INFINITY;
@@ -10242,14 +11496,14 @@ function hitTestNoteLabel(screenPoint) {
   if (!layoutMode) {
     return null;
   }
-  const disableScale = layoutUnifyNodeSize;
+  const disableScale = shouldDisableLayoutScale();
   let hit = null;
   nodes.forEach((node) => {
     if (!(node.isCenter || node.active || node.isCustom)) {
       return;
     }
     const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
-    const radius = layoutNodeSize * (pos.scale || 1);
+    const radius = getLayoutNodeRadius(pos);
     const hitbox = getLayoutNoteLabelHitbox(node, pos, radius);
     const left = hitbox.left;
     const right = hitbox.left + hitbox.width;
@@ -10276,7 +11530,7 @@ function hitTestLayoutKeyMappingLabel(screenPoint) {
     return null;
   }
   const customPianoLabels = getCustomPianoLabelMap();
-  const disableScale = layoutUnifyNodeSize;
+  const disableScale = shouldDisableLayoutScale();
   let hit = null;
   nodes.forEach((node) => {
     if (!(node.isCenter || node.active || node.isCustom)) {
@@ -10293,7 +11547,7 @@ function hitTestLayoutKeyMappingLabel(screenPoint) {
       return;
     }
     const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
-    const radius = layoutNodeSize * (pos.scale || 1);
+    const radius = getLayoutNodeRadius(pos);
     const hitbox = getLayoutKeyMappingLabelHitbox(labelText, node, pos, radius);
     const left = hitbox.left;
     const right = hitbox.left + hitbox.width;
@@ -10395,6 +11649,65 @@ function hitTestLayoutCustomLabel(screenPoint) {
   }
   ctx.restore();
   return null;
+}
+
+function hitTestDistanceLabel(screenPoint) {
+  if (!distanceEdges.length) {
+    return null;
+  }
+  for (let i = distanceEdges.length - 1; i >= 0; i -= 1) {
+    const edge = distanceEdges[i];
+    const { label, labelFont, labelWeight, labelSize, labelPos } = edge;
+    const centerX = labelPos ? labelPos.x : 0;
+    const centerY = labelPos ? labelPos.y : 0;
+    ctx.save();
+    ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
+    const width = ctx.measureText(label).width;
+    ctx.restore();
+    const halfWidth = width / 2 + 6;
+    const halfHeight = labelSize / 2 + 4;
+    if (
+      screenPoint.x >= centerX - halfWidth &&
+      screenPoint.x <= centerX + halfWidth &&
+      screenPoint.y >= centerY - halfHeight &&
+      screenPoint.y <= centerY + halfHeight
+    ) {
+      return edge;
+    }
+  }
+  return null;
+}
+
+function hitTestDistanceLine(screenPoint) {
+  if (!distanceEdges.length) {
+    return null;
+  }
+  const hitThreshold = 6;
+  let best = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  distanceEdges.forEach((edge) => {
+    const samples = edge.curveInfo && edge.curveInfo.samples ? edge.curveInfo.samples : null;
+    if (samples && samples.length > 1) {
+      for (let i = 1; i < samples.length; i += 1) {
+        const distance = distanceToSegment(
+          screenPoint,
+          samples[i - 1].point,
+          samples[i].point
+        );
+        if (distance <= hitThreshold && distance < bestDistance) {
+          best = edge;
+          bestDistance = distance;
+        }
+      }
+      return;
+    }
+    const distance = distanceToSegment(screenPoint, edge.lineStart, edge.lineEnd);
+    if (distance <= hitThreshold && distance < bestDistance) {
+      best = edge;
+      bestDistance = distance;
+    }
+  });
+  return best;
 }
 
 function hitTestAxisLegend(screenPoint) {
@@ -10793,10 +12106,44 @@ function getDistanceRatioLabel(a, b) {
   if (!Number.isFinite(aRatio) || !Number.isFinite(bRatio) || aRatio === 0 || bRatio === 0) {
     return null;
   }
-  if (aRatio >= bRatio) {
-    return formatIntervalRatio(aNum * bDen, aDen * bNum);
+  let numerator = aNum * bDen;
+  let denominator = aDen * bNum;
+  if (aRatio < bRatio) {
+    numerator = bNum * aDen;
+    denominator = bDen * aNum;
   }
-  return formatIntervalRatio(bNum * aDen, bDen * aNum);
+  return {
+    label: formatIntervalRatio(numerator, denominator),
+    numerator,
+    denominator,
+  };
+}
+
+function getDistanceCommaName(numerator, denominator) {
+  const normalized = normalizeCommaRatio(numerator, denominator);
+  if (!normalized) {
+    return "";
+  }
+  const key = `${normalized.numerator}:${normalized.denominator}`;
+  const matches = commaRatioMap.get(key);
+  if (!matches || !matches.length) {
+    return "";
+  }
+  return matches[0].name || "";
+}
+
+function getDistanceEdgeKey(aKey, bKey) {
+  if (!aKey || !bKey) {
+    return "";
+  }
+  return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+}
+
+function getDistanceEdgeOverride(key) {
+  if (!key) {
+    return null;
+  }
+  return distanceEdgeOverrides.get(key) || null;
 }
 
 function reduceFraction(numerator, denominator) {
@@ -11122,12 +12469,13 @@ function updateUiHint() {
   if (!uiHint) {
     return;
   }
+  const helpEnabled = showHelpToggle ? showHelpToggle.checked : showHelpEnabled;
   const nextKey = getUiHintKey();
   if (nextKey !== uiHintKey) {
     uiHintKey = nextKey;
     uiHintDismissed = false;
   }
-  if (!showHelpEnabled || uiHintDismissed || axisModeActive()) {
+  if (!helpEnabled || uiHintDismissed || axisModeActive()) {
     setUiHintVisibility(false);
     return;
   }
@@ -11485,28 +12833,42 @@ function updateBannerMessage() {
   if (!bannerMessage) {
     return;
   }
-  if (analysisMode === "distances") {
-    bannerMessage.textContent = DISTANCE_MODE_BANNER;
+  if (layoutMode && !layoutLockPosition) {
+    bannerMessage.innerHTML =
+      '<button type="button" data-layout-banner="freeze">Freeze</button> this view to edit.';
+    bannerMessage.classList.add("banner-interactive");
     bannerMessage.hidden = false;
     return;
   }
-  if (analysisMode === "commas") {
-    bannerMessage.textContent = COMMA_MODE_BANNER;
+  if (distanceSelectMode && analysisLayers.distances) {
+    bannerMessage.innerHTML =
+      'Drag between nodes to create distance lines, drag line to bend, drag label to move it. Option-click line to delete. Double click label to toggle interval names. ESCAPE or double-click background to exit. <span class="banner-actions">[<button type="button" data-distance-banner="reset">Reset</button>]</span>';
+    bannerMessage.classList.add("banner-interactive");
     bannerMessage.hidden = false;
+    return;
+  }
+  if (analysisLayers.microtonal) {
+    bannerMessage.hidden = true;
+    bannerMessage.textContent = "";
+    bannerMessage.classList.remove("banner-interactive");
     return;
   }
   const activeAxis = getActiveAxisEntry();
   if (!activeAxis) {
     bannerMessage.hidden = true;
     bannerMessage.textContent = "";
+    bannerMessage.classList.remove("banner-interactive");
     return;
   }
   bannerMessage.textContent = formatAxisBannerText(activeAxis);
+  bannerMessage.classList.remove("banner-interactive");
   bannerMessage.hidden = false;
 }
 
 function updateAddModeFromShift() {
-  if (!is3DMode) {
+  if (distanceSelectMode) {
+    isAddMode = false;
+  } else if (!is3DMode) {
     isAddMode = false;
   } else {
     isAddMode = shiftHeld || capsLockOn || axisModeActive();
@@ -11858,10 +13220,7 @@ function applyLayoutUndoState(state) {
   layoutPageSize = state.layoutPageSize;
   layoutOrientation = state.layoutOrientation;
   layoutLockPosition = state.layoutLockPosition;
-  if (layoutLockPositionToggle) {
-    layoutLockPositionToggle.checked = layoutLockPosition;
-  }
-  layoutView = layoutLockPosition ? { ...state.view } : { ...state.layoutView };
+  layoutView = layoutLockPosition ? { ...state.layoutView } : { ...state.view };
   view.zoom = state.view.zoom;
   view.offsetX = state.view.offsetX;
   view.offsetY = state.view.offsetY;
@@ -11985,6 +13344,7 @@ function applyLayoutUndoState(state) {
   updateLayoutNoteTextReadout();
   updateLayoutTriangleLabelReadout();
   updateLayoutTitleMarginReadout();
+  updateLayoutLinkControls();
   invalidateLabelCache({ clearTextWidths: true });
   draw();
   markIsomorphicDirty();
@@ -12062,6 +13422,7 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     layoutTitleMargin = LAYOUT_DEFAULTS.titleMargin;
     layoutKeyMappingMode = LAYOUT_DEFAULTS.keyMappingsMode;
     layoutUnifyNodeSize = LAYOUT_DEFAULTS.unifyNodeSize;
+    layoutFreezeFlatten = LAYOUT_DEFAULTS.freezeFlatten;
     layoutPageSize = LAYOUT_DEFAULTS.pageSize;
     layoutOrientation = LAYOUT_DEFAULTS.orientation;
     layoutLockPosition = LAYOUT_DEFAULTS.lockPosition;
@@ -12103,9 +13464,6 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     }
     if (layoutOrientationSelect) {
       layoutOrientationSelect.value = layoutOrientation;
-    }
-    if (layoutLockPositionToggle) {
-      layoutLockPositionToggle.checked = layoutLockPosition;
     }
     if (layoutNodeSizeInput) {
       layoutNodeSizeInput.value = String(layoutNodeSize);
@@ -12194,6 +13552,9 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     if (layoutUnifySizeToggle) {
       layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
     }
+    if (layoutFreezeFlattenToggle) {
+      layoutFreezeFlattenToggle.checked = layoutFreezeFlatten;
+    }
     updateLayoutNodeSizeReadout();
     updateLayoutRatioTextReadout();
     updateLayoutNoteTextReadout();
@@ -12202,6 +13563,7 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     syncLayoutKeyMappingControls();
     syncLayoutFontVars();
     updateLayoutCustomLabelControls();
+    updateLayoutLinkControls();
   }
   if (resetView) {
     view.zoom = LAYOUT_DEFAULTS.zoom;
@@ -12209,7 +13571,7 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     view.offsetY = 0;
     syncLayoutScaleInput();
   }
-  if (layoutMode && layoutPrevState) {
+  if (resetView && layoutMode && layoutPrevState) {
     view.zoom = layoutPrevState.zoom;
     view.offsetX = layoutPrevState.offsetX;
     view.offsetY = layoutPrevState.offsetY;
@@ -12290,6 +13652,7 @@ function setLayoutMode(enabled, { force = false } = {}) {
     updateLayoutTitleMarginReadout();
     updateLayoutCustomLabelControls();
     updateLayoutSpacingControls();
+    updateLayoutLinkControls();
     draw();
   } else if (layoutPrevState) {
     if (layoutSpacePopover) {
@@ -12319,9 +13682,11 @@ function setLayoutMode(enabled, { force = false } = {}) {
     }
     set3DMode(layoutPrevState.is3DMode);
     layoutPrevState = null;
+    updateLayoutLinkControls();
   } else {
     draw();
   }
+  updateBannerMessage();
   updateUiHint();
 }
 
@@ -12403,10 +13768,8 @@ function applyNavAction(action) {
     view.offsetX = 0;
     view.offsetY = 0;
     view.zoom = 1;
-    if (is3DMode) {
-      view.rotX = 0;
-      view.rotY = 0;
-    }
+    view.rotX = 0;
+    view.rotY = 0;
   } else if (action === "fit-view") {
     if (is3DMode) {
       applyBestView({ cycle: true });
@@ -12899,24 +14262,6 @@ function toggleRatioWheelPanel() {
   syncTopMenuPanelState();
 }
 
-function toggleAnalysisPanel() {
-  if (!analysisToggle || !analysisPanel) {
-    return;
-  }
-  const isOpen = analysisToggle.getAttribute("aria-expanded") === "true";
-  if (!isOpen) {
-    closeTopMenus("analysis");
-  }
-  analysisToggle.setAttribute("aria-expanded", String(!isOpen));
-  analysisPanel.hidden = isOpen;
-  analysisPanel.classList.toggle("panel-open", !isOpen);
-  const parentPanel = analysisToggle.closest(".panel");
-  if (parentPanel) {
-    parentPanel.classList.toggle("panel-open", !isOpen);
-  }
-  syncTopMenuPanelState();
-}
-
 function closeOptionsPanel() {
   if (!optionsToggle || !optionsPanel) {
     return;
@@ -12938,19 +14283,6 @@ function closePresetPanel() {
   presetPanel.hidden = true;
   presetPanel.classList.remove("panel-open");
   const parentPanel = presetToggle.closest(".panel");
-  if (parentPanel) {
-    parentPanel.classList.remove("panel-open");
-  }
-}
-
-function closeAnalysisPanel() {
-  if (!analysisToggle || !analysisPanel) {
-    return;
-  }
-  analysisToggle.setAttribute("aria-expanded", "false");
-  analysisPanel.hidden = true;
-  analysisPanel.classList.remove("panel-open");
-  const parentPanel = analysisToggle.closest(".panel");
   if (parentPanel) {
     parentPanel.classList.remove("panel-open");
   }
@@ -12995,9 +14327,6 @@ function closeTopMenus(except = "") {
   if (except !== "presets") {
     closePresetPanel();
   }
-  if (except !== "analysis") {
-    closeAnalysisPanel();
-  }
   if (except !== "file") {
     closeFilePanel();
   }
@@ -13021,10 +14350,17 @@ function syncTopMenuPanelState() {
   const topMenusOpen =
     (optionsPanel && !optionsPanel.hidden) ||
     (presetPanel && !presetPanel.hidden) ||
-    (analysisPanel && !analysisPanel.hidden) ||
-    (filePanel && !filePanel.hidden);
+    (filePanel && !filePanel.hidden) ||
+    (ratioWheelPanel && !ratioWheelPanel.hidden);
   if (controlActionsPanel) {
     controlActionsPanel.classList.toggle("panel-open", topMenusOpen);
+  }
+  if (uiHint) {
+    if (topMenusOpen) {
+      setUiHintVisibility(false);
+    } else {
+      updateUiHint();
+    }
   }
 }
 
@@ -13038,38 +14374,90 @@ function syncBottomMenuPanelState() {
   synthPanel.classList.toggle("panel-open", anyOpen);
 }
 
-function syncAnalysisModeButtons() {
-  if (!analysisModeButtons.length) {
-    return;
+function syncAnalysisLayerToggles() {
+  if (analysisShowDistancesToggle) {
+    analysisShowDistancesToggle.checked = analysisLayers.distances;
   }
-  analysisModeButtons.forEach((button) => {
-    const mode = button.dataset.analysisMode;
-    const isActive = mode === analysisMode;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", String(isActive));
-  });
+  if (analysisShowMicrotonalToggle) {
+    analysisShowMicrotonalToggle.checked = analysisLayers.microtonal;
+  }
+  if (layoutShowDistancesToggle) {
+    layoutShowDistancesToggle.checked = analysisLayers.distances;
+  }
+  if (layoutShowMicrotonalToggle) {
+    layoutShowMicrotonalToggle.checked = analysisLayers.microtonal;
+  }
 }
 
-function setAnalysisMode(mode) {
-  const nextMode = mode || "none";
-  if (analysisMode === nextMode) {
+function setDistanceSelectMode(enabled) {
+  const nextEnabled = Boolean(enabled);
+  if (distanceSelectMode === nextEnabled) {
     return;
   }
-  analysisMode = nextMode;
-  if (analysisMode !== "distances") {
-    distanceSelectedNodeIds.clear();
+  distanceSelectMode = nextEnabled;
+  if (!distanceSelectMode) {
+    distanceSelectDrag = null;
+    distanceLabelDrag = null;
+    distanceCurveDrag = null;
   }
-  syncAnalysisModeButtons();
   updateBannerMessage();
   draw();
 }
 
-function toggleDistanceSelection(nodeId) {
-  if (distanceSelectedNodeIds.has(nodeId)) {
-    distanceSelectedNodeIds.delete(nodeId);
-  } else {
-    distanceSelectedNodeIds.add(nodeId);
+function getDistanceNodeKey(node) {
+  if (!node) {
+    return "";
   }
+  if (node.isCustom) {
+    return `custom:${node.id}`;
+  }
+  return `grid:${node.exponentX},${node.exponentY},${node.exponentZ || 0}`;
+}
+
+function getNodeByDistanceKey(key) {
+  if (!key) {
+    return null;
+  }
+  if (key.startsWith("custom:")) {
+    const id = Number(key.slice(7));
+    return nodeById.get(id) || null;
+  }
+  if (key.startsWith("grid:")) {
+    const parts = key.slice(5).split(",");
+    if (parts.length < 3) {
+      return null;
+    }
+    const ex = Number(parts[0]);
+    const ey = Number(parts[1]);
+    const ez = Number(parts[2]);
+    const node = nodes.find(
+      (item) =>
+        !item.isCustom &&
+        item.exponentX === ex &&
+        item.exponentY === ey &&
+        (item.exponentZ || 0) === ez
+    );
+    return node || null;
+  }
+  return null;
+}
+
+function addDistanceEdgeBetweenNodes(a, b) {
+  const aKey = getDistanceNodeKey(a);
+  const bKey = getDistanceNodeKey(b);
+  if (!aKey || !bKey || aKey === bKey) {
+    return false;
+  }
+  const edgeKey = getDistanceEdgeKey(aKey, bKey);
+  distanceSelectedEdges.add(edgeKey);
+  return true;
+}
+
+function resetDistanceEdges() {
+  distanceSelectedEdges.clear();
+  distanceSelectedNodeKeys.clear();
+  distanceEdgeOverrides.clear();
+  draw();
 }
 
 async function loadPresets() {
@@ -13151,12 +14539,12 @@ async function loadCommas() {
   commaEntries = [];
   commaRatioMap.clear();
   try {
-    const response = await fetch(new URL("./commas.json", import.meta.url));
+    const response = await fetch(new URL("./interval-names.json", import.meta.url));
     if (!response.ok) {
       throw new Error(`Comma fetch failed: ${response.status}`);
     }
     const data = await response.json();
-    const entries = Array.isArray(data && data.commas) ? data.commas : [];
+    const entries = Array.isArray(data && data.intervals) ? data.intervals : [];
     entries.forEach((entry) => {
       if (!entry) {
         return;
@@ -13196,8 +14584,253 @@ let fileShareTimer = null;
 let ratioWheelHoverIndex = null;
 let ratioWheelHoverNodeId = null;
 
+function lzCompressToEncodedURIComponent(input) {
+  if (input == null) {
+    return "";
+  }
+  return lzCompress(input, 6, (a) =>
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$".charAt(a)
+  );
+}
+
+function lzDecompressFromEncodedURIComponent(input) {
+  if (input == null || input === "") {
+    return "";
+  }
+  return lzDecompress(input, 32, (index) =>
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$".indexOf(input.charAt(index))
+  );
+}
+
+function lzCompress(uncompressed, bitsPerChar, getCharFromInt) {
+  if (uncompressed == null) {
+    return "";
+  }
+  let i;
+  let value;
+  const contextDictionary = new Map();
+  const contextDictionaryToCreate = new Set();
+  let contextC = "";
+  let contextW = "";
+  let contextWC = "";
+  let contextEnlargeIn = 2;
+  let contextDictSize = 3;
+  let contextNumBits = 2;
+  let contextData = [];
+  let contextDataVal = 0;
+  let contextDataPosition = 0;
+
+  const contextAppendBits = (numBits, dataVal) => {
+    for (let j = 0; j < numBits; j += 1) {
+      contextDataVal = (contextDataVal << 1) | (dataVal & 1);
+      if (contextDataPosition === bitsPerChar - 1) {
+        contextDataPosition = 0;
+        contextData.push(getCharFromInt(contextDataVal));
+        contextDataVal = 0;
+      } else {
+        contextDataPosition += 1;
+      }
+      dataVal >>= 1;
+    }
+  };
+
+  for (i = 0; i < uncompressed.length; i += 1) {
+    contextC = uncompressed.charAt(i);
+    if (!contextDictionary.has(contextC)) {
+      contextDictionary.set(contextC, contextDictSize++);
+      contextDictionaryToCreate.add(contextC);
+    }
+
+    contextWC = contextW + contextC;
+    if (contextDictionary.has(contextWC)) {
+      contextW = contextWC;
+    } else {
+      if (contextDictionaryToCreate.has(contextW)) {
+        if (contextW.charCodeAt(0) < 256) {
+          contextAppendBits(contextNumBits, 0);
+          contextAppendBits(8, contextW.charCodeAt(0));
+        } else {
+          contextAppendBits(contextNumBits, 1);
+          contextAppendBits(16, contextW.charCodeAt(0));
+        }
+        contextEnlargeIn -= 1;
+        if (contextEnlargeIn === 0) {
+          contextEnlargeIn = 2 ** contextNumBits;
+          contextNumBits += 1;
+        }
+        contextDictionaryToCreate.delete(contextW);
+      } else {
+        value = contextDictionary.get(contextW);
+        contextAppendBits(contextNumBits, value);
+      }
+      contextEnlargeIn -= 1;
+      if (contextEnlargeIn === 0) {
+        contextEnlargeIn = 2 ** contextNumBits;
+        contextNumBits += 1;
+      }
+      contextDictionary.set(contextWC, contextDictSize++);
+      contextW = String(contextC);
+    }
+  }
+
+  if (contextW !== "") {
+    if (contextDictionaryToCreate.has(contextW)) {
+      if (contextW.charCodeAt(0) < 256) {
+        contextAppendBits(contextNumBits, 0);
+        contextAppendBits(8, contextW.charCodeAt(0));
+      } else {
+        contextAppendBits(contextNumBits, 1);
+        contextAppendBits(16, contextW.charCodeAt(0));
+      }
+      contextEnlargeIn -= 1;
+      if (contextEnlargeIn === 0) {
+        contextEnlargeIn = 2 ** contextNumBits;
+        contextNumBits += 1;
+      }
+      contextDictionaryToCreate.delete(contextW);
+    } else {
+      value = contextDictionary.get(contextW);
+      contextAppendBits(contextNumBits, value);
+    }
+    contextEnlargeIn -= 1;
+    if (contextEnlargeIn === 0) {
+      contextEnlargeIn = 2 ** contextNumBits;
+      contextNumBits += 1;
+    }
+  }
+
+  contextAppendBits(contextNumBits, 2);
+
+  while (true) {
+    contextDataVal <<= 1;
+    if (contextDataPosition === bitsPerChar - 1) {
+      contextData.push(getCharFromInt(contextDataVal));
+      break;
+    } else {
+      contextDataPosition += 1;
+    }
+  }
+  return contextData.join("");
+}
+
+function lzDecompress(compressed, bitsPerChar, getNextValue) {
+  if (compressed == null) {
+    return "";
+  }
+  if (compressed === "") {
+    return null;
+  }
+  const dictionary = [];
+  let enlargeIn = 4;
+  let dictSize = 4;
+  let numBits = 3;
+  let entry = "";
+  let result = [];
+  let i;
+  let w;
+  let bits;
+  let resb;
+  let maxpower;
+  let power;
+  let c;
+
+  const data = {
+    value: getNextValue(0),
+    position: bitsPerChar,
+    index: 1,
+  };
+
+  const dataReadBits = (nBits) => {
+    let bitsVal = 0;
+    let maxPower = 2 ** nBits;
+    let powerVal = 1;
+    while (powerVal !== maxPower) {
+      resb = data.value & data.position;
+      data.position >>= 1;
+      if (data.position === 0) {
+        data.position = bitsPerChar;
+        data.value = getNextValue(data.index++);
+      }
+      bitsVal |= (resb > 0 ? 1 : 0) * powerVal;
+      powerVal <<= 1;
+    }
+    return bitsVal;
+  };
+
+  for (i = 0; i < 3; i += 1) {
+    dictionary[i] = i;
+  }
+
+  bits = dataReadBits(2);
+  switch (bits) {
+    case 0:
+      c = String.fromCharCode(dataReadBits(8));
+      break;
+    case 1:
+      c = String.fromCharCode(dataReadBits(16));
+      break;
+    default:
+      return "";
+  }
+  dictionary[3] = c;
+  w = c;
+  result.push(c);
+
+  while (true) {
+    if (data.index > compressed.length) {
+      return "";
+    }
+    bits = dataReadBits(numBits);
+    switch (bits) {
+      case 0:
+        c = String.fromCharCode(dataReadBits(8));
+        dictionary[dictSize++] = c;
+        bits = dictSize - 1;
+        enlargeIn -= 1;
+        break;
+      case 1:
+        c = String.fromCharCode(dataReadBits(16));
+        dictionary[dictSize++] = c;
+        bits = dictSize - 1;
+        enlargeIn -= 1;
+        break;
+      case 2:
+        return result.join("");
+      default:
+        break;
+    }
+
+    if (enlargeIn === 0) {
+      enlargeIn = 2 ** numBits;
+      numBits += 1;
+    }
+
+    if (dictionary[bits]) {
+      entry = dictionary[bits];
+    } else if (bits === dictSize) {
+      entry = w + w.charAt(0);
+    } else {
+      return null;
+    }
+    result.push(entry);
+
+    dictionary[dictSize++] = w + entry.charAt(0);
+    enlargeIn -= 1;
+    w = entry;
+
+    if (enlargeIn === 0) {
+      enlargeIn = 2 ** numBits;
+      numBits += 1;
+    }
+  }
+}
+
 function encodePresetState(state) {
   const json = JSON.stringify(state);
+  const compressed = lzCompressToEncodedURIComponent(json);
+  if (compressed) {
+    return `lz:${compressed.replace(/\+/g, ".")}`;
+  }
   const bytes = new TextEncoder().encode(json);
   let binary = "";
   bytes.forEach((byte) => {
@@ -13207,6 +14840,17 @@ function encodePresetState(state) {
 }
 
 function decodePresetState(encoded) {
+  if (typeof encoded !== "string") {
+    return null;
+  }
+  if (encoded.startsWith("lz:")) {
+    const payload = encoded.slice(3).replace(/ /g, "+").replace(/\./g, "+");
+    const json = lzDecompressFromEncodedURIComponent(payload);
+    if (!json) {
+      return null;
+    }
+    return JSON.parse(json);
+  }
   let base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
   const pad = base64.length % 4;
   if (pad) {
@@ -13218,14 +14862,39 @@ function decodePresetState(encoded) {
   return JSON.parse(json);
 }
 
-function downloadLatticeState() {
+async function downloadLatticeState() {
   const state = getPresetState();
   const json = JSON.stringify(state, null, 2);
+  const title = layoutTitle ? String(layoutTitle).trim() : "";
+  const creator = layoutCreator ? String(layoutCreator).trim() : "";
+  const safeTitle = title || "Title";
+  const safeCreator = creator || "Creator";
+  const suggestedName = `${safeTitle} - ${safeCreator} [tuninglattice.com].json`;
+  try {
+    if ("showSaveFilePicker" in window) {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [
+          {
+            description: "JSON",
+            accept: { "application/json": [".json"] },
+          },
+        ],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(json);
+      await writable.close();
+      closeFilePanel();
+      return;
+    }
+  } catch (error) {
+    console.warn("Save dialog failed", error);
+  }
   const blob = new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "lattice.json";
+  link.download = suggestedName;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -13265,11 +14934,34 @@ function getPresetState() {
   const lineLabelOverridesState = Array.from(lineLabelOverrides.entries()).map(
     ([key, value]) => [key, Boolean(value)]
   );
+  const distanceEdgesState = Array.from(distanceSelectedEdges.values());
+  const distanceOverridesState = Array.from(distanceEdgeOverrides.entries()).map(
+    ([key, value]) => {
+      if (!value || typeof value !== "object") {
+        return null;
+      }
+      const entry = { key };
+      if (Number.isFinite(value.labelT)) {
+        entry.labelT = value.labelT;
+      }
+      if (value.controlOffset && Number.isFinite(value.controlOffset.x)) {
+        entry.controlOffset = {
+          x: Number(value.controlOffset.x) || 0,
+          y: Number(value.controlOffset.y) || 0,
+        };
+      }
+      if (typeof value.showName === "boolean") {
+        entry.showName = value.showName;
+      }
+      return entry;
+    }
+  ).filter(Boolean);
   return {
     v: 1,
     active,
     customNodes: customState,
     mode3d: is3DMode,
+    distances: analysisLayers.distances,
     view: {
       zoom: view.zoom,
       offsetX: view.offsetX,
@@ -13281,6 +14973,8 @@ function getPresetState() {
     grid: showGrid,
     lineLabels: showLineLabels,
     lineLabelOverrides: lineLabelOverridesState,
+    distanceEdges: distanceEdgesState,
+    distanceEdgeOverrides: distanceOverridesState,
     circles: showCircles,
     keyMappings: showKeyMappings,
     ratios: [
@@ -13368,6 +15062,7 @@ function getPresetState() {
       spacing: { ...layoutSpacing },
       nodeShape: layoutNodeShape,
       unifyNodeSize: layoutUnifyNodeSize,
+      freezeFlatten: layoutFreezeFlatten,
       keyMappingsMode: layoutKeyMappingMode,
       pageSize: layoutPageSize,
       orientation: layoutOrientation,
@@ -13378,6 +15073,7 @@ function getPresetState() {
     showHz,
     showCentsDeviation,
     showCentsSign,
+    directionalRatioLabels,
     hejiEnabled,
     enharmonicsEnabled,
     centsPrecision,
@@ -13471,6 +15167,10 @@ function updatePresetUrl() {
     return;
   }
   const encoded = encodePresetState(getPresetState());
+  if (encoded.length > 3500) {
+    showFileSharePopover("too much data for URI; use File > Save / Load");
+    return;
+  }
   const nextHash = `${PRESET_PARAM}=${encoded}`;
   if (location.hash === `#${nextHash}`) {
     return;
@@ -13490,6 +15190,10 @@ function schedulePresetUrlUpdate() {
 
 function getPresetShareUrl() {
   const encoded = encodePresetState(getPresetState());
+  if (encoded.length > 3500) {
+    showFileSharePopover("too much data for URI; use File > Save / Load");
+    return "";
+  }
   const hash = `${PRESET_PARAM}=${encoded}`;
   return `${location.origin}${location.pathname}${location.search}#${hash}`;
 }
@@ -13537,6 +15241,13 @@ function applyPresetState(state) {
   if (!state || typeof state !== "object") {
     return;
   }
+  analysisLayers.distances = false;
+  analysisLayers.microtonal = false;
+  distanceSelectMode = false;
+  distanceSelectedNodeKeys.clear();
+  distanceSelectedEdges.clear();
+  distanceEdgeOverrides.clear();
+  syncAnalysisLayerToggles();
   pendingLayoutSpacing = null;
   pendingLayoutCustomPositions = null;
   pendingCustomPianoMap = null;
@@ -13582,6 +15293,38 @@ function applyPresetState(state) {
       lineLabelOverrides.set(key, Boolean(entry[1]));
     });
   }
+  if (Array.isArray(state.distanceEdges)) {
+    state.distanceEdges.forEach((edgeKey) => {
+      if (typeof edgeKey === "string" && edgeKey) {
+        distanceSelectedEdges.add(edgeKey);
+      }
+    });
+  }
+  if (Array.isArray(state.distanceEdgeOverrides)) {
+    state.distanceEdgeOverrides.forEach((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return;
+      }
+      const key = String(entry.key || "");
+      if (!key) {
+        return;
+      }
+      const next = {};
+      if (Number.isFinite(entry.labelT)) {
+        next.labelT = entry.labelT;
+      }
+      if (entry.controlOffset && Number.isFinite(entry.controlOffset.x)) {
+        next.controlOffset = {
+          x: Number(entry.controlOffset.x) || 0,
+          y: Number(entry.controlOffset.y) || 0,
+        };
+      }
+      if (typeof entry.showName === "boolean") {
+        next.showName = entry.showName;
+      }
+      distanceEdgeOverrides.set(key, next);
+    });
+  }
   if (typeof state.circles === "boolean") {
     showCircles = state.circles;
     if (navCirclesToggle) {
@@ -13599,6 +15342,10 @@ function applyPresetState(state) {
     if (layoutKeyMappingsToggle) {
       layoutKeyMappingsToggle.checked = showKeyMappings;
     }
+  }
+  if (typeof state.distances === "boolean") {
+    analysisLayers.distances = state.distances;
+    syncAnalysisLayerToggles();
   }
   const viewState = state.view && typeof state.view === "object" ? state.view : null;
   const activeHasZ = Array.isArray(state.active)
@@ -14108,6 +15855,12 @@ function applyPresetState(state) {
         layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
       }
     }
+    if (typeof layoutState.freezeFlatten === "boolean") {
+      layoutFreezeFlatten = layoutState.freezeFlatten;
+      if (layoutFreezeFlattenToggle) {
+        layoutFreezeFlattenToggle.checked = layoutFreezeFlatten;
+      }
+    }
     if (typeof layoutState.pageSize === "string") {
       layoutPageSize = layoutState.pageSize;
       if (layoutPageSizeSelect) {
@@ -14122,9 +15875,6 @@ function applyPresetState(state) {
     }
     if (typeof layoutState.lockPosition === "boolean") {
       layoutLockPosition = layoutState.lockPosition;
-      if (layoutLockPositionToggle) {
-        layoutLockPositionToggle.checked = layoutLockPosition;
-      }
     }
     if (layoutState.view && typeof layoutState.view === "object") {
       const nextZoom = Number(layoutState.view.zoom);
@@ -14167,6 +15917,7 @@ function applyPresetState(state) {
       setLayoutMode(layoutState.mode, { force: layoutState.mode && layoutMode });
     }
   }
+  updateLayoutLinkControls();
 
   if (typeof state.featureMode === "string") {
     featureMode = state.featureMode === "note" ? "note" : "ratio";
@@ -14206,6 +15957,17 @@ function applyPresetState(state) {
     showCentsSign = state.showCentsSign;
     if (showCentsSignToggle) {
       showCentsSignToggle.checked = showCentsSign;
+    }
+  }
+  if (typeof state.directionalRatioLabels === "boolean") {
+    directionalRatioLabels = state.directionalRatioLabels;
+    if (directionalRatioLabelsToggle) {
+      directionalRatioLabelsToggle.checked = directionalRatioLabels;
+    }
+  } else {
+    directionalRatioLabels = false;
+    if (directionalRatioLabelsToggle) {
+      directionalRatioLabelsToggle.checked = directionalRatioLabels;
     }
   }
   if (typeof state.hejiEnabled === "boolean") {
@@ -15128,7 +16890,7 @@ async function buildLayoutSvgString(
   }
   const { widthIn, heightIn, widthPx, heightPx } = getLayoutPageDimensions();
   const { left, top } = getLayoutPageRect();
-  const disableScale = layoutUnifyNodeSize;
+  const disableScale = shouldDisableLayoutScale();
   const labelSize = layoutRatioTextSize;
   const detailSize = layoutNoteTextSize;
   const titleSize = Math.max(12, Math.round(layoutTitleSize));
@@ -15299,8 +17061,8 @@ async function buildLayoutSvgString(
     }
     const start = worldToScreen(getNodeDisplayCoordinate(a), disableScale);
     const end = worldToScreen(getNodeDisplayCoordinate(b), disableScale);
-    const radiusA = layoutNodeSize * (start.scale || 1);
-    const radiusB = layoutNodeSize * (end.scale || 1);
+    const radiusA = getLayoutNodeRadius(start);
+    const radiusB = getLayoutNodeRadius(end);
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const dist = Math.hypot(dx, dy);
@@ -15392,6 +17154,168 @@ async function buildLayoutSvgString(
     }
   }
 
+  if (analysisLayers.distances && distanceSelectedEdges.size) {
+    const distanceNodePosMap = new Map();
+    nodes.forEach((node) => {
+      const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+      distanceNodePosMap.set(node.id, { pos, radius: getLayoutNodeRadius(pos) });
+    });
+    const labelFont = layoutAxisLegendFont;
+    const labelWeight = layoutAxisLegendFontWeight;
+    const labelSize = Math.max(10, Math.round(layoutRatioTextSize * 0.6));
+    const drawCurveSegment = (segment) => {
+      parts.push(
+        `<path d="M ${segment.p0.x} ${segment.p0.y} Q ${segment.p1.x} ${segment.p1.y} ${segment.p2.x} ${segment.p2.y}" ${svgStroke(
+          themeColors.edge
+        )} stroke-width="1.5" stroke-dasharray="6 6" fill="none" />`
+      );
+    };
+    for (const edgeKey of distanceSelectedEdges) {
+      if (!edgeKey) {
+        continue;
+      }
+      const partsKey = edgeKey.split("|");
+      if (partsKey.length !== 2) {
+        continue;
+      }
+      const [aKey, bKey] = partsKey;
+      const a = getNodeByDistanceKey(aKey);
+      const b = getNodeByDistanceKey(bKey);
+      if (!a || !b || !a.active || !b.active) {
+        continue;
+      }
+      const startEntry = distanceNodePosMap.get(a.id);
+      const endEntry = distanceNodePosMap.get(b.id);
+      if (!startEntry || !endEntry) {
+        continue;
+      }
+      const override = getDistanceEdgeOverride(edgeKey);
+      if (override && override.hidden) {
+        continue;
+      }
+      const ratioInfo = getDistanceRatioLabel(a, b);
+      if (!ratioInfo) {
+        continue;
+      }
+      const showName = !override || override.showName !== false;
+      const commaName = showName
+        ? getDistanceCommaName(ratioInfo.numerator, ratioInfo.denominator)
+        : "";
+      const label = commaName ? `${ratioInfo.label} (${commaName})` : ratioInfo.label;
+      const start = startEntry.pos;
+      const end = endEntry.pos;
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      if (!dist) {
+        continue;
+      }
+      const ux = dx / dist;
+      const uy = dy / dist;
+      const straightStartRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+      const straightEndRadius = getNodeEdgeRadius(b, -ux, -uy, endEntry.radius);
+      let lineStart = {
+        x: start.x + ux * straightStartRadius - left,
+        y: start.y + uy * straightStartRadius - top,
+      };
+      let lineEnd = {
+        x: end.x - ux * straightEndRadius - left,
+        y: end.y - uy * straightEndRadius - top,
+      };
+      const autoControl = getAutoDistanceControl(
+        { x: lineStart.x + left, y: lineStart.y + top },
+        { x: lineEnd.x + left, y: lineEnd.y + top },
+        distanceNodePosMap,
+        a,
+        b
+      );
+      const defaultControl = { x: autoControl.x - left, y: autoControl.y - top };
+      let controlOffset = override && override.controlOffset ? override.controlOffset : null;
+      if (!controlOffset && override && override.control) {
+        controlOffset = {
+          x: override.control.x - defaultControl.x,
+          y: override.control.y - defaultControl.y,
+        };
+      }
+      const control = controlOffset
+        ? { x: defaultControl.x + controlOffset.x, y: defaultControl.y + controlOffset.y }
+        : defaultControl;
+      const startVector = { x: control.x - lineStart.x, y: control.y - lineStart.y };
+      const endVector = { x: control.x - lineEnd.x, y: control.y - lineEnd.y };
+      const startLen = Math.hypot(startVector.x, startVector.y);
+      const endLen = Math.hypot(endVector.x, endVector.y);
+      const startUx = startLen > 0 ? startVector.x / startLen : ux;
+      const startUy = startLen > 0 ? startVector.y / startLen : uy;
+      const endUx = endLen > 0 ? endVector.x / endLen : -ux;
+      const endUy = endLen > 0 ? endVector.y / endLen : -uy;
+      const startRadius = getNodeEdgeRadius(a, startUx, startUy, startEntry.radius);
+      const endRadius = getNodeEdgeRadius(b, endUx, endUy, endEntry.radius);
+      lineStart = {
+        x: start.x + startUx * startRadius - left,
+        y: start.y + startUy * startRadius - top,
+      };
+      lineEnd = {
+        x: end.x + endUx * endRadius - left,
+        y: end.y + endUy * endRadius - top,
+      };
+      const labelT = override && Number.isFinite(override.labelT) ? override.labelT : 0.5;
+      const curveInfo = buildQuadraticCurveInfo(lineStart, control, lineEnd);
+      const t = curveInfo.tAtRatio(labelT);
+      const labelPos = getQuadraticPoint(lineStart, control, lineEnd, t);
+      const tangent = getQuadraticTangent(lineStart, control, lineEnd, t);
+      const baseWidth = await measureSvgTextWidth(label, labelSize, labelFont, labelWeight);
+      let angle = 0;
+      let useHorizontal = false;
+      if (Math.abs(tangent.x) > 1e-6 || Math.abs(tangent.y) > 1e-6) {
+        angle = Math.atan2(tangent.y, tangent.x);
+        useHorizontal = shouldUseHorizontalText(angle);
+        if (!useHorizontal) {
+          if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+            angle += Math.PI;
+          }
+        } else {
+          angle = 0;
+        }
+      }
+      const gapWidth = useHorizontal ? labelSize * 0.9 : baseWidth;
+      const layout = computeEdgeLabelLayoutFromWidth({
+        baseSize: labelSize,
+        baseWidth: gapWidth,
+        lineLen: curveInfo.total,
+        minSize: 4,
+      });
+      const size = layout.size;
+      const gap = layout.gap;
+      const gapHalf = gap / 2;
+      const labelArcLen = curveInfo.total * Math.min(1, Math.max(0, labelT));
+      const tLeft = curveInfo.tAtLength(labelArcLen - gapHalf);
+      const tRight = curveInfo.tAtLength(labelArcLen + gapHalf);
+      const leftSegment = getQuadraticSubcurve(lineStart, control, lineEnd, 0, tLeft);
+      const rightSegment = getQuadraticSubcurve(lineStart, control, lineEnd, tRight, 1);
+      if (leftSegment) {
+        drawCurveSegment(leftSegment);
+      }
+      if (rightSegment) {
+        drawCurveSegment(rightSegment);
+      }
+      const rotation = (angle * 180) / Math.PI;
+      parts.push(
+        await buildSvgTextElement({
+          text: label,
+          x: labelPos.x,
+          y: labelPos.y,
+          font: labelFont,
+          size,
+          fontWeight: labelWeight,
+          anchor: "middle",
+          baseline: "middle",
+          color: themeColors.textSecondary,
+          transform: `rotate(${rotation} ${labelPos.x} ${labelPos.y})`,
+        })
+      );
+    }
+  }
+
   const customEdgeOutset = 1;
   for (const customNode of customNodes) {
     const source = nodeById.get(customNode.sourceNodeId);
@@ -15400,8 +17324,8 @@ async function buildLayoutSvgString(
     }
     const start = worldToScreen(getNodeDisplayCoordinate(source), disableScale);
     const end = worldToScreen(getNodeDisplayCoordinate(customNode), disableScale);
-    const radiusA = layoutNodeSize * (start.scale || 1);
-    const radiusB = layoutNodeSize * (end.scale || 1);
+    const radiusA = getLayoutNodeRadius(start);
+    const radiusB = getLayoutNodeRadius(end);
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const dist = Math.hypot(dx, dy);
@@ -15505,8 +17429,8 @@ async function buildLayoutSvgString(
       }
       const start = worldToScreen(getNodeDisplayCoordinate(a), disableScale);
       const end = worldToScreen(getNodeDisplayCoordinate(b), disableScale);
-      const radiusA = layoutNodeSize * (start.scale || 1);
-      const radiusB = layoutNodeSize * (end.scale || 1);
+      const radiusA = getLayoutNodeRadius(start);
+      const radiusB = getLayoutNodeRadius(end);
       const dx = end.x - start.x;
       const dy = end.y - start.y;
       const dist = Math.hypot(dx, dy);
@@ -15588,7 +17512,7 @@ async function buildLayoutSvgString(
     const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
     const x = pos.x - left;
     const y = pos.y - top;
-    const radius = layoutNodeSize * (pos.scale || 1);
+    const radius = getLayoutNodeRadius(pos);
     const shape = getLayoutNodeShape(node);
     const fill = "none";
     const stroke = themeColors.nodeStroke;
@@ -16102,6 +18026,12 @@ function resetLattice() {
   const preservedMidiPort = midiPortSelect ? midiPortSelect.value : null;
   stopAllVoices();
   activeKeys.clear();
+  analysisLayers.distances = false;
+  analysisLayers.microtonal = false;
+  distanceSelectMode = false;
+  distanceSelectedNodeKeys.clear();
+  distanceSelectedEdges.clear();
+  distanceEdgeOverrides.clear();
   customPianoActiveKeys.clear();
   customPianoMap = new Map();
   customPianoSelectedKey = null;
@@ -16219,9 +18149,6 @@ if (layoutKeyMappingOffsetInput) {
 if (layoutKeyMappingDarkToggle) {
   layoutKeyMappingDarkToggle.checked = layoutKeyMappingDark;
 }
-if (layoutLockPositionToggle) {
-  layoutLockPositionToggle.checked = layoutLockPosition;
-}
 if (layoutNodeShapeSelect) {
   layoutNodeShapeSelect.value = layoutNodeShape;
 }
@@ -16237,6 +18164,7 @@ if (layoutTitleInput) {
 if (layoutCreatorInput) {
   layoutCreatorInput.value = layoutCreator;
 }
+updateLayoutLinkControls();
 if (layoutTitleSizeInput) {
   layoutTitleSizeInput.value = String(layoutTitleSize);
 }
@@ -16321,6 +18249,9 @@ if (layoutShowCentsDeviationToggle) {
 if (showCentsSignToggle) {
   showCentsSignToggle.checked = showCentsSign;
 }
+if (directionalRatioLabelsToggle) {
+  directionalRatioLabelsToggle.checked = directionalRatioLabels;
+}
 if (hejiEnabledToggle) {
   hejiEnabledToggle.checked = hejiEnabled;
 }
@@ -16339,6 +18270,7 @@ if (navCirclesToggle) {
 if (layoutCirclesToggle) {
   layoutCirclesToggle.checked = showCircles;
 }
+syncAnalysisLayerToggles();
 syncCentsPrecisionControls();
 syncLayoutKeyMappingControls();
 syncLayoutScaleInput();
@@ -16538,14 +18470,100 @@ if (themeSelect) {
 if (optionsToggle) {
   optionsToggle.addEventListener("click", toggleOptionsPanel);
 }
-if (analysisToggle) {
-  analysisToggle.addEventListener("click", toggleAnalysisPanel);
-}
-if (analysisModeButtons.length) {
-  analysisModeButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      setAnalysisMode(button.dataset.analysisMode || "none");
+if (distanceSelectTriggers.length) {
+  distanceSelectTriggers.forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (!analysisLayers.distances) {
+        analysisLayers.distances = true;
+        syncAnalysisLayerToggles();
+      }
+      setDistanceSelectMode(true);
     });
+  });
+}
+if (analysisShowDistancesToggle) {
+  analysisShowDistancesToggle.addEventListener("change", () => {
+    analysisLayers.distances = analysisShowDistancesToggle.checked;
+    if (!analysisLayers.distances) {
+      setDistanceSelectMode(false);
+    }
+    syncAnalysisLayerToggles();
+    updateBannerMessage();
+    draw();
+  });
+}
+if (analysisShowMicrotonalToggle) {
+  analysisShowMicrotonalToggle.addEventListener("change", () => {
+    analysisLayers.microtonal = analysisShowMicrotonalToggle.checked;
+    syncAnalysisLayerToggles();
+    updateBannerMessage();
+    draw();
+  });
+}
+if (directionalRatioLabelsToggle) {
+  directionalRatioLabelsToggle.addEventListener("change", () => {
+    directionalRatioLabels = directionalRatioLabelsToggle.checked;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutShowDistancesToggle) {
+  layoutShowDistancesToggle.addEventListener("change", () => {
+    analysisLayers.distances = layoutShowDistancesToggle.checked;
+    if (!analysisLayers.distances) {
+      setDistanceSelectMode(false);
+    }
+    syncAnalysisLayerToggles();
+    updateBannerMessage();
+    draw();
+  });
+}
+if (layoutShowMicrotonalToggle) {
+  layoutShowMicrotonalToggle.addEventListener("change", () => {
+    analysisLayers.microtonal = layoutShowMicrotonalToggle.checked;
+    syncAnalysisLayerToggles();
+    updateBannerMessage();
+    draw();
+  });
+}
+if (layoutAnalysisResetButton) {
+  layoutAnalysisResetButton.addEventListener("click", () => {
+    analysisLayers.distances = true;
+    analysisLayers.microtonal = true;
+    syncAnalysisLayerToggles();
+    updateBannerMessage();
+    draw();
+  });
+}
+if (layoutFreezeButton) {
+  layoutFreezeButton.addEventListener("click", () => {
+    if (!layoutLockPosition) {
+      layoutLockPosition = true;
+      refreshLayoutFromView({ flatten: layoutFreezeFlatten });
+      updateLayoutLinkControls();
+      updateBannerMessage();
+    } else {
+      if (
+        !window.confirm(
+          "Unfreeze and replace layout with the current 2D/3D view? This will discard layout edits."
+        )
+      ) {
+        return;
+      }
+      layoutLockPosition = false;
+      const sourceView = layoutSourceView || layoutPrevState;
+      if (sourceView) {
+        view.zoom = sourceView.zoom;
+        view.offsetX = sourceView.offsetX;
+        view.offsetY = sourceView.offsetY;
+        view.rotX = sourceView.rotX;
+        view.rotY = sourceView.rotY;
+      }
+      refreshLayoutFromView({ flatten: false });
+      updateLayoutLinkControls();
+      updateBannerMessage();
+    }
   });
 }
 if (layoutModeToggle && !viewModeInputs.length && !viewModeButtons.length) {
@@ -16563,6 +18581,9 @@ if (viewModeInputs.length) {
       const nextMode = input.value;
       uiHintKey = "";
       uiHintDismissed = false;
+      if (distanceSelectMode) {
+        setDistanceSelectMode(false);
+      }
       if (nextMode === "layout") {
         setLayoutMode(true);
       } else {
@@ -16584,6 +18605,9 @@ if (viewModeButtons.length) {
       }
       uiHintKey = "";
       uiHintDismissed = false;
+      if (distanceSelectMode) {
+        setDistanceSelectMode(false);
+      }
       if (nextMode === "layout") {
         setLayoutMode(true);
       } else {
@@ -16933,37 +18957,6 @@ if (layoutKeyMappingDarkToggle) {
     pushLayoutUndoState();
     layoutKeyMappingDark = layoutKeyMappingDarkToggle.checked;
     draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutLockPositionToggle) {
-  layoutLockPositionToggle.addEventListener("change", () => {
-    pushLayoutUndoState();
-    layoutLockPosition = layoutLockPositionToggle.checked;
-    if (layoutLockPosition) {
-      syncLayoutViewFromCurrent();
-    } else {
-      layoutPositionOffsets.clear();
-      layoutPositions.clear();
-      layoutLabelOffsets.clear();
-      if (layoutMode && layoutPrevState) {
-        view.zoom = layoutPrevState.zoom;
-        view.offsetX = layoutPrevState.offsetX;
-        view.offsetY = layoutPrevState.offsetY;
-        view.rotX = layoutPrevState.rotX;
-        view.rotY = layoutPrevState.rotY;
-        syncLayoutScaleInput();
-        markIsomorphicDirty();
-        draw();
-      }
-      layoutView = {
-        zoom: view.zoom,
-        offsetX: view.offsetX,
-        offsetY: view.offsetY,
-        rotX: view.rotX,
-        rotY: view.rotY,
-      };
-    }
     schedulePresetUrlUpdate();
   });
 }
@@ -17488,10 +19481,16 @@ if (layoutUnifySizeToggle) {
     schedulePresetUrlUpdate();
   });
 }
+if (layoutFreezeFlattenToggle) {
+  layoutFreezeFlattenToggle.addEventListener("change", () => {
+    layoutFreezeFlatten = layoutFreezeFlattenToggle.checked;
+    schedulePresetUrlUpdate();
+  });
+}
 if (layoutResetButton) {
   layoutResetButton.addEventListener("click", () => {
     pushLayoutUndoState();
-    resetLayoutState();
+    resetLayoutState({ resetView: false });
     schedulePresetUrlUpdate();
   });
 }
@@ -17542,6 +19541,29 @@ if (uiHint) {
       showHelpToggle.checked = false;
     }
     setUiHintVisibility(false);
+  });
+}
+if (bannerMessage) {
+  bannerMessage.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!target || !(target instanceof HTMLElement)) {
+      return;
+    }
+    const layoutAction = target.getAttribute("data-layout-banner");
+    if (layoutAction === "freeze") {
+      layoutLockPosition = true;
+      refreshLayoutFromView({ flatten: layoutFreezeFlatten });
+      updateLayoutLinkControls();
+      updateBannerMessage();
+      return;
+    }
+    if (!distanceSelectMode) {
+      return;
+    }
+    const action = target.getAttribute("data-distance-banner");
+    if (action === "reset") {
+      resetDistanceEdges();
+    }
   });
 }
 fundamentalInput.addEventListener("input", () => {
@@ -17815,7 +19837,7 @@ updateTempoReadout();
 updatePatternLengthReadout();
 updatePatternLengthAvailability();
 initTheme();
-syncAnalysisModeButtons();
+syncAnalysisLayerToggles();
 updateLooperButton();
 updateScoreButton();
 updateLfoPlayButton();
@@ -18045,8 +20067,8 @@ if (triangleLabelDialog) {
       closeLayoutFontPopover();
       return;
     }
-    if (analysisMode === "distances" || analysisMode === "commas") {
-      setAnalysisMode("none");
+    if (distanceSelectMode && analysisLayers.distances) {
+      setDistanceSelectMode(false);
       return;
     }
     if (layoutAxisEdit) {

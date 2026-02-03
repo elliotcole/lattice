@@ -318,6 +318,33 @@ body.theme-dark {
   color: var(--ink);
 }
 
+.panel-subtext {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.custom-ratio-dialog textarea {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  font-family: "Lexend", sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--text-primary);
+}
+
+body.theme-dark .custom-ratio-dialog textarea {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(15, 18, 22, 0.9);
+  color: #f5f5f5;
+}
+
 .banner-message:not([hidden]) {
   display: block;
   background: rgba(255, 255, 255, 0.9);
@@ -1253,6 +1280,10 @@ button:active {
   position: relative;
 }
 
+.calculate-toggle {
+  position: relative;
+}
+
 .file-toggle button {
   display: inline-flex;
   align-items: center;
@@ -1303,6 +1334,21 @@ button:active {
   background: var(--panel-solid);
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
   pointer-events: none;
+}
+
+.calculate-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 240px;
+  z-index: 3;
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.calculate-panel[hidden] {
+  display: none;
 }
 
 .file-share-popover[hidden] {

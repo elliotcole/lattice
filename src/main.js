@@ -8,6 +8,8 @@ const exportScaleButton = document.getElementById("export-scale");
 const themeSelect = document.getElementById("theme-select");
 const optionsToggle = document.getElementById("options-toggle");
 const optionsPanel = document.getElementById("options-panel");
+const calculateToggle = document.getElementById("calculate-toggle");
+const calculatePanel = document.getElementById("calculate-panel");
 const layoutModeToggle = document.getElementById("layout-mode");
 const layoutPanel = document.getElementById("layout-panel");
 const layoutPanelToggle = document.getElementById("layout-panel-toggle");
@@ -171,9 +173,13 @@ const lfoPresetSelect = document.getElementById("lfo-preset");
 const lfoPlayToggle = document.getElementById("lfo-play-toggle");
 const lfoStopButton = document.getElementById("lfo-stop");
 const allNotesOffButton = document.getElementById("all-notes-off");
+const findRatioButton = document.getElementById("find-ratio");
 const customRatioDialog = document.getElementById("custom-ratio-dialog");
 const triangleLabelDialog = document.getElementById("triangle-label-dialog");
 const triangleLabelInput = document.getElementById("triangle-label-input");
+const findRatioDialog = document.getElementById("find-ratio-dialog");
+const findRatioForm = document.getElementById("find-ratio-form");
+const findRatioInput = document.getElementById("find-ratio-input");
 const layoutCustomLabelDialog = document.getElementById("layout-custom-label-dialog");
 const layoutCustomLabelInput = document.getElementById("layout-custom-label-input");
 const customRatioNumerator = document.getElementById("custom-ratio-numerator");
@@ -12154,6 +12160,249 @@ function reduceFraction(numerator, denominator) {
   };
 }
 
+function parseRatioInput(value) {
+  if (!value) {
+    return null;
+  }
+  const cleaned = String(value).trim().replace(/\s+/g, "");
+  if (!cleaned) {
+    return null;
+  }
+  const divider = cleaned.includes(":") ? ":" : cleaned.includes("/") ? "/" : null;
+  if (!divider) {
+    return null;
+  }
+  const parts = cleaned.split(divider);
+  if (parts.length !== 2) {
+    return null;
+  }
+  const numerator = Math.trunc(Number(parts[0]));
+  const denominator = Math.trunc(Number(parts[1]));
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) {
+    return null;
+  }
+  if (numerator <= 0 || denominator <= 0) {
+    return null;
+  }
+  return { numerator, denominator };
+}
+
+function normalizeRatio(numerator, denominator) {
+  const reduced = reduceFraction(numerator, denominator);
+  return reduceToOctave(reduced.numerator, reduced.denominator);
+}
+
+function factorizeInteger(value) {
+  const factors = new Map();
+  let remaining = Math.abs(Math.trunc(value));
+  if (remaining <= 1) {
+    return factors;
+  }
+  while (remaining % 2 === 0) {
+    factors.set(2, (factors.get(2) || 0) + 1);
+    remaining /= 2;
+  }
+  for (const prime of primes) {
+    if (prime === 2) {
+      continue;
+    }
+    if (prime * prime > remaining) {
+      break;
+    }
+    while (remaining % prime === 0) {
+      factors.set(prime, (factors.get(prime) || 0) + 1);
+      remaining /= prime;
+    }
+  }
+  if (remaining > 1) {
+    factors.set(remaining, (factors.get(remaining) || 0) + 1);
+  }
+  return factors;
+}
+
+function factorizeRatio(numerator, denominator) {
+  const map = new Map();
+  const numFactors = factorizeInteger(numerator);
+  const denFactors = factorizeInteger(denominator);
+  numFactors.forEach((exp, prime) => {
+    map.set(prime, (map.get(prime) || 0) + exp);
+  });
+  denFactors.forEach((exp, prime) => {
+    map.set(prime, (map.get(prime) || 0) - exp);
+  });
+  return map;
+}
+
+function getAxisPrimeValues() {
+  const x = Number(ratioXSelect && ratioXSelect.value);
+  const y = Number(ratioYSelect && ratioYSelect.value);
+  const z = ratioZSelect && !ratioZSelect.hidden ? Number(ratioZSelect.value) : null;
+  return { x, y, z };
+}
+
+function activateNode(node) {
+  if (!node || node.active) {
+    return;
+  }
+  node.active = true;
+  syncCustomNodesWithSource(node.id, true);
+  updatePitchInstances();
+  refreshPatternFromActiveNodes();
+  markIsomorphicDirty();
+  schedulePresetUrlUpdate();
+  draw();
+}
+
+function findRatioTargetNode(target) {
+  return nodes.find(
+    (node) =>
+      Number(node.numerator) === Number(target.numerator) &&
+      Number(node.denominator) === Number(target.denominator)
+  );
+}
+
+function findBestParentNode(desired) {
+  let best = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let bestHome = Number.POSITIVE_INFINITY;
+  nodes.forEach((node) => {
+    if (node.isCustom) {
+      return;
+    }
+    if (
+      !Number.isFinite(node.exponentX) ||
+      !Number.isFinite(node.exponentY) ||
+      !Number.isFinite(node.exponentZ)
+    ) {
+      return;
+    }
+    const dx = Math.abs(node.exponentX - desired.x);
+    const dy = Math.abs(node.exponentY - desired.y);
+    const dz = Math.abs((node.exponentZ || 0) - desired.z);
+    const distance = dx + dy + dz;
+    const home = Math.abs(node.exponentX) + Math.abs(node.exponentY) + Math.abs(node.exponentZ || 0);
+    if (
+      distance < bestDistance ||
+      (distance === bestDistance && home < bestHome)
+    ) {
+      best = node;
+      bestDistance = distance;
+      bestHome = home;
+    }
+  });
+  return best;
+}
+
+function findOrCreateRatio(value) {
+  const parsed = parseRatioInput(value);
+  if (!parsed) {
+    alert("Please enter a ratio like 1485:1024 or 1485/1024.");
+    return;
+  }
+  const target = normalizeRatio(parsed.numerator, parsed.denominator);
+  const existing = findRatioTargetNode(target);
+  if (existing) {
+    activateNode(existing);
+    return;
+  }
+  const axisPrimes = getAxisPrimeValues();
+  const factors = factorizeRatio(target.numerator, target.denominator);
+  const desired = {
+    x: axisPrimes.x ? factors.get(axisPrimes.x) || 0 : 0,
+    y: axisPrimes.y ? factors.get(axisPrimes.y) || 0 : 0,
+    z: axisPrimes.z ? factors.get(axisPrimes.z) || 0 : 0,
+  };
+  const parent = findBestParentNode(desired);
+  if (!parent) {
+    alert("No parent node found in the current lattice range.");
+    return;
+  }
+  const factorNumerator = target.numerator * parent.denominator;
+  const factorDenominator = target.denominator * parent.numerator;
+  const factorReduced = reduceFraction(factorNumerator, factorDenominator);
+  const factorOctave = reduceToOctave(factorReduced.numerator, factorReduced.denominator);
+  if (factorOctave.numerator === 1 && factorOctave.denominator === 1) {
+    return;
+  }
+  const slot = findNextCustomSlot(parent.id);
+  if (slot == null) {
+    alert("No available custom node slots on the selected parent.");
+    return;
+  }
+  const node = createCustomNodeFromSource(
+    parent,
+    slot,
+    factorOctave.numerator,
+    factorOctave.denominator
+  );
+  if (!node) {
+    alert("Unable to create a custom node for that ratio.");
+    return;
+  }
+  node.active = true;
+  addCustomNodeToScene(node);
+}
+
+function findOrCreateRatiosFromInput(value) {
+  const lines = String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    alert("Please enter one or more ratios.");
+    return;
+  }
+  let handled = 0;
+  lines.forEach((line) => {
+    const parsed = parseRatioInput(line);
+    if (!parsed) {
+      return;
+    }
+    handled += 1;
+    const target = normalizeRatio(parsed.numerator, parsed.denominator);
+    const existing = findRatioTargetNode(target);
+    if (existing) {
+      activateNode(existing);
+      return;
+    }
+    const axisPrimes = getAxisPrimeValues();
+    const factors = factorizeRatio(target.numerator, target.denominator);
+    const desired = {
+      x: axisPrimes.x ? factors.get(axisPrimes.x) || 0 : 0,
+      y: axisPrimes.y ? factors.get(axisPrimes.y) || 0 : 0,
+      z: axisPrimes.z ? factors.get(axisPrimes.z) || 0 : 0,
+    };
+    const parent = findBestParentNode(desired);
+    if (!parent) {
+      return;
+    }
+    const factorNumerator = target.numerator * parent.denominator;
+    const factorDenominator = target.denominator * parent.numerator;
+    const factorReduced = reduceFraction(factorNumerator, factorDenominator);
+    const factorOctave = reduceToOctave(factorReduced.numerator, factorReduced.denominator);
+    if (factorOctave.numerator === 1 && factorOctave.denominator === 1) {
+      return;
+    }
+    const slot = findNextCustomSlot(parent.id);
+    if (slot == null) {
+      return;
+    }
+    const node = createCustomNodeFromSource(
+      parent,
+      slot,
+      factorOctave.numerator,
+      factorOctave.denominator
+    );
+    if (node) {
+      node.active = true;
+      addCustomNodeToScene(node);
+    }
+  });
+  if (!handled) {
+    alert("Please enter ratios like 1485:1024 or 1485/1024.");
+  }
+}
+
 function normalizeCommaRatio(numerator, denominator) {
   if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
     return null;
@@ -14169,6 +14418,24 @@ function toggleOptionsPanel() {
   syncTopMenuPanelState();
 }
 
+function toggleCalculatePanel() {
+  if (!calculateToggle || !calculatePanel) {
+    return;
+  }
+  const isOpen = calculateToggle.getAttribute("aria-expanded") === "true";
+  if (!isOpen) {
+    closeTopMenus("calculate");
+  }
+  calculateToggle.setAttribute("aria-expanded", String(!isOpen));
+  calculatePanel.hidden = isOpen;
+  calculatePanel.classList.toggle("panel-open", !isOpen);
+  const parentPanel = calculateToggle.closest(".panel");
+  if (parentPanel) {
+    parentPanel.classList.toggle("panel-open", !isOpen);
+  }
+  syncTopMenuPanelState();
+}
+
 function togglePresetPanel() {
   if (!presetToggle || !presetPanel) {
     return;
@@ -14262,6 +14529,19 @@ function toggleRatioWheelPanel() {
   syncTopMenuPanelState();
 }
 
+function openFindRatioDialog() {
+  if (!findRatioDialog || !findRatioInput) {
+    return;
+  }
+  if (typeof findRatioDialog.showModal === "function") {
+    findRatioDialog.showModal();
+  }
+  requestAnimationFrame(() => {
+    findRatioInput.focus();
+    findRatioInput.select();
+  });
+}
+
 function closeOptionsPanel() {
   if (!optionsToggle || !optionsPanel) {
     return;
@@ -14283,6 +14563,19 @@ function closePresetPanel() {
   presetPanel.hidden = true;
   presetPanel.classList.remove("panel-open");
   const parentPanel = presetToggle.closest(".panel");
+  if (parentPanel) {
+    parentPanel.classList.remove("panel-open");
+  }
+}
+
+function closeCalculatePanel() {
+  if (!calculateToggle || !calculatePanel) {
+    return;
+  }
+  calculateToggle.setAttribute("aria-expanded", "false");
+  calculatePanel.hidden = true;
+  calculatePanel.classList.remove("panel-open");
+  const parentPanel = calculateToggle.closest(".panel");
   if (parentPanel) {
     parentPanel.classList.remove("panel-open");
   }
@@ -14324,6 +14617,9 @@ function closeTopMenus(except = "") {
   if (except !== "options") {
     closeOptionsPanel();
   }
+  if (except !== "calculate") {
+    closeCalculatePanel();
+  }
   if (except !== "presets") {
     closePresetPanel();
   }
@@ -14349,6 +14645,7 @@ function closeBottomMenus(except = "") {
 function syncTopMenuPanelState() {
   const topMenusOpen =
     (optionsPanel && !optionsPanel.hidden) ||
+    (calculatePanel && !calculatePanel.hidden) ||
     (presetPanel && !presetPanel.hidden) ||
     (filePanel && !filePanel.hidden) ||
     (ratioWheelPanel && !ratioWheelPanel.hidden);
@@ -18470,6 +18767,15 @@ if (themeSelect) {
 if (optionsToggle) {
   optionsToggle.addEventListener("click", toggleOptionsPanel);
 }
+if (calculateToggle) {
+  calculateToggle.addEventListener("click", toggleCalculatePanel);
+}
+if (findRatioButton) {
+  findRatioButton.addEventListener("click", () => {
+    closeTopMenus("calculate");
+    openFindRatioDialog();
+  });
+}
 if (distanceSelectTriggers.length) {
   distanceSelectTriggers.forEach((button) => {
     button.addEventListener("click", (event) => {
@@ -19526,6 +19832,16 @@ if (ratioWheelLarge) {
   ratioWheelLarge.addEventListener("mousemove", handleRatioWheelHover);
   ratioWheelLarge.addEventListener("mouseleave", clearRatioWheelHover);
   ratioWheelLarge.addEventListener("click", handleRatioWheelClick);
+}
+if (findRatioDialog) {
+  findRatioDialog.addEventListener("close", () => {
+    if (findRatioDialog.returnValue === "find") {
+      findOrCreateRatiosFromInput(findRatioInput ? findRatioInput.value : "");
+    }
+    if (findRatioInput) {
+      findRatioInput.value = "";
+    }
+  });
 }
 if (presetToggle) {
   presetToggle.addEventListener("click", togglePresetPanel);

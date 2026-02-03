@@ -95,6 +95,15 @@
                 <ul id="preset-list" class="preset-list"></ul>
               </div>
             </div>
+            <div class="control-group calculate-toggle">
+              <button id="calculate-toggle" type="button" aria-expanded="false" aria-controls="calculate-panel">
+                Calculate
+              </button>
+              <div id="calculate-panel" class="panel calculate-panel" hidden>
+                <button id="find-ratio" type="button" class="button-full">Find Ratios</button>
+                <div class="panel-subtext">Enter ratios like 1485:1024 or 1485/1024</div>
+              </div>
+            </div>
             <div class="control-group options-toggle">
               <button id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel">
                 Options
@@ -1110,6 +1119,19 @@
         <menu class="dialog-actions">
           <button type="submit" value="none">None</button>
           <button type="submit" value="ok">OK</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="find-ratio-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form" id="find-ratio-form">
+        <div class="dialog-title">Find Ratios</div>
+        <label>
+          Enter ratios (1485:1024 or 1485/1024)
+          <textarea id="find-ratio-input" rows="6" required></textarea>
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="find" autofocus>Find</button>
         </menu>
       </form>
     </dialog>

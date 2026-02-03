@@ -1838,6 +1838,10 @@ body.map-mode-active::before {
   color: var(--ink);
 }
 
+.custom-ratio-dialog.interval-dialog {
+  width: min(420px, 90vw);
+}
+
 .credits-dialog {
   width: min(420px, 92vw);
 }

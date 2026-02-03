@@ -2,6 +2,7 @@
   "intervals": [
     {
       "name": "syntonic comma",
+      "type": "comma",
       "numerator": 81,
       "denominator": 80,
       "color": "#E55050",
@@ -9,6 +10,7 @@
     },
     {
       "name": "septimal comma",
+      "type": "comma",
       "numerator": 64,
       "denominator": 63,
       "color": "#E57550",
@@ -16,6 +18,7 @@
     },
     {
       "name": "undecimal quartertone",
+      "type": "quartertone",
       "numerator": 33,
       "denominator": 32,
       "color": "#E59A50",
@@ -23,6 +26,7 @@
     },
     {
       "name": "tridecimal thirdtone",
+      "type": "thirdtone",
       "numerator": 27,
       "denominator": 26,
       "color": "#E5C050",
@@ -30,6 +34,7 @@
     },
     {
       "name": "17-limit schisma",
+      "type": "schisma",
       "numerator": 2187,
       "denominator": 2176,
       "color": "#E5E550",
@@ -37,6 +42,7 @@
     },
     {
       "name": "19-limit schisma",
+      "type": "schisma",
       "numerator": 513,
       "denominator": 512,
       "color": "#C0E550",
@@ -44,6 +50,7 @@
     },
     {
       "name": "23-limit comma",
+      "type": "comma",
       "numerator": 736,
       "denominator": 729,
       "color": "#9AE550",
@@ -51,6 +58,7 @@
     },
     {
       "name": "lesser diesis",
+      "type": "diesis",
       "numerator": 128,
       "denominator": 125,
       "color": "#75E550",
@@ -58,6 +66,7 @@
     },
     {
       "name": "greater diesis",
+      "type": "diesis",
       "numerator": 648,
       "denominator": 625,
       "color": "#50E550",
@@ -65,6 +74,7 @@
     },
     {
       "name": "greater limma",
+      "type": "limma",
       "numerator": 135,
       "denominator": 128,
       "color": "#50E575",
@@ -72,6 +82,7 @@
     },
     {
       "name": "pythagorean comma",
+      "type": "comma",
       "numerator": 531441,
       "denominator": 524288,
       "color": "#50E59A",
@@ -79,6 +90,7 @@
     },
     {
       "name": "minor 5-limit half step",
+      "type": "half step",
       "numerator": 25,
       "denominator": 24,
       "color": "#50E5C0",
@@ -86,6 +98,7 @@
     },
     {
       "name": "37-limit quartertone",
+      "type": "quartertone",
       "numerator": 37,
       "denominator": 36,
       "color": "#50E5E5",
@@ -93,6 +106,7 @@
     },
     {
       "name": "41-limit comma",
+      "type": "comma",
       "numerator": 82,
       "denominator": 81,
       "color": "#50C0E5",
@@ -100,6 +114,7 @@
     },
     {
       "name": "43-limit comma",
+      "type": "comma",
       "numerator": 129,
       "denominator": 128,
       "color": "#509AE5",
@@ -107,6 +122,7 @@
     },
     {
       "name": "47-limit quartertone",
+      "type": "quartertone",
       "numerator": 752,
       "denominator": 729,
       "color": "#5075E5",
@@ -114,6 +130,7 @@
     },
     {
       "name": "schisma",
+      "type": "schisma",
       "numerator": 32805,
       "denominator": 32768,
       "color": "#5050E5",
@@ -121,6 +138,7 @@
     },
     {
       "name": "superparticular Pythagorean comma approx.",
+      "type": "comma",
       "numerator": 74,
       "denominator": 73,
       "color": "#7550E5",
@@ -128,6 +146,7 @@
     },
     {
       "name": "Ptolemy's enharmonic",
+      "type": "unknown",
       "numerator": 56,
       "denominator": 55,
       "color": "#9A50E5",
@@ -135,6 +154,7 @@
     },
     {
       "name": "hard half-step (Ptolemy, Avicenna, Safiud)",
+      "type": "half step",
       "numerator": 56,
       "denominator": 55,
       "color": "#C050E5",
@@ -142,6 +162,7 @@
     },
     {
       "name": "septimal semitone",
+      "type": "half step",
       "numerator": 21,
       "denominator": 20,
       "color": "#E550E5",
@@ -149,6 +170,7 @@
     },
     {
       "name": "limma ascendant",
+      "type": "limma",
       "numerator": 135,
       "denominator": 128,
       "color": "#E550C0",
@@ -156,6 +178,7 @@
     },
     {
       "name": "septimal whole tone",
+      "type": "whole tone",
       "numerator": 8,
       "denominator": 7,
       "color": "#E5509A",
@@ -163,9 +186,18 @@
     },
     {
       "name": "ragisma",
+      "type": "unknown",
       "numerator": 4375,
       "denominator": 4374,
       "color": "#E55075",
+      "description": ""
+    },
+    {
+      "name": "kleisma",
+      "type": "unknown",
+      "numerator": 15625,
+      "denominator": 15552,
+      "color": "#3A86FF",
       "description": ""
     }
   ]

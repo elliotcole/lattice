@@ -101,6 +101,7 @@
               </button>
               <div id="calculate-panel" class="panel calculate-panel" hidden>
                 <button id="find-ratio" type="button" class="button-full">Find Ratios</button>
+                <button id="add-interval" type="button" class="button-full">Add Interval</button>
               </div>
             </div>
             <div class="control-group options-toggle">
@@ -1135,6 +1136,30 @@
         <menu class="dialog-actions">
           <button type="submit" value="cancel">Cancel</button>
           <button type="submit" value="find" autofocus>Find</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="add-interval-dialog" class="custom-ratio-dialog interval-dialog">
+      <form method="dialog" class="custom-ratio-form" id="add-interval-form">
+        <div class="dialog-title">Select interval</div>
+        <label>
+          Interval list
+          <select id="add-interval-select"></select>
+        </label>
+        <label>
+          Custom ratio
+          <input id="add-interval-input" type="text" placeholder="e.g. 81:80 or 81/80" />
+        </label>
+        <label>
+          Interval
+          <select id="add-interval-direction">
+            <option value="above" selected>Above</option>
+            <option value="below">Below</option>
+          </select>
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="add" autofocus>Add</button>
         </menu>
       </form>
     </dialog>

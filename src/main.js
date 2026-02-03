@@ -175,12 +175,18 @@ const lfoPlayToggle = document.getElementById("lfo-play-toggle");
 const lfoStopButton = document.getElementById("lfo-stop");
 const allNotesOffButton = document.getElementById("all-notes-off");
 const findRatioButton = document.getElementById("find-ratio");
+const addIntervalButton = document.getElementById("add-interval");
 const customRatioDialog = document.getElementById("custom-ratio-dialog");
 const triangleLabelDialog = document.getElementById("triangle-label-dialog");
 const triangleLabelInput = document.getElementById("triangle-label-input");
 const findRatioDialog = document.getElementById("find-ratio-dialog");
 const findRatioForm = document.getElementById("find-ratio-form");
 const findRatioInput = document.getElementById("find-ratio-input");
+const addIntervalDialog = document.getElementById("add-interval-dialog");
+const addIntervalForm = document.getElementById("add-interval-form");
+const addIntervalSelect = document.getElementById("add-interval-select");
+const addIntervalInput = document.getElementById("add-interval-input");
+const addIntervalDirection = document.getElementById("add-interval-direction");
 const layoutCustomLabelDialog = document.getElementById("layout-custom-label-dialog");
 const layoutCustomLabelInput = document.getElementById("layout-custom-label-input");
 const customRatioNumerator = document.getElementById("custom-ratio-numerator");
@@ -244,6 +250,10 @@ let bestViewIndex = 0;
 let bestViewSignature = "";
 const analysisLayers = { distances: false, microtonal: false };
 let distanceSelectMode = false;
+let addIntervalMode = false;
+let addIntervalSourceNodeId = null;
+let addIntervalSelectedRing = null;
+let iHeld = false;
 const distanceSelectedNodeKeys = new Set();
 const distanceSelectedEdges = new Set();
 const commaEdges = [];
@@ -252,7 +262,9 @@ const commaRatioMap = new Map();
 let commaEntries = [];
 const DISTANCE_MODE_BANNER = "Drag between nodes to create distance lines. ESC to return.";
 const COMMA_MODE_BANNER = "Labeling microtonal intervals. ESC to exit.";
+const ADD_INTERVAL_BANNER = "Add interval from any node. Select starting node.";
 const DISTANCE_RING_COLOR = "rgba(72, 146, 255, 0.9)";
+const ADD_INTERVAL_RING_COLOR = "rgba(220, 72, 72, 0.9)";
 const GUIDE_DEPTH_DENOM_MAX = 3.2;
 const distanceEdges = [];
 const distanceEdgeOverrides = new Map();
@@ -4465,6 +4477,23 @@ function formatCents(value) {
   const sign = rounded >= 0 ? "+" : "";
   const centsSuffix = showCentsSign ? CENTS_CHAR : "";
   return `${sign}${text}${centsSuffix}`;
+}
+
+function getRatioCents(numerator, denominator) {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return null;
+  }
+  const ratio = numerator / denominator;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return null;
+  }
+  const precision = Math.min(2, Math.max(0, Number(centsPrecision) || 0));
+  const factor = Math.pow(10, precision);
+  let rounded = Math.round(1200 * Math.log2(ratio) * factor) / factor;
+  if (Object.is(rounded, -0)) {
+    rounded = 0;
+  }
+  return rounded;
 }
 
 function measureTextWidth(text, size, font, context = ctx) {
@@ -8937,6 +8966,9 @@ function draw() {
   drawTriangleHover(nodePosMap, disableScale);
 
   const nowMs = performance.now();
+  if (addIntervalSelectedRing && nowMs > addIntervalSelectedRing.until) {
+    addIntervalSelectedRing = null;
+  }
   const nowSec = audioCtx ? audioCtx.currentTime : nowMs / 1000;
   const nodeAmplitudes = getNodeAmplitudeMap(nowSec, nowMs);
 
@@ -8961,6 +8993,8 @@ function draw() {
     const isHovered = node.id === hoverNodeId;
     const isGuide = guideNodes.has(node.id);
     const isOrphanGuide = connectOrphansEnabled && orphanGuideNodes.has(node.id);
+    const isIntervalHover = addIntervalMode && node.active && isHovered;
+    const isIntervalDim = addIntervalMode && node.active && !isHovered;
     const canShowInactive = !isOrphanGuide && isInactiveNodeAvailable(node);
     const canInteractInactive = !is3DMode || isAddMode || distanceSelectMode;
     const amplitude = nodeAmplitudes.get(node.id) || 0;
@@ -8989,9 +9023,19 @@ function draw() {
     if (showMicrotonal && !commaNodeRings.has(node.id)) {
       alpha *= 0.18;
     }
+    if (isIntervalDim) {
+      alpha *= 0.18;
+    }
     const textAlpha = alpha;
-    const textColorPrimary = colorWithAlpha(themeColors.textPrimary, textAlpha);
-    const textColorSecondary = colorWithAlpha(themeColors.textSecondary, textAlpha);
+    const intervalTint = isIntervalDim ? "#9a9a9a" : null;
+    const textColorPrimary = colorWithAlpha(
+      intervalTint || themeColors.textPrimary,
+      textAlpha
+    );
+    const textColorSecondary = colorWithAlpha(
+      intervalTint || themeColors.textSecondary,
+      textAlpha
+    );
 
     if (!isVisible) {
       return;
@@ -9020,7 +9064,7 @@ function draw() {
     }
     if (showNodeShape && showCircles) {
       ctx.beginPath();
-      ctx.strokeStyle = themeColors.nodeStroke;
+      ctx.strokeStyle = intervalTint || themeColors.nodeStroke;
       ctx.lineWidth = 2;
       if (isOrphanGuide) {
         ctx.setLineDash([6, 4]);
@@ -9106,6 +9150,20 @@ function draw() {
         ctx.stroke();
         ctx.restore();
       }
+    }
+    if (
+      addIntervalSelectedRing &&
+      addIntervalSelectedRing.nodeId === node.id &&
+      nowMs <= addIntervalSelectedRing.until
+    ) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0.5, alpha);
+      ctx.strokeStyle = ADD_INTERVAL_RING_COLOR;
+      ctx.lineWidth = Math.max(2, radius * 0.16);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius + 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
     if (showMicrotonal) {
       const rings = commaNodeRings.get(node.id);
@@ -9910,6 +9968,9 @@ function onPointerDown(event) {
     draw();
   }
   const hit = hitTestScreen(screenPoint);
+  if (addIntervalMode) {
+    return;
+  }
   if (layoutMode && !layoutLockPosition) {
     const use3dNav = Boolean(layoutPrevState && layoutPrevState.is3DMode);
     if (use3dNav) {
@@ -11041,6 +11102,13 @@ function onPointerUp(event) {
   if (moved < 4) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const hit = hitTestScreen(screenPoint);
+    if (addIntervalMode) {
+      if (hit && hit.active) {
+        setAddIntervalMode(false);
+        startAddIntervalFromNode(hit);
+      }
+      return;
+    }
     if (distanceSelectMode && analysisLayers.distances) {
       return;
     }
@@ -11083,6 +11151,10 @@ function onPointerUp(event) {
         }
         hideFundamentalSpellingDialog();
       }
+      return;
+    }
+    if (!layoutMode && iHeld && hit && hit.active) {
+      startAddIntervalFromNode(hit);
       return;
     }
     if (
@@ -11500,7 +11572,7 @@ function hitTestScreen(screenPoint) {
 
   nodes.forEach((node) => {
     if (connectOrphansEnabled && orphanGuideNodes.has(node.id)) {
-      if (!shiftHeld && !capsLockOn) {
+      if (!shiftHeld && !capsLockOn && !addIntervalMode) {
         return;
       }
     }
@@ -11513,7 +11585,7 @@ function hitTestScreen(screenPoint) {
     if (
       !node.isCustom &&
       !node.active &&
-      (!isInactiveNodeAvailable(node) || (is3DMode && !isAddMode))
+      (!isInactiveNodeAvailable(node) || (is3DMode && !isAddMode && !addIntervalMode))
     ) {
       return;
     }
@@ -12575,6 +12647,48 @@ function findRatioTargetNode(target) {
   );
 }
 
+function findOrCreateRatioTargetNode(target) {
+  const existing = findRatioTargetNode(target);
+  if (existing) {
+    activateNode(existing);
+    return existing;
+  }
+  const axisPrimes = getAxisPrimeValues();
+  const factors = factorizeRatio(target.numerator, target.denominator);
+  const desired = {
+    x: axisPrimes.x ? factors.get(axisPrimes.x) || 0 : 0,
+    y: axisPrimes.y ? factors.get(axisPrimes.y) || 0 : 0,
+    z: axisPrimes.z ? factors.get(axisPrimes.z) || 0 : 0,
+  };
+  const parent = findBestParentNode(desired);
+  if (!parent) {
+    return null;
+  }
+  const factorNumerator = target.numerator * parent.denominator;
+  const factorDenominator = target.denominator * parent.numerator;
+  const factorReduced = reduceFraction(factorNumerator, factorDenominator);
+  const factorOctave = reduceToOctave(factorReduced.numerator, factorReduced.denominator);
+  if (factorOctave.numerator === 1 && factorOctave.denominator === 1) {
+    return null;
+  }
+  const slot = findNextCustomSlot(parent.id);
+  if (slot == null) {
+    return null;
+  }
+  const node = createCustomNodeFromSource(
+    parent,
+    slot,
+    factorOctave.numerator,
+    factorOctave.denominator
+  );
+  if (!node) {
+    return null;
+  }
+  node.active = true;
+  addCustomNodeToScene(node);
+  return node;
+}
+
 function findBestParentNode(desired) {
   let best = null;
   let bestDistance = Number.POSITIVE_INFINITY;
@@ -12614,47 +12728,10 @@ function findOrCreateRatio(value) {
     return;
   }
   const target = normalizeRatio(parsed.numerator, parsed.denominator);
-  const existing = findRatioTargetNode(target);
-  if (existing) {
-    activateNode(existing);
-    return;
-  }
-  const axisPrimes = getAxisPrimeValues();
-  const factors = factorizeRatio(target.numerator, target.denominator);
-  const desired = {
-    x: axisPrimes.x ? factors.get(axisPrimes.x) || 0 : 0,
-    y: axisPrimes.y ? factors.get(axisPrimes.y) || 0 : 0,
-    z: axisPrimes.z ? factors.get(axisPrimes.z) || 0 : 0,
-  };
-  const parent = findBestParentNode(desired);
-  if (!parent) {
-    alert("No parent node found in the current lattice range.");
-    return;
-  }
-  const factorNumerator = target.numerator * parent.denominator;
-  const factorDenominator = target.denominator * parent.numerator;
-  const factorReduced = reduceFraction(factorNumerator, factorDenominator);
-  const factorOctave = reduceToOctave(factorReduced.numerator, factorReduced.denominator);
-  if (factorOctave.numerator === 1 && factorOctave.denominator === 1) {
-    return;
-  }
-  const slot = findNextCustomSlot(parent.id);
-  if (slot == null) {
-    alert("No available custom node slots on the selected parent.");
-    return;
-  }
-  const node = createCustomNodeFromSource(
-    parent,
-    slot,
-    factorOctave.numerator,
-    factorOctave.denominator
-  );
+  const node = findOrCreateRatioTargetNode(target);
   if (!node) {
-    alert("Unable to create a custom node for that ratio.");
-    return;
+    alert("No parent node found in the current lattice range.");
   }
-  node.active = true;
-  addCustomNodeToScene(node);
 }
 
 function findOrCreateRatiosFromInput(value) {
@@ -12674,47 +12751,72 @@ function findOrCreateRatiosFromInput(value) {
     }
     handled += 1;
     const target = normalizeRatio(parsed.numerator, parsed.denominator);
-    const existing = findRatioTargetNode(target);
-    if (existing) {
-      activateNode(existing);
-      return;
-    }
-    const axisPrimes = getAxisPrimeValues();
-    const factors = factorizeRatio(target.numerator, target.denominator);
-    const desired = {
-      x: axisPrimes.x ? factors.get(axisPrimes.x) || 0 : 0,
-      y: axisPrimes.y ? factors.get(axisPrimes.y) || 0 : 0,
-      z: axisPrimes.z ? factors.get(axisPrimes.z) || 0 : 0,
-    };
-    const parent = findBestParentNode(desired);
-    if (!parent) {
-      return;
-    }
-    const factorNumerator = target.numerator * parent.denominator;
-    const factorDenominator = target.denominator * parent.numerator;
-    const factorReduced = reduceFraction(factorNumerator, factorDenominator);
-    const factorOctave = reduceToOctave(factorReduced.numerator, factorReduced.denominator);
-    if (factorOctave.numerator === 1 && factorOctave.denominator === 1) {
-      return;
-    }
-    const slot = findNextCustomSlot(parent.id);
-    if (slot == null) {
-      return;
-    }
-    const node = createCustomNodeFromSource(
-      parent,
-      slot,
-      factorOctave.numerator,
-      factorOctave.denominator
-    );
-    if (node) {
-      node.active = true;
-      addCustomNodeToScene(node);
-    }
+    findOrCreateRatioTargetNode(target);
   });
   if (!handled) {
     alert("Please enter ratios like 1485:1024 or 1485/1024.");
   }
+}
+
+function getSelectedIntervalRatio() {
+  const selectValue = addIntervalSelect ? String(addIntervalSelect.value) : "custom";
+  if (selectValue && selectValue !== "custom") {
+    return parseRatioInput(selectValue);
+  }
+  if (!addIntervalInput) {
+    return null;
+  }
+  return parseRatioInput(addIntervalInput.value);
+}
+
+function applyAddIntervalFromSource(sourceNode, intervalRatio) {
+  if (!sourceNode || !intervalRatio) {
+    return null;
+  }
+  const directionValue = addIntervalDirection ? addIntervalDirection.value : "above";
+  const useAbove = directionValue !== "below";
+  const stepNumerator = useAbove ? intervalRatio.numerator : intervalRatio.denominator;
+  const stepDenominator = useAbove ? intervalRatio.denominator : intervalRatio.numerator;
+  const productNumerator = sourceNode.numerator * stepNumerator;
+  const productDenominator = sourceNode.denominator * stepDenominator;
+  const target = normalizeRatio(productNumerator, productDenominator);
+  const targetNode = findOrCreateRatioTargetNode(target);
+  if (!targetNode) {
+    return null;
+  }
+  if (addDistanceEdgeBetweenNodes(sourceNode, targetNode)) {
+    if (!analysisLayers.distances) {
+      analysisLayers.distances = true;
+      syncAnalysisLayerToggles();
+    }
+    draw();
+    schedulePresetUrlUpdate();
+  }
+  return targetNode;
+}
+
+function startAddIntervalFromNode(node) {
+  if (!node) {
+    return;
+  }
+  addIntervalSourceNodeId = node.id;
+  addIntervalSelectedRing = {
+    nodeId: node.id,
+    until: performance.now() + 500,
+  };
+  updateBannerMessage();
+  draw();
+  setTimeout(() => {
+    if (
+      addIntervalSelectedRing &&
+      addIntervalSelectedRing.nodeId === node.id &&
+      performance.now() >= addIntervalSelectedRing.until
+    ) {
+      addIntervalSelectedRing = null;
+      draw();
+    }
+  }, 520);
+  openAddIntervalDialog();
 }
 
 function normalizeCommaRatio(numerator, denominator) {
@@ -13069,11 +13171,11 @@ function updateUiHint() {
 
   if (!is3DMode) {
     uiHint.textContent =
-      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold L and press & hold to start LFO.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to pan. Scroll to zoom.";
+      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to pan. Scroll to zoom.";
     return;
   }
   uiHint.textContent =
-    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold L and press & hold to start LFO\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
+    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
 }
 
 function resetUiHintToDefault() {
@@ -13396,6 +13498,12 @@ function updateBannerMessage() {
   if (!bannerMessage) {
     return;
   }
+  if (addIntervalMode) {
+    bannerMessage.textContent = ADD_INTERVAL_BANNER;
+    bannerMessage.classList.remove("banner-interactive");
+    bannerMessage.hidden = false;
+    return;
+  }
   if (layoutMode && !layoutLockPosition) {
     bannerMessage.innerHTML =
       '<button type="button" data-layout-banner="freeze">Freeze</button> this view to edit.';
@@ -13429,7 +13537,7 @@ function updateBannerMessage() {
 }
 
 function updateAddModeFromShift() {
-  if (distanceSelectMode) {
+  if (distanceSelectMode || addIntervalMode) {
     isAddMode = false;
   } else if (!is3DMode) {
     isAddMode = false;
@@ -14856,6 +14964,52 @@ function openFindRatioDialog() {
   });
 }
 
+function populateAddIntervalOptions() {
+  if (!addIntervalSelect) {
+    return;
+  }
+  addIntervalSelect.innerHTML = "";
+  const customOption = document.createElement("option");
+  customOption.value = "custom";
+  customOption.textContent = "Custom";
+  addIntervalSelect.appendChild(customOption);
+  const sorted = [...commaEntries].sort((a, b) => {
+    const aValue = Number(a.numerator) / Number(a.denominator);
+    const bValue = Number(b.numerator) / Number(b.denominator);
+    if (aValue !== bValue) {
+      return aValue - bValue;
+    }
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+  sorted.forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = `${entry.numerator}:${entry.denominator}`;
+    option.textContent = `${entry.numerator}:${entry.denominator}, ${entry.name}`;
+    addIntervalSelect.appendChild(option);
+  });
+  addIntervalSelect.value = "custom";
+}
+
+function openAddIntervalDialog() {
+  if (!addIntervalDialog) {
+    return;
+  }
+  populateAddIntervalOptions();
+  if (addIntervalInput) {
+    addIntervalInput.disabled = false;
+    addIntervalInput.value = "";
+  }
+  if (typeof addIntervalDialog.showModal === "function") {
+    addIntervalDialog.showModal();
+  }
+  requestAnimationFrame(() => {
+    if (addIntervalInput) {
+      addIntervalInput.focus();
+      addIntervalInput.select();
+    }
+  });
+}
+
 function closeOptionsPanel() {
   if (!optionsToggle || !optionsPanel) {
     return;
@@ -15010,6 +15164,22 @@ function setDistanceSelectMode(enabled) {
     distanceSelectDrag = null;
     distanceLabelDrag = null;
     distanceCurveDrag = null;
+  }
+  updateBannerMessage();
+  draw();
+}
+
+function setAddIntervalMode(enabled) {
+  const nextEnabled = Boolean(enabled);
+  if (addIntervalMode === nextEnabled) {
+    return;
+  }
+  addIntervalMode = nextEnabled;
+  if (addIntervalMode) {
+    addIntervalSourceNodeId = null;
+    if (distanceSelectMode) {
+      setDistanceSelectMode(false);
+    }
   }
   updateBannerMessage();
   draw();
@@ -15186,6 +15356,7 @@ async function loadCommas() {
   } catch (error) {
     console.warn("Failed to load commas", error);
   }
+  populateAddIntervalOptions();
 }
 
 const PRESET_PARAM = "s";
@@ -19100,6 +19271,12 @@ if (findRatioButton) {
     openFindRatioDialog();
   });
 }
+if (addIntervalButton) {
+  addIntervalButton.addEventListener("click", () => {
+    closeTopMenus();
+    setAddIntervalMode(true);
+  });
+}
 if (distanceSelectTriggers.length) {
   distanceSelectTriggers.forEach((button) => {
     button.addEventListener("click", (event) => {
@@ -20175,6 +20352,30 @@ if (findRatioInput) {
     }
   });
 }
+if (addIntervalInput) {
+  addIntervalInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (addIntervalDialog) {
+        addIntervalDialog.returnValue = "add";
+        addIntervalDialog.close();
+      }
+    }
+  });
+}
+if (addIntervalSelect && addIntervalInput) {
+  addIntervalSelect.addEventListener("change", () => {
+    const value = String(addIntervalSelect.value || "custom");
+    if (value === "custom") {
+      addIntervalInput.disabled = false;
+      addIntervalInput.value = "";
+      addIntervalInput.focus();
+      return;
+    }
+    addIntervalInput.value = value;
+    addIntervalInput.disabled = true;
+  });
+}
 if (findRatioDialog) {
   findRatioDialog.addEventListener("close", () => {
     if (findRatioDialog.returnValue === "find") {
@@ -20182,6 +20383,28 @@ if (findRatioDialog) {
     }
     if (findRatioInput) {
       findRatioInput.value = "";
+    }
+  });
+}
+if (addIntervalDialog) {
+  addIntervalDialog.addEventListener("close", () => {
+    if (addIntervalDialog.returnValue === "add") {
+      const sourceNode = addIntervalSourceNodeId
+        ? nodeById.get(addIntervalSourceNodeId)
+        : null;
+      const intervalRatio = getSelectedIntervalRatio();
+      if (!sourceNode) {
+        alert("Please select a starting node.");
+      } else if (!intervalRatio) {
+        alert("Please enter a ratio like 81:80 or 81/80.");
+      } else if (!applyAddIntervalFromSource(sourceNode, intervalRatio)) {
+        alert("Unable to place that interval on the current lattice.");
+      }
+    }
+    addIntervalSourceNodeId = null;
+    if (addIntervalInput) {
+      addIntervalInput.value = "";
+      addIntervalInput.disabled = false;
     }
   });
 }
@@ -20640,6 +20863,9 @@ window.addEventListener("keydown", (event) => {
   if (event.key.toLowerCase() === "o") {
     oHeld = true;
   }
+  if (event.key.toLowerCase() === "i") {
+    iHeld = true;
+  }
 if (triangleLabelDialog) {
   triangleLabelDialog.addEventListener("close", () => {
     if (!triangleLabelTargetKey || !triangleLabelTargetTri) {
@@ -20829,6 +21055,9 @@ window.addEventListener("keyup", (event) => {
   }
   if (event.key.toLowerCase() === "o") {
     oHeld = false;
+  }
+  if (event.key.toLowerCase() === "i") {
+    iHeld = false;
   }
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = false;

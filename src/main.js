@@ -160,6 +160,7 @@ const showHzToggle = document.getElementById("show-hz");
 const showCentsDeviationToggle = document.getElementById("show-cents-deviation");
 const showCentsSignToggle = document.getElementById("show-cents-sign");
 const directionalRatioLabelsToggle = document.getElementById("directional-ratio-labels");
+const connectOrphansToggle = document.getElementById("connect-orphans");
 const hejiEnabledToggle = document.getElementById("heji-enabled");
 const enharmonicsEnabledToggle = document.getElementById("enharmonics-enabled");
 const centsPrecisionButtons = document.querySelectorAll("[data-cents-precision]");
@@ -1295,6 +1296,9 @@ let showLineLabels = true;
 let showKeyMappings = true;
 let layoutKeyMappingMode = "hide";
 let showHelpEnabled = true;
+let connectOrphansEnabled = false;
+let orphanGuideNodes = new Set();
+let orphanGuideEdges = new Set();
 let uiHintDismissed = false;
 let uiHintKey = "";
 let keyboardHelpTimer = null;
@@ -6839,6 +6843,48 @@ function drawTriangleHover(nodePosMap, disableScale = false) {
 
 }
 
+function drawOrphanGuideEdges(nodePosMap) {
+  if (!connectOrphansEnabled || !orphanGuideEdges.size) {
+    return;
+  }
+  ctx.save();
+  ctx.strokeStyle = colorWithAlpha(themeColors.edge, 0.7);
+  ctx.lineWidth = 1.5;
+  orphanGuideEdges.forEach((edgeKey) => {
+    const parts = edgeKey.split("|");
+    if (parts.length !== 2) {
+      return;
+    }
+    const a = nodeById.get(Number(parts[0]));
+    const b = nodeById.get(Number(parts[1]));
+    if (!a || !b) {
+      return;
+    }
+    const startEntry = nodePosMap.get(a.id);
+    const endEntry = nodePosMap.get(b.id);
+    if (!startEntry || !endEntry) {
+      return;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+    ctx.beginPath();
+    ctx.moveTo(start.x + ux * startRadius, start.y + uy * startRadius);
+    ctx.lineTo(end.x - ux * endRadius, end.y - uy * endRadius);
+    ctx.stroke();
+  });
+  ctx.restore();
+}
+
 function getGuideRevealInfo(nodePosMap, axisEntry = null) {
   const empty = { guideNodes: new Map(), guideAnchorId: null };
   if (layoutMode) {
@@ -8750,6 +8796,9 @@ function draw() {
   addCustomConnectionSegments(nodePosMap, detailLabelSegments);
   addTriangleDiagonalSegments(nodePosMap, detailLabelSegments);
   addDistanceLineSegments(nodePosMap, detailLabelSegments);
+  const orphanResult = buildOrphanGuideSet();
+  orphanGuideNodes = orphanResult.guides;
+  orphanGuideEdges = orphanResult.edges;
   const detailLabelCollision = {
     circles: nodeRenderList
       .filter(({ node }) => node.isCenter || node.active || node.isCustom)
@@ -8846,6 +8895,7 @@ function draw() {
   }
 
   drawCustomConnections(nodePosMap);
+  drawOrphanGuideEdges(nodePosMap);
   drawGuideEdges(nodePosMap, guideNodes);
   drawTriangleDiagonals(nodePosMap, disableScale);
   drawTriangleLabels(nodePosMap, disableScale);
@@ -8875,8 +8925,9 @@ function draw() {
   nodeRenderList.forEach(({ node, pos }) => {
     const isHovered = node.id === hoverNodeId;
     const isGuide = guideNodes.has(node.id);
-  const canShowInactive = isInactiveNodeAvailable(node);
-  const canInteractInactive = !is3DMode || isAddMode || distanceSelectMode;
+    const isOrphanGuide = connectOrphansEnabled && orphanGuideNodes.has(node.id);
+    const canShowInactive = !isOrphanGuide && isInactiveNodeAvailable(node);
+    const canInteractInactive = !is3DMode || isAddMode || distanceSelectMode;
     const amplitude = nodeAmplitudes.get(node.id) || 0;
     const brightness = Math.min(1, amplitude);
     const isVisible =
@@ -8885,10 +8936,14 @@ function draw() {
       node.isCustom ||
       brightness > 0.01 ||
       isGuide ||
+      isOrphanGuide ||
       (isHovered && canShowInactive && canInteractInactive);
     let alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
     if (isGuide) {
       alpha = guideNodes.get(node.id);
+    }
+    if (isOrphanGuide) {
+      alpha = 0.18;
     }
     if (node.isCustom && !node.active) {
       alpha = 0.25;
@@ -11392,6 +11447,9 @@ function hitTestScreen(screenPoint) {
   const axisEntry = getActiveAxisEntry();
 
   nodes.forEach((node) => {
+    if (connectOrphansEnabled && orphanGuideNodes.has(node.id)) {
+      return;
+    }
     if (layoutMode && !node.isCustom && !node.isCenter && !node.active) {
       return;
     }
@@ -12169,15 +12227,19 @@ function parseRatioInput(value) {
     return null;
   }
   const divider = cleaned.includes(":") ? ":" : cleaned.includes("/") ? "/" : null;
+  let numerator = null;
+  let denominator = null;
   if (!divider) {
-    return null;
+    numerator = Math.trunc(Number(cleaned));
+    denominator = 1;
+  } else {
+    const parts = cleaned.split(divider);
+    if (parts.length !== 2) {
+      return null;
+    }
+    numerator = Math.trunc(Number(parts[0]));
+    denominator = Math.trunc(Number(parts[1]));
   }
-  const parts = cleaned.split(divider);
-  if (parts.length !== 2) {
-    return null;
-  }
-  const numerator = Math.trunc(Number(parts[0]));
-  const denominator = Math.trunc(Number(parts[1]));
   if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) {
     return null;
   }
@@ -12231,6 +12293,204 @@ function factorizeRatio(numerator, denominator) {
     map.set(prime, (map.get(prime) || 0) - exp);
   });
   return map;
+}
+
+function buildOrphanGuideSet() {
+  const guides = new Set();
+  const edgesSet = new Set();
+  if (!connectOrphansEnabled) {
+    return { guides, edges: edgesSet };
+  }
+  const expMap = new Map();
+  nodes.forEach((node) => {
+    if (node.isCustom) {
+      return;
+    }
+    if (
+      !Number.isFinite(node.exponentX) ||
+      !Number.isFinite(node.exponentY) ||
+      !Number.isFinite(node.exponentZ)
+    ) {
+      return;
+    }
+    expMap.set(`${node.exponentX},${node.exponentY},${node.exponentZ || 0}`, node);
+  });
+  const root = nodes.find((node) => node.isCenter);
+  const adjacency = new Map();
+  const addAdj = (a, b) => {
+    if (!adjacency.has(a.id)) {
+      adjacency.set(a.id, []);
+    }
+    adjacency.get(a.id).push(b.id);
+  };
+  edges.forEach(([a, b]) => {
+    if (!a.active || !b.active) {
+      return;
+    }
+    addAdj(a, b);
+    addAdj(b, a);
+  });
+  customNodes.forEach((node) => {
+    if (!node.active) {
+      return;
+    }
+    const source = nodeById.get(node.sourceNodeId);
+    if (!source || !source.active) {
+      return;
+    }
+    addAdj(node, source);
+    addAdj(source, node);
+  });
+  const connected = new Set();
+  if (root && root.active) {
+    const queue = [root.id];
+    connected.add(root.id);
+    while (queue.length) {
+      const current = queue.shift();
+      const neighbors = adjacency.get(current) || [];
+      neighbors.forEach((next) => {
+        if (!connected.has(next)) {
+          connected.add(next);
+          queue.push(next);
+        }
+      });
+    }
+  }
+  const neighborKeys = (key) => {
+    const [x, y, z] = key.split(",").map(Number);
+    return [
+      `${x + 1},${y},${z}`,
+      `${x - 1},${y},${z}`,
+      `${x},${y + 1},${z}`,
+      `${x},${y - 1},${z}`,
+      `${x},${y},${z + 1}`,
+      `${x},${y},${z - 1}`,
+    ];
+  };
+  const findMinMissingPath = (startKey, endKey) => {
+    const costMap = new Map();
+    const stepMap = new Map();
+    const prev = new Map();
+    const open = [startKey];
+    costMap.set(startKey, 0);
+    stepMap.set(startKey, 0);
+    while (open.length) {
+      let bestIndex = 0;
+      let bestKey = open[0];
+      for (let i = 1; i < open.length; i += 1) {
+        const key = open[i];
+        const cost = costMap.get(key);
+        const steps = stepMap.get(key);
+        const bestCost = costMap.get(bestKey);
+        const bestSteps = stepMap.get(bestKey);
+        if (cost < bestCost || (cost === bestCost && steps < bestSteps)) {
+          bestKey = key;
+          bestIndex = i;
+        }
+      }
+      open.splice(bestIndex, 1);
+      if (bestKey === endKey) {
+        break;
+      }
+      const neighbors = neighborKeys(bestKey);
+      neighbors.forEach((nextKey) => {
+        const nextNode = expMap.get(nextKey);
+        if (!nextNode) {
+          return;
+        }
+        const cost = nextNode.active ? 0 : 1;
+        const nextCost = costMap.get(bestKey) + cost;
+        const nextSteps = stepMap.get(bestKey) + 1;
+        const existingCost = costMap.get(nextKey);
+        const existingSteps = stepMap.get(nextKey);
+        const shouldUpdate =
+          existingCost == null ||
+          nextCost < existingCost ||
+          (nextCost === existingCost && nextSteps < existingSteps);
+        if (shouldUpdate) {
+          costMap.set(nextKey, nextCost);
+          stepMap.set(nextKey, nextSteps);
+          prev.set(nextKey, bestKey);
+          if (!open.includes(nextKey)) {
+            open.push(nextKey);
+          }
+        }
+      });
+    }
+    if (!costMap.has(endKey)) {
+      return null;
+    }
+    const path = [];
+    let cursor = endKey;
+    while (cursor) {
+      path.push(cursor);
+      cursor = prev.get(cursor);
+    }
+    path.reverse();
+    return path;
+  };
+  nodes.forEach((node) => {
+    if (!node.active) {
+      return;
+    }
+    if (connected.has(node.id)) {
+      return;
+    }
+    let exponents = null;
+    if (node.isCustom) {
+      if (Array.isArray(node.sourceExponents)) {
+        exponents = {
+          x: Number(node.sourceExponents[0]) || 0,
+          y: Number(node.sourceExponents[1]) || 0,
+          z: Number(node.sourceExponents[2]) || 0,
+        };
+      } else {
+        const source = nodeById.get(node.sourceNodeId);
+        if (source) {
+          exponents = {
+            x: Number(source.exponentX) || 0,
+            y: Number(source.exponentY) || 0,
+            z: Number(source.exponentZ) || 0,
+          };
+        }
+      }
+    } else {
+      exponents = {
+        x: Number(node.exponentX) || 0,
+        y: Number(node.exponentY) || 0,
+        z: Number(node.exponentZ) || 0,
+      };
+    }
+    if (!exponents) {
+      return;
+    }
+    const startKey = `${exponents.x},${exponents.y},${exponents.z}`;
+    const endKey = "0,0,0";
+    if (!expMap.has(startKey) || !expMap.has(endKey)) {
+      return;
+    }
+    const path = findMinMissingPath(startKey, endKey);
+    if (!path || path.length < 2) {
+      return;
+    }
+    for (let i = 0; i < path.length; i += 1) {
+      const key = path[i];
+      const stepNode = expMap.get(key);
+      if (stepNode && !stepNode.active) {
+        guides.add(stepNode.id);
+      }
+      if (i > 0) {
+        const prevKey = path[i - 1];
+        const a = expMap.get(prevKey);
+        const b = expMap.get(key);
+        if (a && b) {
+          const edgeKey = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+          edgesSet.add(edgeKey);
+        }
+      }
+    }
+  });
+  return { guides, edges: edgesSet };
 }
 
 function getAxisPrimeValues() {
@@ -15258,6 +15518,7 @@ function getPresetState() {
     active,
     customNodes: customState,
     mode3d: is3DMode,
+    connectOrphans: connectOrphansEnabled,
     distances: analysisLayers.distances,
     view: {
       zoom: view.zoom,
@@ -16254,6 +16515,12 @@ function applyPresetState(state) {
     showCentsSign = state.showCentsSign;
     if (showCentsSignToggle) {
       showCentsSignToggle.checked = showCentsSign;
+    }
+  }
+  if (typeof state.connectOrphans === "boolean") {
+    connectOrphansEnabled = state.connectOrphans;
+    if (connectOrphansToggle) {
+      connectOrphansToggle.checked = connectOrphansEnabled;
     }
   }
   if (typeof state.directionalRatioLabels === "boolean") {
@@ -18549,6 +18816,9 @@ if (showCentsSignToggle) {
 if (directionalRatioLabelsToggle) {
   directionalRatioLabelsToggle.checked = directionalRatioLabels;
 }
+if (connectOrphansToggle) {
+  connectOrphansToggle.checked = connectOrphansEnabled;
+}
 if (hejiEnabledToggle) {
   hejiEnabledToggle.checked = hejiEnabled;
 }
@@ -18810,6 +19080,13 @@ if (analysisShowMicrotonalToggle) {
 if (directionalRatioLabelsToggle) {
   directionalRatioLabelsToggle.addEventListener("change", () => {
     directionalRatioLabels = directionalRatioLabelsToggle.checked;
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (connectOrphansToggle) {
+  connectOrphansToggle.addEventListener("change", () => {
+    connectOrphansEnabled = connectOrphansToggle.checked;
     draw();
     schedulePresetUrlUpdate();
   });
@@ -19832,6 +20109,17 @@ if (ratioWheelLarge) {
   ratioWheelLarge.addEventListener("mousemove", handleRatioWheelHover);
   ratioWheelLarge.addEventListener("mouseleave", clearRatioWheelHover);
   ratioWheelLarge.addEventListener("click", handleRatioWheelClick);
+}
+if (findRatioInput) {
+  findRatioInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault();
+      if (findRatioDialog) {
+        findRatioDialog.returnValue = "find";
+        findRatioDialog.close();
+      }
+    }
+  });
 }
 if (findRatioDialog) {
   findRatioDialog.addEventListener("close", () => {

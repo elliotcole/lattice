@@ -304,6 +304,8 @@ const distanceEdgeOverrides = new Map();
 let distanceLabelDrag = null;
 let distanceSelectDrag = null;
 let distanceCurveDrag = null;
+let pendingDistanceLabelClickTimer = null;
+let pendingDistanceLabelClickKey = "";
 
 function clampZoom(value) {
   return Math.min(2.2, Math.max(0.5, value));
@@ -967,7 +969,7 @@ const primes = [
 ];
 const GRID_COLS = 20;
 const GRID_ROWS = 20;
-const GRID_DEPTH = 7;
+const GRID_DEPTH = 12;
 const GRID_SPACING = 120;
 const BUILTIN_WAVEFORMS = ["sine", "triangle", "square", "sawtooth"];
 const CUSTOM_WAVEFORMS = new Set(customOscillatorTypes || []);
@@ -5981,9 +5983,9 @@ function syncLayoutFontVars() {
 }
 
 const AXIS_EDGE_COLORS = {
-  x: "rgba(59, 130, 246, 0.5)",
-  y: "rgba(239, 68, 68, 0.5)",
-  z: "rgba(16, 185, 129, 0.5)",
+  x: "rgba(59, 130, 246, 0.3)",
+  y: "rgba(239, 68, 68, 0.3)",
+  z: "rgba(16, 185, 129, 0.3)",
 };
 const BASE_LIGHT_DIR = { x: -0.6, y: -0.8, z: 0 };
 
@@ -8904,12 +8906,6 @@ function draw() {
     refreshThemeColors();
   }
   const distanceFocusMode = distanceSelectMode && analysisLayers.distances;
-  const nonDistanceAlpha = distanceFocusMode ? 0.28 : 1;
-
-  if (nonDistanceAlpha < 1) {
-    ctx.save();
-    ctx.globalAlpha = nonDistanceAlpha;
-  }
   if (layoutMode) {
     drawLayoutPage({ drawAxes: !layoutAxisEdit });
   }
@@ -9055,18 +9051,11 @@ function draw() {
     });
   }
 
-  if (nonDistanceAlpha < 1) {
-    ctx.restore();
-  }
   if (showDistances) {
     drawDistanceConnections(nodePosMap);
   }
   if (distanceSelectMode && analysisLayers.distances) {
     drawDistanceDragPreview(nodePosMap);
-  }
-  if (nonDistanceAlpha < 1) {
-    ctx.save();
-    ctx.globalAlpha = nonDistanceAlpha;
   }
   if (showMicrotonal) {
     drawCommaConnections(nodePosMap);
@@ -9139,6 +9128,9 @@ function draw() {
     }
     if (isIntervalDim) {
       alpha *= 0.18;
+    }
+    if (distanceFocusMode) {
+      alpha *= AXIS_DIM_FACTOR;
     }
     const textAlpha = alpha;
     const intervalTint = isIntervalDim ? "#9a9a9a" : null;
@@ -9718,10 +9710,6 @@ function draw() {
     drawLayoutAxisLegend(layoutAxisEdit, { showHandles: true });
     ctx.restore();
   }
-  if (nonDistanceAlpha < 1) {
-    ctx.restore();
-  }
-
   syncNavViewSliders();
 
   updateBannerMessage();
@@ -10173,6 +10161,7 @@ function onPointerDown(event) {
         lineStart: labelHit.lineStart,
         lineEnd: labelHit.lineEnd,
         control: labelHit.control || labelHit.defaultControl,
+        startPoint: { x: event.offsetX, y: event.offsetY },
       };
       canvas.setPointerCapture(event.pointerId);
       return;
@@ -10667,6 +10656,7 @@ function onPointerDown(event) {
 }
 
 function onCanvasDoubleClick(event) {
+  clearPendingDistanceLabelClick();
   if (distanceSelectMode) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const labelHit = hitTestDistanceLabel(screenPoint);
@@ -11168,7 +11158,14 @@ function onPointerUp(event) {
     return;
   }
   if (distanceLabelDrag) {
+    const dragInfo = distanceLabelDrag;
     distanceLabelDrag = null;
+    const start = dragInfo.startPoint;
+    const movedLabel =
+      start ? Math.hypot(event.offsetX - start.x, event.offsetY - start.y) : 0;
+    if (movedLabel < 4) {
+      queueDistanceLabelSingleClick(dragInfo);
+    }
     return;
   }
   if (distanceCurveDrag) {
@@ -11241,6 +11238,13 @@ function onPointerUp(event) {
 
   if (moved < 4) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
+    if (analysisLayers.distances) {
+      const labelHit = hitTestDistanceLabel(screenPoint);
+      if (labelHit) {
+        queueDistanceLabelSingleClick(labelHit);
+        return;
+      }
+    }
     const hit = hitTestScreen(screenPoint);
     if (addIntervalMode) {
       if (hit && hit.active) {
@@ -12041,6 +12045,33 @@ function hitTestDistanceLine(screenPoint) {
   return best;
 }
 
+function clearPendingDistanceLabelClick() {
+  if (pendingDistanceLabelClickTimer != null) {
+    clearTimeout(pendingDistanceLabelClickTimer);
+    pendingDistanceLabelClickTimer = null;
+  }
+  pendingDistanceLabelClickKey = "";
+}
+
+function queueDistanceLabelSingleClick(edge) {
+  if (!edge || !edge.key) {
+    return;
+  }
+  clearPendingDistanceLabelClick();
+  pendingDistanceLabelClickKey = edge.key;
+  pendingDistanceLabelClickTimer = setTimeout(() => {
+    pendingDistanceLabelClickTimer = null;
+    const key = pendingDistanceLabelClickKey;
+    pendingDistanceLabelClickKey = "";
+    const activeEdge = distanceEdges.find((entry) => entry && entry.key === key);
+    if (!activeEdge) {
+      return;
+    }
+    toggleCommaEdgeVoices(activeEdge.a, activeEdge.b);
+    draw();
+  }, 260);
+}
+
 function hitTestAxisLegend(screenPoint) {
   if (!layoutMode) {
     return null;
@@ -12314,7 +12345,7 @@ function drawGrid() {
     }
   };
 
-  drawPlaneGrid(0.175);
+  drawPlaneGrid(0.35);
   ctx.restore();
 }
 
@@ -15351,6 +15382,7 @@ function setDistanceSelectMode(enabled) {
   if (distanceSelectMode === nextEnabled) {
     return;
   }
+  clearPendingDistanceLabelClick();
   distanceSelectMode = nextEnabled;
   if (!distanceSelectMode) {
     distanceSelectDrag = null;

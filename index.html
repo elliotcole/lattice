@@ -322,6 +322,12 @@
             </div>
             <div class="control-group">
               <div class="control-inline">
+                <input id="layout-show-ratio-cents" type="checkbox" />
+                <label for="layout-show-ratio-cents">Cents</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
                 <input id="layout-show-hz" type="checkbox" />
                 <label for="layout-show-hz">Hz</label>
               </div>
@@ -982,6 +988,12 @@
             </div>
             <div class="control-group">
               <div class="control-inline">
+                <input id="show-ratio-cents" type="checkbox" />
+                <label for="show-ratio-cents">Cents</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
                 <input id="show-hz" type="checkbox" />
                 <label for="show-hz">Hz</label>
               </div>
@@ -1163,6 +1175,88 @@
         </menu>
       </form>
     </dialog>
+    <div id="interval-chart-overlay" class="interval-chart-overlay" hidden>
+      <div class="interval-chart-window" role="dialog" aria-modal="true" aria-label="Interval chart">
+        <div class="interval-chart-header">
+          <div class="interval-chart-title">Calculate Interval</div>
+        </div>
+        <div class="interval-chart-subheader">
+          <label>
+            Add an interval
+            <select id="interval-chart-direction">
+              <option value="above" selected>above</option>
+              <option value="below">below</option>
+            </select>
+            <span id="interval-chart-source-ratio"></span>
+          </label>
+        </div>
+        <div class="interval-chart-body">
+          <div class="interval-chart-filters">
+            <div class="interval-chart-filter-title">Types</div>
+            <div class="interval-chart-filter-actions">
+              <button id="interval-chart-select-all" type="button">Select all</button>
+              <button id="interval-chart-select-none" type="button">None</button>
+            </div>
+            <div class="interval-chart-filter-extra">
+              <label class="interval-chart-type">
+                <input id="interval-chart-superparticular" type="checkbox" />
+                <span>Superparticular only</span>
+              </label>
+            </div>
+            <div id="interval-chart-type-list" class="interval-chart-type-list"></div>
+          </div>
+          <div class="interval-chart-table-column">
+            <div class="interval-chart-toolbar interval-chart-toolbar-search">
+              <input
+                id="interval-chart-search"
+                type="search"
+                placeholder="Search ratios, names, types, sources..."
+              />
+              <label class="interval-chart-listen">
+                <input id="interval-chart-listen" type="checkbox" />
+                <span>Listen</span>
+              </label>
+            </div>
+            <div class="interval-chart-table-wrap">
+              <div class="interval-chart-toolbar"></div>
+              <div id="interval-chart-custom-active" class="interval-chart-custom-active" hidden>
+                Custom ratio selected — table disabled
+              </div>
+              <table class="interval-chart-table">
+                <thead>
+                  <tr>
+                    <th>Ratio</th>
+                    <th>Computed Cents</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Prime factors</th>
+                    <th>Description</th>
+                    <th>Source</th>
+                  </tr>
+                </thead>
+                <tbody id="interval-chart-table-body"></tbody>
+              </table>
+              <div class="interval-chart-custom">
+                <label class="interval-chart-custom-label">
+                  Custom Ratio
+                  <input
+                    id="interval-chart-custom-ratio"
+                    type="text"
+                    placeholder="Or use a custom ratio (e.g. 81:80 or 128/75)"
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="interval-chart-actions">
+          <button id="interval-chart-calc" type="button" class="button-full">
+            Calculate Interval
+          </button>
+          <button id="interval-chart-close" type="button" class="button-full">Cancel</button>
+        </div>
+      </div>
+    </div>
 
     <script type="module" src="./src/main.js"></script>
   </body>

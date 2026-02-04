@@ -1,4 +1,5 @@
 import { customOscillatorTypes, customOscillators } from "./custom-oscillators";
+import intervalChartData from "./intervals_names_gann.json";
 import opentype from "opentype.js";
 const canvas = document.getElementById("lattice");
 const ctx = canvas.getContext("2d");
@@ -10,6 +11,23 @@ const optionsToggle = document.getElementById("options-toggle");
 const optionsPanel = document.getElementById("options-panel");
 const calculateToggle = document.getElementById("calculate-toggle");
 const calculatePanel = document.getElementById("calculate-panel");
+const intervalChartButton = document.getElementById("interval-chart");
+const intervalChartOverlay = document.getElementById("interval-chart-overlay");
+const intervalChartCloseButton = document.getElementById("interval-chart-close");
+const intervalChartTypeList = document.getElementById("interval-chart-type-list");
+const intervalChartTableBody = document.getElementById("interval-chart-table-body");
+const intervalChartSearchInput = document.getElementById("interval-chart-search");
+const intervalChartSelectAllButton = document.getElementById("interval-chart-select-all");
+const intervalChartSelectNoneButton = document.getElementById("interval-chart-select-none");
+const intervalChartListenToggle = document.getElementById("interval-chart-listen");
+const intervalChartCustomInput = document.getElementById("interval-chart-custom-ratio");
+const intervalChartCustomActive = document.getElementById("interval-chart-custom-active");
+const intervalChartCalcButton = document.getElementById("interval-chart-calc");
+const intervalChartDirectionSelect = document.getElementById("interval-chart-direction");
+const intervalChartSourceRatio = document.getElementById("interval-chart-source-ratio");
+const intervalChartSuperparticularToggle = document.getElementById(
+  "interval-chart-superparticular"
+);
 const layoutModeToggle = document.getElementById("layout-mode");
 const layoutPanel = document.getElementById("layout-panel");
 const layoutPanelToggle = document.getElementById("layout-panel-toggle");
@@ -157,6 +175,7 @@ const envelopeTimeModeInputs = document.querySelectorAll(
 const featureModeButtons = document.querySelectorAll("[data-feature-mode]");
 const spellingModeButtons = document.querySelectorAll("[data-spelling-mode]");
 const showHzToggle = document.getElementById("show-hz");
+const showRatioCentsToggle = document.getElementById("show-ratio-cents");
 const showCentsDeviationToggle = document.getElementById("show-cents-deviation");
 const showCentsSignToggle = document.getElementById("show-cents-sign");
 const directionalRatioLabelsToggle = document.getElementById("directional-ratio-labels");
@@ -216,6 +235,7 @@ const layoutKeyMappingsGroup = document.getElementById("layout-key-mappings-grou
 const layoutHejiEnabledToggle = document.getElementById("layout-heji-enabled");
 const layoutEnharmonicsEnabledToggle = document.getElementById("layout-enharmonics-enabled");
 const layoutShowHzToggle = document.getElementById("layout-show-hz");
+const layoutShowRatioCentsToggle = document.getElementById("layout-show-ratio-cents");
 const layoutShowCentsDeviationToggle = document.getElementById("layout-show-cents-deviation");
 const layoutCirclesToggle = document.getElementById("layout-circles");
 const layoutKeyMappingsToggle = document.getElementById("layout-key-mappings-toggle");
@@ -260,6 +280,18 @@ const commaEdges = [];
 const commaNodeRings = new Map();
 const commaRatioMap = new Map();
 let commaEntries = [];
+let intervalChartEntries = [];
+let intervalChartTypes = [];
+let intervalChartLoaded = false;
+let intervalChartSelectedTypes = new Set();
+let intervalChartSearch = "";
+let intervalChartListenEnabled = false;
+let intervalChartAnimating = false;
+const intervalChartActive = new Map();
+const intervalChartRowMap = new Map();
+let intervalChartSelectedKey = null;
+let intervalChartDirection = "above";
+let intervalChartSuperparticularOnly = false;
 const DISTANCE_MODE_BANNER = "Drag between nodes to create distance lines. ESC to return.";
 const COMMA_MODE_BANNER = "Labeling microtonal intervals. ESC to exit.";
 const ADD_INTERVAL_BANNER = "Add interval from any node. Select starting node.";
@@ -1300,6 +1332,7 @@ let spellingHintActive = false;
 let fundamentalSpelling = "sharp";
 let featureMode = "ratio";
 let showHz = false;
+let showRatioCents = false;
 let showCentsDeviation = true;
 let showCentsSign = false;
 let directionalRatioLabels = false;
@@ -3852,6 +3885,11 @@ function handleKeyDown(event) {
     return;
   }
   const key = event.key.toLowerCase();
+  if (intervalChartOverlay && !intervalChartOverlay.hidden && key === "escape") {
+    event.preventDefault();
+    closeIntervalChart();
+    return;
+  }
   if (customPianoMapMode && key === "escape") {
     event.preventDefault();
     setCustomPianoMapMode(false);
@@ -4677,6 +4715,7 @@ function getLabelCacheKey() {
     centsPrecision,
     showCentsSign ? "cents" : "no-cents",
     showHz ? "hz" : "no-hz",
+    showRatioCents ? "ratio-cents" : "no-ratio-cents",
     fundamentalSpelling,
   ].join("|");
 }
@@ -4705,6 +4744,55 @@ function formatOctaveShiftLabel(shift) {
   }
   const factor = Math.pow(2, Math.abs(shift));
   return shift > 0 ? `x${factor}` : `÷${factor}`;
+}
+
+function formatRatioCentsLabel(node) {
+  if (!node) {
+    return "";
+  }
+  const numerator = Number(node.numerator);
+  const denominator = Number(node.denominator);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return "";
+  }
+  let ratio = numerator / denominator;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return "";
+  }
+  const shift = getNodeOctaveShift(node);
+  if (Number.isFinite(shift) && shift !== 0) {
+    ratio *= Math.pow(2, shift);
+  }
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return "";
+  }
+  const cents = 1200 * Math.log2(ratio);
+  if (!Number.isFinite(cents)) {
+    return "";
+  }
+  const precision = Math.min(2, Math.max(0, Number(centsPrecision) || 0));
+  return cents.toFixed(precision);
+}
+
+function enforceCentsDisplayMode() {
+  if (showRatioCents && showCentsDeviation) {
+    showCentsDeviation = false;
+  }
+  if (showCentsDeviation) {
+    showRatioCents = false;
+  }
+  if (showCentsDeviationToggle) {
+    showCentsDeviationToggle.checked = showCentsDeviation;
+  }
+  if (layoutShowCentsDeviationToggle) {
+    layoutShowCentsDeviationToggle.checked = showCentsDeviation;
+  }
+  if (showRatioCentsToggle) {
+    showRatioCentsToggle.checked = showRatioCents;
+  }
+  if (layoutShowRatioCentsToggle) {
+    layoutShowRatioCentsToggle.checked = showRatioCents;
+  }
 }
 
 function getOctaveOffsetKey(node) {
@@ -9260,7 +9348,7 @@ function draw() {
         ctx.fillText(layout.lines[0], pos.x, baseY - lineOffset);
         ctx.fillText(layout.lines[1], pos.x, baseY + lineOffset);
         ctx.save();
-        ctx.strokeStyle = themeColors.textPrimary;
+        ctx.strokeStyle = textColorPrimary;
         ctx.lineWidth = Math.max(1, Math.round(layout.size * 0.06));
         ctx.beginPath();
         ctx.moveTo(pos.x - lineWidth / 2, lineY);
@@ -9293,16 +9381,21 @@ function draw() {
         { wrap: enharmonicsEnabled },
         displayInfo
       );
+      const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
       const defaultOffset = getDefaultNoteDetailOffset(radius, 1);
       const lineWidth = ctx.measureText(ratioText).width;
       const centsWidth = centsLabel ? ctx.measureText(centsLabel).width : 0;
+      const ratioCentsWidth = ratioCentsLabel ? ctx.measureText(ratioCentsLabel).width : 0;
       const hzWidth =
         showHz && Number.isFinite(node.freq)
           ? ctx.measureText(`${node.freq.toFixed(2)} Hz`).width
           : 0;
-      const labelWidth = Math.max(lineWidth, centsWidth, hzWidth);
+      const labelWidth = Math.max(lineWidth, centsWidth, ratioCentsWidth, hzWidth);
       const lineCount =
-        1 + (centsLabel ? 1 : 0) + (showHz && Number.isFinite(node.freq) ? 1 : 0);
+        1 +
+        (centsLabel ? 1 : 0) +
+        (ratioCentsLabel ? 1 : 0) +
+        (showHz && Number.isFinite(node.freq) ? 1 : 0);
       const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
       const rawLabelPos =
         layoutMode && layoutLabelOffsets.has(node.id)
@@ -9347,6 +9440,10 @@ function draw() {
         });
         lineOffset += detailSize + 4;
       }
+      if (ratioCentsLabel) {
+        ctx.fillText(ratioCentsLabel, ratioX, ratioY + lineOffset);
+        lineOffset += detailSize + 4;
+      }
       if (showHz && Number.isFinite(node.freq)) {
         ctx.fillText(`${node.freq.toFixed(2)} Hz`, ratioX, ratioY + lineOffset);
       }
@@ -9371,18 +9468,21 @@ function draw() {
         .join("");
       const restText = hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "";
       const line1 = `${annotation.baseText || ""}${suffixText}${restText}`;
+      const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
       const lineWidth = line1 ? ctx.measureText(line1).width : 0;
       const centsWidth = hejiEnabled && centsLabel ? ctx.measureText(centsLabel).width : 0;
       const octaveWidth = octaveLabel ? ctx.measureText(octaveLabel).width : 0;
+      const ratioCentsWidth = ratioCentsLabel ? ctx.measureText(ratioCentsLabel).width : 0;
       const hzWidth =
         showHz && Number.isFinite(node.freq)
           ? ctx.measureText(`${node.freq.toFixed(2)} Hz`).width
           : 0;
-      const labelWidth = Math.max(lineWidth, centsWidth, octaveWidth, hzWidth);
+      const labelWidth = Math.max(lineWidth, centsWidth, octaveWidth, ratioCentsWidth, hzWidth);
       const lineCount =
         1 +
         (hejiEnabled && centsLabel ? 1 : 0) +
         (octaveLabel ? 1 : 0) +
+        (ratioCentsLabel ? 1 : 0) +
         (showHz && Number.isFinite(node.freq) ? 1 : 0);
       const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
       const rawLabelPos =
@@ -9450,6 +9550,16 @@ function draw() {
         ctx.textBaseline = "top";
         ctx.fillStyle = textColorSecondary;
         ctx.fillText(octaveLabel, labelPos.x, labelPos.y + lineOffset);
+        ctx.restore();
+        lineOffset += detailSize + 4;
+      }
+      if (ratioCentsLabel) {
+        ctx.save();
+        ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = textColorSecondary;
+        ctx.fillText(ratioCentsLabel, labelPos.x, labelPos.y + lineOffset);
         ctx.restore();
         lineOffset += detailSize + 4;
       }
@@ -12647,6 +12757,33 @@ function findRatioTargetNode(target) {
   );
 }
 
+function tryActivateRatioLayer(desired) {
+  if (is3DMode || isFlattened2D) {
+    return false;
+  }
+  if (!Number.isFinite(desired.z) || desired.z === 0) {
+    return false;
+  }
+  const centerX = Math.floor(GRID_COLS / 2);
+  const centerY = Math.floor(GRID_ROWS / 2);
+  const offsetX = Number(latticeExponentOffset.x) || 0;
+  const offsetY = Number(latticeExponentOffset.y) || 0;
+  const minX = -centerX - offsetX;
+  const maxX = GRID_COLS - 1 - centerX - offsetX;
+  const minY = -centerY - offsetY;
+  const maxY = GRID_ROWS - 1 - centerY - offsetY;
+  if (desired.x < minX || desired.x > maxX || desired.y < minY || desired.y > maxY) {
+    return false;
+  }
+  const activeKeys = captureActiveNodeKeys();
+  latticeExponentOffset = {
+    ...latticeExponentOffset,
+    z: -desired.z,
+  };
+  rebuildLattice(activeKeys);
+  return true;
+}
+
 function findOrCreateRatioTargetNode(target) {
   const existing = findRatioTargetNode(target);
   if (existing) {
@@ -12660,6 +12797,13 @@ function findOrCreateRatioTargetNode(target) {
     y: axisPrimes.y ? factors.get(axisPrimes.y) || 0 : 0,
     z: axisPrimes.z ? factors.get(axisPrimes.z) || 0 : 0,
   };
+  if (tryActivateRatioLayer(desired)) {
+    const shifted = findRatioTargetNode(target);
+    if (shifted) {
+      activateNode(shifted);
+      return shifted;
+    }
+  }
   const parent = findBestParentNode(desired);
   if (!parent) {
     return null;
@@ -12769,11 +12913,12 @@ function getSelectedIntervalRatio() {
   return parseRatioInput(addIntervalInput.value);
 }
 
-function applyAddIntervalFromSource(sourceNode, intervalRatio) {
+function applyAddIntervalFromSource(sourceNode, intervalRatio, directionOverride = null) {
   if (!sourceNode || !intervalRatio) {
     return null;
   }
-  const directionValue = addIntervalDirection ? addIntervalDirection.value : "above";
+  const directionValue =
+    directionOverride || (addIntervalDirection ? addIntervalDirection.value : "above");
   const useAbove = directionValue !== "below";
   const stepNumerator = useAbove ? intervalRatio.numerator : intervalRatio.denominator;
   const stepDenominator = useAbove ? intervalRatio.denominator : intervalRatio.numerator;
@@ -12816,7 +12961,7 @@ function startAddIntervalFromNode(node) {
       draw();
     }
   }, 520);
-  openAddIntervalDialog();
+  openIntervalChart();
 }
 
 function normalizeCommaRatio(numerator, denominator) {
@@ -15359,6 +15504,527 @@ async function loadCommas() {
   populateAddIntervalOptions();
 }
 
+async function loadIntervalChartEntries() {
+  if (intervalChartLoaded) {
+    return;
+  }
+  intervalChartEntries = [];
+  intervalChartTypes = [];
+  intervalChartSelectedTypes = new Set();
+  try {
+    const entries = Array.isArray(intervalChartData) ? intervalChartData : [];
+    entries.forEach((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return;
+      }
+      const numerator = Number(entry.numerator);
+      const denominator = Number(entry.denominator);
+      if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || !denominator) {
+        return;
+      }
+      intervalChartEntries.push({
+        numerator,
+        denominator,
+        name: String(entry.name || "").trim(),
+        type: String(entry.type || "unknown").trim() || "unknown",
+        description: String(entry.description || "").trim(),
+        source: String(entry.source || "").trim(),
+      });
+    });
+    intervalChartEntries.sort(
+      (a, b) => a.numerator / a.denominator - b.numerator / b.denominator
+    );
+    const typeSet = new Set(intervalChartEntries.map((entry) => entry.type));
+    intervalChartTypes = Array.from(typeSet).sort((a, b) => a.localeCompare(b));
+    intervalChartTypes.forEach((type) => intervalChartSelectedTypes.add(type));
+    intervalChartLoaded = true;
+  } catch (error) {
+    console.warn("Failed to load interval chart entries", error);
+  }
+  renderIntervalChartTypes();
+  renderIntervalChartTable();
+}
+
+function formatIntervalChartCents(numerator, denominator) {
+  const ratio = numerator / denominator;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return "";
+  }
+  const cents = 1200 * Math.log2(ratio);
+  if (!Number.isFinite(cents)) {
+    return "";
+  }
+  return cents.toFixed(4);
+}
+
+function getIntervalChartDisplayRatio(entry) {
+  if (!entry) {
+    return { numerator: 0, denominator: 0, ratio: NaN };
+  }
+  if (intervalChartDirection === "below") {
+    return {
+      numerator: entry.denominator,
+      denominator: entry.numerator,
+      ratio: entry.denominator / entry.numerator,
+    };
+  }
+  return {
+    numerator: entry.numerator,
+    denominator: entry.denominator,
+    ratio: entry.numerator / entry.denominator,
+  };
+}
+
+function formatIntervalChartDisplayCents(entry) {
+  const display = getIntervalChartDisplayRatio(entry);
+  if (!Number.isFinite(display.ratio) || display.ratio <= 0) {
+    return "";
+  }
+  const cents = 1200 * Math.log2(display.ratio);
+  if (!Number.isFinite(cents)) {
+    return "";
+  }
+  return cents.toFixed(4);
+}
+
+function formatIntervalChartPrimeFactors(entry) {
+  const display = getIntervalChartDisplayRatio(entry);
+  if (!Number.isFinite(display.numerator) || !Number.isFinite(display.denominator)) {
+    return { primes: "", factors: "" };
+  }
+  const map = factorizeRatio(display.numerator, display.denominator);
+  const primes = Array.from(map.entries())
+    .filter(([, exp]) => exp !== 0)
+    .map(([prime]) => Number(prime))
+    .sort((a, b) => a - b);
+  const primeList = primes.join(", ");
+  const factorList = primes
+    .map((prime) => {
+      const exp = map.get(prime) || 0;
+      if (exp === 1) {
+        return String(prime);
+      }
+      return `${prime}^${exp}`;
+    })
+    .join(" ");
+  return { primes: primeList, factors: factorList };
+}
+
+function isSuperparticularRatio(entry) {
+  if (!entry) {
+    return false;
+  }
+  const num = Number(entry.numerator);
+  const den = Number(entry.denominator);
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) {
+    return false;
+  }
+  return Math.abs(num - den) === 1;
+}
+
+function intervalChartMatchesSearch(entry) {
+  if (!intervalChartSearch) {
+    return !intervalChartSuperparticularOnly || isSuperparticularRatio(entry);
+  }
+  if (intervalChartSuperparticularOnly && !isSuperparticularRatio(entry)) {
+    return false;
+  }
+  const query = intervalChartSearch.toLowerCase();
+  const display = getIntervalChartDisplayRatio(entry);
+  const ratioText = `${display.numerator}:${display.denominator}`;
+  const centsText = formatIntervalChartDisplayCents(entry);
+  const factorsText = formatIntervalChartPrimeFactors(entry);
+  const haystack = [
+    ratioText,
+    centsText,
+    factorsText.primes,
+    factorsText.factors,
+    entry.name,
+    entry.type,
+    entry.description,
+    entry.source,
+  ]
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
+function renderIntervalChartTypes() {
+  if (!intervalChartTypeList) {
+    return;
+  }
+  intervalChartTypeList.innerHTML = "";
+  if (!intervalChartTypes.length) {
+    return;
+  }
+  const priority = [
+    "half-step",
+    "semitone",
+    "second",
+    "whole tone",
+    "third",
+    "fourth",
+    "tritone",
+    "fifth",
+    "sixth",
+    "seventh",
+  ];
+  const available = new Set(intervalChartTypes);
+  const primary = priority.filter((type) => available.has(type));
+  const secondary = intervalChartTypes
+    .filter((type) => !priority.includes(type))
+    .sort((a, b) => a.localeCompare(b));
+  const fragment = document.createDocumentFragment();
+  const addTypeRow = (type, container) => {
+    const id = `interval-chart-type-${type.replace(/\s+/g, "-")}`;
+    const wrapper = document.createElement("label");
+    wrapper.className = "interval-chart-type is-child";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.id = id;
+    input.checked = intervalChartSelectedTypes.has(type);
+    input.addEventListener("change", () => {
+      if (input.checked) {
+        intervalChartSelectedTypes.add(type);
+      } else {
+        intervalChartSelectedTypes.delete(type);
+      }
+      renderIntervalChartTypes();
+      renderIntervalChartTable();
+    });
+    const text = document.createElement("span");
+    text.textContent = type;
+    wrapper.appendChild(input);
+    wrapper.appendChild(text);
+    container.appendChild(wrapper);
+  };
+  const makeGroup = (title, types, sizeClass = "") => {
+    const group = document.createElement("div");
+    group.className = "interval-chart-type-group";
+    const header = document.createElement("label");
+    header.className = `interval-chart-type-group-title ${sizeClass}`.trim();
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    const selectedCount = types.filter((type) => intervalChartSelectedTypes.has(type))
+      .length;
+    input.checked = selectedCount === types.length && types.length > 0;
+    input.indeterminate = selectedCount > 0 && selectedCount < types.length;
+    input.addEventListener("change", () => {
+      if (input.checked) {
+        types.forEach((type) => intervalChartSelectedTypes.add(type));
+      } else {
+        types.forEach((type) => intervalChartSelectedTypes.delete(type));
+      }
+      renderIntervalChartTypes();
+      renderIntervalChartTable();
+    });
+    const text = document.createElement("span");
+    text.textContent = title;
+    header.appendChild(input);
+    header.appendChild(text);
+    group.appendChild(header);
+    types.forEach((type) => addTypeRow(type, group));
+    return group;
+  };
+  fragment.appendChild(makeGroup("Steps", primary));
+  if (secondary.length) {
+    fragment.appendChild(makeGroup("Other", secondary));
+  }
+  intervalChartTypeList.appendChild(fragment);
+}
+
+function renderIntervalChartTable() {
+  if (!intervalChartTableBody) {
+    return;
+  }
+  intervalChartTableBody.innerHTML = "";
+  intervalChartRowMap.clear();
+  if (!intervalChartEntries.length) {
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  intervalChartEntries.forEach((entry) => {
+    if (!intervalChartSelectedTypes.has(entry.type)) {
+      return;
+    }
+    if (!intervalChartMatchesSearch(entry)) {
+      return;
+    }
+    const key = `${entry.numerator}:${entry.denominator}`;
+    const tr = document.createElement("tr");
+    tr.dataset.intervalKey = key;
+    if (intervalChartSelectedKey === key) {
+      tr.classList.add("interval-chart-row-selected");
+    }
+    tr.addEventListener("click", () => {
+      intervalChartSelectedKey = key;
+      if (intervalChartListenEnabled) {
+        const active = intervalChartActive.get(key);
+        if (active && active.voices.length) {
+          active.voices.forEach((voice) => stopVoice(voice));
+        } else {
+          intervalChartActive.forEach((entry) => {
+            entry.voices.forEach((voice) => stopVoice(voice));
+          });
+          intervalChartActive.clear();
+          const baseFreq = getIntervalChartBaseFrequency();
+          const ratio = entry.numerator / entry.denominator;
+          if (Number.isFinite(baseFreq) && Number.isFinite(ratio) && ratio > 0) {
+            enableAudio();
+            const fundamentalVoice = startVoice({
+              freq: baseFreq,
+              nodeId: null,
+              octave: 0,
+              source: "interval-chart",
+            });
+            const ratioVoice = startVoice({
+              freq: baseFreq * ratio,
+              nodeId: null,
+              octave: 0,
+              source: "interval-chart",
+            });
+            const voices = [fundamentalVoice, ratioVoice].filter(Boolean);
+            if (voices.length) {
+              intervalChartActive.set(key, { voices });
+              ensureIntervalChartLoop();
+            }
+          }
+        }
+      }
+      renderIntervalChartTable();
+    });
+    const display = getIntervalChartDisplayRatio(entry);
+    const ratioCell = document.createElement("td");
+    ratioCell.textContent = `${display.numerator}:${display.denominator}`;
+    const centsCell = document.createElement("td");
+    centsCell.textContent = formatIntervalChartDisplayCents(entry);
+    const nameCell = document.createElement("td");
+    nameCell.textContent = entry.name;
+    const typeCell = document.createElement("td");
+    typeCell.textContent = entry.type;
+    const factorCell = document.createElement("td");
+    const factorInfo = formatIntervalChartPrimeFactors(entry);
+    const primeLine = document.createElement("div");
+    primeLine.className = "interval-chart-factor-line";
+    primeLine.textContent = factorInfo.primes || "";
+    if (factorInfo.factors) {
+      primeLine.title = factorInfo.factors;
+    }
+    factorCell.appendChild(primeLine);
+    const descCell = document.createElement("td");
+    descCell.textContent = entry.description;
+    const sourceCell = document.createElement("td");
+    sourceCell.textContent = entry.source;
+    tr.appendChild(ratioCell);
+    tr.appendChild(centsCell);
+    tr.appendChild(nameCell);
+    tr.appendChild(typeCell);
+    tr.appendChild(factorCell);
+    tr.appendChild(descCell);
+    tr.appendChild(sourceCell);
+    fragment.appendChild(tr);
+    intervalChartRowMap.set(key, tr);
+  });
+  intervalChartTableBody.appendChild(fragment);
+}
+
+function openIntervalChart() {
+  if (!intervalChartOverlay) {
+    return;
+  }
+  closeCalculatePanel();
+  intervalChartOverlay.hidden = false;
+  document.body.classList.add("interval-chart-open");
+  if (intervalChartSearchInput) {
+    intervalChartSearchInput.value = intervalChartSearch;
+  }
+  if (intervalChartSuperparticularToggle) {
+    intervalChartSuperparticularToggle.checked = intervalChartSuperparticularOnly;
+  }
+  syncIntervalChartCustomState();
+  if (intervalChartDirectionSelect) {
+    intervalChartDirectionSelect.value = intervalChartDirection || "above";
+    intervalChartDirection = intervalChartDirectionSelect.value || "above";
+  }
+  if (intervalChartSourceRatio) {
+    const sourceNode = addIntervalSourceNodeId
+      ? nodeById.get(addIntervalSourceNodeId)
+      : null;
+    intervalChartSourceRatio.textContent = sourceNode
+      ? `${sourceNode.numerator}:${sourceNode.denominator}`
+      : "1:1";
+  }
+  if (intervalChartSearchInput) {
+    intervalChartSearchInput.focus();
+  } else if (intervalChartCloseButton) {
+    intervalChartCloseButton.focus();
+  }
+  loadIntervalChartEntries();
+}
+
+function closeIntervalChart() {
+  if (!intervalChartOverlay) {
+    return;
+  }
+  stopIntervalChartVoices();
+  if (addIntervalMode) {
+    addIntervalSourceNodeId = null;
+    setAddIntervalMode(false);
+  }
+  intervalChartOverlay.hidden = true;
+  document.body.classList.remove("interval-chart-open");
+}
+
+function updateIntervalChartIfOpen() {
+  if (intervalChartOverlay && !intervalChartOverlay.hidden) {
+    renderIntervalChartTable();
+  }
+}
+
+function stopIntervalChartVoices() {
+  if (intervalChartActive.size) {
+    intervalChartActive.forEach((entry) => {
+      entry.voices.forEach((voice) => stopVoice(voice));
+    });
+    intervalChartActive.clear();
+  }
+  voices.forEach((voice) => {
+    if (voice.source === "interval-chart") {
+      stopVoice(voice);
+    }
+  });
+}
+
+function isCustomRatioActive() {
+  const value = intervalChartCustomInput ? intervalChartCustomInput.value.trim() : "";
+  return value.length > 0;
+}
+
+function getIntervalChartBaseFrequency() {
+  if (addIntervalSourceNodeId) {
+    const sourceNode = nodeById.get(addIntervalSourceNodeId);
+    const freq = sourceNode ? Number(sourceNode.freq) : NaN;
+    if (Number.isFinite(freq)) {
+      return freq;
+    }
+  }
+  return Number(fundamentalInput.value) || 220;
+}
+
+function syncIntervalChartCustomState() {
+  if (!intervalChartCustomActive || !intervalChartOverlay) {
+    return;
+  }
+  const active = isCustomRatioActive();
+  intervalChartCustomActive.hidden = !active;
+  const table = intervalChartOverlay.querySelector(".interval-chart-table");
+  if (table) {
+    table.classList.toggle("is-disabled", active);
+  }
+  if (active) {
+    intervalChartSelectedKey = null;
+    renderIntervalChartTable();
+  }
+}
+
+function getIntervalChartSelectedRatio() {
+  if (!intervalChartSelectedKey) {
+    return null;
+  }
+  const [num, den] = intervalChartSelectedKey.split(":").map(Number);
+  if (!Number.isFinite(num) || !Number.isFinite(den)) {
+    return null;
+  }
+  return { numerator: num, denominator: den };
+}
+
+function applyIntervalChartSelection() {
+  let ratio = null;
+  if (isCustomRatioActive()) {
+    ratio = parseRatioInput(intervalChartCustomInput.value);
+    if (!ratio) {
+      alert("Please enter a ratio like 81:80 or 81/80.");
+      return;
+    }
+  } else {
+    ratio = getIntervalChartSelectedRatio();
+    if (!ratio) {
+      return;
+    }
+  }
+  if (!addIntervalSourceNodeId) {
+    alert("Select a starting node with I-click or Add Interval.");
+    return;
+  }
+  const sourceNode = nodeById.get(addIntervalSourceNodeId);
+  if (!sourceNode) {
+    alert("Please select a starting node.");
+    return;
+  }
+  const directionValue = intervalChartDirectionSelect
+    ? intervalChartDirectionSelect.value
+    : "above";
+  if (!applyAddIntervalFromSource(sourceNode, ratio, directionValue)) {
+    alert("Unable to place that interval on the current lattice.");
+    return;
+  }
+  stopIntervalChartVoices();
+  addIntervalSourceNodeId = null;
+  setAddIntervalMode(false);
+  closeIntervalChart();
+}
+
+function ensureIntervalChartLoop() {
+  if (intervalChartAnimating) {
+    return;
+  }
+  intervalChartAnimating = true;
+  requestAnimationFrame(intervalChartPlaybackLoop);
+}
+
+function intervalChartPlaybackLoop() {
+  if (!intervalChartActive.size) {
+    intervalChartAnimating = false;
+    return;
+  }
+  const nowMs = performance.now();
+  const nowSec = audioCtx ? audioCtx.currentTime : nowMs / 1000;
+  intervalChartActive.forEach((entry, key) => {
+    let amplitude = 0;
+    const remaining = [];
+    entry.voices.forEach((voice) => {
+      if (!voice) {
+        return;
+      }
+      const amp = getVoiceAmplitude(voice, nowSec, nowMs);
+      amplitude += amp;
+      const releaseEnd =
+        voice.releaseStartSec != null && voice.releaseDurationSec != null
+          ? voice.releaseStartSec + voice.releaseDurationSec
+          : null;
+      if (releaseEnd == null || nowSec < releaseEnd || amp > 0.0001) {
+        remaining.push(voice);
+      }
+    });
+    entry.voices = remaining;
+    const row = intervalChartRowMap.get(key);
+    if (row) {
+      if (amplitude > 0.0001) {
+        row.style.backgroundColor = colorWithAlpha(
+          themeColors?.playFill || "#ffe36b",
+          Math.min(1, amplitude)
+        );
+      } else {
+        row.style.backgroundColor = "";
+      }
+    }
+    if (!entry.voices.length) {
+      intervalChartActive.delete(key);
+    }
+  });
+  requestAnimationFrame(intervalChartPlaybackLoop);
+}
+
 const PRESET_PARAM = "s";
 let presetSyncEnabled = false;
 let presetUpdateTimer = null;
@@ -15854,6 +16520,7 @@ function getPresetState() {
     featureMode,
     spellingMode,
     showHz,
+    showRatioCents,
     showCentsDeviation,
     showCentsSign,
     directionalRatioLabels,
@@ -16719,22 +17386,19 @@ function applyPresetState(state) {
       layoutShowHzToggle.checked = showHz;
     }
   }
+  if (typeof state.showRatioCents === "boolean") {
+    showRatioCents = state.showRatioCents;
+    if (showRatioCentsToggle) {
+      showRatioCentsToggle.checked = showRatioCents;
+    }
+    if (layoutShowRatioCentsToggle) {
+      layoutShowRatioCentsToggle.checked = showRatioCents;
+    }
+  }
   if (typeof state.showCentsDeviation === "boolean") {
     showCentsDeviation = state.showCentsDeviation;
-    if (showCentsDeviationToggle) {
-      showCentsDeviationToggle.checked = showCentsDeviation;
-    }
-    if (layoutShowCentsDeviationToggle) {
-      layoutShowCentsDeviationToggle.checked = showCentsDeviation;
-    }
   } else {
     showCentsDeviation = true;
-    if (showCentsDeviationToggle) {
-      showCentsDeviationToggle.checked = showCentsDeviation;
-    }
-    if (layoutShowCentsDeviationToggle) {
-      layoutShowCentsDeviationToggle.checked = showCentsDeviation;
-    }
   }
   if (typeof state.showCentsSign === "boolean") {
     showCentsSign = state.showCentsSign;
@@ -16781,6 +17445,7 @@ function applyPresetState(state) {
     centsPrecision = Math.min(2, Math.max(0, Math.round(state.centsPrecision)));
     syncCentsPrecisionControls();
   }
+  enforceCentsDisplayMode();
   invalidateLabelCache();
   updateFundamentalNotes();
   syncFundamentalNoteSelect();
@@ -18398,6 +19063,7 @@ async function buildLayoutSvgString(
         );
       }
       const centsLabel = buildCentsReadout(node, { wrap: enharmonicsEnabled });
+      const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
       const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
       const labelOffsetX = rawLabelPos.x - pos.x;
       const ratioX = pos.x + labelOffsetX * 0.7 - left;
@@ -18415,6 +19081,7 @@ async function buildLayoutSvgString(
           color: themeColors.textSecondary,
         })
       );
+      let detailLine = 1;
       if (centsLabel) {
         parts.push(
           await buildSvgTextWithSmallCent({
@@ -18431,6 +19098,23 @@ async function buildLayoutSvgString(
             color: themeColors.textSecondary,
           })
         );
+        detailLine += 1;
+      }
+      if (ratioCentsLabel) {
+        parts.push(
+          await buildSvgTextElement({
+            text: ratioCentsLabel,
+            x: ratioX,
+            y: ratioY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
+            font: layoutNoteFont,
+            size: detailSize,
+            fontWeight: layoutNoteFontWeight,
+            anchor: "start",
+            baseline: "alphabetic",
+            color: themeColors.textSecondary,
+          })
+        );
+        detailLine += 1;
       }
     } else {
       const maxWidth = radius * 1.6;
@@ -18443,6 +19127,7 @@ async function buildLayoutSvgString(
         layoutRatioFontWeight
       );
       const ratioYOffset = Math.round(layout.size * -0.09);
+      const ratioTextColor = themeColors.textPrimary;
       if (layout.lines.length === 1) {
         parts.push(
           await buildSvgTextElement({
@@ -18454,7 +19139,7 @@ async function buildLayoutSvgString(
             fontWeight: layoutRatioFontWeight,
             anchor: "middle",
             baseline: "middle",
-            color: themeColors.textPrimary,
+            color: ratioTextColor,
           })
         );
       } else {
@@ -18486,7 +19171,7 @@ async function buildLayoutSvgString(
             fontWeight: layoutRatioFontWeight,
             anchor: "middle",
             baseline: "middle",
-            color: themeColors.textPrimary,
+            color: ratioTextColor,
           })
         );
         parts.push(
@@ -18499,12 +19184,12 @@ async function buildLayoutSvgString(
             fontWeight: layoutRatioFontWeight,
             anchor: "middle",
             baseline: "middle",
-            color: themeColors.textPrimary,
+            color: ratioTextColor,
           })
         );
         parts.push(
           `<line x1="${x - lineWidth / 2}" y1="${lineY}" x2="${x + lineWidth / 2}" y2="${lineY}" ${svgStroke(
-            themeColors.textPrimary
+            ratioTextColor
           )} stroke-width="${Math.max(1, Math.round(layout.size * 0.06))}" />`
         );
       }
@@ -18519,6 +19204,7 @@ async function buildLayoutSvgString(
         requireHejiDetail: true,
         baseTextForHeji: displayInfo.pitchClass,
       });
+      const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
       const hasParen = centsLabel && centsLabel.includes("(");
       const restGapScale =
         hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
@@ -18542,6 +19228,7 @@ async function buildLayoutSvgString(
           color: themeColors.textSecondary,
         })
       );
+      let detailLine = 1;
       if (hejiEnabled && centsLabel) {
         parts.push(
           await buildSvgTextWithSmallCent({
@@ -18558,6 +19245,23 @@ async function buildLayoutSvgString(
             color: themeColors.textSecondary,
           })
         );
+        detailLine += 1;
+      }
+      if (ratioCentsLabel) {
+        parts.push(
+          await buildSvgTextElement({
+            text: ratioCentsLabel,
+            x: labelX,
+            y: labelY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
+            font: layoutNoteFont,
+            size: detailSize,
+            fontWeight: layoutNoteFontWeight,
+            anchor: "start",
+            baseline: "alphabetic",
+            color: themeColors.textSecondary,
+          })
+        );
+        detailLine += 1;
       }
     }
   }
@@ -19029,12 +19733,19 @@ if (showHzToggle) {
 if (layoutShowHzToggle) {
   layoutShowHzToggle.checked = showHz;
 }
+if (showRatioCentsToggle) {
+  showRatioCentsToggle.checked = showRatioCents;
+}
+if (layoutShowRatioCentsToggle) {
+  layoutShowRatioCentsToggle.checked = showRatioCents;
+}
 if (showCentsDeviationToggle) {
   showCentsDeviationToggle.checked = showCentsDeviation;
 }
 if (layoutShowCentsDeviationToggle) {
   layoutShowCentsDeviationToggle.checked = showCentsDeviation;
 }
+enforceCentsDisplayMode();
 if (showCentsSignToggle) {
   showCentsSignToggle.checked = showCentsSign;
 }
@@ -19264,6 +19975,92 @@ if (optionsToggle) {
 }
 if (calculateToggle) {
   calculateToggle.addEventListener("click", toggleCalculatePanel);
+}
+if (intervalChartButton) {
+  intervalChartButton.addEventListener("click", () => {
+    openIntervalChart();
+  });
+}
+if (intervalChartCloseButton) {
+  intervalChartCloseButton.addEventListener("click", () => {
+    closeIntervalChart();
+  });
+}
+if (intervalChartOverlay) {
+  intervalChartOverlay.addEventListener("click", (event) => {
+    if (event.target === intervalChartOverlay) {
+      closeIntervalChart();
+    }
+  });
+  intervalChartOverlay.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      applyIntervalChartSelection();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeIntervalChart();
+    }
+  });
+}
+if (intervalChartSearchInput) {
+  intervalChartSearchInput.addEventListener("input", () => {
+    intervalChartSearch = intervalChartSearchInput.value.trim();
+    renderIntervalChartTable();
+  });
+}
+if (intervalChartListenToggle) {
+  intervalChartListenToggle.addEventListener("change", () => {
+    intervalChartListenEnabled = intervalChartListenToggle.checked;
+    if (!intervalChartListenEnabled) {
+      intervalChartActive.forEach((entry) => {
+        entry.voices.forEach((voice) => stopVoice(voice));
+      });
+    }
+  });
+}
+if (intervalChartSuperparticularToggle) {
+  intervalChartSuperparticularToggle.addEventListener("change", () => {
+    intervalChartSuperparticularOnly = intervalChartSuperparticularToggle.checked;
+    renderIntervalChartTable();
+  });
+}
+if (intervalChartDirectionSelect) {
+  intervalChartDirectionSelect.addEventListener("change", () => {
+    intervalChartDirection = intervalChartDirectionSelect.value || "above";
+    renderIntervalChartTable();
+  });
+}
+if (intervalChartCustomInput) {
+  intervalChartCustomInput.addEventListener("input", () => {
+    syncIntervalChartCustomState();
+  });
+}
+if (intervalChartCustomInput) {
+  intervalChartCustomInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      applyIntervalChartSelection();
+    }
+  });
+}
+if (intervalChartCalcButton) {
+  intervalChartCalcButton.addEventListener("click", () => {
+    applyIntervalChartSelection();
+  });
+}
+if (intervalChartSelectAllButton) {
+  intervalChartSelectAllButton.addEventListener("click", () => {
+    intervalChartSelectedTypes = new Set(intervalChartTypes);
+    renderIntervalChartTypes();
+    renderIntervalChartTable();
+  });
+}
+if (intervalChartSelectNoneButton) {
+  intervalChartSelectNoneButton.addEventListener("click", () => {
+    intervalChartSelectedTypes.clear();
+    renderIntervalChartTypes();
+    renderIntervalChartTable();
+  });
 }
 if (findRatioButton) {
   findRatioButton.addEventListener("click", () => {
@@ -19505,12 +20302,37 @@ if (layoutShowHzToggle) {
     schedulePresetUrlUpdate();
   });
 }
+if (showRatioCentsToggle) {
+  showRatioCentsToggle.addEventListener("change", () => {
+    showRatioCents = showRatioCentsToggle.checked;
+    if (showRatioCents) {
+      showCentsDeviation = false;
+    }
+    enforceCentsDisplayMode();
+    invalidateLabelCache();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutShowRatioCentsToggle) {
+  layoutShowRatioCentsToggle.addEventListener("change", () => {
+    showRatioCents = layoutShowRatioCentsToggle.checked;
+    if (showRatioCents) {
+      showCentsDeviation = false;
+    }
+    enforceCentsDisplayMode();
+    invalidateLabelCache();
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
 if (showCentsDeviationToggle) {
   showCentsDeviationToggle.addEventListener("change", () => {
     showCentsDeviation = showCentsDeviationToggle.checked;
-    if (layoutShowCentsDeviationToggle) {
-      layoutShowCentsDeviationToggle.checked = showCentsDeviation;
+    if (showCentsDeviation) {
+      showRatioCents = false;
     }
+    enforceCentsDisplayMode();
     invalidateLabelCache();
     draw();
     schedulePresetUrlUpdate();
@@ -19519,9 +20341,10 @@ if (showCentsDeviationToggle) {
 if (layoutShowCentsDeviationToggle) {
   layoutShowCentsDeviationToggle.addEventListener("change", () => {
     showCentsDeviation = layoutShowCentsDeviationToggle.checked;
-    if (showCentsDeviationToggle) {
-      showCentsDeviationToggle.checked = showCentsDeviation;
+    if (showCentsDeviation) {
+      showRatioCents = false;
     }
+    enforceCentsDisplayMode();
     invalidateLabelCache();
     draw();
     schedulePresetUrlUpdate();
@@ -19607,6 +20430,7 @@ if (centsPrecisionButtons.length) {
       centsPrecision = Math.min(2, Math.max(0, Math.round(next)));
       syncCentsPrecisionControls();
       invalidateLabelCache();
+      updateIntervalChartIfOpen();
       draw();
       schedulePresetUrlUpdate();
     });

@@ -21,6 +21,7 @@ const intervalChartSelectAllButton = document.getElementById("interval-chart-sel
 const intervalChartSelectNoneButton = document.getElementById("interval-chart-select-none");
 const intervalChartListenToggle = document.getElementById("interval-chart-listen");
 const intervalChartCustomInput = document.getElementById("interval-chart-custom-ratio");
+const intervalChartCustomTextInput = document.getElementById("interval-chart-custom-text");
 const intervalChartCustomActive = document.getElementById("interval-chart-custom-active");
 const intervalChartCalcButton = document.getElementById("interval-chart-calc");
 const intervalChartDirectionSelect = document.getElementById("interval-chart-direction");
@@ -7056,6 +7057,8 @@ function getClusterGuideInfo(pointer, nodePosMap, axisEntry = null) {
   const guideNodes = new Map();
   let anchor = null;
   let anchorDist = Infinity;
+  const restrictToZeroExponentPlane = !is3DMode && isFlattened2D;
+  const useDepthProjection = is3DMode || isFlattened2D;
   nodes.forEach((node) => {
     if (node.isCustom) {
       return;
@@ -7063,15 +7066,18 @@ function getClusterGuideInfo(pointer, nodePosMap, axisEntry = null) {
     if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
       return;
     }
+    if (restrictToZeroExponentPlane && (Number(node.exponentZ) || 0) !== 0) {
+      return;
+    }
     const z = Number.isFinite(node.gridZ) ? node.gridZ : gridCenterZ;
-    if (z !== gridCenterZ) {
+    if (is3DMode && z !== gridCenterZ) {
       return;
     }
     const entry = nodePosMap.get(node.id);
     if (!entry) {
       return;
     }
-    if (is3DMode) {
+    if (useDepthProjection) {
       const denom = entry.pos && Number.isFinite(entry.pos.denom) ? entry.pos.denom : 1;
       if (!entry.pos.visible || denom > GUIDE_DEPTH_DENOM_MAX) {
         return;
@@ -7098,12 +7104,15 @@ function getClusterGuideInfo(pointer, nodePosMap, axisEntry = null) {
     if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
       return;
     }
+    if (restrictToZeroExponentPlane && (Number(node.exponentZ) || 0) !== 0) {
+      return;
+    }
     const z = Number.isFinite(node.gridZ) ? node.gridZ : gridCenterZ;
     if (z !== anchorZ) {
       return;
     }
     const entry = nodePosMap.get(node.id);
-    if (is3DMode && entry) {
+    if (useDepthProjection && entry) {
       const denom = entry.pos && Number.isFinite(entry.pos.denom) ? entry.pos.denom : 1;
       if (!entry.pos.visible || denom > GUIDE_DEPTH_DENOM_MAX) {
         return;
@@ -8339,10 +8348,14 @@ function drawDistanceConnections(nodePosMap) {
       continue;
     }
     const showName = !override || override.showName !== false;
+    const customText = override && typeof override.customText === "string"
+      ? override.customText.trim()
+      : "";
     const commaName = showName
       ? getDistanceCommaName(ratioInfo.numerator, ratioInfo.denominator)
       : "";
-    const label = commaName ? `${ratioInfo.label} (${commaName})` : ratioInfo.label;
+    const baseLabel = customText ? `${ratioInfo.label} ${customText}` : ratioInfo.label;
+    const label = commaName ? `${baseLabel} (${commaName})` : baseLabel;
     const start = startEntry.pos;
     const end = endEntry.pos;
     const dx = end.x - start.x;
@@ -8890,7 +8903,13 @@ function draw() {
   if (!themeColors) {
     refreshThemeColors();
   }
+  const distanceFocusMode = distanceSelectMode && analysisLayers.distances;
+  const nonDistanceAlpha = distanceFocusMode ? 0.28 : 1;
 
+  if (nonDistanceAlpha < 1) {
+    ctx.save();
+    ctx.globalAlpha = nonDistanceAlpha;
+  }
   if (layoutMode) {
     drawLayoutPage({ drawAxes: !layoutAxisEdit });
   }
@@ -9036,11 +9055,18 @@ function draw() {
     });
   }
 
+  if (nonDistanceAlpha < 1) {
+    ctx.restore();
+  }
   if (showDistances) {
     drawDistanceConnections(nodePosMap);
   }
   if (distanceSelectMode && analysisLayers.distances) {
     drawDistanceDragPreview(nodePosMap);
+  }
+  if (nonDistanceAlpha < 1) {
+    ctx.save();
+    ctx.globalAlpha = nonDistanceAlpha;
   }
   if (showMicrotonal) {
     drawCommaConnections(nodePosMap);
@@ -9363,6 +9389,7 @@ function draw() {
       isGuide ||
       (!node.active && !node.isCustom && !node.isCenter)
     ) {
+      ctx.restore();
       return;
     }
     const detailSize = layoutMode ? layoutNoteTextSize : 14;
@@ -9689,6 +9716,9 @@ function draw() {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     drawLayoutAxisLegend(layoutAxisEdit, { showHandles: true });
+    ctx.restore();
+  }
+  if (nonDistanceAlpha < 1) {
     ctx.restore();
   }
 
@@ -11658,12 +11688,13 @@ function isInactiveNodeAvailable(node) {
   if (distanceSelectMode) {
     return true;
   }
+  const onZeroPlane = (Number(node.exponentZ) || 0) === 0;
   if (!is3DMode) {
     const axisEntry = getActiveAxisEntry();
     if (axisEntry && (axisEntry.axis === "x" || axisEntry.axis === "y")) {
-      return isNodeOnAxisEntry(node, axisEntry) && (node.gridZ || 0) === gridCenterZ;
+      return isNodeOnAxisEntry(node, axisEntry) && onZeroPlane;
     }
-    return !distanceSelectMode && (shiftHeld || capsLockOn) && (node.gridZ || 0) === gridCenterZ;
+    return !distanceSelectMode && (shiftHeld || capsLockOn) && onZeroPlane;
   }
   const axisEntry = getActiveAxisEntry();
   if (axisEntry) {
@@ -12283,7 +12314,7 @@ function drawGrid() {
     }
   };
 
-  drawPlaneGrid(0.35);
+  drawPlaneGrid(0.175);
   ctx.restore();
 }
 
@@ -12913,7 +12944,12 @@ function getSelectedIntervalRatio() {
   return parseRatioInput(addIntervalInput.value);
 }
 
-function applyAddIntervalFromSource(sourceNode, intervalRatio, directionOverride = null) {
+function applyAddIntervalFromSource(
+  sourceNode,
+  intervalRatio,
+  directionOverride = null,
+  customText = ""
+) {
   if (!sourceNode || !intervalRatio) {
     return null;
   }
@@ -12929,7 +12965,18 @@ function applyAddIntervalFromSource(sourceNode, intervalRatio, directionOverride
   if (!targetNode) {
     return null;
   }
-  if (addDistanceEdgeBetweenNodes(sourceNode, targetNode)) {
+  if (
+    !layoutMode &&
+    !is3DMode &&
+    !targetNode.isCustom &&
+    Math.abs(Number(targetNode.exponentZ) || 0) > 0
+  ) {
+    if (mode3dCheckbox) {
+      mode3dCheckbox.checked = true;
+    }
+    set3DMode(true);
+  }
+  if (addDistanceEdgeBetweenNodes(sourceNode, targetNode, { customText })) {
     if (!analysisLayers.distances) {
       analysisLayers.distances = true;
       syncAnalysisLayerToggles();
@@ -15368,7 +15415,7 @@ function getNodeByDistanceKey(key) {
   return null;
 }
 
-function addDistanceEdgeBetweenNodes(a, b) {
+function addDistanceEdgeBetweenNodes(a, b, options = {}) {
   const aKey = getDistanceNodeKey(a);
   const bKey = getDistanceNodeKey(b);
   if (!aKey || !bKey || aKey === bKey) {
@@ -15376,6 +15423,14 @@ function addDistanceEdgeBetweenNodes(a, b) {
   }
   const edgeKey = getDistanceEdgeKey(aKey, bKey);
   distanceSelectedEdges.add(edgeKey);
+  if (Object.prototype.hasOwnProperty.call(options, "customText")) {
+    const customText = String(options.customText || "").trim();
+    const existing = getDistanceEdgeOverride(edgeKey) || {};
+    distanceEdgeOverrides.set(edgeKey, {
+      ...existing,
+      customText,
+    });
+  }
   return true;
 }
 
@@ -15867,6 +15922,13 @@ function closeIntervalChart() {
     return;
   }
   stopIntervalChartVoices();
+  if (intervalChartCustomInput) {
+    intervalChartCustomInput.value = "";
+  }
+  if (intervalChartCustomTextInput) {
+    intervalChartCustomTextInput.value = "";
+  }
+  syncIntervalChartCustomState();
   if (addIntervalMode) {
     addIntervalSourceNodeId = null;
     setAddIntervalMode(false);
@@ -15961,10 +16023,13 @@ function applyIntervalChartSelection() {
     alert("Please select a starting node.");
     return;
   }
+  const customText = intervalChartCustomTextInput
+    ? intervalChartCustomTextInput.value.trim()
+    : "";
   const directionValue = intervalChartDirectionSelect
     ? intervalChartDirectionSelect.value
     : "above";
-  if (!applyAddIntervalFromSource(sourceNode, ratio, directionValue)) {
+  if (!applyAddIntervalFromSource(sourceNode, ratio, directionValue, customText)) {
     alert("Unable to place that interval on the current lattice.");
     return;
   }
@@ -16401,6 +16466,9 @@ function getPresetState() {
       if (typeof value.showName === "boolean") {
         entry.showName = value.showName;
       }
+      if (typeof value.customText === "string" && value.customText.trim()) {
+        entry.customText = value.customText.trim();
+      }
       return entry;
     }
   ).filter(Boolean);
@@ -16771,6 +16839,9 @@ function applyPresetState(state) {
       }
       if (typeof entry.showName === "boolean") {
         next.showName = entry.showName;
+      }
+      if (typeof entry.customText === "string" && entry.customText.trim()) {
+        next.customText = entry.customText.trim();
       }
       distanceEdgeOverrides.set(key, next);
     });

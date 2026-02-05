@@ -1,5 +1,5 @@
 import { customOscillatorTypes, customOscillators } from "./custom-oscillators";
-import intervalChartData from "./intervals_names_gann.json";
+import intervalChartData from "./interval-names.json";
 import opentype from "opentype.js";
 const canvas = document.getElementById("lattice");
 const ctx = canvas.getContext("2d");
@@ -61,8 +61,12 @@ const octaveShiftInput = document.getElementById("octave-shift-input");
 const layoutKeyMappingPrefixInput = document.getElementById("layout-key-mapping-prefix");
 const layoutKeyMappingSuffixInput = document.getElementById("layout-key-mapping-suffix");
 const layoutFreezeButton = document.getElementById("layout-freeze");
+const layoutShareLinkButton = document.getElementById("layout-share-link");
 const layoutNodeSizeInput = document.getElementById("layout-node-size");
 const layoutNodeSizeReadout = document.getElementById("layout-node-size-readout");
+const layoutAlignXButton = document.getElementById("layout-align-x");
+const layoutAlignYButton = document.getElementById("layout-align-y");
+const layoutStraightenButton = document.getElementById("layout-straighten");
 const layoutRatioTextSizeInput = document.getElementById("layout-ratio-text-size");
 const layoutRatioTextReadout = document.getElementById("layout-ratio-text-readout");
 const layoutNoteTextSizeInput = document.getElementById("layout-note-text-size");
@@ -89,6 +93,9 @@ const layoutTriangleLabelWeightSelect = document.getElementById("layout-triangle
 const layoutAxisFontSelect = document.getElementById("layout-axis-font");
 const layoutAxisWeightSelect = document.getElementById("layout-axis-weight");
 const layoutAxisSizeInput = document.getElementById("layout-axis-size");
+const layoutLineLabelFontSelect = document.getElementById("layout-line-label-font");
+const layoutLineLabelWeightSelect = document.getElementById("layout-line-label-weight");
+const layoutLineLabelSizeInput = document.getElementById("layout-line-label-size");
 const layoutCustomFontSelect = document.getElementById("layout-custom-font");
 const layoutCustomWeightSelect = document.getElementById("layout-custom-weight");
 const layoutKeyMappingFontSelect = document.getElementById("layout-key-mapping-font");
@@ -104,8 +111,12 @@ const midiEnable = document.getElementById("midi-enable");
 const midiPortSelect = document.getElementById("midi-port");
 const midiChannelSelect = document.getElementById("midi-channel");
 const presetToggle = document.getElementById("preset-toggle");
-const presetPanel = document.getElementById("preset-panel");
+const presetOverlay = document.getElementById("preset-overlay");
 const presetList = document.getElementById("preset-list");
+const presetSearchInput = document.getElementById("preset-search");
+const presetTagList = document.getElementById("preset-tag-list");
+const presetCloseButton = document.getElementById("preset-close");
+const presetSortSelect = document.getElementById("preset-sort");
 const distanceSelectTriggers = document.querySelectorAll("[data-distance-select]");
 const fileToggle = document.getElementById("file-toggle");
 const filePanel = document.getElementById("file-panel");
@@ -242,7 +253,6 @@ const layoutCirclesToggle = document.getElementById("layout-circles");
 const layoutKeyMappingsToggle = document.getElementById("layout-key-mappings-toggle");
 const layoutShowDistancesToggle = document.getElementById("layout-show-distances");
 const layoutShowMicrotonalToggle = document.getElementById("layout-show-microtonal");
-const layoutAnalysisResetButton = document.getElementById("layout-analysis-reset");
 const nav3dButtons = nav3dPanel ? nav3dPanel.querySelectorAll("button[data-view], button[data-action]") : [];
 const viewPanelToggle = document.getElementById("view-panel-toggle");
 const viewsPanel = nav3dPanel ? nav3dPanel.querySelector(".nav-3d-panel") : null;
@@ -293,11 +303,18 @@ const intervalChartRowMap = new Map();
 let intervalChartSelectedKey = null;
 let intervalChartDirection = "above";
 let intervalChartSuperparticularOnly = false;
-const DISTANCE_MODE_BANNER = "Drag between nodes to create distance lines. ESC to return.";
-const COMMA_MODE_BANNER = "Labeling microtonal intervals. ESC to exit.";
-const ADD_INTERVAL_BANNER = "Add interval from any node. Select starting node.";
+const INTERACTION_MODE_LABELS = {
+  "distance-edit": "Distance Edit",
+  "microtonal-intervals": "Interval Overlay",
+};
+const DISTANCE_MODE_HELP =
+  "Distance Edit\nDrag between nodes to create distance lines.\nDrag line to bend, drag label to move.\nOption-click line to delete.\nDouble-click label to toggle interval names.\nESC or double-click background to exit.";
+const MICROTONAL_MODE_HELP =
+  "Interval Overlay (analysis view)\nClick node to show connections.\nClick visible connections to listen.\nDouble-click canvas to exit mode.\nExcluded from PDF/SVG export.";
 const DISTANCE_RING_COLOR = "rgba(72, 146, 255, 0.9)";
 const ADD_INTERVAL_RING_COLOR = "rgba(220, 72, 72, 0.9)";
+const MICROTONAL_HOVER_RING_COLOR = "rgba(134, 239, 172, 0.95)";
+const MICROTONAL_SELECTED_RING_COLOR = "rgba(16, 185, 129, 0.95)";
 const GUIDE_DEPTH_DENOM_MAX = 3.2;
 const distanceEdges = [];
 const distanceEdgeOverrides = new Map();
@@ -306,6 +323,10 @@ let distanceSelectDrag = null;
 let distanceCurveDrag = null;
 let pendingDistanceLabelClickTimer = null;
 let pendingDistanceLabelClickKey = "";
+let microtonalHoverPairKey = "";
+const microtonalSelectedNodeIds = new Set();
+let bannerDismissedKey = "";
+let currentBannerKey = "";
 
 function clampZoom(value) {
   return Math.min(2.2, Math.max(0.5, value));
@@ -359,6 +380,7 @@ const TRIANGLE_TRI_TO_DIAG = {
   bcd: "slash",
 };
 let layoutLabelHitboxVisible = false;
+const layoutRenderedNoteLabelHitboxes = new Map();
 
 function clearTriangleLabelsForCell(entry) {
   TRIANGLE_TRI_IDS.forEach((tri) => {
@@ -402,12 +424,12 @@ function computeTriangleLabelLayout(text, font, baseSize, points, fontWeight = 4
 }
 
 function getLayoutNoteLabelHitbox(node, pos, radius) {
+  const rendered = layoutRenderedNoteLabelHitboxes.get(node.id);
+  if (rendered) {
+    return rendered;
+  }
   const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
-  const labelOffsetX = rawLabelPos.x - pos.x;
-  const labelPos = {
-    x: pos.x + labelOffsetX * 0.7,
-    y: rawLabelPos.y,
-  };
+  const labelPos = { x: rawLabelPos.x, y: rawLabelPos.y };
   let width = 0;
   let height = layoutNoteTextSize;
   if (featureMode === "ratio") {
@@ -822,7 +844,7 @@ function applyLayoutPositionOffsets(entries) {
 }
 
 function updateDragLock(drag, event) {
-  if (!event.shiftKey) {
+  if (!event.shiftKey || event.altKey) {
     drag.lockAxis = null;
     drag.lockOriginX = event.offsetX;
     drag.lockOriginY = event.offsetY;
@@ -837,6 +859,60 @@ function updateDragLock(drag, event) {
     drag.lockAxis = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
   }
   return drag.lockAxis;
+}
+
+function updateProjectedAxisLock(drag, event) {
+  if (!event.shiftKey || !event.altKey) {
+    drag.axisLock = null;
+    drag.axisLockJustSet = false;
+    drag.axisLockOriginX = event.offsetX;
+    drag.axisLockOriginY = event.offsetY;
+    return null;
+  }
+  if (!drag.axisLock) {
+    const originX = Number.isFinite(drag.axisLockOriginX)
+      ? drag.axisLockOriginX
+      : drag.lockOriginX;
+    const originY = Number.isFinite(drag.axisLockOriginY)
+      ? drag.axisLockOriginY
+      : drag.lockOriginY;
+    const dx = event.offsetX - originX;
+    const dy = event.offsetY - originY;
+    if (Math.abs(dx) < 2 && Math.abs(dy) < 2) {
+      return null;
+    }
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const settings = getAxisLegendSettings();
+    const candidates = [
+      { axis: "x", dir: settings.xDir },
+      { axis: "y", dir: settings.yDir },
+      { axis: "z", dir: settings.zDir },
+    ].filter((entry) => hasActiveAxis(entry.axis) && !layoutAxisHidden[entry.axis]);
+    const pool = candidates.length ? candidates : [
+      { axis: "x", dir: settings.xDir },
+      { axis: "y", dir: settings.yDir },
+      { axis: "z", dir: settings.zDir },
+    ];
+    let best = null;
+    let bestDot = -1;
+    pool.forEach((entry) => {
+      if (!entry.dir) {
+        return;
+      }
+      const dot = Math.abs(ux * entry.dir.x + uy * entry.dir.y);
+      if (dot > bestDot) {
+        bestDot = dot;
+        best = entry;
+      }
+    });
+    drag.axisLock = best ? { axis: best.axis, dir: best.dir } : null;
+    drag.axisLockJustSet = Boolean(drag.axisLock);
+    drag.axisLockOriginX = event.offsetX;
+    drag.axisLockOriginY = event.offsetY;
+  }
+  return drag.axisLock;
 }
 
 function syncLayoutViewFromCurrent() {
@@ -923,7 +999,19 @@ function refreshLayoutFromView({ flatten = false } = {}) {
       const worldX = projectedX / safeScale;
       const worldY = projectedY / safeScale;
       const z = (1 / safeScale - 1) / 0.002 - cameraDistance;
-      layoutPositions.set(node.id, { x: worldX, y: worldY, z });
+      const flattenedCoord = { x: worldX, y: worldY, z };
+      layoutPositions.set(node.id, flattenedCoord);
+      if (!node.isCustom) {
+        const base = getLayoutBaseCoordinate(node);
+        layoutPositionOffsets.set(
+          `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`,
+          {
+            x: flattenedCoord.x - base.x,
+            y: flattenedCoord.y - base.y,
+            z: flattenedCoord.z - base.z,
+          }
+        );
+      }
     });
     if (layoutMode) {
       view.zoom = layoutView.zoom;
@@ -1245,6 +1333,10 @@ let pendingCustomAction = null;
 let lastCustomFactor = { numerator: 5, denominator: 4 };
 let cHeld = false;
 let layoutMode = false;
+let layoutAlignMode = "";
+let layoutAlignAnchorId = null;
+let layoutStraightenAnchorId = null;
+let layoutStraightenDir = null;
 let layoutDrag = null;
 let layoutLabelDrag = null;
 let layoutPositions = new Map();
@@ -1295,6 +1387,7 @@ let layoutTriangleLabelFont = "Noto Serif";
 let layoutCustomLabelFont = "Noto Serif";
 let layoutKeyMappingFont = "Lexend";
 let layoutAxisLegendFont = "Noto Serif";
+let layoutLineLabelFont = "Noto Serif";
 let layoutCreatorFont = "Lexend";
 let layoutTitleFontWeight = 400;
 let layoutRatioFontWeight = 400;
@@ -1303,8 +1396,10 @@ let layoutTriangleLabelFontWeight = 400;
 let layoutCustomLabelFontWeight = 400;
 let layoutKeyMappingFontWeight = 400;
 let layoutAxisLegendFontWeight = 400;
+let layoutLineLabelFontWeight = 400;
 let layoutCreatorFontWeight = 400;
 let layoutAxisLegendTextSize = 19;
+let layoutLineLabelTextSize = 13;
 let layoutCustomLabels = [];
 let layoutCustomLabelPending = null;
 let layoutCustomLabelId = 1;
@@ -1314,6 +1409,7 @@ let layoutAxisOffsets = {
   y: { x: 0, y: 0 },
   z: { x: 0, y: 0 },
 };
+let layoutAxisHidden = { x: false, y: false, z: false };
 let layoutAxisAngles = {
   x: null,
   y: null,
@@ -1408,6 +1504,7 @@ const LAYOUT_DEFAULTS = {
   customLabelFont: "Noto Serif",
   keyMappingFont: "Lexend",
   axisLegendFont: "Noto Serif",
+  lineLabelFont: "Noto Serif",
   creatorFont: "Lexend",
   titleFontWeight: 400,
   ratioFontWeight: 400,
@@ -1416,8 +1513,11 @@ const LAYOUT_DEFAULTS = {
   customLabelFontWeight: 400,
   keyMappingFontWeight: 400,
   axisLegendFontWeight: 400,
+  lineLabelFontWeight: 400,
   creatorFontWeight: 400,
   axisLegendTextSize: 19,
+  lineLabelTextSize: 13,
+  axisHidden: { x: false, y: false, z: false },
 };
 
 function updateNavModeSections() {
@@ -3910,6 +4010,17 @@ function handleKeyDown(event) {
   if (layoutMode && (event.metaKey || event.ctrlKey) && key === "y") {
     event.preventDefault();
     redoLayoutChange();
+    return;
+  }
+  if (layoutMode && layoutAxisEdit && (key === "delete" || key === "backspace")) {
+    event.preventDefault();
+    pushLayoutUndoState();
+    layoutAxisHidden[layoutAxisEdit] = true;
+    layoutAxisEdit = null;
+    layoutAxisEditDrag = null;
+    updateUiHint();
+    draw();
+    schedulePresetUrlUpdate();
     return;
   }
   if (layoutMode) {
@@ -7538,6 +7649,8 @@ function drawCanvasEdgeSegment({
   dash = null,
   lineWidth = 1.5,
   labelT = 0.5,
+  labelAvoidNodes = null,
+  labelAlpha = null,
 }) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -7567,8 +7680,12 @@ function drawCanvasEdgeSegment({
     ctx.setLineDash([]);
   }
   if (shouldLabel && lineLen > 0) {
+    const labelLines = String(label).split("\n");
     ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
-    const baseWidth = ctx.measureText(label).width;
+    const baseWidth = labelLines.reduce(
+      (maxWidth, line) => Math.max(maxWidth, ctx.measureText(line).width),
+      0
+    );
     const layout = computeEdgeLabelLayoutFromWidth({
       baseSize: labelSize,
       baseWidth,
@@ -7580,8 +7697,51 @@ function drawCanvasEdgeSegment({
     if (size !== labelSize) {
       ctx.font = `${labelWeight} ${size}px ${labelFont}`;
     }
+    const textWidth = labelLines.reduce(
+      (maxWidth, line) => Math.max(maxWidth, ctx.measureText(line).width),
+      0
+    );
+    const lineGap = Math.max(2, Math.round(size * 0.25));
+    const textHeight = labelLines.length * size + (labelLines.length - 1) * lineGap;
+    let clampedT = Math.min(1, Math.max(0, labelT));
+    if (Array.isArray(labelAvoidNodes) && labelAvoidNodes.length) {
+      const labelRadius = Math.hypot(textWidth / 2 + 6, textHeight / 2 + 4);
+      const intersectsNodeAt = (t) => {
+        const x = lineStart.x + (lineEnd.x - lineStart.x) * t;
+        const y = lineStart.y + (lineEnd.y - lineStart.y) * t;
+        for (let i = 0; i < labelAvoidNodes.length; i += 1) {
+          const circle = labelAvoidNodes[i];
+          const clearance = (Number(circle.r) || 0) + labelRadius;
+          if (clearance <= 0) {
+            continue;
+          }
+          if (Math.hypot(x - circle.x, y - circle.y) < clearance) {
+            return true;
+          }
+        }
+        return false;
+      };
+      if (intersectsNodeAt(clampedT)) {
+        const step = 0.04;
+        const maxSteps = 24;
+        let bestT = clampedT;
+        for (let i = 1; i <= maxSteps; i += 1) {
+          const delta = i * step;
+          const left = Math.max(0, clampedT - delta);
+          const right = Math.min(1, clampedT + delta);
+          if (!intersectsNodeAt(left)) {
+            bestT = left;
+            break;
+          }
+          if (!intersectsNodeAt(right)) {
+            bestT = right;
+            break;
+          }
+        }
+        clampedT = bestT;
+      }
+    }
     const gapHalf = gap / 2;
-    const clampedT = Math.min(1, Math.max(0, labelT));
     const midX = lineStart.x + (lineEnd.x - lineStart.x) * clampedT;
     const midY = lineStart.y + (lineEnd.y - lineStart.y) * clampedT;
     const gapStart = {
@@ -7610,12 +7770,18 @@ function drawCanvasEdgeSegment({
       }
     }
     ctx.save();
+    const effectiveLabelAlpha = Number.isFinite(labelAlpha) ? labelAlpha : alpha;
+    ctx.globalAlpha = effectiveLabelAlpha;
     ctx.translate(midX, midY);
     ctx.rotate(angle);
     ctx.fillStyle = themeColors.textSecondary;
     ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(label, 0, 0);
+    ctx.textBaseline = "top";
+    const textStartY = -textHeight / 2;
+    labelLines.forEach((line, index) => {
+      const y = textStartY + index * (size + lineGap);
+      ctx.fillText(line, 0, y);
+    });
     ctx.restore();
   } else {
     ctx.beginPath();
@@ -7881,6 +8047,18 @@ function getNodeEdgeRadius(node, ux, uy, radius) {
   return getShapeEdgeRadius(shape, ux, uy, radius);
 }
 
+function hasSelectedDistanceEdgeBetweenNodes(a, b) {
+  if (!a || !b || !distanceSelectedEdges.size) {
+    return false;
+  }
+  const aKey = getDistanceNodeKey(a);
+  const bKey = getDistanceNodeKey(b);
+  if (!aKey || !bKey || aKey === bKey) {
+    return false;
+  }
+  return distanceSelectedEdges.has(getDistanceEdgeKey(aKey, bKey));
+}
+
 function draw3DEdges(nodePosMap, axisEntry = null) {
   const labelFont = layoutRatioFont;
   const labelWeight = layoutRatioFontWeight;
@@ -7888,6 +8066,9 @@ function draw3DEdges(nodePosMap, axisEntry = null) {
   const axisActive = Boolean(axisEntry);
   edges.forEach(([a, b]) => {
     if (!a.active || !b.active) {
+      return;
+    }
+    if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
       return;
     }
     const startEntry = nodePosMap && nodePosMap.get(a.id);
@@ -8095,6 +8276,10 @@ function getAxisLegendSettings() {
   };
 }
 
+function getLayoutLineLabelSize() {
+  return Math.max(8, Math.round(layoutLineLabelTextSize));
+}
+
 const VERTICAL_TEXT_THRESHOLD = (15 * Math.PI) / 180;
 
 function shouldUseHorizontalText(angle) {
@@ -8115,7 +8300,7 @@ function getAxisLegendAngle(dir, centerX = null, pageCenterX = null) {
 }
 
 function getAxisLegendInfo(axis, settings = getAxisLegendSettings()) {
-  if (!layoutMode || !hasActiveAxis(axis)) {
+  if (!layoutMode || !hasActiveAxis(axis) || layoutAxisHidden[axis]) {
     return null;
   }
   const { left, top, width, height } = getLayoutPageRect();
@@ -8316,17 +8501,17 @@ function drawDistanceConnections(nodePosMap) {
     return;
   }
   const labelFont = layoutMode
-    ? layoutAxisLegendFont
+    ? layoutLineLabelFont
     : is3DMode
     ? layoutRatioFont
     : "Noto Serif";
   const labelWeight = layoutMode
-    ? layoutAxisLegendFontWeight
+    ? layoutLineLabelFontWeight
     : is3DMode
     ? layoutRatioFontWeight
     : 400;
   const labelSize = layoutMode
-    ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
+    ? getLayoutLineLabelSize()
     : is3DMode
     ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
     : 14;
@@ -8561,6 +8746,50 @@ function buildCommaConnections(nodePosMap) {
   if (!commaEntries.length) {
     return;
   }
+  const isDiagonalPair = (a, b) => {
+    const ax = Number(a.exponentX);
+    const ay = Number(a.exponentY);
+    const az = Number(a.exponentZ);
+    const bx = Number(b.exponentX);
+    const by = Number(b.exponentY);
+    const bz = Number(b.exponentZ);
+    if (
+      Number.isFinite(ax) &&
+      Number.isFinite(ay) &&
+      Number.isFinite(az) &&
+      Number.isFinite(bx) &&
+      Number.isFinite(by) &&
+      Number.isFinite(bz)
+    ) {
+      let changed = 0;
+      if (ax !== bx) changed += 1;
+      if (ay !== by) changed += 1;
+      if (az !== bz) changed += 1;
+      return changed >= 2;
+    }
+    const gx = Number(a.gridX);
+    const gy = Number(a.gridY);
+    const gz = Number(a.gridZ);
+    const hx = Number(b.gridX);
+    const hy = Number(b.gridY);
+    const hz = Number(b.gridZ);
+    if (
+      Number.isFinite(gx) &&
+      Number.isFinite(gy) &&
+      Number.isFinite(gz) &&
+      Number.isFinite(hx) &&
+      Number.isFinite(hy) &&
+      Number.isFinite(hz)
+    ) {
+      let changed = 0;
+      if (gx !== hx) changed += 1;
+      if (gy !== hy) changed += 1;
+      if (gz !== hz) changed += 1;
+      return changed >= 2;
+    }
+    return true;
+  };
+  const seenConnections = new Set();
   const activeNodes = nodes.filter((node) => node.active);
   for (let i = 0; i < activeNodes.length; i += 1) {
     const a = activeNodes[i];
@@ -8571,14 +8800,19 @@ function buildCommaConnections(nodePosMap) {
     }
     for (let j = i + 1; j < activeNodes.length; j += 1) {
       const b = activeNodes[j];
+      if (!isDiagonalPair(a, b)) {
+        continue;
+      }
       const bNum = Number(b.numerator);
       const bDen = Number(b.denominator);
       if (!Number.isFinite(bNum) || !Number.isFinite(bDen) || bDen === 0) {
         continue;
       }
-      const num = aNum * bDen;
-      const den = aDen * bNum;
-      const normalized = normalizeCommaRatio(num, den);
+      const ratioInfo = getDistanceRatioLabel(a, b);
+      if (!ratioInfo) {
+        continue;
+      }
+      const normalized = normalizeCommaRatio(ratioInfo.numerator, ratioInfo.denominator);
       if (!normalized) {
         continue;
       }
@@ -8588,6 +8822,16 @@ function buildCommaConnections(nodePosMap) {
         continue;
       }
       matches.forEach((entry) => {
+        const pairKey = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+        const nameKey = String(entry.name || "")
+          .toLowerCase()
+          .replace(/\s+/g, " ")
+          .trim();
+        const connectionKey = `${pairKey}|${nameKey}`;
+        if (seenConnections.has(connectionKey)) {
+          return;
+        }
+        seenConnections.add(connectionKey);
         commaEdges.push({ a, b, entry });
         [a.id, b.id].forEach((nodeId) => {
           if (!commaNodeRings.has(nodeId)) {
@@ -8611,22 +8855,63 @@ function drawCommaConnections(nodePosMap) {
   if (!commaEdges.length) {
     return;
   }
+  const aggregatedEdges = new Map();
+  commaEdges.forEach(({ a, b, entry }) => {
+    if (!a || !b || !entry) {
+      return;
+    }
+    const pairKey = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+    if (!aggregatedEdges.has(pairKey)) {
+      aggregatedEdges.set(pairKey, {
+        a,
+        b,
+        color: entry.color,
+        labels: [],
+      });
+    }
+    const aggregate = aggregatedEdges.get(pairKey);
+    const name = String(entry.name || "").trim();
+    if (name && !aggregate.labels.includes(name)) {
+      aggregate.labels.push(name);
+    }
+  });
+  const labelAvoidNodes = [];
+  nodePosMap.forEach((entry, nodeId) => {
+    if (!entry || !entry.pos || !entry.pos.visible) {
+      return;
+    }
+    const node = nodeById.get(nodeId);
+    if (!node || (!node.active && !node.isCenter && !node.isCustom)) {
+      return;
+    }
+    labelAvoidNodes.push({
+      x: entry.pos.x,
+      y: entry.pos.y,
+      r: entry.radius,
+    });
+  });
+  const activeFocusNodeIds = new Set(microtonalSelectedNodeIds);
+  if (Number.isFinite(hoverNodeId)) {
+    activeFocusNodeIds.add(hoverNodeId);
+  }
+  const hasFocus = activeFocusNodeIds.size > 0;
+  const preferredSourceId = activeFocusNodeIds.size === 1 ? Array.from(activeFocusNodeIds)[0] : null;
   const labelFont = layoutMode
-    ? layoutAxisLegendFont
+    ? layoutLineLabelFont
     : is3DMode
     ? layoutRatioFont
     : "Noto Serif";
   const labelWeight = layoutMode
-    ? layoutAxisLegendFontWeight
+    ? layoutLineLabelFontWeight
     : is3DMode
     ? layoutRatioFontWeight
     : 400;
   const labelSize = layoutMode
-    ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
+    ? getLayoutLineLabelSize()
     : is3DMode
     ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
     : 14;
-  commaEdges.forEach(({ a, b, entry }) => {
+  aggregatedEdges.forEach(({ a, b, color, labels }) => {
     const startEntry = nodePosMap.get(a.id);
     const endEntry = nodePosMap.get(b.id);
     if (!startEntry || !endEntry) {
@@ -8644,16 +8929,38 @@ function drawCommaConnections(nodePosMap) {
     const uy = dy / dist;
     const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
     const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+    const pairKey = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+    const isFocused = hasFocus
+      ? activeFocusNodeIds.has(a.id) || activeFocusNodeIds.has(b.id)
+      : false;
+    const alpha = hasFocus
+      ? isFocused
+        ? 1
+        : 0.1
+      : 0.1;
     drawCanvasEdgeSegment({
       start,
       end,
       startRadius,
       endRadius,
-      color: entry.color,
-      label: entry.name,
+      color,
+      label: isFocused ? labels.join("\n") : null,
       labelFont,
       labelWeight,
       labelSize,
+      alpha: alpha * 0.4,
+      lineWidth: 3,
+      labelAlpha: 1,
+      // In focused-node mode, place labels near the destination node.
+      labelT:
+        preferredSourceId != null
+          ? a.id === preferredSourceId
+            ? 0.75
+            : b.id === preferredSourceId
+            ? 0.25
+            : 0.5
+          : 0.5,
+      labelAvoidNodes,
     });
   });
 }
@@ -8664,17 +8971,17 @@ function drawCustomConnections(nodePosMap) {
   }
   const edgeOutset = 1;
   const labelFont = layoutMode
-    ? layoutAxisLegendFont
+    ? layoutLineLabelFont
     : is3DMode
     ? layoutRatioFont
     : "Noto Serif";
   const labelWeight = layoutMode
-    ? layoutAxisLegendFontWeight
+    ? layoutLineLabelFontWeight
     : is3DMode
     ? layoutRatioFontWeight
     : 400;
   const labelSize = layoutMode
-    ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
+    ? getLayoutLineLabelSize()
     : is3DMode
     ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
     : 14;
@@ -8686,6 +8993,9 @@ function drawCustomConnections(nodePosMap) {
     }
     const source = nodeById.get(node.sourceNodeId);
     if (!source) {
+      return;
+    }
+    if (hasSelectedDistanceEdgeBetweenNodes(source, node)) {
       return;
     }
     const startEntry = nodePosMap.get(source.id);
@@ -8741,6 +9051,9 @@ function addCustomConnectionSegments(nodePosMap, segments) {
     }
     const source = nodeById.get(node.sourceNodeId);
     if (!source) {
+      return;
+    }
+    if (hasSelectedDistanceEdgeBetweenNodes(source, node)) {
       return;
     }
     const startEntry = nodePosMap.get(source.id);
@@ -8901,6 +9214,7 @@ function addDistanceLineSegments(nodePosMap, segments) {
 
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  layoutRenderedNoteLabelHitboxes.clear();
 
   if (!themeColors) {
     refreshThemeColors();
@@ -8934,6 +9248,9 @@ function draw() {
   const detailLabelSegments = [];
   edges.forEach(([a, b]) => {
     if (!a.active || !b.active) {
+      return;
+    }
+    if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
       return;
     }
     const startEntry = nodePosMap.get(a.id);
@@ -8997,14 +9314,17 @@ function draw() {
   }
   const showDistances = analysisLayers.distances;
   const showMicrotonal = analysisLayers.microtonal;
-  if (is3DMode) {
+  if (is3DMode && !showMicrotonal) {
     draw3DEdges(nodePosMap, axisEntry);
-  } else {
-    const labelFont = layoutMode ? layoutAxisLegendFont : "Noto Serif";
-    const labelWeight = layoutMode ? layoutAxisLegendFontWeight : 400;
-    const labelSize = layoutMode ? Math.max(10, Math.round(layoutRatioTextSize * 0.6)) : 14;
+  } else if (!showMicrotonal) {
+    const labelFont = layoutMode ? layoutLineLabelFont : "Noto Serif";
+    const labelWeight = layoutMode ? layoutLineLabelFontWeight : 400;
+    const labelSize = layoutMode ? getLayoutLineLabelSize() : 14;
     edges.forEach(([a, b]) => {
       if (!a.active || !b.active) {
+        return;
+      }
+      if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
         return;
       }
       const startEntry = nodePosMap.get(a.id);
@@ -9064,8 +9384,10 @@ function draw() {
   drawCustomConnections(nodePosMap);
   drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry);
   drawGuideEdges(nodePosMap, guideNodes);
-  drawTriangleDiagonals(nodePosMap, disableScale);
-  drawTriangleLabels(nodePosMap, disableScale);
+  if (!showMicrotonal) {
+    drawTriangleDiagonals(nodePosMap, disableScale);
+    drawTriangleLabels(nodePosMap, disableScale);
+  }
   drawTriangleHover(nodePosMap, disableScale);
 
   const nowMs = performance.now();
@@ -9272,18 +9594,18 @@ function draw() {
       ctx.restore();
     }
     if (showMicrotonal) {
-      const rings = commaNodeRings.get(node.id);
-      if (rings && rings.length) {
-        rings.forEach((ring, index) => {
-          ctx.save();
-          ctx.globalAlpha = Math.max(0.5, alpha);
-          ctx.strokeStyle = ring.color;
-          ctx.lineWidth = Math.max(2, radius * 0.1);
-          ctx.beginPath();
-          ctx.arc(pos.x, pos.y, radius + 6 + index * 4, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.restore();
-        });
+      const isSelectedMicrotonal = microtonalSelectedNodeIds.has(node.id);
+      if (isSelectedMicrotonal || isHovered) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0.5, alpha);
+        ctx.strokeStyle = isSelectedMicrotonal
+          ? MICROTONAL_SELECTED_RING_COLOR
+          : MICROTONAL_HOVER_RING_COLOR;
+        ctx.lineWidth = Math.max(2, radius * 0.1);
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, radius + 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
       }
     }
 
@@ -9384,11 +9706,12 @@ function draw() {
       ctx.restore();
       return;
     }
-    const detailSize = layoutMode ? layoutNoteTextSize : 14;
-    const noteLabelFont = layoutMode ? layoutNoteFont : "Lexend, sans-serif";
-    const noteLabelWeight = layoutMode ? layoutNoteFontWeight : 200;
     const displayInfo = getCachedDisplayInfo(node);
-    if (featureMode === "note") {
+    if (!showMicrotonal) {
+      const detailSize = layoutMode ? layoutNoteTextSize : 14;
+      const noteLabelFont = layoutMode ? layoutNoteFont : "Lexend, sans-serif";
+      const noteLabelWeight = layoutMode ? layoutNoteFontWeight : 200;
+      if (featureMode === "note") {
       ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
@@ -9439,6 +9762,16 @@ function draw() {
       }
       const ratioX = rawLabelPos.x;
       const ratioY = rawLabelPos.y;
+      if (layoutMode) {
+        const padding = Math.max(4, Math.round(detailSize * 0.25));
+        layoutRenderedNoteLabelHitboxes.set(node.id, {
+          left: ratioX - padding,
+          top: ratioY - padding,
+          width: labelWidth + padding * 2,
+          height: labelHeight + padding * 2,
+          labelPos: { x: ratioX, y: ratioY },
+        });
+      }
       let lineOffset = 0;
       ctx.fillText(ratioText, ratioX, ratioY + lineOffset);
       lineOffset += detailSize + 4;
@@ -9466,7 +9799,7 @@ function draw() {
       if (showHz && Number.isFinite(node.freq)) {
         ctx.fillText(`${node.freq.toFixed(2)} Hz`, ratioX, ratioY + lineOffset);
       }
-    } else {
+      } else {
       ctx.fillStyle = textColorSecondary;
       const centsLabel = getCachedCentsReadout(
         node,
@@ -9526,6 +9859,16 @@ function draw() {
         });
       }
       const labelPos = { x: rawLabelPos.x, y: rawLabelPos.y };
+      if (layoutMode) {
+        const padding = Math.max(4, Math.round(detailSize * 0.25));
+        layoutRenderedNoteLabelHitboxes.set(node.id, {
+          left: labelPos.x - padding,
+          top: labelPos.y - padding,
+          width: labelWidth + padding * 2,
+          height: labelHeight + padding * 2,
+          labelPos: { x: labelPos.x, y: labelPos.y },
+        });
+      }
       const restGapScale = hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
       let lineOffset = 0;
       drawHejiInline({
@@ -9592,17 +9935,18 @@ function draw() {
         ctx.fillText(`${node.freq.toFixed(2)} Hz`, labelPos.x, hzY);
         ctx.restore();
       }
-    }
+      }
 
-    if (layoutMode && layoutLabelHitboxVisible) {
-      const hitbox = getLayoutNoteLabelHitbox(node, pos, radius);
-      ctx.save();
-      ctx.strokeStyle = "rgba(255, 80, 80, 0.8)";
-      ctx.fillStyle = "rgba(255, 80, 80, 0.12)";
-      ctx.lineWidth = 1;
-      ctx.fillRect(hitbox.left, hitbox.top, hitbox.width, hitbox.height);
-      ctx.strokeRect(hitbox.left, hitbox.top, hitbox.width, hitbox.height);
-      ctx.restore();
+      if (layoutMode && layoutLabelHitboxVisible) {
+        const hitbox = getLayoutNoteLabelHitbox(node, pos, radius);
+        ctx.save();
+        ctx.strokeStyle = "rgba(255, 80, 80, 0.8)";
+        ctx.fillStyle = "rgba(255, 80, 80, 0.12)";
+        ctx.lineWidth = 1;
+        ctx.fillRect(hitbox.left, hitbox.top, hitbox.width, hitbox.height);
+        ctx.strokeRect(hitbox.left, hitbox.top, hitbox.width, hitbox.height);
+        ctx.restore();
+      }
     }
 
     if (keyMap && node.active && !layoutMode && showKeyMappings) {
@@ -9710,6 +10054,7 @@ function draw() {
     drawLayoutAxisLegend(layoutAxisEdit, { showHandles: true });
     ctx.restore();
   }
+  drawAnalysisWatermark();
   syncNavViewSliders();
 
   updateBannerMessage();
@@ -10184,7 +10529,7 @@ function onPointerDown(event) {
     if (layoutMode) {
       // allow normal layout dragging when no distance line/label is hit
     }
-    if (hit && hit.active) {
+    if (distanceSelectMode && hit && hit.active) {
       distanceSelectDrag = {
         startNodeId: hit.id,
         startKey: getDistanceNodeKey(hit),
@@ -10195,9 +10540,51 @@ function onPointerDown(event) {
       canvas.setPointerCapture(event.pointerId);
       return;
     }
-    if (hit) {
+    if (distanceSelectMode && hit) {
       return;
     }
+  }
+  if (layoutMode && layoutAlignMode) {
+    if (hit) {
+      if (layoutAlignMode === "straighten") {
+        if (!layoutStraightenAnchorId) {
+          layoutStraightenAnchorId = hit.id;
+        } else if (!layoutStraightenDir) {
+          const anchor = nodeById.get(layoutStraightenAnchorId);
+          if (anchor && anchor.id !== hit.id) {
+            const anchorPos = ensureLayoutPosition(anchor);
+            const targetPos = ensureLayoutPosition(hit);
+            const dx = targetPos.x - anchorPos.x;
+            const dy = targetPos.y - anchorPos.y;
+            const len = Math.hypot(dx, dy);
+            if (len > 0.0001) {
+              layoutStraightenDir = { x: dx / len, y: dy / len };
+            }
+          }
+        } else if (layoutStraightenAnchorId !== hit.id) {
+          const anchor = nodeById.get(layoutStraightenAnchorId);
+          if (anchor) {
+            pushLayoutUndoState();
+            applyLayoutStraightenToNode(hit, anchor, layoutStraightenDir);
+            draw();
+            schedulePresetUrlUpdate();
+          }
+        }
+      } else {
+        if (!layoutAlignAnchorId) {
+          layoutAlignAnchorId = hit.id;
+        } else if (layoutAlignAnchorId !== hit.id) {
+          const anchor = nodeById.get(layoutAlignAnchorId);
+          if (anchor) {
+            pushLayoutUndoState();
+            applyLayoutAlignToNode(hit, anchor, layoutAlignMode);
+            draw();
+            schedulePresetUrlUpdate();
+          }
+        }
+      }
+    }
+    return;
   }
   const now = performance.now();
   if (isCustomPianoMapModeActive()) {
@@ -10382,7 +10769,7 @@ function onPointerDown(event) {
   }
 
   if (layoutMode) {
-    if (event.altKey) {
+    if (event.altKey && !event.shiftKey) {
       const handleHit = hitTestAxisLegendHandle(screenPoint);
       if (handleHit && layoutAxisOffsets[handleHit.axis]) {
         pushLayoutUndoState();
@@ -10585,6 +10972,9 @@ function onPointerDown(event) {
         lockAxis: null,
         lockOriginX: event.offsetX,
         lockOriginY: event.offsetY,
+        axisLock: null,
+        axisLockOriginX: event.offsetX,
+        axisLockOriginY: event.offsetY,
       };
       canvas.setPointerCapture(event.pointerId);
       return;
@@ -10657,6 +11047,14 @@ function onPointerDown(event) {
 
 function onCanvasDoubleClick(event) {
   clearPendingDistanceLabelClick();
+  if (layoutMode && layoutAlignMode) {
+    setLayoutAlignMode("");
+    return;
+  }
+  if (analysisLayers.microtonal) {
+    setMicrotonalIntervalsMode(false);
+    return;
+  }
   if (distanceSelectMode) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const labelHit = hitTestDistanceLabel(screenPoint);
@@ -10771,6 +11169,7 @@ function onCanvasDoubleClick(event) {
 
 function onPointerMove(event) {
   view.lastPointer = { x: event.offsetX, y: event.offsetY };
+  updateMicrotonalHoverFocus(view.lastPointer);
   if (distanceSelectDrag) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const hit = hitTestScreen(screenPoint);
@@ -10985,13 +11384,27 @@ function onPointerMove(event) {
     const node = nodeById.get(layoutDrag.nodeId);
     if (node) {
       const coord = getNodeDisplayCoordinate(node);
-      const lockAxis = updateDragLock(layoutDrag, event);
       const delta = {
         x: event.offsetX - layoutDrag.startScreen.x,
         y: event.offsetY - layoutDrag.startScreen.y,
       };
+      const axisLock = updateProjectedAxisLock(layoutDrag, event);
+      const useProjectedAxis = Boolean(axisLock);
+      if (useProjectedAxis && layoutDrag.axisLockJustSet) {
+        layoutDrag.startScreen = { x: event.offsetX, y: event.offsetY };
+        layoutDrag.startCoord = { x: coord.x, y: coord.y, z: coord.z };
+        layoutDrag.axisLockJustSet = false;
+        return;
+      }
+      const useDelta = useProjectedAxis
+        ? {
+            x: axisLock.dir.x * (delta.x * axisLock.dir.x + delta.y * axisLock.dir.y),
+            y: axisLock.dir.y * (delta.x * axisLock.dir.x + delta.y * axisLock.dir.y),
+          }
+        : delta;
+      const lockAxis = useProjectedAxis ? null : updateDragLock(layoutDrag, event);
       const deltaWorld = screenDeltaToWorldDelta(
-        delta,
+        useDelta,
         layoutDrag.startCoord,
         shouldDisableLayoutScale()
       );
@@ -11005,7 +11418,7 @@ function onPointerMove(event) {
       } else if (lockAxis === "y") {
         nextCoord.x = layoutDrag.startCoord.x;
       }
-      if (!event.shiftKey) {
+      if (!event.shiftKey || !event.altKey) {
         layoutDrag.startCoord = { x: nextCoord.x, y: nextCoord.y };
         layoutDrag.startScreen = { x: event.offsetX, y: event.offsetY };
       }
@@ -11234,6 +11647,8 @@ function onPointerUp(event) {
     view.dragging = false;
     markIsomorphicDirty();
   }
+  view.lastPointer = { x: event.offsetX, y: event.offsetY };
+  updateMicrotonalHoverFocus(view.lastPointer);
   view.reducedEffects = false;
 
   if (moved < 4) {
@@ -11258,10 +11673,16 @@ function onPointerUp(event) {
     }
     if (analysisLayers.microtonal) {
       const edgeHit = hitTestCommaEdge(screenPoint);
-      if (edgeHit) {
-        toggleCommaEdgeVoices(edgeHit.a, edgeHit.b);
-        draw();
-        return;
+      if (edgeHit && !hit) {
+        const edgeConnectedToSelection =
+          microtonalSelectedNodeIds.size > 0 &&
+          (microtonalSelectedNodeIds.has(edgeHit.a.id) ||
+            microtonalSelectedNodeIds.has(edgeHit.b.id));
+        if (edgeConnectedToSelection) {
+          handleMicrotonalEdgePlayback(edgeHit.a, edgeHit.b);
+          draw();
+          return;
+        }
       }
     }
     if (!layoutMode && fHeld && hit) {
@@ -11527,6 +11948,15 @@ function onPointerUp(event) {
         draw();
         return;
       }
+      if (analysisLayers.microtonal) {
+        if (microtonalSelectedNodeIds.has(hit.id)) {
+          microtonalSelectedNodeIds.delete(hit.id);
+        } else {
+          microtonalSelectedNodeIds.add(hit.id);
+        }
+        draw();
+        return;
+      }
       if (baseVoice) {
         stopVoice(baseVoice);
         hit.baseVoiceId = null;
@@ -11565,6 +11995,7 @@ function onPointerLeave() {
   triangleHover = null;
   view.rotating = false;
   view.lastPointer = null;
+  microtonalHoverPairKey = "";
   if (view.dragging) {
     view.dragging = false;
   }
@@ -11572,24 +12003,27 @@ function onPointerLeave() {
   scheduleDraw();
 }
 
-function hitTestCommaEdge(screenPoint) {
-  if (!commaEdges.length) {
+function hitTestCommaEdge(screenPoint, options = {}) {
+  if (!screenPoint || !commaEdges.length) {
     return null;
   }
-  const disableScale = shouldDisableLayoutScale();
-  const nodePosMap = new Map();
-  nodes.forEach((node) => {
-    if (!node.active) {
-      return;
-    }
-    const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
-    const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
-    const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
-    nodePosMap.set(node.id, { pos, radius });
-  });
+  const hitThreshold = Math.max(1, Number(options.hitThreshold) || 6);
+  let nodePosMap = options.nodePosMap instanceof Map ? options.nodePosMap : null;
+  if (!nodePosMap) {
+    const disableScale = shouldDisableLayoutScale();
+    nodePosMap = new Map();
+    nodes.forEach((node) => {
+      if (!node.active) {
+        return;
+      }
+      const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+      const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
+      const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
+      nodePosMap.set(node.id, { pos, radius });
+    });
+  }
   let best = null;
   let bestDistance = Number.POSITIVE_INFINITY;
-  const hitThreshold = 6;
   commaEdges.forEach(({ a, b }) => {
     const startEntry = nodePosMap.get(a.id);
     const endEntry = nodePosMap.get(b.id);
@@ -11659,6 +12093,103 @@ function toggleCommaEdgeVoices(a, b) {
       node.baseVoiceId = nextVoice.id;
     }
   });
+}
+
+function getNodeBaseVoice(node) {
+  if (!node) {
+    return null;
+  }
+  return node.baseVoiceId ? findVoiceById(node.baseVoiceId) : null;
+}
+
+function startNodeBaseVoiceIfNeeded(node) {
+  if (!node) {
+    return;
+  }
+  if (getNodeBaseVoice(node)) {
+    return;
+  }
+  const voice = startVoice({
+    nodeId: node.id,
+    octave: 0,
+    freq: node.freq,
+    source: "node",
+  });
+  if (voice) {
+    node.baseVoiceId = voice.id;
+  }
+}
+
+function stopNodeBaseVoice(node) {
+  if (!node) {
+    return;
+  }
+  const voice = getNodeBaseVoice(node);
+  if (voice) {
+    stopVoice(voice);
+  }
+  node.baseVoiceId = null;
+}
+
+function sourceHasOtherPlayingMicrotonalDestinations(sourceNode, destinationNode) {
+  if (!sourceNode) {
+    return false;
+  }
+  buildCommaConnections(new Map());
+  for (let i = 0; i < commaEdges.length; i += 1) {
+    const edge = commaEdges[i];
+    if (!edge || !edge.a || !edge.b) {
+      continue;
+    }
+    let other = null;
+    if (edge.a.id === sourceNode.id) {
+      other = edge.b;
+    } else if (edge.b.id === sourceNode.id) {
+      other = edge.a;
+    }
+    if (!other || (destinationNode && other.id === destinationNode.id)) {
+      continue;
+    }
+    if (getNodeBaseVoice(other)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function handleMicrotonalEdgePlayback(a, b) {
+  if (!a || !b) {
+    return;
+  }
+  let sourceNode = null;
+  let destinationNode = null;
+  const aSelected = microtonalSelectedNodeIds.has(a.id);
+  const bSelected = microtonalSelectedNodeIds.has(b.id);
+  if (aSelected && !bSelected) {
+    sourceNode = a;
+    destinationNode = b;
+  } else if (bSelected && !aSelected) {
+    sourceNode = b;
+    destinationNode = a;
+  } else {
+    // Fallback when both endpoints are selected.
+    sourceNode = a;
+    destinationNode = b;
+  }
+
+  const sourcePlaying = Boolean(getNodeBaseVoice(sourceNode));
+  const destinationPlaying = Boolean(getNodeBaseVoice(destinationNode));
+
+  if (sourcePlaying && destinationPlaying) {
+    stopNodeBaseVoice(destinationNode);
+    if (!sourceHasOtherPlayingMicrotonalDestinations(sourceNode, destinationNode)) {
+      stopNodeBaseVoice(sourceNode);
+    }
+    return;
+  }
+
+  startNodeBaseVoiceIfNeeded(sourceNode);
+  startNodeBaseVoiceIfNeeded(destinationNode);
 }
 
 function onWheel(event) {
@@ -12051,6 +12582,31 @@ function clearPendingDistanceLabelClick() {
     pendingDistanceLabelClickTimer = null;
   }
   pendingDistanceLabelClickKey = "";
+}
+
+function updateMicrotonalHoverFocus(screenPoint) {
+  if (!analysisLayers.microtonal || !screenPoint) {
+    microtonalHoverPairKey = "";
+    return;
+  }
+  const insideCanvas =
+    screenPoint.x >= 0 &&
+    screenPoint.y >= 0 &&
+    screenPoint.x <= canvas.clientWidth &&
+    screenPoint.y <= canvas.clientHeight;
+  if (!insideCanvas) {
+    microtonalHoverPairKey = "";
+    return;
+  }
+  const edgeHoverHit = hitTestCommaEdge(screenPoint, { hitThreshold: 10 });
+  if (!edgeHoverHit) {
+    microtonalHoverPairKey = "";
+    return;
+  }
+  microtonalHoverPairKey =
+    edgeHoverHit.a.id < edgeHoverHit.b.id
+      ? `${edgeHoverHit.a.id}|${edgeHoverHit.b.id}`
+      : `${edgeHoverHit.b.id}|${edgeHoverHit.a.id}`;
 }
 
 function queueDistanceLabelSingleClick(edge) {
@@ -13048,17 +13604,7 @@ function normalizeCommaRatio(numerator, denominator) {
   }
   const reduced = reduceFraction(numerator, denominator);
   const octaveReduced = reduceToOctave(reduced.numerator, reduced.denominator);
-  let num = octaveReduced.numerator;
-  let den = octaveReduced.denominator;
-  const ratio = octaveReduced.ratio;
-  if (Number.isFinite(ratio) && ratio > 0) {
-    const inverse = 2 / ratio;
-    if (inverse < ratio) {
-      num = den * 2;
-      den = octaveReduced.numerator;
-    }
-  }
-  return reduceFraction(num, den);
+  return reduceFraction(octaveReduced.numerator, octaveReduced.denominator);
 }
 
 function resizeWheelCanvas(canvasEl) {
@@ -13326,6 +13872,10 @@ function updateRatioWheels() {
 }
 
 function getUiHintKey() {
+  const interactionMode = getInteractionMode();
+  if (interactionMode) {
+    return `interaction:${interactionMode}`;
+  }
   if (layoutMode) {
     if (layoutAxisEdit) {
       return "layout-axis-edit";
@@ -13342,6 +13892,25 @@ function getUiHintKey() {
     return "mode-2d";
   }
   return "mode-3d";
+}
+
+function getInteractionMode() {
+  if (distanceSelectMode && analysisLayers.distances) {
+    return "distance-edit";
+  }
+  if (layoutMode && layoutAlignMode) {
+    if (layoutAlignMode === "y") {
+      return "align-y";
+    }
+    if (layoutAlignMode === "straighten") {
+      return "align-straighten";
+    }
+    return "align-x";
+  }
+  if (analysisLayers.microtonal) {
+    return "microtonal-intervals";
+  }
+  return "";
 }
 
 function setUiHintVisibility(isVisible) {
@@ -13368,9 +13937,34 @@ function updateUiHint() {
     return;
   }
   setUiHintVisibility(true);
+  const interactionMode = getInteractionMode();
+  if (interactionMode === "distance-edit") {
+    uiHint.textContent = DISTANCE_MODE_HELP;
+    return;
+  }
+  if (interactionMode === "microtonal-intervals") {
+    uiHint.textContent = MICROTONAL_MODE_HELP;
+    return;
+  }
+  if (interactionMode === "align-x") {
+    uiHint.textContent =
+      "X-Align mode\nClick node to establish position.\nAny other nodes clicked will align.";
+    return;
+  }
+  if (interactionMode === "align-y") {
+    uiHint.textContent =
+      "Y-Align mode\nClick node to establish position.\nAny other nodes clicked will align.";
+    return;
+  }
+  if (interactionMode === "align-straighten") {
+    uiHint.textContent =
+      "Straighten mode\nClick two nodes to set the line.\nAny other nodes clicked will align.";
+    return;
+  }
   if (layoutMode) {
     if (layoutAxisEdit) {
-      uiHint.textContent = "Editing axis legend. Press ESC to exit.";
+      uiHint.textContent =
+        "Editing axis legend.\nPress Delete to remove. Reset Layout restores.\nPress ESC to exit.";
       return;
     }
     if (tHeld) {
@@ -13687,76 +14281,86 @@ function showKeyboardModeHelp(message) {
   }, 5000);
 }
 
-function formatAxisBannerText(entry) {
-  if (!entry) {
-    return "";
-  }
-  const centerX = Math.floor(GRID_COLS / 2);
-  const centerY = Math.floor(GRID_ROWS / 2);
-  const centerZ = gridCenterZ;
-  const label = entry.axis.toUpperCase();
-  let coordA = 0;
-  let coordB = 0;
-  switch (entry.axis) {
-    case "z":
-      coordA = entry.anchor.x - centerX;
-      coordB = centerY - entry.anchor.y;
-      break;
-    case "x":
-      coordA = centerY - entry.anchor.y;
-      coordB = entry.anchor.z - centerZ;
-      break;
-    case "y":
-      coordA = entry.anchor.x - centerX;
-      coordB = entry.anchor.z - centerZ;
-      break;
-    default:
-      coordA = entry.anchor.x - centerX;
-      coordB = centerY - entry.anchor.y;
-  }
-  return `Editing ${label} axis for node [${coordA},${coordB}]: press Escape to return`;
-}
-
 function updateBannerMessage() {
   if (!bannerMessage) {
     return;
   }
-  if (addIntervalMode) {
-    bannerMessage.textContent = ADD_INTERVAL_BANNER;
-    bannerMessage.classList.remove("banner-interactive");
-    bannerMessage.hidden = false;
-    return;
+  const interactionMode = getInteractionMode();
+  let nextKey = "";
+  let nextText = "";
+  let nextHtml = "";
+  let nextInteractive = false;
+  let nextHidden = false;
+  if (layoutMode && !layoutLockPosition && !interactionMode) {
+    nextKey = "layout-freeze";
+    nextHtml = 'Drag, scroll, and use arrow keys to adjust view. <button type="button" data-layout-banner="freeze">Freeze</button> this view to edit.';
+    nextInteractive = true;
+  } else if (
+    interactionMode === "align-x" ||
+    interactionMode === "align-y" ||
+    interactionMode === "align-straighten"
+  ) {
+    const label =
+      interactionMode === "align-y"
+        ? "Y-Align mode"
+        : interactionMode === "align-straighten"
+        ? "Straighten mode"
+        : "X-Align mode";
+    nextKey = `interaction:${interactionMode}`;
+    nextHtml = `<button type="button" data-layout-banner="exit-align">Exit</button> ${label}.`;
+    nextInteractive = true;
+  } else if (interactionMode) {
+    nextKey = `interaction:${interactionMode}`;
+    nextText = INTERACTION_MODE_LABELS[interactionMode] || interactionMode;
+  } else {
+    nextKey = "none";
+    nextHidden = true;
   }
-  if (layoutMode && !layoutLockPosition) {
-    bannerMessage.innerHTML =
-      '<button type="button" data-layout-banner="freeze">Freeze</button> this view to edit.';
-    bannerMessage.classList.add("banner-interactive");
-    bannerMessage.hidden = false;
-    return;
-  }
-  if (distanceSelectMode && analysisLayers.distances) {
-    bannerMessage.innerHTML =
-      'Drag between nodes to create distance lines, drag line to bend, drag label to move it. Option-click line to delete. Double click label to toggle interval names. ESCAPE or double-click background to exit. <span class="banner-actions">[<button type="button" data-distance-banner="reset">Reset</button>]</span>';
-    bannerMessage.classList.add("banner-interactive");
-    bannerMessage.hidden = false;
-    return;
-  }
-  if (analysisLayers.microtonal) {
+  currentBannerKey = nextKey;
+  if (bannerDismissedKey && bannerDismissedKey === nextKey) {
     bannerMessage.hidden = true;
     bannerMessage.textContent = "";
     bannerMessage.classList.remove("banner-interactive");
     return;
   }
-  const activeAxis = getActiveAxisEntry();
-  if (!activeAxis) {
+  bannerDismissedKey = "";
+  if (nextHidden) {
     bannerMessage.hidden = true;
     bannerMessage.textContent = "";
     bannerMessage.classList.remove("banner-interactive");
     return;
   }
-  bannerMessage.textContent = formatAxisBannerText(activeAxis);
-  bannerMessage.classList.remove("banner-interactive");
+  if (nextHtml) {
+    bannerMessage.innerHTML = nextHtml;
+  } else {
+    bannerMessage.textContent = nextText;
+  }
+  bannerMessage.classList.toggle("banner-interactive", nextInteractive);
   bannerMessage.hidden = false;
+}
+
+function drawAnalysisWatermark() {
+  if (!analysisLayers.microtonal) {
+    return;
+  }
+  const text = "Analysis View";
+  const padding = 14;
+  const alpha = layoutMode ? 0.5 : 0.38;
+  let x = canvas.width - padding;
+  let y = padding;
+  if (layoutMode) {
+    const pageRect = getLayoutPageRect();
+    x = pageRect.left + pageRect.width - padding;
+    y = pageRect.top + padding;
+  }
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = themeColors.textSecondary;
+  ctx.font = '600 13px "Lexend", sans-serif';
+  ctx.textAlign = "right";
+  ctx.textBaseline = "top";
+  ctx.fillText(text, x, y);
+  ctx.restore();
 }
 
 function updateAddModeFromShift() {
@@ -13952,6 +14556,7 @@ function captureLayoutUndoState() {
       y: { ...layoutAxisOffsets.y },
       z: { ...layoutAxisOffsets.z },
     },
+    layoutAxisHidden: { ...layoutAxisHidden },
     layoutAxisAngles: { ...layoutAxisAngles },
     layoutTitlePosition: layoutTitlePosition ? { ...layoutTitlePosition } : null,
     layoutCreatorPosition: layoutCreatorPosition ? { ...layoutCreatorPosition } : null,
@@ -13967,6 +14572,7 @@ function captureLayoutUndoState() {
     layoutCustomLabelTextSize,
     layoutKeyMappingTextSize,
     layoutAxisLegendTextSize,
+    layoutLineLabelTextSize,
     layoutKeyMappingOffset,
     layoutKeyMappingDark,
     layoutKeyMappingPrefix,
@@ -13986,6 +14592,7 @@ function captureLayoutUndoState() {
     layoutCustomLabelFont,
     layoutKeyMappingFont,
     layoutAxisLegendFont,
+    layoutLineLabelFont,
     layoutTitleFontWeight,
     layoutCreatorFontWeight,
     layoutRatioFontWeight,
@@ -13994,6 +14601,7 @@ function captureLayoutUndoState() {
     layoutCustomLabelFontWeight,
     layoutKeyMappingFontWeight,
     layoutAxisLegendFontWeight,
+    layoutLineLabelFontWeight,
     layoutUnifyNodeSize,
     layoutPageSize,
     layoutOrientation,
@@ -14049,6 +14657,9 @@ function applyLayoutUndoState(state) {
     y: { ...state.layoutAxisOffsets.y },
     z: { ...state.layoutAxisOffsets.z },
   };
+  layoutAxisHidden = state.layoutAxisHidden
+    ? { ...state.layoutAxisHidden }
+    : { ...LAYOUT_DEFAULTS.axisHidden };
   layoutAxisAngles = { ...state.layoutAxisAngles };
   layoutTitlePosition = state.layoutTitlePosition ? { ...state.layoutTitlePosition } : null;
   layoutCreatorPosition = state.layoutCreatorPosition ? { ...state.layoutCreatorPosition } : null;
@@ -14071,6 +14682,8 @@ function applyLayoutUndoState(state) {
   layoutKeyMappingTextSize = state.layoutKeyMappingTextSize ?? layoutKeyMappingTextSize;
   layoutAxisLegendTextSize =
     state.layoutAxisLegendTextSize ?? layoutAxisLegendTextSize;
+  layoutLineLabelTextSize =
+    state.layoutLineLabelTextSize ?? layoutLineLabelTextSize;
   layoutKeyMappingOffset = state.layoutKeyMappingOffset ?? layoutKeyMappingOffset;
   layoutKeyMappingDark = state.layoutKeyMappingDark ?? layoutKeyMappingDark;
   layoutKeyMappingPrefix = state.layoutKeyMappingPrefix ?? layoutKeyMappingPrefix;
@@ -14089,6 +14702,7 @@ function applyLayoutUndoState(state) {
   layoutCustomLabelFont = state.layoutCustomLabelFont ?? layoutCustomLabelFont;
   layoutKeyMappingFont = state.layoutKeyMappingFont ?? layoutKeyMappingFont;
   layoutAxisLegendFont = state.layoutAxisLegendFont ?? layoutAxisLegendFont;
+  layoutLineLabelFont = state.layoutLineLabelFont ?? layoutLineLabelFont;
   layoutCreatorFont = state.layoutCreatorFont ?? layoutCreatorFont;
   layoutTitleFontWeight = state.layoutTitleFontWeight ?? layoutTitleFontWeight;
   layoutRatioFontWeight = state.layoutRatioFontWeight ?? layoutRatioFontWeight;
@@ -14101,6 +14715,8 @@ function applyLayoutUndoState(state) {
     state.layoutKeyMappingFontWeight ?? layoutKeyMappingFontWeight;
   layoutAxisLegendFontWeight =
     state.layoutAxisLegendFontWeight ?? layoutAxisLegendFontWeight;
+  layoutLineLabelFontWeight =
+    state.layoutLineLabelFontWeight ?? layoutLineLabelFontWeight;
   layoutCreatorFontWeight =
     state.layoutCreatorFontWeight ?? layoutCreatorFontWeight;
   layoutSpacing = state.layoutSpacing
@@ -14151,6 +14767,9 @@ function applyLayoutUndoState(state) {
   if (layoutAxisSizeInput) {
     layoutAxisSizeInput.value = String(layoutAxisLegendTextSize);
   }
+  if (layoutLineLabelSizeInput) {
+    layoutLineLabelSizeInput.value = String(layoutLineLabelTextSize);
+  }
   if (layoutCustomLabelSizeInput) {
     layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
   }
@@ -14196,11 +14815,20 @@ function applyLayoutUndoState(state) {
   if (layoutAxisFontSelect) {
     layoutAxisFontSelect.value = layoutAxisLegendFont;
   }
+  if (layoutLineLabelFontSelect) {
+    layoutLineLabelFontSelect.value = layoutLineLabelFont;
+  }
+  if (layoutLineLabelWeightSelect) {
+    layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
+  }
   if (layoutTriangleLabelWeightSelect) {
     layoutTriangleLabelWeightSelect.value = String(layoutTriangleLabelFontWeight);
   }
   if (layoutAxisWeightSelect) {
     layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
+  }
+  if (layoutLineLabelWeightSelect) {
+    layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
   }
   if (layoutCustomFontSelect) {
     layoutCustomFontSelect.value = layoutCustomLabelFont;
@@ -14282,16 +14910,17 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
   layoutRedoStack.length = 0;
   layoutTitlePosition = null;
   layoutCreatorPosition = null;
-  layoutAxisOffsets = {
-    x: { x: 0, y: 0 },
-    y: { x: 0, y: 0 },
-    z: { x: 0, y: 0 },
-  };
-  layoutAxisAngles = {
-    x: null,
-    y: null,
-    z: null,
-  };
+    layoutAxisOffsets = {
+      x: { x: 0, y: 0 },
+      y: { x: 0, y: 0 },
+      z: { x: 0, y: 0 },
+    };
+    layoutAxisHidden = { ...LAYOUT_DEFAULTS.axisHidden };
+    layoutAxisAngles = {
+      x: null,
+      y: null,
+      z: null,
+    };
   layoutAxisEdit = null;
   layoutAxisEditDrag = null;
   layoutKeyMappingDrag = null;
@@ -14303,6 +14932,7 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     layoutCustomLabelTextSize = LAYOUT_DEFAULTS.customLabelTextSize;
     layoutKeyMappingTextSize = LAYOUT_DEFAULTS.keyMappingTextSize;
     layoutAxisLegendTextSize = LAYOUT_DEFAULTS.axisLegendTextSize;
+    layoutLineLabelTextSize = LAYOUT_DEFAULTS.lineLabelTextSize;
     layoutKeyMappingOffset = LAYOUT_DEFAULTS.keyMappingOffset;
     layoutKeyMappingDark = LAYOUT_DEFAULTS.keyMappingDark;
     layoutKeyMappingPrefix = LAYOUT_DEFAULTS.keyMappingPrefix;
@@ -14328,6 +14958,7 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     layoutCustomLabelFont = LAYOUT_DEFAULTS.customLabelFont;
     layoutKeyMappingFont = LAYOUT_DEFAULTS.keyMappingFont;
     layoutAxisLegendFont = LAYOUT_DEFAULTS.axisLegendFont;
+    layoutLineLabelFont = LAYOUT_DEFAULTS.lineLabelFont;
     layoutCreatorFont = LAYOUT_DEFAULTS.creatorFont;
     layoutTitleFontWeight = LAYOUT_DEFAULTS.titleFontWeight;
     layoutRatioFontWeight = LAYOUT_DEFAULTS.ratioFontWeight;
@@ -14336,6 +14967,7 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     layoutCustomLabelFontWeight = LAYOUT_DEFAULTS.customLabelFontWeight;
     layoutKeyMappingFontWeight = LAYOUT_DEFAULTS.keyMappingFontWeight;
     layoutAxisLegendFontWeight = LAYOUT_DEFAULTS.axisLegendFontWeight;
+    layoutLineLabelFontWeight = LAYOUT_DEFAULTS.lineLabelFontWeight;
     layoutCreatorFontWeight = LAYOUT_DEFAULTS.creatorFontWeight;
     if (layoutTitleInput) {
       layoutTitleInput.value = layoutTitle;
@@ -14386,6 +15018,9 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     if (layoutAxisSizeInput) {
       layoutAxisSizeInput.value = String(layoutAxisLegendTextSize);
     }
+    if (layoutLineLabelSizeInput) {
+      layoutLineLabelSizeInput.value = String(layoutLineLabelTextSize);
+    }
     if (layoutKeyMappingPrefixInput) {
       layoutKeyMappingPrefixInput.value = layoutKeyMappingPrefix;
     }
@@ -14434,11 +15069,17 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     if (layoutAxisFontSelect) {
       layoutAxisFontSelect.value = layoutAxisLegendFont;
     }
+    if (layoutLineLabelFontSelect) {
+      layoutLineLabelFontSelect.value = layoutLineLabelFont;
+    }
     if (layoutKeyMappingWeightSelect) {
       layoutKeyMappingWeightSelect.value = String(layoutKeyMappingFontWeight);
     }
     if (layoutAxisWeightSelect) {
       layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
+    }
+    if (layoutLineLabelWeightSelect) {
+      layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
     }
     if (layoutNodeShapeSelect) {
       layoutNodeShapeSelect.value = layoutNodeShape;
@@ -14482,6 +15123,11 @@ function setLayoutMode(enabled, { force = false } = {}) {
   const wasLayoutMode = layoutMode;
   if (wasLayoutMode === enabled && !(force && enabled)) {
     return;
+  }
+  if (!enabled && layoutAlignMode) {
+    layoutAlignMode = "";
+    layoutAlignAnchorId = null;
+    syncLayoutAlignButtons();
   }
   uiHintKey = "";
   uiHintDismissed = false;
@@ -14959,7 +15605,9 @@ function initLayoutFonts() {
   layoutKeyMappingFont =
     styles.getPropertyValue("--font-key-mapping").trim() || "Lexend";
   layoutAxisLegendFont = layoutRatioFont;
+  layoutLineLabelFont = layoutAxisLegendFont;
   layoutAxisLegendFontWeight = layoutRatioFontWeight;
+  layoutLineLabelFontWeight = layoutAxisLegendFontWeight;
   layoutCreatorFont = layoutTitleFont;
   layoutCreatorFontWeight = layoutTitleFontWeight;
   if (layoutTitleFontSelect) {
@@ -15004,11 +15652,17 @@ function initLayoutFonts() {
   if (layoutAxisFontSelect) {
     layoutAxisFontSelect.value = layoutAxisLegendFont;
   }
+  if (layoutLineLabelFontSelect) {
+    layoutLineLabelFontSelect.value = layoutLineLabelFont;
+  }
   if (layoutKeyMappingWeightSelect) {
     layoutKeyMappingWeightSelect.value = String(layoutKeyMappingFontWeight);
   }
   if (layoutAxisWeightSelect) {
     layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
+  }
+  if (layoutLineLabelWeightSelect) {
+    layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
   }
   syncLayoutFontVars();
 }
@@ -15081,22 +15735,46 @@ function toggleCalculatePanel() {
   syncTopMenuPanelState();
 }
 
+function openPresetOverlay() {
+  if (!presetToggle || !presetOverlay) {
+    return;
+  }
+  closeTopMenus("presets");
+  presetToggle.setAttribute("aria-expanded", "true");
+  presetOverlay.hidden = false;
+  document.body.classList.add("preset-open");
+  if (presetSortSelect) {
+    presetSortSelect.value = presetSortMode;
+  }
+  syncTopMenuPanelState();
+  requestAnimationFrame(() => {
+    if (presetSearchInput) {
+      presetSearchInput.focus();
+      presetSearchInput.select();
+    }
+  });
+}
+
+function closePresetOverlay() {
+  if (!presetToggle || !presetOverlay) {
+    return;
+  }
+  presetToggle.setAttribute("aria-expanded", "false");
+  presetOverlay.hidden = true;
+  document.body.classList.remove("preset-open");
+  syncTopMenuPanelState();
+}
+
 function togglePresetPanel() {
-  if (!presetToggle || !presetPanel) {
+  if (!presetToggle || !presetOverlay) {
     return;
   }
   const isOpen = presetToggle.getAttribute("aria-expanded") === "true";
-  if (!isOpen) {
-    closeTopMenus("presets");
+  if (isOpen) {
+    closePresetOverlay();
+  } else {
+    openPresetOverlay();
   }
-  presetToggle.setAttribute("aria-expanded", String(!isOpen));
-  presetPanel.hidden = isOpen;
-  presetPanel.classList.toggle("panel-open", !isOpen);
-  const parentPanel = presetToggle.closest(".panel");
-  if (parentPanel) {
-    parentPanel.classList.toggle("panel-open", !isOpen);
-  }
-  syncTopMenuPanelState();
 }
 
 function toggleFilePanel() {
@@ -15247,16 +15925,7 @@ function closeOptionsPanel() {
 }
 
 function closePresetPanel() {
-  if (!presetToggle || !presetPanel) {
-    return;
-  }
-  presetToggle.setAttribute("aria-expanded", "false");
-  presetPanel.hidden = true;
-  presetPanel.classList.remove("panel-open");
-  const parentPanel = presetToggle.closest(".panel");
-  if (parentPanel) {
-    parentPanel.classList.remove("panel-open");
-  }
+  closePresetOverlay();
 }
 
 function closeCalculatePanel() {
@@ -15337,7 +16006,7 @@ function syncTopMenuPanelState() {
   const topMenusOpen =
     (optionsPanel && !optionsPanel.hidden) ||
     (calculatePanel && !calculatePanel.hidden) ||
-    (presetPanel && !presetPanel.hidden) ||
+    (presetOverlay && !presetOverlay.hidden) ||
     (filePanel && !filePanel.hidden) ||
     (ratioWheelPanel && !ratioWheelPanel.hidden);
   if (controlActionsPanel) {
@@ -15375,6 +16044,34 @@ function syncAnalysisLayerToggles() {
   if (layoutShowMicrotonalToggle) {
     layoutShowMicrotonalToggle.checked = analysisLayers.microtonal;
   }
+  updateUiHint();
+}
+
+function clearMicrotonalModeState() {
+  microtonalSelectedNodeIds.clear();
+  microtonalHoverPairKey = "";
+}
+
+function setMicrotonalIntervalsMode(enabled) {
+  const nextEnabled = Boolean(enabled);
+  if (analysisLayers.microtonal === nextEnabled) {
+    return;
+  }
+  if (nextEnabled && layoutAlignMode) {
+    layoutAlignMode = "";
+    layoutAlignAnchorId = null;
+    syncLayoutAlignButtons();
+  }
+  analysisLayers.microtonal = nextEnabled;
+  if (nextEnabled && distanceSelectMode) {
+    setDistanceSelectMode(false);
+  }
+  if (!nextEnabled) {
+    clearMicrotonalModeState();
+  }
+  syncAnalysisLayerToggles();
+  updateBannerMessage();
+  draw();
 }
 
 function setDistanceSelectMode(enabled) {
@@ -15383,6 +16080,16 @@ function setDistanceSelectMode(enabled) {
     return;
   }
   clearPendingDistanceLabelClick();
+  if (nextEnabled && layoutAlignMode) {
+    layoutAlignMode = "";
+    layoutAlignAnchorId = null;
+    syncLayoutAlignButtons();
+  }
+  if (nextEnabled && analysisLayers.microtonal) {
+    analysisLayers.microtonal = false;
+    clearMicrotonalModeState();
+    syncAnalysisLayerToggles();
+  }
   distanceSelectMode = nextEnabled;
   if (!distanceSelectMode) {
     distanceSelectDrag = null;
@@ -15407,6 +16114,109 @@ function setAddIntervalMode(enabled) {
   }
   updateBannerMessage();
   draw();
+}
+
+function syncLayoutAlignButtons() {
+  if (layoutAlignXButton) {
+    layoutAlignXButton.classList.toggle("is-active", layoutAlignMode === "x");
+  }
+  if (layoutAlignYButton) {
+    layoutAlignYButton.classList.toggle("is-active", layoutAlignMode === "y");
+  }
+  if (layoutStraightenButton) {
+    layoutStraightenButton.classList.toggle("is-active", layoutAlignMode === "straighten");
+  }
+}
+
+function setLayoutAlignMode(mode, { silent = false } = {}) {
+  const nextMode =
+    mode === "y" ? "y" : mode === "x" ? "x" : mode === "straighten" ? "straighten" : "";
+  if (layoutAlignMode === nextMode) {
+    layoutAlignMode = "";
+  } else {
+    layoutAlignMode = nextMode;
+  }
+  if (layoutAlignMode) {
+    layoutAlignAnchorId = null;
+    layoutStraightenAnchorId = null;
+    layoutStraightenDir = null;
+    if (distanceSelectMode) {
+      distanceSelectMode = false;
+      distanceSelectDrag = null;
+      distanceLabelDrag = null;
+      distanceCurveDrag = null;
+    }
+    if (analysisLayers.microtonal) {
+      analysisLayers.microtonal = false;
+      clearMicrotonalModeState();
+      syncAnalysisLayerToggles();
+    }
+  } else {
+    layoutAlignAnchorId = null;
+    layoutStraightenAnchorId = null;
+    layoutStraightenDir = null;
+  }
+  syncLayoutAlignButtons();
+  if (silent) {
+    return;
+  }
+  updateBannerMessage();
+  updateUiHint();
+  draw();
+}
+
+function applyLayoutAlignToNode(target, anchor, axis) {
+  if (!target || !anchor || target.id === anchor.id) {
+    return;
+  }
+  const anchorPos = ensureLayoutPosition(anchor);
+  const targetPos = ensureLayoutPosition(target);
+  const next = { ...targetPos };
+  if (axis === "y") {
+    next.y = anchorPos.y;
+  } else {
+    next.x = anchorPos.x;
+  }
+  layoutPositions.set(target.id, next);
+  if (!target.isCustom) {
+    const base = getLayoutBaseCoordinate(target);
+    layoutPositionOffsets.set(
+      `${target.exponentX},${target.exponentY},${target.exponentZ || 0}`,
+      {
+        x: next.x - base.x,
+        y: next.y - base.y,
+        z: next.z - base.z,
+      }
+    );
+  }
+}
+
+function applyLayoutStraightenToNode(target, anchor, dir) {
+  if (!target || !anchor || !dir || target.id === anchor.id) {
+    return;
+  }
+  const anchorPos = ensureLayoutPosition(anchor);
+  const targetPos = ensureLayoutPosition(target);
+  const dx = targetPos.x - anchorPos.x;
+  const dy = targetPos.y - anchorPos.y;
+  const t = dx * dir.x + dy * dir.y;
+  const next = {
+    x: anchorPos.x + dir.x * t,
+    y: anchorPos.y + dir.y * t,
+    z: targetPos.z,
+  };
+  layoutPositions.set(target.id, next);
+  if (!target.isCustom) {
+    const base = getLayoutBaseCoordinate(target);
+    layoutPositionOffsets.set(
+      `${target.exponentX},${target.exponentY},${target.exponentZ || 0}`,
+      {
+        x: next.x - base.x,
+        y: next.y - base.y,
+        z: next.z - base.z,
+      }
+    );
+  }
 }
 
 function getDistanceNodeKey(node) {
@@ -15466,11 +16276,152 @@ function addDistanceEdgeBetweenNodes(a, b, options = {}) {
   return true;
 }
 
+let presetEntries = [];
+let presetActiveTags = new Set();
+let presetSortMode = "title";
+
 function resetDistanceEdges() {
   distanceSelectedEdges.clear();
   distanceSelectedNodeKeys.clear();
   distanceEdgeOverrides.clear();
   draw();
+}
+
+function parsePresetName(name) {
+  const nameString = String(name || "").trim();
+  const match = nameString.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
+  return {
+    title: match && match[1] ? match[1].trim() : nameString,
+    creator: match && match[2] ? match[2].trim() : "",
+  };
+}
+
+function normalizePresetEntry(entry) {
+  if (Array.isArray(entry)) {
+    const [name, uri] = entry;
+    const parsed = parsePresetName(name);
+    return {
+      title: parsed.title,
+      creator: parsed.creator,
+      uri: String(uri || ""),
+      tags: [],
+    };
+  }
+  if (entry && typeof entry === "object") {
+    const title = String(entry.title || "").trim();
+    const creator = String(entry.creator || "").trim();
+    const uri = String(entry.uri || "").trim();
+    const tags = Array.isArray(entry.tags)
+      ? entry.tags.map((tag) => String(tag || "").trim()).filter(Boolean)
+      : [];
+    if (!title && !creator && !uri) {
+      return null;
+    }
+    return { title, creator, uri, tags };
+  }
+  return null;
+}
+
+function buildPresetHref(uriString) {
+  const uriValue = String(uriString || "");
+  if (uriValue.startsWith("http://") || uriValue.startsWith("https://")) {
+    try {
+      const parsed = new URL(uriValue);
+      if (parsed.hash) {
+        return `${window.location.origin}${window.location.pathname}${parsed.hash}`;
+      }
+      return `${window.location.origin}${parsed.pathname}${parsed.search}`;
+    } catch (error) {
+      return uriValue;
+    }
+  }
+  if (uriValue.startsWith("#")) {
+    return `${window.location.origin}${window.location.pathname}${uriValue}`;
+  }
+  if (uriValue.startsWith("/")) {
+    return `${window.location.origin}${uriValue}`;
+  }
+  return `${window.location.origin}/${uriValue}`;
+}
+
+function renderPresetTags() {}
+
+function renderPresetList() {
+  if (!presetList) {
+    return;
+  }
+  presetList.innerHTML = "";
+  const searchTerm = presetSearchInput
+    ? presetSearchInput.value.trim().toLowerCase()
+    : "";
+  const selectedTags = presetActiveTags.size ? Array.from(presetActiveTags) : null;
+  const filtered = presetEntries.filter((entry) => {
+    if (selectedTags && selectedTags.length) {
+      const hasTag = entry.tags.some((tag) => selectedTags.includes(tag));
+      if (!hasTag) {
+        return false;
+      }
+    }
+    if (!searchTerm) {
+      return true;
+    }
+    return entry.searchText.includes(searchTerm);
+  });
+  const sorted = [...filtered].sort((a, b) => {
+    if (presetSortMode === "creator") {
+      const creatorA = (a.creator || "").toLowerCase();
+      const creatorB = (b.creator || "").toLowerCase();
+      if (creatorA !== creatorB) {
+        return creatorA.localeCompare(creatorB);
+      }
+    }
+    const titleA = (a.title || "").toLowerCase();
+    const titleB = (b.title || "").toLowerCase();
+    const titleCompare = titleA.localeCompare(titleB);
+    if (titleCompare !== 0) {
+      return titleCompare;
+    }
+    return (a.creator || "").toLowerCase().localeCompare((b.creator || "").toLowerCase());
+  });
+  if (!sorted.length) {
+    const empty = document.createElement("div");
+    empty.className = "preset-empty";
+    empty.textContent = presetEntries.length ? "No presets match." : "No presets yet.";
+    presetList.appendChild(empty);
+    return;
+  }
+  sorted.forEach((entry) => {
+    const link = document.createElement("a");
+    link.className = "preset-card";
+    link.href = buildPresetHref(entry.uri);
+    link.target = "_self";
+    link.rel = "noopener";
+    link.addEventListener("click", () => {
+      closePresetOverlay();
+    });
+    const title = document.createElement("div");
+    title.className = "preset-card-title";
+    title.textContent = entry.title || "Untitled preset";
+    link.appendChild(title);
+    if (entry.creator) {
+      const creator = document.createElement("div");
+      creator.className = "preset-card-creator";
+      creator.textContent = entry.creator;
+      link.appendChild(creator);
+    }
+    if (entry.tags.length) {
+      const tags = document.createElement("div");
+      tags.className = "preset-card-tags";
+      entry.tags.forEach((tag) => {
+        const chip = document.createElement("span");
+        chip.className = "preset-card-tag";
+        chip.textContent = tag;
+        tags.appendChild(chip);
+      });
+      link.appendChild(tags);
+    }
+    presetList.appendChild(link);
+  });
 }
 
 async function loadPresets() {
@@ -15487,60 +16438,19 @@ async function loadPresets() {
     if (!Array.isArray(data)) {
       throw new Error("Preset data is not an array");
     }
-    if (data.length === 0) {
-      const emptyItem = document.createElement("li");
-      emptyItem.className = "preset-empty";
-      emptyItem.textContent = "No presets yet.";
-      presetList.appendChild(emptyItem);
-      return;
-    }
-    data.forEach((entry) => {
-      if (!Array.isArray(entry) || entry.length < 2) {
-        return;
-      }
-      const [name, uri] = entry;
-      const item = document.createElement("li");
-      const link = document.createElement("a");
-      const nameString = String(name);
-      const match = nameString.match(/^(.*?)\s*(\(([^()]*)\))?$/);
-      const mainLabelText = match && match[1] ? match[1].trim() : nameString;
-      const metaText = match && match[3] ? match[3].trim() : "";
-      const labelSpan = document.createElement("span");
-      labelSpan.className = "preset-label";
-      labelSpan.textContent = mainLabelText;
-      link.appendChild(labelSpan);
-      if (metaText) {
-        const metaSpan = document.createElement("span");
-        metaSpan.className = "preset-meta";
-        metaSpan.textContent = metaText;
-        link.appendChild(metaSpan);
-      }
-      const uriString = String(uri);
-      if (uriString.startsWith("http://") || uriString.startsWith("https://")) {
-        try {
-          const parsed = new URL(uriString);
-          if (parsed.hash) {
-            link.href = `${window.location.origin}${window.location.pathname}${parsed.hash}`;
-          } else {
-            link.href = `${window.location.origin}${parsed.pathname}${parsed.search}`;
-          }
-        } catch (error) {
-          link.href = uriString;
-        }
-      } else if (uriString.startsWith("#")) {
-        link.href = `${window.location.origin}${window.location.pathname}${uriString}`;
-      } else if (uriString.startsWith("/")) {
-        link.href = `${window.location.origin}${uriString}`;
-      } else {
-        link.href = `${window.location.origin}/${uriString}`;
-      }
-      link.target = "_self";
-      link.rel = "noopener";
-      item.appendChild(link);
-      presetList.appendChild(item);
-    });
+    presetEntries = data
+      .map((entry) => normalizePresetEntry(entry))
+      .filter(Boolean)
+      .map((entry) => ({
+        ...entry,
+        searchText: `${entry.title} ${entry.creator} ${entry.tags.join(" ")}`
+          .toLowerCase()
+          .trim(),
+      }));
+    renderPresetTags();
+    renderPresetList();
   } catch (error) {
-    const errorItem = document.createElement("li");
+    const errorItem = document.createElement("div");
     errorItem.className = "preset-empty";
     errorItem.textContent = "Failed to load presets.";
     presetList.appendChild(errorItem);
@@ -15551,13 +16461,18 @@ async function loadPresets() {
 async function loadCommas() {
   commaEntries = [];
   commaRatioMap.clear();
+  const seenCommaEntries = new Set();
   try {
     const response = await fetch(new URL("./interval-names.json", import.meta.url));
     if (!response.ok) {
       throw new Error(`Comma fetch failed: ${response.status}`);
     }
     const data = await response.json();
-    const entries = Array.isArray(data && data.intervals) ? data.intervals : [];
+    const entries = Array.isArray(data)
+      ? data
+      : Array.isArray(data && data.intervals)
+      ? data.intervals
+      : [];
     entries.forEach((entry) => {
       if (!entry) {
         return;
@@ -15579,6 +16494,12 @@ async function loadCommas() {
         denominator: normalizedRatio.denominator,
         color: entry.color || themeColors?.edge || "#999999",
       };
+      const normalizedNameKey = name.toLowerCase().replace(/\s+/g, " ").trim();
+      const uniqueKey = `${key}|${normalizedNameKey}`;
+      if (seenCommaEntries.has(uniqueKey)) {
+        return;
+      }
+      seenCommaEntries.add(uniqueKey);
       commaEntries.push(normalized);
       if (!commaRatioMap.has(key)) {
         commaRatioMap.set(key, []);
@@ -16448,6 +17369,29 @@ async function downloadLatticeState() {
 }
 
 function getPresetState() {
+  const isEmptyArray = (value) => !Array.isArray(value) || value.length === 0;
+  const isEmptyObject = (value) =>
+    !value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length;
+  const isDefaultLayoutView = (value) =>
+    value &&
+    Number(value.zoom) === Number(LAYOUT_DEFAULTS.view.zoom) &&
+    Number(value.offsetX) === Number(LAYOUT_DEFAULTS.view.offsetX) &&
+    Number(value.offsetY) === Number(LAYOUT_DEFAULTS.view.offsetY) &&
+    Number(value.rotX) === Number(LAYOUT_DEFAULTS.view.rotX) &&
+    Number(value.rotY) === Number(LAYOUT_DEFAULTS.view.rotY);
+  const isDefaultAxisOffsets = (value) =>
+    value &&
+    ["x", "y", "z"].every((axis) => {
+      const entry = value[axis];
+      return entry && Number(entry.x) === 0 && Number(entry.y) === 0;
+    });
+  const isDefaultAxisHidden = (value) =>
+    value &&
+    ["x", "y", "z"].every(
+      (axis) => Boolean(value[axis]) === Boolean(LAYOUT_DEFAULTS.axisHidden[axis])
+    );
+  const isDefaultAxisAngles = (value) =>
+    value && ["x", "y", "z"].every((axis) => value[axis] == null);
   const active = nodes
     .filter((node) => node.active && !node.isCustom)
     .map((node) => [node.exponentX, node.exponentY, node.exponentZ || 0]);
@@ -16476,6 +17420,21 @@ function getPresetState() {
           rotX: view.rotX,
           rotY: view.rotY,
         };
+  const layoutSourceViewState =
+    layoutSourceView &&
+    Number.isFinite(layoutSourceView.zoom) &&
+    Number.isFinite(layoutSourceView.offsetX) &&
+    Number.isFinite(layoutSourceView.offsetY) &&
+    Number.isFinite(layoutSourceView.rotX) &&
+    Number.isFinite(layoutSourceView.rotY)
+      ? {
+          zoom: layoutSourceView.zoom,
+          offsetX: layoutSourceView.offsetX,
+          offsetY: layoutSourceView.offsetY,
+          rotX: layoutSourceView.rotX,
+          rotY: layoutSourceView.rotY,
+        }
+      : null;
   const lineLabelOverridesState = Array.from(lineLabelOverrides.entries()).map(
     ([key, value]) => [key, Boolean(value)]
   );
@@ -16504,7 +17463,242 @@ function getPresetState() {
       return entry;
     }
   ).filter(Boolean);
-  return {
+  const layoutState = {
+    mode: layoutMode,
+    title: layoutTitle,
+    creator: layoutCreator,
+    titleSize: layoutTitleSize,
+    creatorSize: layoutCreatorSize,
+    nodeSize: layoutNodeSize,
+    ratioTextSize: layoutRatioTextSize,
+    noteTextSize: layoutNoteTextSize,
+    triangleLabelTextSize: layoutTriangleLabelTextSize,
+    customLabelTextSize: layoutCustomLabelTextSize,
+    keyMappingTextSize: layoutKeyMappingTextSize,
+    keyMappingOffset: layoutKeyMappingOffset,
+    keyMappingDark: layoutKeyMappingDark,
+    keyMappingPrefix: layoutKeyMappingPrefix,
+    keyMappingSuffix: layoutKeyMappingSuffix,
+    axisLegendTextSize: layoutAxisLegendTextSize,
+    lineLabelTextSize: layoutLineLabelTextSize,
+    titleMargin: layoutTitleMargin,
+    titlePosition: layoutTitlePosition,
+    creatorPosition: layoutCreatorPosition,
+    customLabels: layoutCustomLabels.map((entry) => ({
+      id: entry.id,
+      text: entry.text,
+      position: entry.position ? { ...entry.position } : null,
+    })),
+    positionOffsets: serializeLayoutPositionOffsets(),
+    customNodePositions: serializeLayoutCustomNodePositions(),
+    labelOffsets: serializeLayoutLabelOffsets(),
+    keyMappingOffsets: serializeLayoutKeyMappingOffsets(),
+    axisOffsets: layoutAxisOffsets,
+    axisHidden: layoutAxisHidden,
+    axisAngles: layoutAxisAngles,
+    lockPosition: layoutLockPosition,
+    view: layoutViewState,
+    sourceView: layoutSourceViewState,
+    titleFont: layoutTitleFont,
+    creatorFont: layoutCreatorFont,
+    ratioFont: layoutRatioFont,
+    noteFont: layoutNoteFont,
+    triangleLabelFont: layoutTriangleLabelFont,
+    customLabelFont: layoutCustomLabelFont,
+    keyMappingFont: layoutKeyMappingFont,
+    axisLegendFont: layoutAxisLegendFont,
+    lineLabelFont: layoutLineLabelFont,
+    titleFontWeight: layoutTitleFontWeight,
+    creatorFontWeight: layoutCreatorFontWeight,
+    ratioFontWeight: layoutRatioFontWeight,
+    noteFontWeight: layoutNoteFontWeight,
+    triangleLabelFontWeight: layoutTriangleLabelFontWeight,
+    customLabelFontWeight: layoutCustomLabelFontWeight,
+    keyMappingFontWeight: layoutKeyMappingFontWeight,
+    axisLegendFontWeight: layoutAxisLegendFontWeight,
+    lineLabelFontWeight: layoutLineLabelFontWeight,
+    spacing: { ...layoutSpacing },
+    nodeShape: layoutNodeShape,
+    unifyNodeSize: layoutUnifyNodeSize,
+    freezeFlatten: layoutFreezeFlatten,
+    keyMappingsMode: layoutKeyMappingMode,
+    pageSize: layoutPageSize,
+    orientation: layoutOrientation,
+    zoom: layoutViewState.zoom,
+  };
+
+  if (!layoutState.mode) {
+    delete layoutState.mode;
+  }
+  if (!layoutState.title) {
+    delete layoutState.title;
+  }
+  if (!layoutState.creator) {
+    delete layoutState.creator;
+  }
+  if (layoutState.titleSize === LAYOUT_DEFAULTS.titleSize) {
+    delete layoutState.titleSize;
+  }
+  if (layoutState.creatorSize === LAYOUT_DEFAULTS.creatorSize) {
+    delete layoutState.creatorSize;
+  }
+  if (layoutState.nodeSize === LAYOUT_DEFAULTS.nodeSize) {
+    delete layoutState.nodeSize;
+  }
+  if (layoutState.ratioTextSize === LAYOUT_DEFAULTS.ratioTextSize) {
+    delete layoutState.ratioTextSize;
+  }
+  if (layoutState.noteTextSize === LAYOUT_DEFAULTS.noteTextSize) {
+    delete layoutState.noteTextSize;
+  }
+  if (layoutState.triangleLabelTextSize === LAYOUT_DEFAULTS.triangleLabelTextSize) {
+    delete layoutState.triangleLabelTextSize;
+  }
+  if (layoutState.customLabelTextSize === LAYOUT_DEFAULTS.customLabelTextSize) {
+    delete layoutState.customLabelTextSize;
+  }
+  if (layoutState.keyMappingTextSize === LAYOUT_DEFAULTS.keyMappingTextSize) {
+    delete layoutState.keyMappingTextSize;
+  }
+  if (layoutState.keyMappingOffset === LAYOUT_DEFAULTS.keyMappingOffset) {
+    delete layoutState.keyMappingOffset;
+  }
+  if (layoutState.keyMappingDark === LAYOUT_DEFAULTS.keyMappingDark) {
+    delete layoutState.keyMappingDark;
+  }
+  if (layoutState.keyMappingPrefix === LAYOUT_DEFAULTS.keyMappingPrefix) {
+    delete layoutState.keyMappingPrefix;
+  }
+  if (layoutState.keyMappingSuffix === LAYOUT_DEFAULTS.keyMappingSuffix) {
+    delete layoutState.keyMappingSuffix;
+  }
+  if (layoutState.axisLegendTextSize === LAYOUT_DEFAULTS.axisLegendTextSize) {
+    delete layoutState.axisLegendTextSize;
+  }
+  if (layoutState.lineLabelTextSize === LAYOUT_DEFAULTS.lineLabelTextSize) {
+    delete layoutState.lineLabelTextSize;
+  }
+  if (layoutState.titleMargin === LAYOUT_DEFAULTS.titleMargin) {
+    delete layoutState.titleMargin;
+  }
+  if (layoutState.titleFont === LAYOUT_DEFAULTS.titleFont) {
+    delete layoutState.titleFont;
+  }
+  if (layoutState.creatorFont === LAYOUT_DEFAULTS.creatorFont) {
+    delete layoutState.creatorFont;
+  }
+  if (layoutState.ratioFont === LAYOUT_DEFAULTS.ratioFont) {
+    delete layoutState.ratioFont;
+  }
+  if (layoutState.noteFont === LAYOUT_DEFAULTS.noteFont) {
+    delete layoutState.noteFont;
+  }
+  if (layoutState.triangleLabelFont === LAYOUT_DEFAULTS.triangleLabelFont) {
+    delete layoutState.triangleLabelFont;
+  }
+  if (layoutState.customLabelFont === LAYOUT_DEFAULTS.customLabelFont) {
+    delete layoutState.customLabelFont;
+  }
+  if (layoutState.keyMappingFont === LAYOUT_DEFAULTS.keyMappingFont) {
+    delete layoutState.keyMappingFont;
+  }
+  if (layoutState.axisLegendFont === LAYOUT_DEFAULTS.axisLegendFont) {
+    delete layoutState.axisLegendFont;
+  }
+  if (layoutState.lineLabelFont === LAYOUT_DEFAULTS.lineLabelFont) {
+    delete layoutState.lineLabelFont;
+  }
+  if (layoutState.titleFontWeight === LAYOUT_DEFAULTS.titleFontWeight) {
+    delete layoutState.titleFontWeight;
+  }
+  if (layoutState.creatorFontWeight === LAYOUT_DEFAULTS.creatorFontWeight) {
+    delete layoutState.creatorFontWeight;
+  }
+  if (layoutState.ratioFontWeight === LAYOUT_DEFAULTS.ratioFontWeight) {
+    delete layoutState.ratioFontWeight;
+  }
+  if (layoutState.noteFontWeight === LAYOUT_DEFAULTS.noteFontWeight) {
+    delete layoutState.noteFontWeight;
+  }
+  if (layoutState.triangleLabelFontWeight === LAYOUT_DEFAULTS.triangleLabelFontWeight) {
+    delete layoutState.triangleLabelFontWeight;
+  }
+  if (layoutState.customLabelFontWeight === LAYOUT_DEFAULTS.customLabelFontWeight) {
+    delete layoutState.customLabelFontWeight;
+  }
+  if (layoutState.keyMappingFontWeight === LAYOUT_DEFAULTS.keyMappingFontWeight) {
+    delete layoutState.keyMappingFontWeight;
+  }
+  if (layoutState.axisLegendFontWeight === LAYOUT_DEFAULTS.axisLegendFontWeight) {
+    delete layoutState.axisLegendFontWeight;
+  }
+  if (layoutState.lineLabelFontWeight === LAYOUT_DEFAULTS.lineLabelFontWeight) {
+    delete layoutState.lineLabelFontWeight;
+  }
+  if (
+    layoutState.spacing &&
+    layoutState.spacing.x === LAYOUT_DEFAULTS.spacing.x &&
+    layoutState.spacing.y === LAYOUT_DEFAULTS.spacing.y &&
+    layoutState.spacing.z === LAYOUT_DEFAULTS.spacing.z
+  ) {
+    delete layoutState.spacing;
+  }
+  if (layoutState.nodeShape === LAYOUT_DEFAULTS.nodeShape) {
+    delete layoutState.nodeShape;
+  }
+  if (layoutState.unifyNodeSize === LAYOUT_DEFAULTS.unifyNodeSize) {
+    delete layoutState.unifyNodeSize;
+  }
+  if (layoutState.freezeFlatten === LAYOUT_DEFAULTS.freezeFlatten) {
+    delete layoutState.freezeFlatten;
+  }
+  if (layoutState.keyMappingsMode === LAYOUT_DEFAULTS.keyMappingsMode) {
+    delete layoutState.keyMappingsMode;
+  }
+  if (layoutState.pageSize === LAYOUT_DEFAULTS.pageSize) {
+    delete layoutState.pageSize;
+  }
+  if (layoutState.orientation === LAYOUT_DEFAULTS.orientation) {
+    delete layoutState.orientation;
+  }
+  if (layoutState.lockPosition === LAYOUT_DEFAULTS.lockPosition) {
+    delete layoutState.lockPosition;
+  }
+  if (isDefaultLayoutView(layoutState.view)) {
+    delete layoutState.view;
+  }
+  if (layoutState.zoom === LAYOUT_DEFAULTS.zoom) {
+    delete layoutState.zoom;
+  }
+  if (!layoutState.sourceView) {
+    delete layoutState.sourceView;
+  }
+  if (isEmptyArray(layoutState.customLabels)) {
+    delete layoutState.customLabels;
+  }
+  if (isEmptyArray(layoutState.positionOffsets)) {
+    delete layoutState.positionOffsets;
+  }
+  if (isEmptyArray(layoutState.customNodePositions)) {
+    delete layoutState.customNodePositions;
+  }
+  if (isEmptyArray(layoutState.labelOffsets)) {
+    delete layoutState.labelOffsets;
+  }
+  if (isEmptyArray(layoutState.keyMappingOffsets)) {
+    delete layoutState.keyMappingOffsets;
+  }
+  if (isDefaultAxisOffsets(layoutState.axisOffsets)) {
+    delete layoutState.axisOffsets;
+  }
+  if (isDefaultAxisHidden(layoutState.axisHidden)) {
+    delete layoutState.axisHidden;
+  }
+  if (isDefaultAxisAngles(layoutState.axisAngles)) {
+    delete layoutState.axisAngles;
+  }
+
+  const state = {
     v: 1,
     active,
     customNodes: customState,
@@ -16559,64 +17753,6 @@ function getPresetState() {
     fundamental: Number(fundamentalInput.value) || 220,
     a4: Number(a4Input.value) || 440,
     fundamentalSpelling,
-    layout: {
-      mode: layoutMode,
-      title: layoutTitle,
-      creator: layoutCreator,
-      titleSize: layoutTitleSize,
-      creatorSize: layoutCreatorSize,
-      nodeSize: layoutNodeSize,
-      ratioTextSize: layoutRatioTextSize,
-      noteTextSize: layoutNoteTextSize,
-      triangleLabelTextSize: layoutTriangleLabelTextSize,
-      customLabelTextSize: layoutCustomLabelTextSize,
-      keyMappingTextSize: layoutKeyMappingTextSize,
-      keyMappingOffset: layoutKeyMappingOffset,
-      keyMappingDark: layoutKeyMappingDark,
-      keyMappingPrefix: layoutKeyMappingPrefix,
-      keyMappingSuffix: layoutKeyMappingSuffix,
-      axisLegendTextSize: layoutAxisLegendTextSize,
-      titleMargin: layoutTitleMargin,
-      titlePosition: layoutTitlePosition,
-      creatorPosition: layoutCreatorPosition,
-      customLabels: layoutCustomLabels.map((entry) => ({
-        id: entry.id,
-        text: entry.text,
-        position: entry.position ? { ...entry.position } : null,
-      })),
-      positionOffsets: serializeLayoutPositionOffsets(),
-      customNodePositions: serializeLayoutCustomNodePositions(),
-      labelOffsets: serializeLayoutLabelOffsets(),
-      keyMappingOffsets: serializeLayoutKeyMappingOffsets(),
-      axisOffsets: layoutAxisOffsets,
-      axisAngles: layoutAxisAngles,
-      lockPosition: layoutLockPosition,
-      view: layoutViewState,
-      titleFont: layoutTitleFont,
-      creatorFont: layoutCreatorFont,
-      ratioFont: layoutRatioFont,
-      noteFont: layoutNoteFont,
-      triangleLabelFont: layoutTriangleLabelFont,
-      customLabelFont: layoutCustomLabelFont,
-      keyMappingFont: layoutKeyMappingFont,
-      axisLegendFont: layoutAxisLegendFont,
-      titleFontWeight: layoutTitleFontWeight,
-      creatorFontWeight: layoutCreatorFontWeight,
-      ratioFontWeight: layoutRatioFontWeight,
-      noteFontWeight: layoutNoteFontWeight,
-      triangleLabelFontWeight: layoutTriangleLabelFontWeight,
-      customLabelFontWeight: layoutCustomLabelFontWeight,
-      keyMappingFontWeight: layoutKeyMappingFontWeight,
-      axisLegendFontWeight: layoutAxisLegendFontWeight,
-      spacing: { ...layoutSpacing },
-      nodeShape: layoutNodeShape,
-      unifyNodeSize: layoutUnifyNodeSize,
-      freezeFlatten: layoutFreezeFlatten,
-      keyMappingsMode: layoutKeyMappingMode,
-      pageSize: layoutPageSize,
-      orientation: layoutOrientation,
-      zoom: layoutViewState.zoom,
-    },
     featureMode,
     spellingMode,
     showHz,
@@ -16641,6 +17777,41 @@ function getPresetState() {
       envelopeTimeMode,
     },
   };
+
+  if (isEmptyArray(state.active)) {
+    delete state.active;
+  }
+  if (isEmptyArray(state.customNodes)) {
+    delete state.customNodes;
+  }
+  if (isEmptyArray(state.lineLabelOverrides)) {
+    delete state.lineLabelOverrides;
+  }
+  if (isEmptyArray(state.distanceEdges)) {
+    delete state.distanceEdges;
+  }
+  if (isEmptyArray(state.distanceEdgeOverrides)) {
+    delete state.distanceEdgeOverrides;
+  }
+  if (isEmptyArray(state.noteSpellings)) {
+    delete state.noteSpellings;
+  }
+  if (isEmptyArray(state.octaveOffsets)) {
+    delete state.octaveOffsets;
+  }
+  if (isEmptyArray(state.triangles)) {
+    delete state.triangles;
+  }
+  if (isEmptyArray(state.triangleLabels)) {
+    delete state.triangleLabels;
+  }
+  if (isEmptyObject(layoutState)) {
+    delete state.layout;
+  } else {
+    state.layout = layoutState;
+  }
+
+  return state;
 }
 
 function applyPresetCustomNodes(entries) {
@@ -16717,10 +17888,6 @@ function updatePresetUrl() {
     return;
   }
   const encoded = encodePresetState(getPresetState());
-  if (encoded.length > 3500) {
-    showFileSharePopover("too much data for URI; use File > Save / Load");
-    return;
-  }
   const nextHash = `${PRESET_PARAM}=${encoded}`;
   if (location.hash === `#${nextHash}`) {
     return;
@@ -16740,10 +17907,6 @@ function schedulePresetUrlUpdate() {
 
 function getPresetShareUrl() {
   const encoded = encodePresetState(getPresetState());
-  if (encoded.length > 3500) {
-    showFileSharePopover("too much data for URI; use File > Save / Load");
-    return "";
-  }
   const hash = `${PRESET_PARAM}=${encoded}`;
   return `${location.origin}${location.pathname}${location.search}#${hash}`;
 }
@@ -16793,6 +17956,8 @@ function applyPresetState(state) {
   }
   analysisLayers.distances = false;
   analysisLayers.microtonal = false;
+  microtonalSelectedNodeIds.clear();
+  microtonalHoverPairKey = "";
   distanceSelectMode = false;
   distanceSelectedNodeKeys.clear();
   distanceSelectedEdges.clear();
@@ -16901,11 +18066,19 @@ function applyPresetState(state) {
     syncAnalysisLayerToggles();
   }
   const viewState = state.view && typeof state.view === "object" ? state.view : null;
+  const layoutState = state.layout && typeof state.layout === "object" ? state.layout : null;
+  layoutSourceView = null;
   const activeHasZ = Array.isArray(state.active)
     ? state.active.some((entry) => Array.isArray(entry) && Number(entry[2]) !== 0)
     : false;
   const wants3D = Boolean(state.mode3d) || activeHasZ;
-  const targetDepth = wants3D ? GRID_DEPTH : 1;
+  const layoutHasTilt =
+    Boolean(layoutState && layoutState.view && typeof layoutState.view === "object") &&
+    (Math.abs(Number(layoutState.view.rotX) || 0) > 1e-6 ||
+      Math.abs(Number(layoutState.view.rotY) || 0) > 1e-6);
+  const layoutNeedsProjectedDepth =
+    Boolean(layoutState && layoutState.mode) && layoutHasTilt;
+  const targetDepth = wants3D || layoutNeedsProjectedDepth ? GRID_DEPTH : 1;
   const targetCenterZ = Math.floor(targetDepth / 2);
   gridDepth = targetDepth;
   gridCenterZ = targetCenterZ;
@@ -17073,7 +18246,6 @@ function applyPresetState(state) {
     }
   }
 
-  const layoutState = state.layout && typeof state.layout === "object" ? state.layout : null;
   if (layoutState) {
     pendingLayoutLabelOffsets = Array.isArray(layoutState.labelOffsets)
       ? layoutState.labelOffsets
@@ -17208,6 +18380,20 @@ function applyPresetState(state) {
         layoutAxisSizeInput.value = String(layoutAxisLegendTextSize);
       }
     }
+    if (Number.isFinite(layoutState.lineLabelTextSize)) {
+      layoutLineLabelTextSize = Math.min(
+        28,
+        Math.max(8, Math.round(layoutState.lineLabelTextSize))
+      );
+      if (layoutLineLabelSizeInput) {
+        layoutLineLabelSizeInput.value = String(layoutLineLabelTextSize);
+      }
+    } else {
+      layoutLineLabelTextSize = Math.max(8, Math.round(layoutRatioTextSize * 0.6));
+      if (layoutLineLabelSizeInput) {
+        layoutLineLabelSizeInput.value = String(layoutLineLabelTextSize);
+      }
+    }
     if (typeof layoutState.keyMappingPrefix === "string") {
       layoutKeyMappingPrefix = layoutState.keyMappingPrefix;
       if (layoutKeyMappingPrefixInput) {
@@ -17266,6 +18452,13 @@ function applyPresetState(state) {
         }
       });
     }
+    if (layoutState.axisHidden && typeof layoutState.axisHidden === "object") {
+      ["x", "y", "z"].forEach((axis) => {
+        layoutAxisHidden[axis] = Boolean(layoutState.axisHidden[axis]);
+      });
+    } else {
+      layoutAxisHidden = { ...LAYOUT_DEFAULTS.axisHidden };
+    }
     if (layoutState.axisAngles && typeof layoutState.axisAngles === "object") {
       ["x", "y", "z"].forEach((axis) => {
         const angle = layoutState.axisAngles[axis];
@@ -17320,10 +18513,32 @@ function applyPresetState(state) {
         layoutAxisFontSelect.value = layoutAxisLegendFont;
       }
     }
+    if (typeof layoutState.lineLabelFont === "string") {
+      layoutLineLabelFont = layoutState.lineLabelFont;
+      if (layoutLineLabelFontSelect) {
+        layoutLineLabelFontSelect.value = layoutLineLabelFont;
+      }
+    } else {
+      layoutLineLabelFont = layoutAxisLegendFont;
+      if (layoutLineLabelFontSelect) {
+        layoutLineLabelFontSelect.value = layoutLineLabelFont;
+      }
+    }
     if (Number.isFinite(layoutState.axisLegendFontWeight)) {
       layoutAxisLegendFontWeight = layoutState.axisLegendFontWeight;
       if (layoutAxisWeightSelect) {
         layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
+      }
+    }
+    if (Number.isFinite(layoutState.lineLabelFontWeight)) {
+      layoutLineLabelFontWeight = layoutState.lineLabelFontWeight;
+      if (layoutLineLabelWeightSelect) {
+        layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
+      }
+    } else {
+      layoutLineLabelFontWeight = layoutAxisLegendFontWeight;
+      if (layoutLineLabelWeightSelect) {
+        layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
       }
     }
     if (Number.isFinite(layoutState.titleFontWeight)) {
@@ -17442,11 +18657,40 @@ function applyPresetState(state) {
         rotX: Number.isFinite(nextRotX) ? nextRotX : layoutView.rotX,
         rotY: Number.isFinite(nextRotY) ? nextRotY : layoutView.rotY,
       };
+      if (layoutState.mode && !layoutLockPosition) {
+        view.zoom = layoutView.zoom;
+        view.offsetX = layoutView.offsetX;
+        view.offsetY = layoutView.offsetY;
+        view.rotX = layoutView.rotX;
+        view.rotY = layoutView.rotY;
+      }
     } else if (Number.isFinite(layoutState.zoom)) {
       layoutView = {
         ...layoutView,
         zoom: Math.min(2.2, Math.max(0.5, layoutState.zoom)),
       };
+    }
+    if (layoutState.sourceView && typeof layoutState.sourceView === "object") {
+      const srcZoom = Number(layoutState.sourceView.zoom);
+      const srcOffsetX = Number(layoutState.sourceView.offsetX);
+      const srcOffsetY = Number(layoutState.sourceView.offsetY);
+      const srcRotX = Number(layoutState.sourceView.rotX);
+      const srcRotY = Number(layoutState.sourceView.rotY);
+      if (
+        Number.isFinite(srcZoom) &&
+        Number.isFinite(srcOffsetX) &&
+        Number.isFinite(srcOffsetY) &&
+        Number.isFinite(srcRotX) &&
+        Number.isFinite(srcRotY)
+      ) {
+        layoutSourceView = {
+          zoom: srcZoom,
+          offsetX: srcOffsetX,
+          offsetY: srcOffsetY,
+          rotX: srcRotX,
+          rotY: srcRotY,
+        };
+      }
     }
     if (Number.isFinite(layoutState.zoom)) {
       if (layoutMode && layoutLockPosition) {
@@ -18413,6 +19657,7 @@ function queuePresetFontRecalc() {
     add(layoutCustomLabelFont, layoutCustomLabelFontWeight, layoutCustomLabelTextSize);
     add(layoutKeyMappingFont, layoutKeyMappingFontWeight, layoutKeyMappingTextSize);
     add(layoutAxisLegendFont, layoutAxisLegendFontWeight, layoutAxisLegendTextSize);
+    add(layoutLineLabelFont, layoutLineLabelFontWeight, layoutLineLabelTextSize);
     add("HEJI2Text", 400, layoutNoteTextSize);
     Promise.all(tasks).finally(() => {
       invalidateLabelCache({ clearTextWidths: true });
@@ -18495,7 +19740,7 @@ async function buildLayoutSvgString(
         size: titleSize,
         fontWeight: layoutTitleFontWeight,
         anchor: "middle",
-        baseline: "alphabetic",
+        baseline: "text-before-edge",
         color: themeColors.textPrimary,
       })
     );
@@ -18513,7 +19758,7 @@ async function buildLayoutSvgString(
         size: creatorSize,
         fontWeight: layoutCreatorFontWeight,
         anchor: "middle",
-        baseline: "alphabetic",
+        baseline: "text-before-edge",
         color: themeColors.textSecondary,
       })
     );
@@ -18609,22 +19854,118 @@ async function buildLayoutSvgString(
     }
   }
 
-  const edgeLabelSize = Math.max(10, Math.round(layoutRatioTextSize * 0.6));
-  const lineLabelFont = layoutAxisLegendFont;
-  const lineLabelWeight = layoutAxisLegendFontWeight;
-  for (const [a, b] of edges) {
+  const exportNodeRenderList = nodes
+    .map((node) => ({
+      node,
+      pos: worldToScreen(getNodeDisplayCoordinate(node), disableScale),
+    }))
+    .sort((a, b) => {
+      if (a.node.isCustom && !b.node.isCustom) {
+        return 1;
+      }
+      if (!a.node.isCustom && b.node.isCustom) {
+        return -1;
+      }
+      return a.pos.depth - b.pos.depth;
+    });
+  const exportNodePosMap = new Map();
+  exportNodeRenderList.forEach(({ node, pos }) => {
+    exportNodePosMap.set(node.id, { pos, radius: getLayoutNodeRadius(pos) });
+  });
+  const exportDetailLabelSegments = [];
+  edges.forEach(([a, b]) => {
     if (!a.active || !b.active) {
-      continue;
+      return;
     }
-    const start = worldToScreen(getNodeDisplayCoordinate(a), disableScale);
-    const end = worldToScreen(getNodeDisplayCoordinate(b), disableScale);
-    const radiusA = getLayoutNodeRadius(start);
-    const radiusB = getLayoutNodeRadius(end);
+    if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
+      return;
+    }
+    const startEntry = exportNodePosMap.get(a.id);
+    const endEntry = exportNodePosMap.get(b.id);
+    if (!startEntry || !endEntry) {
+      return;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const dist = Math.hypot(dx, dy);
     if (!dist) {
       return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+    exportDetailLabelSegments.push({
+      x1: start.x + ux * startRadius,
+      y1: start.y + uy * startRadius,
+      x2: end.x - ux * endRadius,
+      y2: end.y - uy * endRadius,
+    });
+  });
+  addCustomConnectionSegments(exportNodePosMap, exportDetailLabelSegments);
+  addTriangleDiagonalSegments(exportNodePosMap, exportDetailLabelSegments);
+  addDistanceLineSegments(exportNodePosMap, exportDetailLabelSegments);
+  const exportDetailLabelCollision = {
+    circles: exportNodeRenderList
+      .filter(({ node }) => node.isCenter || node.active || node.isCustom)
+      .map(({ node, pos }) => ({
+        id: node.id,
+        x: pos.x,
+        y: pos.y,
+        r: getLayoutNodeRadius(pos),
+      })),
+    segments: exportDetailLabelSegments,
+    rects: [],
+  };
+  const getExportDetailLabelPosition = (node, pos, radius, width, height) => {
+    if (layoutLabelOffsets.has(node.id)) {
+      const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
+      exportDetailLabelCollision.rects.push({
+        left: rawLabelPos.x,
+        top: rawLabelPos.y,
+        right: rawLabelPos.x + width,
+        bottom: rawLabelPos.y + height,
+      });
+      return rawLabelPos;
+    }
+    return getDetailLabelPosition({
+      center: pos,
+      baseOffset: getDefaultNoteDetailOffset(radius, 1),
+      width,
+      height,
+      circles: exportDetailLabelCollision.circles,
+      placedRects: exportDetailLabelCollision.rects,
+      segments: exportDetailLabelCollision.segments,
+      ignoreId: node.id,
+    });
+  };
+
+  const edgeLabelSize = getLayoutLineLabelSize();
+  const lineLabelFont = layoutLineLabelFont;
+  const lineLabelWeight = layoutLineLabelFontWeight;
+  for (const [a, b] of edges) {
+    if (!a.active || !b.active) {
+      continue;
+    }
+    if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
+      continue;
+    }
+    const startEntry = exportNodePosMap.get(a.id);
+    const endEntry = exportNodePosMap.get(b.id);
+    if (!startEntry || !endEntry) {
+      continue;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const radiusA = startEntry.radius;
+    const radiusB = endEntry.radius;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      continue;
     }
     const ux = dx / dist;
     const uy = dy / dist;
@@ -18717,9 +20058,9 @@ async function buildLayoutSvgString(
       const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
       distanceNodePosMap.set(node.id, { pos, radius: getLayoutNodeRadius(pos) });
     });
-    const labelFont = layoutAxisLegendFont;
-    const labelWeight = layoutAxisLegendFontWeight;
-    const labelSize = Math.max(10, Math.round(layoutRatioTextSize * 0.6));
+    const labelFont = layoutLineLabelFont;
+    const labelWeight = layoutLineLabelFontWeight;
+    const labelSize = getLayoutLineLabelSize();
     const drawCurveSegment = (segment) => {
       parts.push(
         `<path d="M ${segment.p0.x} ${segment.p0.y} Q ${segment.p1.x} ${segment.p1.y} ${segment.p2.x} ${segment.p2.y}" ${svgStroke(
@@ -18755,10 +20096,13 @@ async function buildLayoutSvgString(
         continue;
       }
       const showName = !override || override.showName !== false;
+      const customText =
+        override && typeof override.customText === "string" ? override.customText.trim() : "";
       const commaName = showName
         ? getDistanceCommaName(ratioInfo.numerator, ratioInfo.denominator)
         : "";
-      const label = commaName ? `${ratioInfo.label} (${commaName})` : ratioInfo.label;
+      const baseLabel = customText ? `${ratioInfo.label} ${customText}` : ratioInfo.label;
+      const label = commaName ? `${baseLabel} (${commaName})` : baseLabel;
       const start = startEntry.pos;
       const end = endEntry.pos;
       const dx = end.x - start.x;
@@ -18879,10 +20223,18 @@ async function buildLayoutSvgString(
     if (!source) {
       continue;
     }
-    const start = worldToScreen(getNodeDisplayCoordinate(source), disableScale);
-    const end = worldToScreen(getNodeDisplayCoordinate(customNode), disableScale);
-    const radiusA = getLayoutNodeRadius(start);
-    const radiusB = getLayoutNodeRadius(end);
+    if (hasSelectedDistanceEdgeBetweenNodes(source, customNode)) {
+      continue;
+    }
+    const startEntry = exportNodePosMap.get(source.id);
+    const endEntry = exportNodePosMap.get(customNode.id);
+    if (!startEntry || !endEntry) {
+      continue;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const radiusA = startEntry.radius;
+    const radiusB = endEntry.radius;
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const dist = Math.hypot(dx, dy);
@@ -18970,6 +20322,58 @@ async function buildLayoutSvgString(
     } else {
       pushLine(edgeStart, edgeEnd);
     }
+  }
+
+  const exportOrphanResult = connectOrphansEnabled ? buildOrphanGuideSet() : null;
+  const exportOrphanGuides = exportOrphanResult ? exportOrphanResult.guides : null;
+  if (exportOrphanResult) {
+    exportOrphanResult.edges.forEach((edgeKey) => {
+      const partsKey = edgeKey.split("|");
+      if (partsKey.length !== 2) {
+        return;
+      }
+      const a = nodeById.get(Number(partsKey[0]));
+      const b = nodeById.get(Number(partsKey[1]));
+      if (!a || !b) {
+        return;
+      }
+      const isOrphanA = exportOrphanGuides && exportOrphanGuides.has(a.id);
+      const isOrphanB = exportOrphanGuides && exportOrphanGuides.has(b.id);
+      if (!isOrphanA && !isOrphanB) {
+        return;
+      }
+      const startEntry = exportNodePosMap.get(a.id);
+      const endEntry = exportNodePosMap.get(b.id);
+      if (!startEntry || !endEntry) {
+        return;
+      }
+      const start = startEntry.pos;
+      const end = endEntry.pos;
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      if (!dist) {
+        return;
+      }
+      const ux = dx / dist;
+      const uy = dy / dist;
+      const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+      const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+      const edgeStart = {
+        x: start.x + ux * startRadius - left,
+        y: start.y + uy * startRadius - top,
+      };
+      const edgeEnd = {
+        x: end.x - ux * endRadius - left,
+        y: end.y - uy * endRadius - top,
+      };
+      const strokeColor = colorWithAlpha(themeColors.nodeStroke, 0.08);
+      parts.push(
+        `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" ${svgStroke(
+          strokeColor
+        )} stroke-width="1.5" />`
+      );
+    });
   }
 
   if (triangleDiagonals.size) {
@@ -19061,18 +20465,24 @@ async function buildLayoutSvgString(
     }
   }
 
-  for (const node of nodes) {
-    const isVisible = node.isCenter || node.active || node.isCustom;
+  for (const { node, pos } of exportNodeRenderList) {
+    const isOrphanGuide = exportOrphanGuides && exportOrphanGuides.has(node.id);
+    const isVisible = node.isCenter || node.active || node.isCustom || isOrphanGuide;
     if (!isVisible) {
       continue;
     }
-    const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+    const entry = exportNodePosMap.get(node.id);
+    if (!entry) {
+      continue;
+    }
     const x = pos.x - left;
     const y = pos.y - top;
-    const radius = getLayoutNodeRadius(pos);
+    const radius = entry.radius;
     const shape = getLayoutNodeShape(node);
     const fill = "none";
-    const stroke = themeColors.nodeStroke;
+    const stroke = isOrphanGuide && !node.active && !node.isCenter && !node.isCustom
+      ? colorWithAlpha(themeColors.nodeStroke, 0.08)
+      : themeColors.nodeStroke;
     if (showCircles) {
       if (shape === "circle") {
         parts.push(
@@ -19111,6 +20521,9 @@ async function buildLayoutSvgString(
           )} stroke-width="2" />`
         );
       }
+    }
+    if (isOrphanGuide && !node.active && !node.isCenter && !node.isCustom) {
+      continue;
     }
 
     if (featureMode === "note") {
@@ -19167,13 +20580,33 @@ async function buildLayoutSvgString(
       }
       const centsLabel = buildCentsReadout(node, { wrap: enharmonicsEnabled });
       const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
-      const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
-      const labelOffsetX = rawLabelPos.x - pos.x;
-      const ratioX = pos.x + labelOffsetX * 0.7 - left;
+      const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
+      const ratioText = `${node.numerator}:${node.denominator}${octaveLabel}`;
+      const hzText = showHz && Number.isFinite(node.freq) ? `${node.freq.toFixed(2)} Hz` : "";
+      const ratioWidth = await measureSvgTextWidth(
+        ratioText,
+        detailSize,
+        layoutNoteFont,
+        layoutNoteFontWeight
+      );
+      const centsWidth = centsLabel
+        ? await measureSvgTextWidth(centsLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
+        : 0;
+      const ratioCentsWidth = ratioCentsLabel
+        ? await measureSvgTextWidth(ratioCentsLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
+        : 0;
+      const hzWidth = hzText
+        ? await measureSvgTextWidth(hzText, detailSize, layoutNoteFont, layoutNoteFontWeight)
+        : 0;
+      const labelWidth = Math.max(ratioWidth, centsWidth, ratioCentsWidth, hzWidth);
+      const lineCount = 1 + (centsLabel ? 1 : 0) + (ratioCentsLabel ? 1 : 0) + (hzText ? 1 : 0);
+      const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
+      const rawLabelPos = getExportDetailLabelPosition(node, pos, radius, labelWidth, labelHeight);
+      const ratioX = rawLabelPos.x - left;
       const ratioY = rawLabelPos.y - top;
       parts.push(
         await buildSvgTextElement({
-          text: `${node.numerator}:${node.denominator}`,
+          text: ratioText,
           x: ratioX,
           y: ratioY + svgNoteBaselineOffset,
           font: layoutNoteFont,
@@ -19218,6 +20651,21 @@ async function buildLayoutSvgString(
           })
         );
         detailLine += 1;
+      }
+      if (hzText) {
+        parts.push(
+          await buildSvgTextElement({
+            text: hzText,
+            x: ratioX,
+            y: ratioY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
+            font: layoutNoteFont,
+            size: detailSize,
+            fontWeight: layoutNoteFontWeight,
+            anchor: "start",
+            baseline: "alphabetic",
+            color: themeColors.textSecondary,
+          })
+        );
       }
     } else {
       const maxWidth = radius * 1.6;
@@ -19297,10 +20745,6 @@ async function buildLayoutSvgString(
         );
       }
 
-      const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
-      const labelOffsetX = rawLabelPos.x - pos.x;
-      const labelX = pos.x + labelOffsetX * 0.7 - left;
-      const labelY = rawLabelPos.y - top;
       const displayInfo = getDisplayNoteInfo(node);
       const centsLabel = buildCentsReadout(node, {
         wrap: enharmonicsEnabled,
@@ -19308,11 +20752,46 @@ async function buildLayoutSvgString(
         baseTextForHeji: displayInfo.pitchClass,
       });
       const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
+      const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
+      const hzText = showHz && Number.isFinite(node.freq) ? `${node.freq.toFixed(2)} Hz` : "";
       const hasParen = centsLabel && centsLabel.includes("(");
       const restGapScale =
         hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
       const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
       const annotation = getHejiAnnotation(node, baseLabel || node.note_name);
+      const suffixText = annotation.suffixParts
+        .map((part) => (part && part.text ? part.text : ""))
+        .join("");
+      const line1 = `${annotation.baseText || ""}${suffixText}${
+        hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : ""
+      }`;
+      const lineWidth = line1
+        ? await measureSvgTextWidth(line1, detailSize, layoutNoteFont, layoutNoteFontWeight)
+        : 0;
+      const centsWidth =
+        hejiEnabled && centsLabel
+          ? await measureSvgTextWidth(centsLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
+          : 0;
+      const octaveWidth = octaveLabel
+        ? await measureSvgTextWidth(octaveLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
+        : 0;
+      const ratioCentsWidth = ratioCentsLabel
+        ? await measureSvgTextWidth(ratioCentsLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
+        : 0;
+      const hzWidth = hzText
+        ? await measureSvgTextWidth(hzText, detailSize, layoutNoteFont, layoutNoteFontWeight)
+        : 0;
+      const labelWidth = Math.max(lineWidth, centsWidth, octaveWidth, ratioCentsWidth, hzWidth);
+      const lineCount =
+        1 +
+        (hejiEnabled && centsLabel ? 1 : 0) +
+        (octaveLabel ? 1 : 0) +
+        (ratioCentsLabel ? 1 : 0) +
+        (hzText ? 1 : 0);
+      const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
+      const rawLabelPos = getExportDetailLabelPosition(node, pos, radius, labelWidth, labelHeight);
+      const labelX = rawLabelPos.x - left;
+      const labelY = rawLabelPos.y - top;
       parts.push(
         await buildHejiSvgInline({
           x: labelX,
@@ -19350,6 +20829,22 @@ async function buildLayoutSvgString(
         );
         detailLine += 1;
       }
+      if (octaveLabel) {
+        parts.push(
+          await buildSvgTextElement({
+            text: octaveLabel,
+            x: labelX,
+            y: labelY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
+            font: layoutNoteFont,
+            size: detailSize,
+            fontWeight: layoutNoteFontWeight,
+            anchor: "start",
+            baseline: "alphabetic",
+            color: themeColors.textSecondary,
+          })
+        );
+        detailLine += 1;
+      }
       if (ratioCentsLabel) {
         parts.push(
           await buildSvgTextElement({
@@ -19365,6 +20860,21 @@ async function buildLayoutSvgString(
           })
         );
         detailLine += 1;
+      }
+      if (hzText) {
+        parts.push(
+          await buildSvgTextElement({
+            text: hzText,
+            x: labelX,
+            y: labelY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
+            font: layoutNoteFont,
+            size: detailSize,
+            fontWeight: layoutNoteFontWeight,
+            anchor: "start",
+            baseline: "alphabetic",
+            color: themeColors.textSecondary,
+          })
+        );
       }
     }
   }
@@ -19624,6 +21134,8 @@ function resetLattice() {
   activeKeys.clear();
   analysisLayers.distances = false;
   analysisLayers.microtonal = false;
+  microtonalSelectedNodeIds.clear();
+  microtonalHoverPairKey = "";
   distanceSelectMode = false;
   distanceSelectedNodeKeys.clear();
   distanceSelectedEdges.clear();
@@ -19806,11 +21318,20 @@ if (layoutCustomWeightSelect) {
 if (layoutAxisFontSelect) {
   layoutAxisFontSelect.value = layoutAxisLegendFont;
 }
+if (layoutLineLabelFontSelect) {
+  layoutLineLabelFontSelect.value = layoutLineLabelFont;
+}
 if (layoutAxisWeightSelect) {
   layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
 }
+if (layoutLineLabelWeightSelect) {
+  layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
+}
 if (layoutAxisSizeInput) {
   layoutAxisSizeInput.value = String(layoutAxisLegendTextSize);
+}
+if (layoutLineLabelSizeInput) {
+  layoutLineLabelSizeInput.value = String(layoutLineLabelTextSize);
 }
 if (layoutKeyMappingFontSelect) {
   layoutKeyMappingFontSelect.value = layoutKeyMappingFont;
@@ -19821,6 +21342,7 @@ if (layoutKeyMappingWeightSelect) {
 if (layoutUnifySizeToggle) {
   layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
 }
+syncLayoutAlignButtons();
 if (layoutModeToggle) {
   layoutModeToggle.checked = layoutMode;
 }
@@ -20079,6 +21601,29 @@ if (optionsToggle) {
 if (calculateToggle) {
   calculateToggle.addEventListener("click", toggleCalculatePanel);
 }
+if (presetCloseButton) {
+  presetCloseButton.addEventListener("click", () => {
+    closePresetOverlay();
+  });
+}
+if (presetOverlay) {
+  presetOverlay.addEventListener("click", (event) => {
+    if (event.target === presetOverlay) {
+      closePresetOverlay();
+    }
+  });
+}
+if (presetSearchInput) {
+  presetSearchInput.addEventListener("input", () => {
+    renderPresetList();
+  });
+}
+if (presetSortSelect) {
+  presetSortSelect.addEventListener("change", () => {
+    presetSortMode = presetSortSelect.value === "creator" ? "creator" : "title";
+    renderPresetList();
+  });
+}
 if (intervalChartButton) {
   intervalChartButton.addEventListener("click", () => {
     openIntervalChart();
@@ -20202,10 +21747,7 @@ if (analysisShowDistancesToggle) {
 }
 if (analysisShowMicrotonalToggle) {
   analysisShowMicrotonalToggle.addEventListener("change", () => {
-    analysisLayers.microtonal = analysisShowMicrotonalToggle.checked;
-    syncAnalysisLayerToggles();
-    updateBannerMessage();
-    draw();
+    setMicrotonalIntervalsMode(analysisShowMicrotonalToggle.checked);
   });
 }
 if (directionalRatioLabelsToggle) {
@@ -20235,19 +21777,7 @@ if (layoutShowDistancesToggle) {
 }
 if (layoutShowMicrotonalToggle) {
   layoutShowMicrotonalToggle.addEventListener("change", () => {
-    analysisLayers.microtonal = layoutShowMicrotonalToggle.checked;
-    syncAnalysisLayerToggles();
-    updateBannerMessage();
-    draw();
-  });
-}
-if (layoutAnalysisResetButton) {
-  layoutAnalysisResetButton.addEventListener("click", () => {
-    analysisLayers.distances = true;
-    analysisLayers.microtonal = true;
-    syncAnalysisLayerToggles();
-    updateBannerMessage();
-    draw();
+    setMicrotonalIntervalsMode(layoutShowMicrotonalToggle.checked);
   });
 }
 if (layoutFreezeButton) {
@@ -20546,6 +22076,23 @@ if (layoutKeyMappingButtons.length) {
     });
   });
 }
+if (layoutShareLinkButton) {
+  layoutShareLinkButton.addEventListener("click", async () => {
+    const encoded = encodePresetState(getPresetState());
+    const hash = `${PRESET_PARAM}=${encoded}`;
+    history.replaceState(null, "", `${location.pathname}${location.search}#${hash}`);
+    const shareUrl = `${location.origin}${location.pathname}${location.search}#${hash}`;
+    if (encoded.length > 3500) {
+      showFileSharePopover("Preset URL copied (very long). Use File > Save / Load if it fails.");
+    }
+    try {
+      await copyTextToClipboard(shareUrl);
+      showFileSharePopover("Preset URL copied. Paste it in a new tab to reopen this preset.");
+    } catch (error) {
+      showFileSharePopover("Couldn't copy the preset URL. Try again.");
+    }
+  });
+}
 if (layoutExitButton) {
   layoutExitButton.addEventListener("click", () => {
     if (layoutModeToggle) {
@@ -20824,6 +22371,15 @@ function syncLayoutFontPopoverInputs() {
   if (layoutCustomLabelSizeInput) {
     layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
   }
+  if (layoutLineLabelFontSelect) {
+    layoutLineLabelFontSelect.value = layoutLineLabelFont;
+  }
+  if (layoutLineLabelWeightSelect) {
+    layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
+  }
+  if (layoutLineLabelSizeInput) {
+    layoutLineLabelSizeInput.value = String(layoutLineLabelTextSize);
+  }
   if (layoutKeyMappingFontSelect) {
     layoutKeyMappingFontSelect.value = layoutKeyMappingFont;
   }
@@ -20846,6 +22402,7 @@ function applyLayoutFontSnapshot(snapshot) {
   layoutCustomLabelFont = snapshot.customLabel;
   layoutKeyMappingFont = snapshot.keyMapping;
   layoutAxisLegendFont = snapshot.axisLegend;
+  layoutLineLabelFont = snapshot.lineLabel ?? layoutLineLabelFont;
   layoutCreatorFont = snapshot.creator;
   layoutTitleFontWeight = snapshot.titleWeight;
   layoutRatioFontWeight = snapshot.ratioWeight;
@@ -20854,6 +22411,7 @@ function applyLayoutFontSnapshot(snapshot) {
   layoutCustomLabelFontWeight = snapshot.customLabelWeight;
   layoutKeyMappingFontWeight = snapshot.keyMappingWeight;
   layoutAxisLegendFontWeight = snapshot.axisLegendWeight;
+  layoutLineLabelFontWeight = snapshot.lineLabelWeight ?? layoutLineLabelFontWeight;
   layoutCreatorFontWeight = snapshot.creatorWeight;
   setLayoutTitleSize(snapshot.titleSize);
   setLayoutCreatorSize(snapshot.creatorSize);
@@ -20863,6 +22421,7 @@ function applyLayoutFontSnapshot(snapshot) {
   setLayoutCustomLabelSize(snapshot.customLabelTextSize);
   layoutKeyMappingTextSize = snapshot.keyMappingTextSize;
   layoutAxisLegendTextSize = snapshot.axisLegendTextSize;
+  layoutLineLabelTextSize = snapshot.lineLabelTextSize ?? layoutLineLabelTextSize;
   updateLayoutRatioTextReadout();
   updateLayoutNoteTextReadout();
   updateLayoutTriangleLabelReadout();
@@ -20903,6 +22462,7 @@ if (layoutFontsButton && layoutFontPopover) {
       customLabel: layoutCustomLabelFont,
       keyMapping: layoutKeyMappingFont,
       axisLegend: layoutAxisLegendFont,
+      lineLabel: layoutLineLabelFont,
       creator: layoutCreatorFont,
       titleWeight: layoutTitleFontWeight,
       ratioWeight: layoutRatioFontWeight,
@@ -20911,6 +22471,7 @@ if (layoutFontsButton && layoutFontPopover) {
       customLabelWeight: layoutCustomLabelFontWeight,
       keyMappingWeight: layoutKeyMappingFontWeight,
       axisLegendWeight: layoutAxisLegendFontWeight,
+      lineLabelWeight: layoutLineLabelFontWeight,
       creatorWeight: layoutCreatorFontWeight,
       titleSize: layoutTitleSize,
       creatorSize: layoutCreatorSize,
@@ -20920,11 +22481,36 @@ if (layoutFontsButton && layoutFontPopover) {
       customLabelTextSize: layoutCustomLabelTextSize,
       keyMappingTextSize: layoutKeyMappingTextSize,
       axisLegendTextSize: layoutAxisLegendTextSize,
+      lineLabelTextSize: layoutLineLabelTextSize,
     };
     updateLayoutCustomLabelControls();
     syncLayoutFontPopoverInputs();
     layoutFontPopover.hidden = false;
     layoutFontsButton.setAttribute("aria-expanded", "true");
+  });
+}
+if (layoutAlignXButton) {
+  layoutAlignXButton.addEventListener("click", () => {
+    if (!layoutMode) {
+      return;
+    }
+    setLayoutAlignMode("x");
+  });
+}
+if (layoutAlignYButton) {
+  layoutAlignYButton.addEventListener("click", () => {
+    if (!layoutMode) {
+      return;
+    }
+    setLayoutAlignMode("y");
+  });
+}
+if (layoutStraightenButton) {
+  layoutStraightenButton.addEventListener("click", () => {
+    if (!layoutMode) {
+      return;
+    }
+    setLayoutAlignMode("straighten");
   });
 }
 if (layoutFontCancelButton) {
@@ -21188,6 +22774,20 @@ if (layoutAxisFontSelect) {
     schedulePresetUrlUpdate();
   });
 }
+if (layoutLineLabelFontSelect) {
+  layoutLineLabelFontSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutLineLabelFont = layoutLineLabelFontSelect.value || layoutLineLabelFont;
+    invalidateLabelCache({ clearTextWidths: true });
+    ensureUiFontReady(
+      layoutLineLabelFont,
+      layoutLineLabelFontWeight,
+      layoutLineLabelTextSize
+    ).then(draw);
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
 if (layoutTriangleLabelWeightSelect) {
   layoutTriangleLabelWeightSelect.addEventListener("change", () => {
     pushLayoutUndoState();
@@ -21208,6 +22808,26 @@ if (layoutAxisWeightSelect) {
     pushLayoutUndoState();
     layoutAxisLegendFontWeight =
       Number(layoutAxisWeightSelect.value) || layoutAxisLegendFontWeight;
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutLineLabelWeightSelect) {
+  layoutLineLabelWeightSelect.addEventListener("change", () => {
+    pushLayoutUndoState();
+    layoutLineLabelFontWeight =
+      Number(layoutLineLabelWeightSelect.value) || layoutLineLabelFontWeight;
+    invalidateLabelCache({ clearTextWidths: true });
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutLineLabelSizeInput) {
+  layoutLineLabelSizeInput.addEventListener("input", () => {
+    pushLayoutUndoState();
+    layoutLineLabelTextSize =
+      Number(layoutLineLabelSizeInput.value) || layoutLineLabelTextSize;
     invalidateLabelCache({ clearTextWidths: true });
     draw();
     schedulePresetUrlUpdate();
@@ -21353,11 +22973,9 @@ if (uiHint) {
 }
 if (bannerMessage) {
   bannerMessage.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!target || !(target instanceof HTMLElement)) {
-      return;
-    }
-    const layoutAction = target.getAttribute("data-layout-banner");
+    const target = event.target instanceof Element ? event.target : bannerMessage;
+    const actionEl = target.closest("[data-layout-banner]");
+    const layoutAction = actionEl ? actionEl.getAttribute("data-layout-banner") : null;
     if (layoutAction === "freeze") {
       layoutLockPosition = true;
       refreshLayoutFromView({ flatten: layoutFreezeFlatten });
@@ -21365,13 +22983,12 @@ if (bannerMessage) {
       updateBannerMessage();
       return;
     }
-    if (!distanceSelectMode) {
+    if (layoutAction === "exit-align") {
+      setLayoutAlignMode("");
       return;
     }
-    const action = target.getAttribute("data-distance-banner");
-    if (action === "reset") {
-      resetDistanceEdges();
-    }
+    bannerDismissedKey = currentBannerKey;
+    updateBannerMessage();
   });
 }
 fundamentalInput.addEventListener("input", () => {
@@ -21874,8 +23491,16 @@ if (triangleLabelDialog) {
     draw();
   }
   if (event.key === "Escape") {
+    if (presetOverlay && !presetOverlay.hidden) {
+      closePresetOverlay();
+      return;
+    }
     if (layoutFontPopover && !layoutFontPopover.hidden) {
       closeLayoutFontPopover();
+      return;
+    }
+    if (layoutAlignMode) {
+      setLayoutAlignMode("");
       return;
     }
     if (distanceSelectMode && analysisLayers.distances) {

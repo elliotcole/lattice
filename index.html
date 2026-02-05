@@ -88,12 +88,9 @@
               <input id="load-lattice-input" type="file" accept="application/json" hidden />
             </div>
             <div class="control-group preset-toggle">
-              <button id="preset-toggle" type="button" aria-expanded="false" aria-controls="preset-panel">
+              <button id="preset-toggle" type="button" aria-expanded="false" aria-controls="preset-overlay">
                 Presets
               </button>
-              <div id="preset-panel" class="panel preset-panel" hidden>
-                <ul id="preset-list" class="preset-list"></ul>
-              </div>
             </div>
             <div class="control-group calculate-toggle">
               <button id="calculate-toggle" type="button" aria-expanded="false" aria-controls="calculate-panel">
@@ -184,6 +181,18 @@
           </div>
         </div>
         <div class="control-group">
+          <button id="layout-freeze" type="button" class="button-full">Freeze &amp; Edit Layout</button>
+        </div>
+        <div class="control-group">
+          <button id="layout-share-link" type="button" class="button-full">Save &amp; Copy Link</button>
+        </div>
+        <div class="control-group">
+          <div class="control-inline">
+            <input id="layout-freeze-flatten" type="checkbox" checked />
+            <span>Flatten on Freeze</span>
+          </div>
+        </div>
+        <div class="control-group">
           <label for="layout-page-size">Page Size</label>
           <select id="layout-page-size">
             <option value="letter">Letter</option>
@@ -196,15 +205,6 @@
             <option value="portrait">Portrait</option>
             <option value="landscape" selected>Landscape</option>
           </select>
-        </div>
-        <div class="control-group">
-          <button id="layout-freeze" type="button" class="button-full">Freeze &amp; Edit Layout</button>
-        </div>
-        <div class="control-group">
-          <div class="control-inline">
-            <input id="layout-freeze-flatten" type="checkbox" checked />
-            <span>Flatten on Freeze</span>
-          </div>
         </div>
         <div class="control-group">
           <input id="layout-title" type="text" placeholder="Title" aria-label="Title" />
@@ -251,6 +251,16 @@
         <div class="control-group control-group-inline">
           <label for="layout-node-size">Node</label>
           <input id="layout-node-size" type="range" min="18" max="70" step="1" value="35" />
+        </div>
+        <div class="nav-3d-title">Align</div>
+        <div class="control-group">
+          <div class="control-inline layout-align-row">
+            <button id="layout-align-x" type="button">X</button>
+            <button id="layout-align-y" type="button">Y</button>
+          </div>
+          <div class="control-inline layout-align-row">
+            <button id="layout-straighten" type="button">Straighten</button>
+          </div>
         </div>
         <div id="layout-key-mappings-group" class="nav-3d-accordion-body" hidden>
           <div
@@ -351,16 +361,11 @@
                 <button type="button" class="inline-link" data-distance-select>edit</button>
               </div>
             </div>
-            <div class="control-group">
-              <button id="layout-analysis-reset" type="button" class="button-full">
-                Reset Analysis
-              </button>
-            </div>
           </div>
         </div>
         <div class="nav-3d-title">Export</div>
         <div class="control-group">
-          <div class="control-inline">
+          <div class="control-inline layout-align-row">
             <button id="export-svg" type="button">SVG</button>
             <button id="export-pdf" type="button">PDF</button>
           </div>
@@ -553,6 +558,36 @@
           <div class="layout-font-size">
             <span>Size</span>
             <input id="layout-axis-size" type="range" min="10" max="36" step="1" value="19" />
+          </div>
+        </label>
+        <label>
+          Line Labels Font
+          <div class="layout-font-controls">
+            <select id="layout-line-label-font">
+              <option value="Lexend">Lexend</option>
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-line-label-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Size</span>
+            <input id="layout-line-label-size" type="range" min="8" max="28" step="1" value="13" />
           </div>
         </label>
         <div id="layout-custom-size-group" hidden>
@@ -1020,7 +1055,7 @@
             <div class="control-group">
               <div class="control-inline">
                 <input id="analysis-show-microtonal" type="checkbox" />
-                <label for="analysis-show-microtonal">Microtonal intervals</label>
+                <label for="analysis-show-microtonal">Interval Overlay</label>
               </div>
             </div>
             <div class="control-group" hidden>
@@ -1262,6 +1297,36 @@
             Calculate Interval
           </button>
           <button id="interval-chart-close" type="button" class="button-full">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div id="preset-overlay" class="preset-overlay" hidden>
+      <div class="preset-window" role="dialog" aria-modal="true" aria-label="Presets">
+        <div class="preset-header">
+          <div class="preset-title">Presets</div>
+        </div>
+        <div class="preset-body preset-body-single">
+          <div class="preset-main">
+            <div class="preset-toolbar">
+              <input
+                id="preset-search"
+                type="search"
+                placeholder="Search presets..."
+                autocomplete="off"
+              />
+              <label class="preset-sort">
+                <span>Sort</span>
+                <select id="preset-sort">
+                  <option value="title" selected>Title (A–Z)</option>
+                  <option value="creator">Creator (A–Z)</option>
+                </select>
+              </label>
+            </div>
+            <div id="preset-list" class="preset-list"></div>
+          </div>
+        </div>
+        <div class="preset-actions">
+          <button id="preset-close" type="button" class="button-full">Close</button>
         </div>
       </div>
     </div>

@@ -206,6 +206,7 @@ const lfoPlayToggle = document.getElementById("lfo-play-toggle");
 const lfoStopButton = document.getElementById("lfo-stop");
 const allNotesOffButton = document.getElementById("all-notes-off");
 const findRatioButton = document.getElementById("find-ratio");
+const buildIntervalsButton = document.getElementById("build-intervals");
 const addIntervalButton = document.getElementById("add-interval");
 const customRatioDialog = document.getElementById("custom-ratio-dialog");
 const triangleLabelDialog = document.getElementById("triangle-label-dialog");
@@ -213,6 +214,12 @@ const triangleLabelInput = document.getElementById("triangle-label-input");
 const findRatioDialog = document.getElementById("find-ratio-dialog");
 const findRatioForm = document.getElementById("find-ratio-form");
 const findRatioInput = document.getElementById("find-ratio-input");
+const buildIntervalsDialog = document.getElementById("build-intervals-dialog");
+const buildIntervalsForm = document.getElementById("build-intervals-form");
+const buildIntervalsInput = document.getElementById("build-intervals-input");
+const buildIntervalsPreview = document.getElementById("build-intervals-preview");
+const buildIntervalsTicks = document.getElementById("build-intervals-ticks");
+const buildIntervalsWarning = document.getElementById("build-intervals-warning");
 const addIntervalDialog = document.getElementById("add-interval-dialog");
 const addIntervalForm = document.getElementById("add-interval-form");
 const addIntervalSelect = document.getElementById("add-interval-select");
@@ -13561,6 +13568,86 @@ function findOrCreateRatiosFromInput(value) {
   }
 }
 
+function buildFromIntervalsInput(value) {
+  const lines = String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    alert("Please enter one or more ratios.");
+    return;
+  }
+  let currentNumerator = 1;
+  let currentDenominator = 1;
+  let handled = 0;
+  lines.forEach((line) => {
+    const parsed = parseRatioInput(line);
+    if (!parsed) {
+      return;
+    }
+    if (parsed.numerator === 1 && parsed.denominator === 1) {
+      return;
+    }
+    handled += 1;
+    currentNumerator *= parsed.numerator;
+    currentDenominator *= parsed.denominator;
+    const reduced = reduceFraction(currentNumerator, currentDenominator);
+    currentNumerator = reduced.numerator;
+    currentDenominator = reduced.denominator;
+    const ratioValue = currentNumerator / currentDenominator;
+    const octaveShift = ratioValue >= 2 ? Math.floor(Math.log2(ratioValue)) : 0;
+    const target = normalizeRatio(currentNumerator, currentDenominator);
+    const targetNode = findOrCreateRatioTargetNode(target);
+    if (targetNode && octaveShift > 0) {
+      setNodeOctaveShift(targetNode, octaveShift);
+    }
+  });
+  if (!handled) {
+    alert("Please enter ratios like 5:3 or 9/8.");
+  }
+}
+
+function updateBuildIntervalsPreview() {
+  if (!buildIntervalsTicks || !buildIntervalsPreview) {
+    return;
+  }
+  buildIntervalsTicks.innerHTML = "";
+  const lines = String(buildIntervalsInput ? buildIntervalsInput.value : "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  let currentNumerator = 1;
+  let currentDenominator = 1;
+  let overOctave = false;
+  lines.forEach((line) => {
+    const parsed = parseRatioInput(line);
+    if (!parsed) {
+      return;
+    }
+    if (parsed.numerator === 1 && parsed.denominator === 1) {
+      return;
+    }
+    currentNumerator *= parsed.numerator;
+    currentDenominator *= parsed.denominator;
+    const reduced = reduceFraction(currentNumerator, currentDenominator);
+    currentNumerator = reduced.numerator;
+    currentDenominator = reduced.denominator;
+    const ratioValue = currentNumerator / currentDenominator;
+    if (ratioValue > 2) {
+      overOctave = true;
+    }
+    const tick = document.createElement("span");
+    tick.className = "build-intervals-tick";
+    const position = Math.min(1, Math.max(0, ratioValue - 1));
+    tick.style.left = `${(position * 100).toFixed(2)}%`;
+    buildIntervalsTicks.appendChild(tick);
+  });
+  buildIntervalsPreview.classList.toggle("is-over", overOctave);
+  if (buildIntervalsWarning) {
+    buildIntervalsWarning.hidden = !overOctave;
+  }
+}
+
 function getSelectedIntervalRatio() {
   const selectValue = addIntervalSelect ? String(addIntervalSelect.value) : "custom";
   if (selectValue && selectValue !== "custom") {
@@ -15950,6 +16037,20 @@ function openAddIntervalDialog() {
       addIntervalInput.select();
     }
   });
+}
+
+function openBuildIntervalsDialog() {
+  if (!buildIntervalsDialog || !buildIntervalsInput) {
+    return;
+  }
+  if (typeof buildIntervalsDialog.showModal === "function") {
+    buildIntervalsDialog.showModal();
+  }
+  requestAnimationFrame(() => {
+    buildIntervalsInput.focus();
+    buildIntervalsInput.select();
+  });
+  updateBuildIntervalsPreview();
 }
 
 function closeOptionsPanel() {
@@ -21800,6 +21901,17 @@ if (findRatioButton) {
     openFindRatioDialog();
   });
 }
+if (buildIntervalsButton) {
+  buildIntervalsButton.addEventListener("click", () => {
+    closeTopMenus("calculate");
+    openBuildIntervalsDialog();
+  });
+}
+if (buildIntervalsInput) {
+  buildIntervalsInput.addEventListener("input", () => {
+    updateBuildIntervalsPreview();
+  });
+}
 if (addIntervalButton) {
   addIntervalButton.addEventListener("click", () => {
     closeTopMenus();
@@ -21880,13 +21992,22 @@ if (layoutFreezeButton) {
         return;
       }
       layoutLockPosition = false;
-      const sourceView = layoutSourceView || layoutPrevState;
+      layoutSourceView = null;
+      const sourceView = layoutPrevState;
       if (sourceView) {
         view.zoom = sourceView.zoom;
         view.offsetX = sourceView.offsetX;
         view.offsetY = sourceView.offsetY;
         view.rotX = sourceView.rotX;
         view.rotY = sourceView.rotY;
+        layoutView = {
+          zoom: sourceView.zoom,
+          offsetX: sourceView.offsetX,
+          offsetY: sourceView.offsetY,
+          rotX: sourceView.rotX,
+          rotY: sourceView.rotY,
+        };
+        syncLayoutScaleInput();
       }
       refreshLayoutFromView({ flatten: false });
       updateLayoutLinkControls();
@@ -22972,17 +23093,6 @@ if (ratioWheelLarge) {
   ratioWheelLarge.addEventListener("mouseleave", clearRatioWheelHover);
   ratioWheelLarge.addEventListener("click", handleRatioWheelClick);
 }
-if (findRatioInput) {
-  findRatioInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
-      event.preventDefault();
-      if (findRatioDialog) {
-        findRatioDialog.returnValue = "find";
-        findRatioDialog.close();
-      }
-    }
-  });
-}
 if (addIntervalInput) {
   addIntervalInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -23008,6 +23118,11 @@ if (addIntervalSelect && addIntervalInput) {
   });
 }
 if (findRatioDialog) {
+  findRatioDialog.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target.tagName !== "TEXTAREA") {
+      event.preventDefault();
+    }
+  });
   findRatioDialog.addEventListener("close", () => {
     if (findRatioDialog.returnValue === "find") {
       findOrCreateRatiosFromInput(findRatioInput ? findRatioInput.value : "");
@@ -23015,6 +23130,22 @@ if (findRatioDialog) {
     if (findRatioInput) {
       findRatioInput.value = "";
     }
+  });
+}
+if (buildIntervalsDialog) {
+  buildIntervalsDialog.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target.tagName !== "TEXTAREA") {
+      event.preventDefault();
+    }
+  });
+  buildIntervalsDialog.addEventListener("close", () => {
+    if (buildIntervalsDialog.returnValue === "build") {
+      buildFromIntervalsInput(buildIntervalsInput ? buildIntervalsInput.value : "");
+    }
+    if (buildIntervalsInput) {
+      buildIntervalsInput.value = "";
+    }
+    updateBuildIntervalsPreview();
   });
 }
 if (addIntervalDialog) {

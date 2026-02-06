@@ -98,6 +98,9 @@
               </button>
               <div id="calculate-panel" class="panel calculate-panel" hidden>
                 <button id="find-ratio" type="button" class="button-full">Find Ratios</button>
+                <button id="build-intervals" type="button" class="button-full">
+                  Build from Intervals
+                </button>
                 <button id="add-interval" type="button" class="button-full">Add Interval</button>
               </div>
             </div>
@@ -1178,6 +1181,29 @@
           <button type="submit" value="cancel">Cancel</button>
           <button type="submit" value="find" autofocus>Find</button>
         </menu>
+      </form>
+    </dialog>
+    <dialog id="build-intervals-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form" id="build-intervals-form">
+        <div class="dialog-title">Build from intervals</div>
+        <label>
+          One ratio per line (e.g. 5/3, 9/8)
+          <textarea id="build-intervals-input" rows="8" required></textarea>
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="build">OK</button>
+        </menu>
+        <div id="build-intervals-preview" class="build-intervals-preview">
+          <div class="build-intervals-line">
+            <span class="build-intervals-endpoint start"></span>
+            <span class="build-intervals-endpoint end"></span>
+            <div id="build-intervals-ticks" class="build-intervals-ticks"></div>
+          </div>
+          <div id="build-intervals-warning" class="build-intervals-warning" hidden>
+            Intervals exceed an octave.
+          </div>
+        </div>
       </form>
     </dialog>
     <dialog id="add-interval-dialog" class="custom-ratio-dialog interval-dialog">

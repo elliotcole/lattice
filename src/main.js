@@ -361,6 +361,7 @@ let midiEnabled = false;
 let rHeld = false;
 let tHeld = false;
 let lHeld = false;
+let customTextHeld = false;
 let fHeld = false;
 let oHeld = false;
 let suppressClickAfterRespell = false;
@@ -560,15 +561,27 @@ function serializeLayoutKeyMappingOffsets() {
 }
 
 function serializeLayoutPositionOffsets() {
-  return Array.from(layoutPositionOffsets.entries()).map(([key, offset]) => {
-    const [expX, expY, expZ] = key.split(",").map(Number);
-    return {
-      exponents: [expX, expY, expZ],
-      offsetX: offset.x,
-      offsetY: offset.y,
-      offsetZ: offset.z,
-    };
-  });
+  const epsilon = 1e-3;
+  const roundOffset = (value) => Math.round(value * 100) / 100;
+  return Array.from(layoutPositionOffsets.entries())
+    .map(([key, offset]) => {
+      const [expX, expY, expZ] = key.split(",").map(Number);
+      const offsetX = roundOffset(Number(offset.x) || 0);
+      const offsetY = roundOffset(Number(offset.y) || 0);
+      const offsetZ = roundOffset(Number(offset.z) || 0);
+      const hasOffset =
+        Math.abs(offsetX) > epsilon ||
+        Math.abs(offsetY) > epsilon ||
+        Math.abs(offsetZ) > epsilon;
+      if (!hasOffset) {
+        return null;
+      }
+      if (Math.abs(offsetZ) > epsilon) {
+        return [expX, expY, expZ, offsetX, offsetY, offsetZ];
+      }
+      return [expX, expY, expZ, offsetX, offsetY];
+    })
+    .filter(Boolean);
 }
 
 function serializeLayoutCustomNodePositions() {
@@ -817,29 +830,55 @@ function applyLayoutPositionOffsets(entries) {
     }
   });
   entries.forEach((entry) => {
-    if (!entry || typeof entry !== "object") {
+    if (!entry) {
       return;
     }
-    const offsetX = Number(entry.offsetX) || 0;
-    const offsetY = Number(entry.offsetY) || 0;
-    const offsetZ = Number(entry.offsetZ) || 0;
-    if (Array.isArray(entry.exponents) && entry.exponents.length >= 2) {
-      const [expX, expY, expZ = 0] = entry.exponents.map(Number);
-      const node = exponentMap.get(`${expX},${expY},${expZ}`);
-      if (node) {
-        layoutPositionOffsets.set(`${expX},${expY},${expZ}`, {
-          x: offsetX,
-          y: offsetY,
-          z: offsetZ,
-        });
-        const base = getLayoutBaseCoordinate(node);
-        layoutPositions.set(node.id, {
-          x: base.x + offsetX,
-          y: base.y + offsetY,
-          z: base.z + offsetZ,
-        });
+    let expX;
+    let expY;
+    let expZ = 0;
+    let offsetX = 0;
+    let offsetY = 0;
+    let offsetZ = 0;
+    if (Array.isArray(entry)) {
+      if (entry.length < 5) {
+        return;
       }
+      expX = Number(entry[0]);
+      expY = Number(entry[1]);
+      expZ = Number(entry[2]) || 0;
+      offsetX = Number(entry[3]) || 0;
+      offsetY = Number(entry[4]) || 0;
+      offsetZ = Number(entry[5]) || 0;
+    } else if (typeof entry === "object") {
+      offsetX = Number(entry.offsetX) || 0;
+      offsetY = Number(entry.offsetY) || 0;
+      offsetZ = Number(entry.offsetZ) || 0;
+      if (Array.isArray(entry.exponents) && entry.exponents.length >= 2) {
+        [expX, expY, expZ = 0] = entry.exponents.map(Number);
+      } else {
+        return;
+      }
+    } else {
+      return;
     }
+    if (!Number.isFinite(expX) || !Number.isFinite(expY) || !Number.isFinite(expZ)) {
+      return;
+    }
+    const node = exponentMap.get(`${expX},${expY},${expZ}`);
+    if (!node) {
+      return;
+    }
+    layoutPositionOffsets.set(`${expX},${expY},${expZ}`, {
+      x: offsetX,
+      y: offsetY,
+      z: offsetZ,
+    });
+    const base = getLayoutBaseCoordinate(node);
+    layoutPositions.set(node.id, {
+      x: base.x + offsetX,
+      y: base.y + offsetY,
+      z: base.z + offsetZ,
+    });
   });
 }
 
@@ -1373,7 +1412,7 @@ let layoutTitleMargin = 32;
 let layoutTitlePosition = null;
 let layoutCreatorPosition = null;
 let layoutUnifyNodeSize = true;
-let layoutFreezeFlatten = true;
+let layoutFreezeFlatten = false;
 let layoutPageSize = "letter";
 let layoutOrientation = "landscape";
 let layoutLockPosition = false;
@@ -1491,7 +1530,7 @@ const LAYOUT_DEFAULTS = {
   titleMargin: 32,
   keyMappingsMode: "hide",
   unifyNodeSize: true,
-  freezeFlatten: true,
+  freezeFlatten: false,
   pageSize: "letter",
   orientation: "landscape",
   zoom: 1,
@@ -6698,6 +6737,8 @@ function openLayoutCustomLabelDialog(value = "") {
   if (!layoutCustomLabelDialog || !layoutCustomLabelInput) {
     return;
   }
+  customTextHeld = false;
+  xKeyHeld = false;
   layoutCustomLabelInput.value = value;
   if (typeof layoutCustomLabelDialog.showModal === "function") {
     layoutCustomLabelDialog.showModal();
@@ -10596,7 +10637,7 @@ function onPointerDown(event) {
       toggleCustomPianoPreviewVoice(hit);
       return;
     }
-    if (tHeld || rHeld || (layoutMode && lHeld)) {
+    if (tHeld || rHeld || (layoutMode && customTextHeld)) {
       return;
     }
     if (layoutMode) {
@@ -10843,7 +10884,7 @@ function onPointerDown(event) {
         return;
       }
     }
-    if (lHeld) {
+    if (customTextHeld) {
       if (layoutCustomLabelDialog && !layoutCustomLabelDialog.open) {
         const { left, top } = getLayoutPageRect();
         layoutCustomLabelPending = {
@@ -13982,7 +14023,7 @@ function updateUiHint() {
   }
   if (layoutMode) {
     uiHint.textContent =
-      "Layout mode: Drag to adjust positions. \nOption-click to reset adjustments\nHold Shift to lock moves to 1 direction.\nHold L and click to add custom text.\nClick Space to adjust per-axis spacing.\nDouble-click a node to change its shape.\nDouble-click an axis legend to adjust angle.\nDouble-click a connection to show ratio";
+      "Layout mode: Drag to adjust positions. \nOption-click to reset adjustments\nHold Shift to lock moves to 1 direction.\nHold X and click to add custom text.\nClick Space to adjust per-axis spacing.\nDouble-click a node to change its shape.\nDouble-click an axis legend to adjust angle.\nDouble-click a connection to show ratio";
     return;
   }
 
@@ -17328,6 +17369,45 @@ function decodePresetState(encoded) {
   return JSON.parse(json);
 }
 
+function getJsonByteSize(value) {
+  try {
+    const text = JSON.stringify(value);
+    return new TextEncoder().encode(text).length;
+  } catch (error) {
+    return 0;
+  }
+}
+
+function logPresetSizeBreakdown(state, encodedLength) {
+  try {
+    if (!state || typeof state !== "object") {
+      return;
+    }
+    const totalBytes = getJsonByteSize(state);
+    const topLevel = Object.entries(state).map(([key, value]) => ({
+      key,
+      bytes: getJsonByteSize(value),
+    }));
+    topLevel.sort((a, b) => b.bytes - a.bytes);
+    console.group("Preset size breakdown");
+    console.log(
+      `Encoded length: ${encodedLength} chars, JSON size: ${totalBytes} bytes`
+    );
+    console.table(topLevel);
+    if (state.layout && typeof state.layout === "object") {
+      const layoutEntries = Object.entries(state.layout).map(([key, value]) => ({
+        key,
+        bytes: getJsonByteSize(value),
+      }));
+      layoutEntries.sort((a, b) => b.bytes - a.bytes);
+      console.table(layoutEntries);
+    }
+    console.groupEnd();
+  } catch (error) {
+    console.warn("Preset size breakdown failed", error);
+  }
+}
+
 async function downloadLatticeState() {
   const state = getPresetState();
   const json = JSON.stringify(state, null, 2);
@@ -17520,7 +17600,6 @@ function getPresetState() {
     spacing: { ...layoutSpacing },
     nodeShape: layoutNodeShape,
     unifyNodeSize: layoutUnifyNodeSize,
-    freezeFlatten: layoutFreezeFlatten,
     keyMappingsMode: layoutKeyMappingMode,
     pageSize: layoutPageSize,
     orientation: layoutOrientation,
@@ -17648,9 +17727,6 @@ function getPresetState() {
   }
   if (layoutState.unifyNodeSize === LAYOUT_DEFAULTS.unifyNodeSize) {
     delete layoutState.unifyNodeSize;
-  }
-  if (layoutState.freezeFlatten === LAYOUT_DEFAULTS.freezeFlatten) {
-    delete layoutState.freezeFlatten;
   }
   if (layoutState.keyMappingsMode === LAYOUT_DEFAULTS.keyMappingsMode) {
     delete layoutState.keyMappingsMode;
@@ -18623,12 +18699,6 @@ function applyPresetState(state) {
         layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
       }
     }
-    if (typeof layoutState.freezeFlatten === "boolean") {
-      layoutFreezeFlatten = layoutState.freezeFlatten;
-      if (layoutFreezeFlattenToggle) {
-        layoutFreezeFlattenToggle.checked = layoutFreezeFlatten;
-      }
-    }
     if (typeof layoutState.pageSize === "string") {
       layoutPageSize = layoutState.pageSize;
       if (layoutPageSizeSelect) {
@@ -18712,6 +18782,20 @@ function applyPresetState(state) {
         };
       }
       setLayoutMode(layoutState.mode, { force: layoutState.mode && layoutMode });
+      if (layoutState.mode) {
+        layoutLockPosition = true;
+        if (layoutFreezeButton) {
+          layoutFreezeButton.textContent = "Unfreeze";
+        }
+        if (layoutMode) {
+          view.zoom = layoutView.zoom;
+          view.offsetX = layoutView.offsetX;
+          view.offsetY = layoutView.offsetY;
+          view.rotX = layoutView.rotX;
+          view.rotY = layoutView.rotY;
+          syncLayoutScaleInput();
+        }
+      }
     }
   }
   updateLayoutLinkControls();
@@ -22078,7 +22162,13 @@ if (layoutKeyMappingButtons.length) {
 }
 if (layoutShareLinkButton) {
   layoutShareLinkButton.addEventListener("click", async () => {
-    const encoded = encodePresetState(getPresetState());
+    const state = getPresetState();
+    const encoded = encodePresetState(state);
+    logPresetSizeBreakdown(state, encoded.length);
+    console.log("Preset size summary", {
+      encodedLength: encoded.length,
+      jsonBytes: getJsonByteSize(state),
+    });
     const hash = `${PRESET_PARAM}=${encoded}`;
     history.replaceState(null, "", `${location.pathname}${location.search}#${hash}`);
     const shareUrl = `${location.origin}${location.pathname}${location.search}#${hash}`;
@@ -22842,12 +22932,6 @@ if (layoutUnifySizeToggle) {
     schedulePresetUrlUpdate();
   });
 }
-if (layoutFreezeFlattenToggle) {
-  layoutFreezeFlattenToggle.addEventListener("change", () => {
-    layoutFreezeFlatten = layoutFreezeFlattenToggle.checked;
-    schedulePresetUrlUpdate();
-  });
-}
 if (layoutResetButton) {
   layoutResetButton.addEventListener("click", () => {
     pushLayoutUndoState();
@@ -23285,6 +23369,10 @@ if (layoutCustomLabelDialog && layoutCustomLabelInput) {
     }
   });
   layoutCustomLabelDialog.addEventListener("close", () => {
+    if (layoutMode) {
+      customTextHeld = false;
+      xKeyHeld = false;
+    }
     if (layoutCustomLabelDialog.returnValue === "cancel") {
       layoutCustomLabelEditId = null;
       layoutCustomLabelPending = null;
@@ -23380,6 +23468,17 @@ window.addEventListener("keydown", handleKeyDown);
 window.addEventListener("keyup", handleKeyUp);
 window.addEventListener("keydown", (event) => {
   syncCapsLockState(event);
+  if (
+    layoutCustomLabelDialog &&
+    layoutCustomLabelDialog.open &&
+    event.key !== "Escape"
+  ) {
+    return;
+  }
+  const tag = event.target && event.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+    return;
+  }
   if (event.metaKey || event.ctrlKey) {
     return;
   }
@@ -23467,6 +23566,9 @@ if (triangleLabelDialog) {
   }
   if (event.key.toLowerCase() === "x") {
     xKeyHeld = true;
+    if (layoutMode) {
+      customTextHeld = true;
+    }
   }
   if (event.key.toLowerCase() === "y") {
     yKeyHeld = true;
@@ -23577,6 +23679,13 @@ window.addEventListener("pointerdown", (event) => {
 });
 window.addEventListener("keyup", (event) => {
   syncCapsLockState(event);
+  if (layoutCustomLabelDialog && layoutCustomLabelDialog.open) {
+    return;
+  }
+  const tag = event.target && event.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+    return;
+  }
   if (event.key === "Shift") {
     shiftHeld = false;
     updateAddModeFromShift();
@@ -23616,6 +23725,7 @@ window.addEventListener("keyup", (event) => {
   }
   if (event.key.toLowerCase() === "x") {
     xKeyHeld = false;
+    customTextHeld = false;
   }
   if (event.key.toLowerCase() === "y") {
     yKeyHeld = false;

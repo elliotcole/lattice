@@ -98,10 +98,10 @@
               </button>
               <div id="calculate-panel" class="panel calculate-panel" hidden>
                 <button id="find-ratio" type="button" class="button-full">Find Ratios</button>
+                <button id="add-interval" type="button" class="button-full">Find Interval</button>
                 <button id="build-intervals" type="button" class="button-full">
                   Build from Intervals
                 </button>
-                <button id="add-interval" type="button" class="button-full">Add Interval</button>
               </div>
             </div>
             <div class="control-group options-toggle">
@@ -748,6 +748,29 @@
           <option value="sawtooth">Sawtooth</option>
         </select>
       </div>
+      <div class="synth-group snapshot-group">
+        <div class="snapshot-header">
+          <span>Snapshots</span>
+          <label class="snapshot-toggle" title="Defer to cycle end">
+            <input id="snapshot-defer" type="checkbox" />
+            Defer
+          </label>
+          <button id="snapshot-copy" type="button">Save &amp; Copy</button>
+          <button id="snapshot-reset" type="button">Reset</button>
+        </div>
+        <div id="snapshot-grid" class="snapshot-grid" role="group" aria-label="Snapshots">
+          <button type="button" class="snapshot-slot" data-slot="0" title="Alt+1 save, 1 recall">1</button>
+          <button type="button" class="snapshot-slot" data-slot="1" title="Alt+2 save, 2 recall">2</button>
+          <button type="button" class="snapshot-slot" data-slot="2" title="Alt+3 save, 3 recall">3</button>
+          <button type="button" class="snapshot-slot" data-slot="3" title="Alt+4 save, 4 recall">4</button>
+          <button type="button" class="snapshot-slot" data-slot="4" title="Alt+5 save, 5 recall">5</button>
+          <button type="button" class="snapshot-slot" data-slot="5" title="Alt+6 save, 6 recall">6</button>
+          <button type="button" class="snapshot-slot" data-slot="6" title="Alt+7 save, 7 recall">7</button>
+          <button type="button" class="snapshot-slot" data-slot="7" title="Alt+8 save, 8 recall">8</button>
+          <button type="button" class="snapshot-slot" data-slot="8" title="Alt+9 save, 9 recall">9</button>
+          <button type="button" class="snapshot-slot" data-slot="9" title="Alt+0 save, 0 recall">0</button>
+        </div>
+      </div>
       <div class="synth-group envelope-toggle">
         <label class="visually-hidden" for="envelope-toggle">Envelope Panel</label>
         <button id="envelope-toggle" type="button" aria-expanded="false" aria-controls="envelope-panel">Envelope</button>
@@ -1107,6 +1130,7 @@
           thanks to Michael Harrison, Johnny MacMillan, and Ben Hjertmann for feedback
           &amp; suggestions
         </p>
+        <p>&amp; special thanks to Michael Harrison for teaching me how to draw a chart</p>
         <p class="credits-contact">
           Questions, bugs, requests, email me at elliot . c . cole @ gmail.com
         </p>
@@ -1123,6 +1147,7 @@
         </label>
         <menu class="dialog-actions">
           <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="none">No label</button>
           <button type="submit" value="confirm">OK</button>
         </menu>
       </form>
@@ -1170,6 +1195,20 @@
         </menu>
       </form>
     </dialog>
+    <dialog id="distance-label-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form">
+        <div class="dialog-title">Interval Name</div>
+        <label>
+          Text
+          <input type="text" id="distance-label-input" maxlength="80" />
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="none">No label</button>
+          <button type="submit" value="confirm">OK</button>
+        </menu>
+      </form>
+    </dialog>
     <dialog id="find-ratio-dialog" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form" id="find-ratio-form">
         <div class="dialog-title">Find Ratios</div>
@@ -1188,7 +1227,7 @@
         <div class="dialog-title">Build from intervals</div>
         <label>
           One ratio per line (e.g. 5/3, 9/8)
-          <textarea id="build-intervals-input" rows="8" required></textarea>
+          <textarea id="build-intervals-input" rows="8"></textarea>
         </label>
         <menu class="dialog-actions">
           <button type="submit" value="cancel">Cancel</button>
@@ -1337,7 +1376,8 @@
               <label class="preset-sort">
                 <span>Sort</span>
                 <select id="preset-sort">
-                  <option value="title" selected>Title (A–Z)</option>
+                  <option value="default" selected>Default</option>
+                  <option value="title">Title (A–Z)</option>
                   <option value="creator">Creator (A–Z)</option>
                 </select>
               </label>

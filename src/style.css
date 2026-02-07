@@ -1453,6 +1453,72 @@ button:active {
   min-width: 0;
 }
 
+.snapshot-group {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 160px;
+}
+
+.snapshot-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--muted-ink);
+}
+
+.snapshot-header button {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.snapshot-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--muted-ink);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.snapshot-toggle input {
+  margin: 0;
+}
+
+.snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 16px);
+  grid-auto-rows: 16px;
+  gap: 4px;
+}
+
+.snapshot-slot {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted-ink);
+  font-size: 9px;
+  padding: 0;
+  line-height: 1;
+}
+
+.snapshot-slot.is-filled {
+  background: rgba(63, 94, 251, 0.15);
+  border-color: rgba(63, 94, 251, 0.4);
+  color: var(--text-primary);
+}
+
+.snapshot-slot.is-active {
+  border-color: rgba(63, 94, 251, 0.9);
+  box-shadow: 0 0 0 1px rgba(63, 94, 251, 0.5);
+}
+
 .synth-panel label {
   font-size: 11px;
   letter-spacing: 0.3px;

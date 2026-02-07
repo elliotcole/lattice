@@ -211,6 +211,8 @@ const addIntervalButton = document.getElementById("add-interval");
 const customRatioDialog = document.getElementById("custom-ratio-dialog");
 const triangleLabelDialog = document.getElementById("triangle-label-dialog");
 const triangleLabelInput = document.getElementById("triangle-label-input");
+const distanceLabelDialog = document.getElementById("distance-label-dialog");
+const distanceLabelInput = document.getElementById("distance-label-input");
 const findRatioDialog = document.getElementById("find-ratio-dialog");
 const findRatioForm = document.getElementById("find-ratio-form");
 const findRatioInput = document.getElementById("find-ratio-input");
@@ -315,7 +317,7 @@ const INTERACTION_MODE_LABELS = {
   "microtonal-intervals": "Interval Overlay",
 };
 const DISTANCE_MODE_HELP =
-  "Distance Edit\nDrag between nodes to create distance lines.\nDrag line to bend, drag label to move.\nOption-click line to delete.\nDouble-click label to toggle interval names.\nESC or double-click background to exit.";
+  "Distance Edit\nDrag between nodes to create distance lines.\nDrag label to slide, drag line to curve.\nOption-click line to delete.\nDouble-click label to change interval name.\nESC or double-click background to exit.";
 const MICROTONAL_MODE_HELP =
   "Interval Overlay (analysis view)\nClick node to show connections.\nClick visible connections to listen.\nDouble-click canvas to exit mode.\nExcluded from PDF/SVG export.";
 const DISTANCE_RING_COLOR = "rgba(72, 146, 255, 0.9)";
@@ -330,6 +332,7 @@ let distanceSelectDrag = null;
 let distanceCurveDrag = null;
 let pendingDistanceLabelClickTimer = null;
 let pendingDistanceLabelClickKey = "";
+let pendingDistanceLabelEditKey = "";
 let microtonalHoverPairKey = "";
 const microtonalSelectedNodeIds = new Set();
 let bannerDismissedKey = "";
@@ -372,6 +375,20 @@ let customTextHeld = false;
 let fHeld = false;
 let oHeld = false;
 let suppressClickAfterRespell = false;
+
+function resetHeldModifiers() {
+  rHeld = false;
+  tHeld = false;
+  lHeld = false;
+  fHeld = false;
+  oHeld = false;
+  iHeld = false;
+  cHeld = false;
+  zKeyHeld = false;
+  xKeyHeld = false;
+  yKeyHeld = false;
+  customTextHeld = false;
+}
 const midiActiveNotes = new Map();
 const activeKeys = new Map();
 const triangleDiagonals = new Map();
@@ -1369,10 +1386,17 @@ let patternSequenceState = null;
 let patternRhythmState = null;
 let patternOctaveState = null;
 let patternVoices = new Set();
+let patternStepCounter = 0;
 let tempoBpm = 120;
 let patternLengthValue = 1;
 let patternLengthMode = "sustain";
 let envelopeTimeMode = "absolute";
+let pendingPlayState = null;
+const snapshotSlots = Array.from({ length: 10 }, () => null);
+let snapshotActiveIndex = -1;
+let pendingSnapshotIndex = -1;
+let pendingSnapshotState = null;
+let snapshotDeferToCycleEnd = false;
 let customNodes = [];
 let nextCustomNodeId = 200000;
 let pendingCustomAction = null;
@@ -2074,6 +2098,11 @@ function buildPatternStates(preserveIndices = false) {
   const prevOctaveIndex = patternOctaveState ? patternOctaveState.index : 0;
   patternActiveNodes = getActiveNodeOrder();
   const count = patternActiveNodes.length;
+  const safeSequenceIndex = preserveIndices && count
+    ? prevSequenceIndex % count
+    : 0;
+  const safeRhythmIndex = preserveIndices ? prevRhythmIndex : 0;
+  const safeOctaveIndex = preserveIndices ? prevOctaveIndex : 0;
   const sequencePattern = sequencePatternSelect ? sequencePatternSelect.value : "ascending";
   const rhythmPattern = rhythmPatternSelect ? rhythmPatternSelect.value : "steady";
   const octavePattern = octavePatternSelect ? octavePatternSelect.value : "unison";
@@ -2107,15 +2136,22 @@ function buildPatternStates(preserveIndices = false) {
       type: sequencePattern,
       order,
       octaveOffsets: Array.from({ length: order.length }, () => 0),
-      index: preserveIndices ? prevSequenceIndex : 0,
+      index: preserveIndices ? safeSequenceIndex : 0,
       cyclesCompleted: preserveIndices ? prevSequenceCycles : 0,
     };
   } else {
     patternSequenceState = {
       type: sequencePattern,
       order,
-      index: preserveIndices ? prevSequenceIndex : 0,
+      index: preserveIndices ? safeSequenceIndex : 0,
     };
+  }
+
+  const cycleLength = getSequenceOrderIndices().length;
+  if (preserveIndices && cycleLength) {
+    patternStepCounter = patternStepCounter % cycleLength;
+  } else if (!preserveIndices) {
+    patternStepCounter = 0;
   }
 
   let rhythmValues = [1];
@@ -2137,7 +2173,7 @@ function buildPatternStates(preserveIndices = false) {
   patternRhythmState = {
     type: rhythmPattern,
     values: rhythmValues,
-    index: preserveIndices ? prevRhythmIndex : 0,
+    index: safeRhythmIndex,
   };
 
   patternOctaveState = {
@@ -2150,7 +2186,7 @@ function buildPatternStates(preserveIndices = false) {
           : octavePattern === "down-up"
             ? [-1, 0, 1, 0]
             : [0],
-    index: preserveIndices ? prevOctaveIndex : 0,
+    index: safeOctaveIndex,
   };
 }
 
@@ -2311,10 +2347,30 @@ function scheduleNextPatternEvent(delayMs) {
     if (patternPlayerState !== "playing") {
       return;
     }
+    if (pendingSnapshotState && snapshotDeferToCycleEnd && patternSequenceState) {
+      const cycleLength = getSequenceOrderIndices().length;
+      if (cycleLength && patternStepCounter > 0 && patternStepCounter % cycleLength === 0) {
+        const nextState = pendingSnapshotState;
+        const nextIndex = pendingSnapshotIndex;
+        pendingSnapshotState = null;
+        pendingSnapshotIndex = -1;
+        snapshotActiveIndex = nextIndex;
+        applyPresetState(nextState, { skipLayoutModeSwitch: true, skipStopVoices: true });
+        updateSnapshotUi();
+        resetPatternCycle();
+        if (patternPlayerState === "playing") {
+          scheduleNextPatternEvent(0);
+        }
+        return;
+      }
+    }
     const isOneShot = Boolean(oneShotCheckbox && oneShotCheckbox.checked);
     const step = nextSequenceStep();
     const durationBeats = nextRhythmBeats();
     const baseOctave = nextOctaveOffset();
+    if (step) {
+      patternStepCounter += 1;
+    }
     const indices = step && Array.isArray(step.indices) ? step.indices : [];
     const octaveOffsets = step && Array.isArray(step.octaveOffsets) ? step.octaveOffsets : [];
     indices.forEach((nextIndex, idx) => {
@@ -2368,6 +2424,7 @@ function startPatternPlayback() {
   if (!patternSequenceState) {
     buildPatternStates(false);
   }
+  patternStepCounter = 0;
   patternPlayerState = "playing";
   updateScoreButton();
   scheduleNextPatternEvent(0);
@@ -2382,8 +2439,340 @@ function stopPatternPlayback() {
   patternOffTimers = [];
   stopPatternVoices();
   patternPlayerState = "idle";
+  patternStepCounter = 0;
   updateScoreButton();
   draw();
+}
+
+const PLAY_STATE_SKIP_SOURCES = new Set(["pattern", "looper", "interval-chart"]);
+
+function isAudioPlaybackActive() {
+  return Boolean(audioCtx && audioCtx.state === "running");
+}
+
+function serializePlayState() {
+  if (!isAudioPlaybackActive()) {
+    return null;
+  }
+  const activeVoices = voices.filter(
+    (voice) =>
+      voice &&
+      !voice.releasing &&
+      !PLAY_STATE_SKIP_SOURCES.has(voice.source || "") &&
+      Number.isFinite(voice.nodeId)
+  );
+  const hasLfo = lfoPresetPlaying || activeVoices.some((voice) => voice.lfoActive);
+  const hasPattern = patternPlayerState === "playing";
+  if (!activeVoices.length && !hasPattern && !hasLfo) {
+    return null;
+  }
+  const nodes = activeVoices.map((voice) => {
+    const entry = { id: voice.nodeId };
+    if (Number.isFinite(voice.octave) && voice.octave !== 0) {
+      entry.octave = voice.octave;
+    }
+    if (voice.source) {
+      entry.source = voice.source;
+    }
+    if (Number.isFinite(voice.peakGain)) {
+      entry.velocity = Math.max(0, Math.min(1, voice.peakGain / 0.2));
+    }
+    if (voice.lfoActive) {
+      entry.lfo = {
+        half: Number(voice.lfoHalfPeriod) || 0,
+        curve: Number.isFinite(voice.lfoCurve) ? voice.lfoCurve : 1,
+      };
+    }
+    const node = nodeById.get(voice.nodeId);
+    if (node && node.baseVoiceId === voice.id) {
+      entry.base = true;
+    }
+    return entry;
+  });
+  const pattern = {
+    playing: patternPlayerState === "playing",
+    tempo: Number(tempoSlider ? tempoSlider.value : tempoBpm) || tempoBpm,
+    lengthMode: patternLengthMode,
+    lengthValue: patternLengthValue,
+    sequence: sequencePatternSelect ? sequencePatternSelect.value : "ascending",
+    rhythm: rhythmPatternSelect ? rhythmPatternSelect.value : "steady",
+    octave: octavePatternSelect ? octavePatternSelect.value : "none",
+  };
+  const play = {
+    active: true,
+    pattern,
+  };
+  if (nodes.length) {
+    play.nodes = nodes;
+  }
+  if (hasLfo) {
+    play.lfo = { preset: lfoPresetPlaying };
+  }
+  return play;
+}
+
+function applyPlayState(play) {
+  if (!play || !play.active) {
+    return;
+  }
+  pendingPlayState = play;
+  if (!isAudioPlaybackActive()) {
+    return;
+  }
+  pendingPlayState = null;
+
+  stopAllVoices();
+  clearLfoStopTimers();
+  nodes.forEach((node) => {
+    node.baseVoiceId = null;
+  });
+
+  if (play.pattern) {
+    if (tempoSlider && Number.isFinite(play.pattern.tempo)) {
+      tempoSlider.value = String(play.pattern.tempo);
+      updateTempoReadout();
+    }
+    if (sequencePatternSelect && play.pattern.sequence) {
+      sequencePatternSelect.value = play.pattern.sequence;
+    }
+    if (rhythmPatternSelect && play.pattern.rhythm) {
+      rhythmPatternSelect.value = play.pattern.rhythm;
+    }
+    if (octavePatternSelect && play.pattern.octave) {
+      octavePatternSelect.value = play.pattern.octave;
+    }
+    if (patternLengthModeInputs.length) {
+      patternLengthModeInputs.forEach((input) => {
+        input.checked = input.value === play.pattern.lengthMode;
+      });
+      patternLengthMode = play.pattern.lengthMode || patternLengthMode;
+    }
+    if (patternLengthSlider && Number.isFinite(play.pattern.lengthValue)) {
+      patternLengthSlider.value = String(play.pattern.lengthValue);
+      updatePatternLengthReadout();
+    }
+    updatePatternLengthAvailability();
+    if (play.pattern.playing) {
+      startPatternPlayback();
+    } else {
+      stopPatternPlayback();
+    }
+  }
+
+  if (play.lfo && typeof play.lfo.preset === "boolean") {
+    lfoPresetPlaying = play.lfo.preset;
+    updateLfoPlayButton();
+  }
+
+  if (Array.isArray(play.nodes)) {
+    play.nodes.forEach((entry) => {
+      if (!entry || !Number.isFinite(entry.id)) {
+        return;
+      }
+      const node = nodeById.get(entry.id);
+      if (!node) {
+        return;
+      }
+      const octave = Number(entry.octave) || 0;
+      const lfo = entry.lfo || null;
+      const velocity = Number.isFinite(entry.velocity) ? entry.velocity : 1;
+      const voice = startVoice({
+        nodeId: node.id,
+        octave,
+        freq: node.freq * Math.pow(2, octave),
+        velocity,
+        lfoActive: lfo && lfo.half > 0,
+        lfoHalfPeriod: lfo ? lfo.half : 0,
+        lfoStartMs: lfo ? performance.now() : 0,
+        lfoCurve: lfo && Number.isFinite(lfo.curve) ? lfo.curve : 1,
+        source: entry.source || "preset",
+      });
+      if (voice) {
+        if (entry.base || entry.source === "node" || entry.source === "random-lfo") {
+          node.baseVoiceId = voice.id;
+        }
+      }
+    });
+  }
+  draw();
+}
+
+function maybeApplyPendingPlayState() {
+  if (!pendingPlayState) {
+    return;
+  }
+  applyPlayState(pendingPlayState);
+}
+
+function resetPatternCycle({ restart = false } = {}) {
+  buildPatternStates(false);
+  if (restart && patternPlayerState === "playing") {
+    if (patternNextTimer) {
+      clearTimeout(patternNextTimer);
+      patternNextTimer = null;
+    }
+    scheduleNextPatternEvent(0);
+  }
+}
+
+function buildSnapshotState() {
+  const state = getPresetState();
+  if (!state) {
+    return null;
+  }
+  delete state.layout;
+  delete state.play;
+  delete state.synth;
+  if (layoutMode && layoutPrevState) {
+    state.mode3d = Boolean(layoutPrevState.is3DMode);
+    state.view = {
+      zoom: layoutPrevState.zoom,
+      offsetX: layoutPrevState.offsetX,
+      offsetY: layoutPrevState.offsetY,
+      rotX: layoutPrevState.rotX,
+      rotY: layoutPrevState.rotY,
+    };
+  } else {
+    state.mode3d = Boolean(is3DMode);
+    state.view = {
+      zoom: view.zoom,
+      offsetX: view.offsetX,
+      offsetY: view.offsetY,
+      rotX: view.rotX,
+      rotY: view.rotY,
+    };
+  }
+  return JSON.parse(JSON.stringify(state));
+}
+
+function serializeSnapshotsForPreset() {
+  const entries = [];
+  snapshotSlots.forEach((snapshot, index) => {
+    if (!snapshot) {
+      return;
+    }
+    entries.push([index, snapshot]);
+  });
+  return entries;
+}
+
+function applySnapshotsFromPreset(value) {
+  if (!Array.isArray(value)) {
+    return;
+  }
+  snapshotSlots.fill(null);
+  value.forEach((entry) => {
+    if (!Array.isArray(entry) || entry.length < 2) {
+      return;
+    }
+    const index = Number(entry[0]);
+    const snapshot = entry[1];
+    if (!Number.isFinite(index) || index < 0 || index >= snapshotSlots.length) {
+      return;
+    }
+    if (!snapshot || typeof snapshot !== "object") {
+      return;
+    }
+    snapshotSlots[index] = snapshot;
+  });
+  updateSnapshotUi();
+}
+
+function buildSnapshotPresetUrl() {
+  const state = getPresetState();
+  if (!state) {
+    return null;
+  }
+  const snapshots = serializeSnapshotsForPreset();
+  if (snapshots.length) {
+    state.snapshots = snapshots;
+  }
+  if (snapshotActiveIndex >= 0) {
+    state.snapshotActive = snapshotActiveIndex;
+  }
+  const encoded = encodePresetState(state);
+  return `${window.location.origin}/#${PRESET_PARAM}=${encoded}`;
+}
+
+function updateSnapshotUi() {
+  const buttons = document.querySelectorAll(".snapshot-slot");
+  buttons.forEach((button) => {
+    const index = Number(button.dataset.slot);
+    if (!Number.isFinite(index)) {
+      return;
+    }
+    button.classList.toggle("is-filled", Boolean(snapshotSlots[index]));
+    button.classList.toggle("is-active", index === snapshotActiveIndex);
+  });
+}
+
+function saveSnapshot(index) {
+  if (index < 0 || index >= snapshotSlots.length) {
+    return;
+  }
+  const state = buildSnapshotState();
+  if (!state) {
+    return;
+  }
+  snapshotSlots[index] = state;
+  updateSnapshotUi();
+}
+
+function recallSnapshot(index) {
+  if (index < 0 || index >= snapshotSlots.length) {
+    return;
+  }
+  const state = snapshotSlots[index];
+  if (!state) {
+    return;
+  }
+  if (snapshotDeferToCycleEnd && patternPlayerState === "playing") {
+    pendingSnapshotIndex = index;
+    pendingSnapshotState = state;
+    return;
+  }
+  snapshotActiveIndex = index;
+  applyPresetState(state, { skipLayoutModeSwitch: true, skipStopVoices: true });
+  buildPatternStates(true);
+  updateSnapshotUi();
+}
+
+function clearSnapshots() {
+  snapshotSlots.fill(null);
+  snapshotActiveIndex = -1;
+  updateSnapshotUi();
+}
+
+function getSnapshotIndexFromEvent(event) {
+  if (!event) {
+    return null;
+  }
+  const key = event.key;
+  if (key >= "1" && key <= "9") {
+    return Number(key) - 1;
+  }
+  if (key === "0") {
+    return 9;
+  }
+  if (event.code && event.code.startsWith("Digit")) {
+    const digit = event.code.slice(5);
+    if (digit === "0") {
+      return 9;
+    }
+    if (digit >= "1" && digit <= "9") {
+      return Number(digit) - 1;
+    }
+  }
+  if (event.code && event.code.startsWith("Numpad")) {
+    const digit = event.code.slice(6);
+    if (digit === "0") {
+      return 9;
+    }
+    if (digit >= "1" && digit <= "9") {
+      return Number(digit) - 1;
+    }
+  }
+  return null;
 }
 
 function disableVoiceLfo(voice) {
@@ -2684,6 +3073,7 @@ function createCustomNodeFromSource(sourceNode, slot, factorNumerator, factorDen
     baseVoiceId: null,
     isCustom: true,
     octaveShift: 0,
+    octaveShiftManual: false,
   };
   layoutNodeShapes.set(node.id, "diamond");
   return node;
@@ -2784,12 +3174,18 @@ function refreshCustomNodes() {
     if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
       return;
     }
-    const octaveReduced = reduceToOctave(numerator, denominator);
-    const reduced = reduceFraction(octaveReduced.numerator, octaveReduced.denominator);
+    const normalized = normalizeRatioToOctave(numerator, denominator);
+    if (!normalized) {
+      return;
+    }
+    const reduced = reduceFraction(normalized.numerator, normalized.denominator);
     customNode.numerator = reduced.numerator;
     customNode.denominator = reduced.denominator;
     customNode.derivedNumerator = reduced.numerator;
     customNode.derivedDenominator = reduced.denominator;
+    if (!customNode.octaveShiftManual) {
+      customNode.octaveShift = normalized.shift;
+    }
     const ratioValue = reduced.numerator / reduced.denominator;
     if (!Number.isFinite(ratioValue)) {
       return;
@@ -2918,6 +3314,7 @@ function openCustomRatioDialog(action) {
 }
 
 function handleCustomRatioDialogClose() {
+  resetHeldModifiers();
   if (!customRatioDialog) {
     pendingCustomAction = null;
     return;
@@ -2972,6 +3369,12 @@ function setupDialogKeyDefaults(dialog) {
       return;
     }
     if (event.key !== "Enter") {
+      return;
+    }
+    if (
+      dialog.id === "find-ratio-dialog" ||
+      dialog.id === "build-intervals-dialog"
+    ) {
       return;
     }
     if (event.isComposing) {
@@ -4833,13 +5236,17 @@ async function buildSvgTextWithSmallCent({
   return nodes.join("\n");
 }
 
+const STACKED_ASCENT_RATIO = 0.82;
+const STACKED_DESCENT_RATIO = 0.18;
+
 function computeRatioLabelLayout(
   numerator,
   denominator,
   font,
   baseSize,
   maxWidth,
-  fontWeight = 400
+  fontWeight = 400,
+  maxHeight = null
 ) {
   const singleLine = `${numerator}:${denominator}`;
   let size = baseSize;
@@ -4852,18 +5259,83 @@ function computeRatioLabelLayout(
   lines = [String(numerator), String(denominator)];
   lineGap = Math.round(size * 0.15);
   const minSize = Math.max(10, Math.round(baseSize * 0.6));
+  const measureTwoLineHeight = () => {
+    if (!maxHeight) {
+      return 0;
+    }
+    return size * (STACKED_ASCENT_RATIO + STACKED_DESCENT_RATIO) * 2 + lineGap;
+  };
   const measureTwoLine = () =>
     Math.max(
       measureTextWidthWithWeight(lines[0], size, font, fontWeight),
       measureTextWidthWithWeight(lines[1], size, font, fontWeight)
     );
   width = measureTwoLine();
-  while (width > maxWidth && size > minSize) {
+  let height = maxHeight ? measureTwoLineHeight() : 0;
+  while ((width > maxWidth || (maxHeight && height > maxHeight)) && size > minSize) {
     size -= 1;
     lineGap = Math.round(size * 0.15);
     width = measureTwoLine();
+    height = maxHeight ? measureTwoLineHeight() : 0;
   }
   return { lines, size, lineGap };
+}
+
+function getFontMetrics(text, size, font, fontWeight = 400) {
+  ctx.save();
+  ctx.font = `${fontWeight} ${size}px ${font}`;
+  const metrics = ctx.measureText(text);
+  ctx.restore();
+  const ascent = Number.isFinite(metrics.fontBoundingBoxAscent)
+    ? metrics.fontBoundingBoxAscent
+    : Number.isFinite(metrics.actualBoundingBoxAscent)
+    ? metrics.actualBoundingBoxAscent
+    : size * 0.8;
+  const descent = Number.isFinite(metrics.fontBoundingBoxDescent)
+    ? metrics.fontBoundingBoxDescent
+    : Number.isFinite(metrics.actualBoundingBoxDescent)
+    ? metrics.actualBoundingBoxDescent
+    : size * 0.2;
+  return {
+    width: metrics.width,
+    ascent,
+    descent,
+  };
+}
+
+function computeStackedRatioPositions(lines, font, size, fontWeight, centerY, lineGap) {
+  const topMetrics = getFontMetrics(lines[0], size, font, fontWeight);
+  const bottomMetrics = getFontMetrics(lines[1], size, font, fontWeight);
+  const totalHeight =
+    topMetrics.ascent +
+    topMetrics.descent +
+    lineGap +
+    bottomMetrics.ascent +
+    bottomMetrics.descent;
+  const topY = centerY - totalHeight / 2;
+  const topBaseline = topY + topMetrics.ascent;
+  const bottomBaseline =
+    topY + topMetrics.ascent + topMetrics.descent + lineGap + bottomMetrics.ascent;
+  const lineY =
+    (topBaseline + topMetrics.descent + bottomBaseline - bottomMetrics.ascent) / 2;
+  const lineWidth = Math.max(topMetrics.width, bottomMetrics.width);
+  return { topBaseline, bottomBaseline, lineY, lineWidth };
+}
+
+function computeStackedRatioPositionsFromLine(
+  lines,
+  font,
+  size,
+  fontWeight,
+  lineY,
+  lineGap
+) {
+  const topMetrics = getFontMetrics(lines[0], size, font, fontWeight);
+  const bottomMetrics = getFontMetrics(lines[1], size, font, fontWeight);
+  const topBaseline = lineY - lineGap / 2 - size * STACKED_DESCENT_RATIO;
+  const bottomBaseline = lineY + lineGap / 2 + size * STACKED_ASCENT_RATIO;
+  const lineWidth = Math.max(topMetrics.width, bottomMetrics.width);
+  return { topBaseline, bottomBaseline, lineY, lineWidth };
 }
 
 function getLabelCacheKey() {
@@ -6763,6 +7235,7 @@ function setNodeOctaveShift(node, shift) {
   const normalized = Number.isFinite(shift) ? Math.trunc(shift) : 0;
   if (node.isCustom) {
     node.octaveShift = normalized;
+    node.octaveShiftManual = true;
     return;
   }
   const key = getOctaveOffsetKey(node);
@@ -8583,14 +9056,21 @@ function drawDistanceConnections(nodePosMap) {
       continue;
     }
     const showName = !override || override.showName !== false;
-    const customText = override && typeof override.customText === "string"
-      ? override.customText.trim()
-      : "";
+    const customText =
+      override && typeof override.customText === "string" ? override.customText.trim() : "";
     const commaName = showName
       ? getDistanceCommaName(ratioInfo.numerator, ratioInfo.denominator)
       : "";
-    const baseLabel = customText ? `${ratioInfo.label} ${customText}` : ratioInfo.label;
-    const label = commaName ? `${baseLabel} (${commaName})` : baseLabel;
+    const baseLabel = showName
+      ? customText
+        ? `${ratioInfo.label} ${customText}`
+        : ratioInfo.label
+      : customText;
+    const label =
+      baseLabel && commaName && showName ? `${baseLabel} (${commaName})` : baseLabel;
+    if (!label) {
+      continue;
+    }
     const start = startEntry.pos;
     const end = endEntry.pos;
     const dx = end.x - start.x;
@@ -9481,6 +9961,9 @@ function draw() {
       isOrphanGuide ||
       (isHovered && canShowInactive && canInteractInactive);
     let alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
+    if (node.isCenter && !node.active) {
+      alpha = isHovered ? 0.3 : 0.15;
+    }
     if (isGuide) {
       alpha = guideNodes.get(node.id);
     }
@@ -9713,35 +10196,41 @@ function draw() {
       }
     } else {
       const maxWidth = radius * 1.6;
+      const maxHeight = radius * 1.6;
       const layout = computeRatioLabelLayout(
         node.numerator,
         node.denominator,
         labelFont,
         labelSize,
         maxWidth,
-        labelWeight
+        labelWeight,
+        maxHeight
       );
       const ratioYOffset = Math.round(layout.size * -0.09);
       ctx.font = `${labelWeight} ${layout.size}px ${labelFont}`;
       if (layout.lines.length === 1) {
         ctx.fillText(layout.lines[0], pos.x, pos.y + ratioYOffset);
       } else {
-        const lineOffset = layout.size / 2 + layout.lineGap / 2;
-        const baseY = pos.y + ratioYOffset;
-        const lineWidth = Math.max(
-          measureTextWidthWithWeight(layout.lines[0], layout.size, labelFont, labelWeight),
-          measureTextWidthWithWeight(layout.lines[1], layout.size, labelFont, labelWeight)
+        const positions = computeStackedRatioPositionsFromLine(
+          layout.lines,
+          labelFont,
+          layout.size,
+          labelWeight,
+          pos.y,
+          layout.lineGap
         );
-        const lineY = baseY + layout.size * 0.1;
-        ctx.fillText(layout.lines[0], pos.x, baseY - lineOffset);
-        ctx.fillText(layout.lines[1], pos.x, baseY + lineOffset);
+        ctx.save();
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText(layout.lines[0], pos.x, positions.topBaseline);
+        ctx.fillText(layout.lines[1], pos.x, positions.bottomBaseline);
         ctx.save();
         ctx.strokeStyle = textColorPrimary;
         ctx.lineWidth = Math.max(1, Math.round(layout.size * 0.06));
         ctx.beginPath();
-        ctx.moveTo(pos.x - lineWidth / 2, lineY);
-        ctx.lineTo(pos.x + lineWidth / 2, lineY);
+        ctx.moveTo(pos.x - positions.lineWidth / 2, positions.lineY);
+        ctx.lineTo(pos.x + positions.lineWidth / 2, positions.lineY);
         ctx.stroke();
+        ctx.restore();
         ctx.restore();
       }
     }
@@ -10204,6 +10693,9 @@ function startVoice(options) {
   voices.push(voice);
 
   ensureLfoLoop();
+  if (!layoutMode) {
+    schedulePresetUrlUpdate();
+  }
 
   if (isOneShot) {
     const stopAt = now + attack + decay + release + 0.05;
@@ -10271,6 +10763,9 @@ function stopVoice(voice, immediate = false) {
     looperLoopDurationMs = Math.max(looperLoopDurationMs, t);
     voice.loopOffRecorded = true;
   }
+  if (!layoutMode) {
+    schedulePresetUrlUpdate();
+  }
 
 }
 
@@ -10301,6 +10796,7 @@ function enableAudio() {
 
   audioToggle.textContent = "Sound On";
   audioToggle.classList.add("button-on");
+  maybeApplyPendingPlayState();
 }
 
 function disableAudio() {
@@ -11107,12 +11603,7 @@ function onCanvasDoubleClick(event) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const labelHit = hitTestDistanceLabel(screenPoint);
     if (labelHit) {
-      const override = getDistanceEdgeOverride(labelHit.key) || {};
-      distanceEdgeOverrides.set(labelHit.key, {
-        ...override,
-        showName: override.showName === false,
-      });
-      draw();
+      openDistanceLabelDialog(labelHit.key);
       return;
     }
     if (!hitTestScreen(screenPoint)) {
@@ -11132,12 +11623,7 @@ function onCanvasDoubleClick(event) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const labelHit = hitTestDistanceLabel(screenPoint);
     if (labelHit) {
-      const override = getDistanceEdgeOverride(labelHit.key) || {};
-      distanceEdgeOverrides.set(labelHit.key, {
-        ...override,
-        showName: override.showName === false,
-      });
-      draw();
+      openDistanceLabelDialog(labelHit.key);
       return;
     }
   }
@@ -11929,7 +12415,7 @@ function onPointerUp(event) {
       return;
     }
     if (hit) {
-      if (event.altKey && !hit.isCenter) {
+      if (event.altKey) {
         if (hit.active) {
           hit.active = false;
           syncCustomNodesWithSource(hit.id, false);
@@ -11976,6 +12462,9 @@ function onPointerUp(event) {
           return;
         }
       }
+      if (hit.isCenter && !hit.active && !event.shiftKey) {
+        return;
+      }
       if (is3DMode && !isAddMode && !hit.active && !hit.isCenter && !hit.isCustom) {
         return;
       }
@@ -11986,6 +12475,9 @@ function onPointerUp(event) {
         return;
       }
       if (!hit.active) {
+        if (hit.isCenter && !event.shiftKey) {
+          return;
+        }
         hit.active = true;
         syncCustomNodesWithSource(hit.id, true);
         updatePitchInstances();
@@ -13098,6 +13590,58 @@ function getDistanceCommaName(numerator, denominator) {
   return matches[0].name || "";
 }
 
+function getDistanceEdgeNodes(edgeKey) {
+  if (!edgeKey) {
+    return null;
+  }
+  const parts = String(edgeKey).split("|");
+  if (parts.length !== 2) {
+    return null;
+  }
+  const [aKey, bKey] = parts;
+  const a =
+    aKey.startsWith("grid:") || aKey.startsWith("custom:")
+      ? getNodeByDistanceKey(aKey)
+      : nodeById.get(Number(aKey));
+  const b =
+    bKey.startsWith("grid:") || bKey.startsWith("custom:")
+      ? getNodeByDistanceKey(bKey)
+      : nodeById.get(Number(bKey));
+  if (!a || !b) {
+    return null;
+  }
+  return { a, b };
+}
+
+function getDistanceEdgeDefaultLabel(edgeKey) {
+  const nodes = getDistanceEdgeNodes(edgeKey);
+  if (!nodes) {
+    return "";
+  }
+  const ratioInfo = getDistanceRatioLabel(nodes.a, nodes.b);
+  if (!ratioInfo) {
+    return "";
+  }
+  const commaName = getDistanceCommaName(ratioInfo.numerator, ratioInfo.denominator);
+  return commaName ? `${ratioInfo.label} (${commaName})` : ratioInfo.label;
+}
+
+function openDistanceLabelDialog(edgeKey) {
+  if (!distanceLabelDialog || !distanceLabelInput) {
+    return;
+  }
+  pendingDistanceLabelEditKey = edgeKey || "";
+  const baseLabel = getDistanceEdgeDefaultLabel(edgeKey);
+  distanceLabelInput.value = baseLabel;
+  if (typeof distanceLabelDialog.showModal === "function") {
+    distanceLabelDialog.showModal();
+  }
+  requestAnimationFrame(() => {
+    distanceLabelInput.focus();
+    distanceLabelInput.select();
+  });
+}
+
 function getDistanceEdgeKey(aKey, bKey) {
   if (!aKey || !bKey) {
     return "";
@@ -13568,6 +14112,18 @@ function findOrCreateRatiosFromInput(value) {
   }
 }
 
+function parseRatioInputWithDivider(value) {
+  const cleaned = String(value || "").trim().replace(/\s+/g, "");
+  if (!cleaned) {
+    return null;
+  }
+  const divider = cleaned.includes(":") ? ":" : cleaned.includes("/") ? "/" : null;
+  if (!divider) {
+    return null;
+  }
+  return parseRatioInput(cleaned);
+}
+
 function buildFromIntervalsInput(value) {
   const lines = String(value || "")
     .split(/\r?\n/)
@@ -13581,7 +14137,7 @@ function buildFromIntervalsInput(value) {
   let currentDenominator = 1;
   let handled = 0;
   lines.forEach((line) => {
-    const parsed = parseRatioInput(line);
+    const parsed = parseRatioInputWithDivider(line);
     if (!parsed) {
       return;
     }
@@ -13595,10 +14151,10 @@ function buildFromIntervalsInput(value) {
     currentNumerator = reduced.numerator;
     currentDenominator = reduced.denominator;
     const ratioValue = currentNumerator / currentDenominator;
-    const octaveShift = ratioValue >= 2 ? Math.floor(Math.log2(ratioValue)) : 0;
+    const octaveShift = Math.floor(Math.log2(ratioValue));
     const target = normalizeRatio(currentNumerator, currentDenominator);
     const targetNode = findOrCreateRatioTargetNode(target);
-    if (targetNode && octaveShift > 0) {
+    if (targetNode && octaveShift) {
       setNodeOctaveShift(targetNode, octaveShift);
     }
   });
@@ -13619,8 +14175,9 @@ function updateBuildIntervalsPreview() {
   let currentNumerator = 1;
   let currentDenominator = 1;
   let overOctave = false;
+  let underOctave = false;
   lines.forEach((line) => {
-    const parsed = parseRatioInput(line);
+    const parsed = parseRatioInputWithDivider(line);
     if (!parsed) {
       return;
     }
@@ -13636,15 +14193,31 @@ function updateBuildIntervalsPreview() {
     if (ratioValue > 2) {
       overOctave = true;
     }
+    if (ratioValue < 1) {
+      underOctave = true;
+    }
     const tick = document.createElement("span");
     tick.className = "build-intervals-tick";
     const position = Math.min(1, Math.max(0, ratioValue - 1));
     tick.style.left = `${(position * 100).toFixed(2)}%`;
     buildIntervalsTicks.appendChild(tick);
   });
-  buildIntervalsPreview.classList.toggle("is-over", overOctave);
+  const outOfRange = overOctave || underOctave;
+  buildIntervalsPreview.classList.toggle("is-over", outOfRange);
   if (buildIntervalsWarning) {
-    buildIntervalsWarning.hidden = !overOctave;
+    if (!outOfRange) {
+      buildIntervalsWarning.hidden = true;
+      buildIntervalsWarning.textContent = "";
+    } else if (overOctave && underOctave) {
+      buildIntervalsWarning.hidden = false;
+      buildIntervalsWarning.textContent = "Intervals exceed an octave and drop below unison.";
+    } else if (overOctave) {
+      buildIntervalsWarning.hidden = false;
+      buildIntervalsWarning.textContent = "Intervals exceed an octave.";
+    } else {
+      buildIntervalsWarning.hidden = false;
+      buildIntervalsWarning.textContent = "Intervals drop below unison.";
+    }
   }
 }
 
@@ -16238,6 +16811,7 @@ function setDistanceSelectMode(enabled) {
     distanceLabelDrag = null;
     distanceCurveDrag = null;
   }
+  updateUiHint();
   updateBannerMessage();
   draw();
 }
@@ -16420,7 +16994,7 @@ function addDistanceEdgeBetweenNodes(a, b, options = {}) {
 
 let presetEntries = [];
 let presetActiveTags = new Set();
-let presetSortMode = "title";
+let presetSortMode = "default";
 
 function resetDistanceEdges() {
   distanceSelectedEdges.clear();
@@ -16509,6 +17083,48 @@ function renderPresetList() {
     }
     return entry.searchText.includes(searchTerm);
   });
+  if (presetSortMode === "default") {
+    if (!filtered.length) {
+      const empty = document.createElement("div");
+      empty.className = "preset-empty";
+      empty.textContent = presetEntries.length ? "No presets match." : "No presets yet.";
+      presetList.appendChild(empty);
+      return;
+    }
+    filtered.forEach((entry) => {
+      const link = document.createElement("a");
+      link.className = "preset-card";
+      link.href = buildPresetHref(entry.uri);
+      link.target = "_self";
+      link.rel = "noopener";
+      link.addEventListener("click", () => {
+        closePresetOverlay();
+      });
+      const title = document.createElement("div");
+      title.className = "preset-card-title";
+      title.textContent = entry.title || "Untitled preset";
+      link.appendChild(title);
+      if (entry.creator) {
+        const creator = document.createElement("div");
+        creator.className = "preset-card-creator";
+        creator.textContent = entry.creator;
+        link.appendChild(creator);
+      }
+      if (entry.tags.length) {
+        const tags = document.createElement("div");
+        tags.className = "preset-card-tags";
+        entry.tags.forEach((tag) => {
+          const chip = document.createElement("span");
+          chip.className = "preset-card-tag";
+          chip.textContent = tag;
+          tags.appendChild(chip);
+        });
+        link.appendChild(tags);
+      }
+      presetList.appendChild(link);
+    });
+    return;
+  }
   const sorted = [...filtered].sort((a, b) => {
     if (presetSortMode === "creator") {
       const creatorA = (a.creator || "").toLowerCase();
@@ -17988,6 +18604,13 @@ function getPresetState() {
     state.layout = layoutState;
   }
 
+  if (!layoutMode) {
+    const playState = serializePlayState();
+    if (playState) {
+      state.play = playState;
+    }
+  }
+
   return state;
 }
 
@@ -18127,9 +18750,39 @@ function readPresetFromUrl() {
   }
 }
 
-function applyPresetState(state) {
+function applyPresetState(state, options = {}) {
   if (!state || typeof state !== "object") {
     return;
+  }
+  if (Array.isArray(state.snapshots)) {
+    applySnapshotsFromPreset(state.snapshots);
+    snapshotActiveIndex = Number.isFinite(state.snapshotActive)
+      ? Math.trunc(state.snapshotActive)
+      : snapshotActiveIndex;
+    updateSnapshotUi();
+  }
+  const layoutState = state.layout && typeof state.layout === "object" ? state.layout : null;
+  const presetLayoutMode = Boolean(layoutState && layoutState.mode);
+  const presetWants3D = Boolean(state.mode3d);
+  if (!options.skipLayoutModeSwitch) {
+    if (presetLayoutMode !== layoutMode) {
+      setLayoutMode(presetLayoutMode, { force: true });
+    }
+    if (!presetLayoutMode) {
+      is3DMode = presetWants3D;
+      if (mode3dCheckbox) {
+        mode3dCheckbox.checked = presetWants3D;
+      }
+      updateNavPanelVisibility();
+      syncViewModeControls();
+    }
+  } else if (!layoutMode) {
+    is3DMode = presetWants3D;
+    if (mode3dCheckbox) {
+      mode3dCheckbox.checked = presetWants3D;
+    }
+    updateNavPanelVisibility();
+    syncViewModeControls();
   }
   analysisLayers.distances = false;
   analysisLayers.microtonal = false;
@@ -18243,7 +18896,6 @@ function applyPresetState(state) {
     syncAnalysisLayerToggles();
   }
   const viewState = state.view && typeof state.view === "object" ? state.view : null;
-  const layoutState = state.layout && typeof state.layout === "object" ? state.layout : null;
   layoutSourceView = null;
   const activeHasZ = Array.isArray(state.active)
     ? state.active.some((entry) => Array.isArray(entry) && Number(entry[2]) !== 0)
@@ -18996,7 +19648,11 @@ function applyPresetState(state) {
     });
   }
   customNodes = [];
-  rebuildLattice(activeKeys, { remapTriangles: false, remapLayoutOffsets: false });
+  rebuildLattice(activeKeys, {
+    remapTriangles: false,
+    remapLayoutOffsets: false,
+    stopVoices: !options.skipStopVoices,
+  });
   applyPresetCustomNodes(state.customNodes);
   if (pendingCustomPianoMap) {
     applyCustomPianoMap(pendingCustomPianoMap);
@@ -19112,6 +19768,9 @@ function applyPresetState(state) {
     applyLayoutCustomNodePositions(pendingLayoutCustomPositions);
     pendingLayoutCustomPositions = null;
     draw();
+  }
+  if (state.play && !layoutMode) {
+    applyPlayState(state.play);
   }
   draw();
   queuePresetFontRecalc();
@@ -20286,8 +20945,16 @@ async function buildLayoutSvgString(
       const commaName = showName
         ? getDistanceCommaName(ratioInfo.numerator, ratioInfo.denominator)
         : "";
-      const baseLabel = customText ? `${ratioInfo.label} ${customText}` : ratioInfo.label;
-      const label = commaName ? `${baseLabel} (${commaName})` : baseLabel;
+      const baseLabel = showName
+        ? customText
+          ? `${ratioInfo.label} ${customText}`
+          : ratioInfo.label
+        : customText;
+      const label =
+        baseLabel && commaName && showName ? `${baseLabel} (${commaName})` : baseLabel;
+      if (!label) {
+        continue;
+      }
       const start = startEntry.pos;
       const end = endEntry.pos;
       const dx = end.x - start.x;
@@ -20707,9 +21374,10 @@ async function buildLayoutSvgString(
         );
       }
     }
-    if (isOrphanGuide && !node.active && !node.isCenter && !node.isCustom) {
-      continue;
-    }
+    const orphanTextAlpha =
+      isOrphanGuide && !node.active && !node.isCenter && !node.isCustom ? 0.08 : 1;
+    const textColorPrimary = colorWithAlpha(themeColors.textPrimary, orphanTextAlpha);
+    const textColorSecondary = colorWithAlpha(themeColors.textSecondary, orphanTextAlpha);
 
     if (featureMode === "note") {
       if (hejiEnabled && nodeHasHighPrime(node)) {
@@ -20741,7 +21409,7 @@ async function buildLayoutSvgString(
             align: "center",
             baseline: "middle",
             hejiYOffset: svgLabelHejiYOffset,
-            color: themeColors.textPrimary,
+            color: textColorPrimary,
           })
         );
       } else {
@@ -20759,7 +21427,7 @@ async function buildLayoutSvgString(
             align: "center",
             baseline: "middle",
             hejiYOffset: svgLabelHejiYOffset,
-            color: themeColors.textPrimary,
+            color: textColorPrimary,
           })
         );
       }
@@ -20799,7 +21467,7 @@ async function buildLayoutSvgString(
           fontWeight: layoutNoteFontWeight,
           anchor: "start",
           baseline: "alphabetic",
-          color: themeColors.textSecondary,
+          color: textColorSecondary,
         })
       );
       let detailLine = 1;
@@ -20816,7 +21484,7 @@ async function buildLayoutSvgString(
             baseline: "alphabetic",
             hejiAccidentals: hejiEnabled,
             hejiYOffset: svgDetailHejiYOffset,
-            color: themeColors.textSecondary,
+            color: textColorSecondary,
           })
         );
         detailLine += 1;
@@ -20832,7 +21500,7 @@ async function buildLayoutSvgString(
             fontWeight: layoutNoteFontWeight,
             anchor: "start",
             baseline: "alphabetic",
-            color: themeColors.textSecondary,
+            color: textColorSecondary,
           })
         );
         detailLine += 1;
@@ -20848,22 +21516,24 @@ async function buildLayoutSvgString(
             fontWeight: layoutNoteFontWeight,
             anchor: "start",
             baseline: "alphabetic",
-            color: themeColors.textSecondary,
+            color: textColorSecondary,
           })
         );
       }
     } else {
       const maxWidth = radius * 1.6;
+      const maxHeight = radius * 1.6;
       const layout = computeRatioLabelLayout(
         node.numerator,
         node.denominator,
         layoutRatioFont,
         labelSize,
         maxWidth,
-        layoutRatioFontWeight
+        layoutRatioFontWeight,
+        maxHeight
       );
       const ratioYOffset = Math.round(layout.size * -0.09);
-      const ratioTextColor = themeColors.textPrimary;
+      const ratioTextColor = textColorPrimary;
       if (layout.lines.length === 1) {
         parts.push(
           await buildSvgTextElement({
@@ -20879,34 +21549,24 @@ async function buildLayoutSvgString(
           })
         );
       } else {
-        const lineOffset = layout.size / 2 + layout.lineGap / 2;
-        const lineY1 = y + ratioYOffset - lineOffset;
-        const lineY2 = y + ratioYOffset + lineOffset;
-        const lineWidth = Math.max(
-          await measureSvgTextWidth(
-            layout.lines[0],
-            layout.size,
-            layoutRatioFont,
-            layoutRatioFontWeight
-          ),
-          await measureSvgTextWidth(
-            layout.lines[1],
-            layout.size,
-            layoutRatioFont,
-            layoutRatioFontWeight
-          )
+        const positions = computeStackedRatioPositionsFromLine(
+          layout.lines,
+          layoutRatioFont,
+          layout.size,
+          layoutRatioFontWeight,
+          y,
+          layout.lineGap
         );
-        const lineY = y + ratioYOffset + layout.size * 0.1;
         parts.push(
           await buildSvgTextElement({
             text: layout.lines[0],
             x,
-            y: lineY1,
+            y: positions.topBaseline,
             font: layoutRatioFont,
             size: layout.size,
             fontWeight: layoutRatioFontWeight,
             anchor: "middle",
-            baseline: "middle",
+            baseline: "alphabetic",
             color: ratioTextColor,
           })
         );
@@ -20914,17 +21574,17 @@ async function buildLayoutSvgString(
           await buildSvgTextElement({
             text: layout.lines[1],
             x,
-            y: lineY2,
+            y: positions.bottomBaseline,
             font: layoutRatioFont,
             size: layout.size,
             fontWeight: layoutRatioFontWeight,
             anchor: "middle",
-            baseline: "middle",
+            baseline: "alphabetic",
             color: ratioTextColor,
           })
         );
         parts.push(
-          `<line x1="${x - lineWidth / 2}" y1="${lineY}" x2="${x + lineWidth / 2}" y2="${lineY}" ${svgStroke(
+          `<line x1="${x - positions.lineWidth / 2}" y1="${positions.lineY}" x2="${x + positions.lineWidth / 2}" y2="${positions.lineY}" ${svgStroke(
             ratioTextColor
           )} stroke-width="${Math.max(1, Math.round(layout.size * 0.06))}" />`
         );
@@ -20992,7 +21652,7 @@ async function buildLayoutSvgString(
           restGapScale,
           restHejiAccidentals: hejiEnabled && hasParen,
           fontWeight: layoutNoteFontWeight,
-          color: themeColors.textSecondary,
+          color: textColorSecondary,
         })
       );
       let detailLine = 1;
@@ -21009,7 +21669,7 @@ async function buildLayoutSvgString(
             baseline: "alphabetic",
             hejiAccidentals: hejiEnabled,
             hejiYOffset: svgDetailHejiYOffset,
-            color: themeColors.textSecondary,
+            color: textColorSecondary,
           })
         );
         detailLine += 1;
@@ -21025,7 +21685,7 @@ async function buildLayoutSvgString(
             fontWeight: layoutNoteFontWeight,
             anchor: "start",
             baseline: "alphabetic",
-            color: themeColors.textSecondary,
+            color: textColorSecondary,
           })
         );
         detailLine += 1;
@@ -21041,7 +21701,7 @@ async function buildLayoutSvgString(
             fontWeight: layoutNoteFontWeight,
             anchor: "start",
             baseline: "alphabetic",
-            color: themeColors.textSecondary,
+            color: textColorSecondary,
           })
         );
         detailLine += 1;
@@ -21057,7 +21717,7 @@ async function buildLayoutSvgString(
             fontWeight: layoutNoteFontWeight,
             anchor: "start",
             baseline: "alphabetic",
-            color: themeColors.textSecondary,
+            color: textColorSecondary,
           })
         );
       }
@@ -21240,9 +21900,11 @@ function applyActiveNodeKeys(keys) {
 
 function rebuildLattice(
   activeKeys = null,
-  { remapTriangles = true, remapLayoutOffsets = true } = {}
+  { remapTriangles = true, remapLayoutOffsets = true, stopVoices = true } = {}
 ) {
-  stopAllVoices();
+  if (stopVoices) {
+    stopAllVoices();
+  }
   const previousSourceKeys = new Map();
   const previousCustomIds = new Set(customNodes.map((node) => node.id));
   nodes.forEach((node) => {
@@ -21805,10 +22467,81 @@ if (presetSearchInput) {
 }
 if (presetSortSelect) {
   presetSortSelect.addEventListener("change", () => {
-    presetSortMode = presetSortSelect.value === "creator" ? "creator" : "title";
+    const nextMode = presetSortSelect.value;
+    presetSortMode = nextMode === "creator" ? "creator" : nextMode === "title" ? "title" : "default";
     renderPresetList();
   });
 }
+window.addEventListener("keydown", (event) => {
+  if (event.defaultPrevented) {
+    return;
+  }
+  const targetTag = event.target ? event.target.tagName : "";
+  if (targetTag === "INPUT" || targetTag === "TEXTAREA" || targetTag === "SELECT") {
+    return;
+  }
+  if (document.activeElement !== canvas) {
+    return;
+  }
+  const index = getSnapshotIndexFromEvent(event);
+  if (index == null) {
+    return;
+  }
+  const isSave = event.altKey && !event.metaKey && !event.ctrlKey;
+  const isRecall = !event.altKey && !event.metaKey && !event.ctrlKey;
+  if (!isSave && !isRecall) {
+    return;
+  }
+  event.preventDefault();
+  if (isSave) {
+    saveSnapshot(index);
+  } else {
+    recallSnapshot(index);
+  }
+});
+const snapshotResetButton = document.getElementById("snapshot-reset");
+if (snapshotResetButton) {
+  snapshotResetButton.addEventListener("click", () => {
+    clearSnapshots();
+  });
+}
+const snapshotButtons = document.querySelectorAll(".snapshot-slot");
+snapshotButtons.forEach((button) => {
+  button.addEventListener("click", (event) => {
+    const index = Number(button.dataset.slot);
+    if (!Number.isFinite(index)) {
+      return;
+    }
+    if (event.shiftKey) {
+      saveSnapshot(index);
+      return;
+    }
+    recallSnapshot(index);
+  });
+});
+const snapshotDeferToggle = document.getElementById("snapshot-defer");
+if (snapshotDeferToggle) {
+  snapshotDeferToggle.addEventListener("change", () => {
+    snapshotDeferToCycleEnd = snapshotDeferToggle.checked;
+  });
+}
+const snapshotCopyButton = document.getElementById("snapshot-copy");
+if (snapshotCopyButton) {
+  snapshotCopyButton.addEventListener("click", async () => {
+    const url = buildSnapshotPresetUrl();
+    if (!url) {
+      showFileSharePopover("Nothing to copy yet.");
+      return;
+    }
+    try {
+      await copyTextToClipboard(url);
+      showFileSharePopover("Snapshot URL copied.");
+    } catch (error) {
+      showFileSharePopover("Couldn't copy snapshot URL. Try again.");
+    }
+  });
+}
+updateSnapshotUi();
 if (intervalChartButton) {
   intervalChartButton.addEventListener("click", () => {
     openIntervalChart();
@@ -23124,6 +23857,7 @@ if (findRatioDialog) {
     }
   });
   findRatioDialog.addEventListener("close", () => {
+    resetHeldModifiers();
     if (findRatioDialog.returnValue === "find") {
       findOrCreateRatiosFromInput(findRatioInput ? findRatioInput.value : "");
     }
@@ -23139,6 +23873,7 @@ if (buildIntervalsDialog) {
     }
   });
   buildIntervalsDialog.addEventListener("close", () => {
+    resetHeldModifiers();
     if (buildIntervalsDialog.returnValue === "build") {
       buildFromIntervalsInput(buildIntervalsInput ? buildIntervalsInput.value : "");
     }
@@ -23150,6 +23885,7 @@ if (buildIntervalsDialog) {
 }
 if (addIntervalDialog) {
   addIntervalDialog.addEventListener("close", () => {
+    resetHeldModifiers();
     if (addIntervalDialog.returnValue === "add") {
       const sourceNode = addIntervalSourceNodeId
         ? nodeById.get(addIntervalSourceNodeId)
@@ -23500,10 +24236,7 @@ if (layoutCustomLabelDialog && layoutCustomLabelInput) {
     }
   });
   layoutCustomLabelDialog.addEventListener("close", () => {
-    if (layoutMode) {
-      customTextHeld = false;
-      xKeyHeld = false;
-    }
+    resetHeldModifiers();
     if (layoutCustomLabelDialog.returnValue === "cancel") {
       layoutCustomLabelEditId = null;
       layoutCustomLabelPending = null;
@@ -23553,6 +24286,7 @@ if (octaveShiftDialog && octaveShiftInput) {
     }
   });
   octaveShiftDialog.addEventListener("close", () => {
+    resetHeldModifiers();
     if (octaveShiftTargetId == null) {
       return;
     }
@@ -23810,13 +24544,6 @@ window.addEventListener("pointerdown", (event) => {
 });
 window.addEventListener("keyup", (event) => {
   syncCapsLockState(event);
-  if (layoutCustomLabelDialog && layoutCustomLabelDialog.open) {
-    return;
-  }
-  const tag = event.target && event.target.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
-    return;
-  }
   if (event.key === "Shift") {
     shiftHeld = false;
     updateAddModeFromShift();
@@ -23868,6 +24595,57 @@ window.addEventListener("keyup", (event) => {
 
 if (customRatioDialog) {
   customRatioDialog.addEventListener("close", handleCustomRatioDialogClose);
+}
+if (distanceLabelDialog) {
+  distanceLabelDialog.addEventListener("close", () => {
+    resetHeldModifiers();
+    const edgeKey = pendingDistanceLabelEditKey;
+    pendingDistanceLabelEditKey = "";
+    if (!edgeKey) {
+      return;
+    }
+    if (
+      distanceLabelDialog.returnValue !== "confirm" &&
+      distanceLabelDialog.returnValue !== "none"
+    ) {
+      return;
+    }
+    const text = distanceLabelInput ? distanceLabelInput.value.trim() : "";
+    const existing = getDistanceEdgeOverride(edgeKey);
+    if (distanceLabelDialog.returnValue === "none") {
+      distanceEdgeOverrides.set(edgeKey, {
+        ...(existing || {}),
+        showName: false,
+      });
+      schedulePresetUrlUpdate();
+      draw();
+      return;
+    }
+    if (!text) {
+      if (existing) {
+        const next = { ...existing };
+        delete next.customText;
+        if (next.showName === false) {
+          delete next.showName;
+        }
+        if (!Object.keys(next).length) {
+          distanceEdgeOverrides.delete(edgeKey);
+        } else {
+          distanceEdgeOverrides.set(edgeKey, next);
+        }
+        schedulePresetUrlUpdate();
+        draw();
+      }
+      return;
+    }
+    distanceEdgeOverrides.set(edgeKey, {
+      ...(existing || {}),
+      customText: text,
+      showName: false,
+    });
+    schedulePresetUrlUpdate();
+    draw();
+  });
 }
 
 resizeCanvas();

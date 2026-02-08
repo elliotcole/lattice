@@ -163,6 +163,8 @@ const volumeSlider = document.getElementById("volume");
 const volumeReadout = document.getElementById("volume-readout");
 const lfoDepthSlider = document.getElementById("lfo-depth");
 const lfoDepthReadout = document.getElementById("lfo-depth-readout");
+const lfoRateSlider = document.getElementById("lfo-rate");
+const lfoRateReadout = document.getElementById("lfo-rate-readout");
 const keyboardModeSelect = document.getElementById("keyboard-mode");
 const waveformSelect = document.getElementById("waveform");
 const attackSlider = document.getElementById("attack");
@@ -337,6 +339,9 @@ let microtonalHoverPairKey = "";
 const microtonalSelectedNodeIds = new Set();
 let bannerDismissedKey = "";
 let currentBannerKey = "";
+let tempBannerActive = false;
+let tempBannerTimer = null;
+let tempBannerHideTimer = null;
 
 function clampZoom(value) {
   return Math.min(2.2, Math.max(0.5, value));
@@ -360,6 +365,10 @@ let masterGain = null;
 let hoverNodeId = null;
 let themeColors = null;
 let lfoDepth = 1;
+let lfoRate = 1;
+const LFO_RATE_MIN = 0.1;
+const LFO_RATE_MAX = 10;
+const LFO_RATE_RANGE = LFO_RATE_MAX / LFO_RATE_MIN;
 let lfoArmingId = null;
 let lfoArmingStart = 0;
 let lfoAnimating = false;
@@ -1395,13 +1404,29 @@ let patternLengthMode = "sustain";
 let envelopeTimeMode = "absolute";
 let pendingPlayState = null;
 const snapshotSlots = Array.from({ length: 10 }, () => null);
+const snapshotLetterSlots = Array.from({ length: 26 }, () => null);
+const SNAPSHOT_KEY_ROWS = [
+  ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+  ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
+  ["z", "x", "c", "v", "b", "n", "m"],
+];
+const snapshotKeyToSlot = new Map();
+const snapshotLetterKeyToSlot = new Map();
+let snapshotKeyboardContainer = null;
+let snapshotKeyboardKeys = null;
 let snapshotActiveIndex = -1;
 let pendingSnapshotIndex = -1;
 let pendingSnapshotState = null;
+let pendingSnapshotLetterKey = "";
 let snapshotDeferToCycleEnd = false;
-let snapshotRestorePlayNodes = false;
+let snapshotRestorePlayNodes = true;
 let snapshotConnectCommonTones = false;
-let snapshotIncludeAxes = false;
+let snapshotRestoreView = true;
+let snapshotKeyboardMode = false;
+let snapshotKeyboardActive = false;
+let snapshotKeyboardPrevMode = "";
+let snapshotActiveLetterKey = "";
+let snapshotDebugEnabled = false;
 let customNodes = [];
 let nextCustomNodeId = 200000;
 let pendingCustomAction = null;
@@ -2357,9 +2382,16 @@ function scheduleNextPatternEvent(delayMs) {
       if (cycleLength && patternStepCounter > 0 && patternStepCounter % cycleLength === 0) {
         const nextSnapshot = pendingSnapshotState;
         const nextIndex = pendingSnapshotIndex;
+        const nextLetter = pendingSnapshotLetterKey;
         pendingSnapshotState = null;
         pendingSnapshotIndex = -1;
-        snapshotActiveIndex = nextIndex;
+        pendingSnapshotLetterKey = "";
+        if (nextIndex >= 0) {
+          snapshotActiveIndex = nextIndex;
+        }
+        if (nextLetter) {
+          snapshotActiveLetterKey = nextLetter;
+        }
         applyPresetState(nextSnapshot.state, {
           skipLayoutModeSwitch: true,
           skipStopVoices: true,
@@ -2632,29 +2664,30 @@ function buildSnapshotState() {
   delete state.layout;
   delete state.play;
   delete state.synth;
-  if (!snapshotIncludeAxes) {
-    delete state.ratios;
-  }
   if (layoutMode && layoutPrevState) {
     state.mode3d = Boolean(layoutPrevState.is3DMode);
-    state.view = {
-      zoom: layoutPrevState.zoom,
-      offsetX: layoutPrevState.offsetX,
-      offsetY: layoutPrevState.offsetY,
-      rotX: layoutPrevState.rotX,
-      rotY: layoutPrevState.rotY,
-    };
+    if (snapshotRestoreView) {
+      state.view = {
+        zoom: layoutPrevState.zoom,
+        offsetX: layoutPrevState.offsetX,
+        offsetY: layoutPrevState.offsetY,
+        rotX: layoutPrevState.rotX,
+        rotY: layoutPrevState.rotY,
+      };
+    }
   } else {
     state.mode3d = Boolean(is3DMode);
-    state.view = {
-      zoom: view.zoom,
-      offsetX: view.offsetX,
-      offsetY: view.offsetY,
-      rotX: view.rotX,
-      rotY: view.rotY,
-    };
+    if (snapshotRestoreView) {
+      state.view = {
+        zoom: view.zoom,
+        offsetX: view.offsetX,
+        offsetY: view.offsetY,
+        rotX: view.rotX,
+        rotY: view.rotY,
+      };
+    }
   }
-  if (!state.view || !Number.isFinite(state.view.zoom)) {
+  if (snapshotRestoreView && (!state.view || !Number.isFinite(state.view.zoom))) {
     state.view = {
       zoom: view.zoom,
       offsetX: view.offsetX,
@@ -2666,14 +2699,25 @@ function buildSnapshotState() {
   return JSON.parse(JSON.stringify(state));
 }
 
+function getNodeRatioKey(node) {
+  if (!node) {
+    return null;
+  }
+  const numerator = Number(node.numerator);
+  const denominator = Number(node.denominator);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return null;
+  }
+  const divisor = gcd(numerator, denominator);
+  return `ratio:${numerator / divisor}:${denominator / divisor}`;
+}
+
 function getSnapshotNodeKey(node) {
   if (!node) {
     return null;
   }
   if (node.isCustom) {
-    const source = Array.isArray(node.sourceExponents)
-      ? node.sourceExponents
-      : null;
+    const source = Array.isArray(node.sourceExponents) ? node.sourceExponents : null;
     if (!source || source.length < 2 || node.customSlot == null) {
       return null;
     }
@@ -2689,6 +2733,31 @@ function getSnapshotNodeKey(node) {
 function getNodeBySnapshotKey(key) {
   if (!key || typeof key !== "string") {
     return null;
+  }
+  if (key.startsWith("ratio:")) {
+    const parts = key.slice(6).split(":");
+    if (parts.length < 2) {
+      return null;
+    }
+    const numerator = Number(parts[0]);
+    const denominator = Number(parts[1]);
+    if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+      return null;
+    }
+    const divisor = gcd(numerator, denominator);
+    const normNum = numerator / divisor;
+    const normDen = denominator / divisor;
+    return (
+      nodes.find((node) => {
+        const nodeNum = Number(node.numerator);
+        const nodeDen = Number(node.denominator);
+        if (!Number.isFinite(nodeNum) || !Number.isFinite(nodeDen) || nodeDen === 0) {
+          return false;
+        }
+        const nodeDiv = gcd(nodeNum, nodeDen);
+        return nodeNum / nodeDiv === normNum && nodeDen / nodeDiv === normDen;
+      }) || null
+    );
   }
   if (key.startsWith("grid:")) {
     const parts = key.slice(5).split(",");
@@ -2739,8 +2808,7 @@ function getPlayingSnapshotKeys() {
     if (!voice || voice.releasing || !Number.isFinite(voice.nodeId)) {
       return;
     }
-    const node = nodeById.get(voice.nodeId);
-    const key = getSnapshotNodeKey(node);
+    const key = getSnapshotNodeKey(nodeById.get(voice.nodeId));
     if (key) {
       keys.add(key);
     }
@@ -2751,6 +2819,17 @@ function getPlayingSnapshotKeys() {
 function serializeSnapshotsForPreset() {
   const entries = [];
   snapshotSlots.forEach((snapshot, index) => {
+    if (!snapshot) {
+      return;
+    }
+    entries.push([index, snapshot]);
+  });
+  return entries;
+}
+
+function serializeLetterSnapshotsForPreset() {
+  const entries = [];
+  snapshotLetterSlots.forEach((snapshot, index) => {
     if (!snapshot) {
       return;
     }
@@ -2781,6 +2860,28 @@ function applySnapshotsFromPreset(value) {
   updateSnapshotUi();
 }
 
+function applyLetterSnapshotsFromPreset(value) {
+  if (!Array.isArray(value)) {
+    return;
+  }
+  snapshotLetterSlots.fill(null);
+  value.forEach((entry) => {
+    if (!Array.isArray(entry) || entry.length < 2) {
+      return;
+    }
+    const index = Number(entry[0]);
+    const snapshot = entry[1];
+    if (!Number.isFinite(index) || index < 0 || index >= snapshotLetterSlots.length) {
+      return;
+    }
+    if (!snapshot || typeof snapshot !== "object" || !snapshot.state) {
+      return;
+    }
+    snapshotLetterSlots[index] = snapshot;
+  });
+  updateSnapshotUi();
+}
+
 function buildSnapshotPresetUrl() {
   const state = getPresetState();
   if (!state) {
@@ -2790,8 +2891,15 @@ function buildSnapshotPresetUrl() {
   if (snapshots.length) {
     state.snapshots = snapshots;
   }
+  const letterSnapshots = serializeLetterSnapshotsForPreset();
+  if (letterSnapshots.length) {
+    state.snapshotsLetters = letterSnapshots;
+  }
   if (snapshotActiveIndex >= 0) {
     state.snapshotActive = snapshotActiveIndex;
+  }
+  if (snapshotActiveLetterKey) {
+    state.snapshotActiveLetter = snapshotActiveLetterKey;
   }
   const encoded = encodePresetState(state);
   return `${window.location.origin}/#${PRESET_PARAM}=${encoded}`;
@@ -2807,6 +2915,93 @@ function updateSnapshotUi() {
     button.classList.toggle("is-filled", Boolean(snapshotSlots[index]));
     button.classList.toggle("is-active", index === snapshotActiveIndex);
   });
+  const keyButtons = document.querySelectorAll(".snapshot-key");
+  keyButtons.forEach((button) => {
+    const letter = button.dataset.key;
+    const index = Number(button.dataset.slot);
+    if (!letter || !Number.isFinite(index)) {
+      return;
+    }
+    button.classList.toggle("is-filled", Boolean(snapshotLetterSlots[index]));
+    button.classList.toggle("is-active", letter === snapshotActiveLetterKey);
+  });
+  if (snapshotKeyboardContainer) {
+    snapshotKeyboardContainer.hidden = !snapshotKeyboardMode;
+    const active =
+      snapshotKeyboardActiveToggle && snapshotKeyboardModeToggle
+        ? snapshotKeyboardModeToggle.checked && snapshotKeyboardActiveToggle.checked
+        : snapshotKeyboardActive;
+    snapshotKeyboardContainer.classList.toggle("is-inactive", !active);
+    if (snapshotDebugEnabled) {
+      console.log("[snapshot-letters-visual]", {
+        active,
+        mode: snapshotKeyboardModeToggle ? snapshotKeyboardModeToggle.checked : snapshotKeyboardMode,
+        toggle: snapshotKeyboardActiveToggle ? snapshotKeyboardActiveToggle.checked : null,
+        classList: snapshotKeyboardContainer.className,
+      });
+    }
+  }
+  const snapshotGrid = document.getElementById("snapshot-grid");
+  if (snapshotGrid) {
+    snapshotGrid.hidden = snapshotKeyboardMode;
+  }
+}
+
+function logSnapshotDebug(stage, snapshot) {
+  if (!snapshotDebugEnabled) {
+    return;
+  }
+  const voiceList = voices.filter((voice) => voice);
+  const missingNodeVoices = [];
+  const mismatchedBaseVoices = [];
+  const orphanBaseNodes = [];
+  const baseMismatchNodes = [];
+  voiceList.forEach((voice) => {
+    const node = nodeById.get(voice.nodeId);
+    if (!node) {
+      missingNodeVoices.push(voice.id);
+      return;
+    }
+    if (node.baseVoiceId !== voice.id) {
+      mismatchedBaseVoices.push({ voiceId: voice.id, nodeId: node.id, base: node.baseVoiceId });
+    }
+  });
+  nodes.forEach((node) => {
+    if (!node.baseVoiceId) {
+      return;
+    }
+    const voice = findVoiceById(node.baseVoiceId);
+    if (!voice) {
+      orphanBaseNodes.push(node.id);
+      return;
+    }
+    if (voice.nodeId !== node.id) {
+      baseMismatchNodes.push({
+        nodeId: node.id,
+        base: node.baseVoiceId,
+        voiceNodeId: voice.nodeId,
+      });
+    }
+  });
+  console.groupCollapsed(
+    `[snapshot] ${stage} | voices=${voiceList.length} | active=${snapshotActiveIndex}`
+  );
+  console.log("snapshotConnectCommonTones", snapshotConnectCommonTones);
+  console.log("snapshotRestorePlayNodes", snapshotRestorePlayNodes);
+  console.log("snapshotKeys", snapshot && snapshot.playKeys ? snapshot.playKeys.length : 0);
+  if (missingNodeVoices.length) {
+    console.warn("voices with missing node", missingNodeVoices);
+  }
+  if (mismatchedBaseVoices.length) {
+    console.warn("voices not bound as base", mismatchedBaseVoices);
+  }
+  if (orphanBaseNodes.length) {
+    console.warn("nodes with missing base voice", orphanBaseNodes);
+  }
+  if (baseMismatchNodes.length) {
+    console.warn("nodes with base voice from other node", baseMismatchNodes);
+  }
+  console.groupEnd();
 }
 
 function saveSnapshot(index) {
@@ -2820,8 +3015,52 @@ function saveSnapshot(index) {
   snapshotSlots[index] = {
     state,
     playKeys: getPlayingSnapshotKeys(),
-    includeAxes: snapshotIncludeAxes,
   };
+  updateSnapshotUi();
+  const displayIndex = index === 9 ? 0 : index + 1;
+  showTemporaryBanner(`Snapshot ${displayIndex} saved`);
+}
+
+function saveSnapshotLetter(letter, index) {
+  if (index < 0 || index >= snapshotLetterSlots.length) {
+    return;
+  }
+  const state = buildSnapshotState();
+  if (!state) {
+    return;
+  }
+  snapshotLetterSlots[index] = {
+    state,
+    playKeys: getPlayingSnapshotKeys(),
+  };
+  snapshotActiveLetterKey = letter;
+  updateSnapshotUi();
+  showTemporaryBanner(`Snapshot ${letter.toUpperCase()} saved`);
+}
+
+function recallSnapshotLetter(letter, index) {
+  if (index < 0 || index >= snapshotLetterSlots.length) {
+    return;
+  }
+  const snapshot = snapshotLetterSlots[index];
+  if (!snapshot || !snapshot.state) {
+    return;
+  }
+  const snapshotState = JSON.parse(JSON.stringify(snapshot.state));
+  if (!snapshotRestoreView && snapshotState.view) {
+    delete snapshotState.view;
+  }
+  if (snapshotDeferToCycleEnd && patternPlayerState === "playing") {
+    pendingSnapshotIndex = -1;
+    pendingSnapshotState = { ...snapshot, state: snapshotState };
+    snapshotActiveLetterKey = letter;
+    updateSnapshotUi();
+    return;
+  }
+  snapshotActiveLetterKey = letter;
+  applyPresetState(snapshotState, { skipLayoutModeSwitch: true, skipStopVoices: true });
+  buildPatternStates(true);
+  restoreSnapshotPlayState(snapshot);
   updateSnapshotUi();
 }
 
@@ -2833,14 +3072,18 @@ function recallSnapshot(index) {
   if (!snapshot || !snapshot.state) {
     return;
   }
-  const requiresDefer = snapshotDeferToCycleEnd || snapshot.includeAxes;
-  if (requiresDefer && patternPlayerState === "playing") {
+  const snapshotState = JSON.parse(JSON.stringify(snapshot.state));
+  if (!snapshotRestoreView && snapshotState.view) {
+    delete snapshotState.view;
+  }
+  if (snapshotDeferToCycleEnd && patternPlayerState === "playing") {
     pendingSnapshotIndex = index;
-    pendingSnapshotState = snapshot;
+    pendingSnapshotState = { ...snapshot, state: snapshotState };
+    pendingSnapshotLetterKey = "";
     return;
   }
   snapshotActiveIndex = index;
-  applyPresetState(snapshot.state, { skipLayoutModeSwitch: true, skipStopVoices: true });
+  applyPresetState(snapshotState, { skipLayoutModeSwitch: true, skipStopVoices: true });
   buildPatternStates(true);
   restoreSnapshotPlayState(snapshot);
   updateSnapshotUi();
@@ -2859,46 +3102,80 @@ function restoreSnapshotPlayState(snapshot) {
   if (!audioCtx || audioCtx.state !== "running") {
     return;
   }
+  logSnapshotDebug("before-restore", snapshot);
   const targetKeys = new Set(snapshot.playKeys);
+  const targetFreqKeys = new Set();
+  const targetNodes = new Map();
+  const targetFreqMap = new Map();
+  targetKeys.forEach((key) => {
+    const node = getNodeBySnapshotKey(key);
+    if (!node || !Number.isFinite(node.freq)) {
+      return;
+    }
+    const freqKey = node.freq.toFixed(6);
+    targetFreqKeys.add(freqKey);
+    targetNodes.set(key, { node, freqKey });
+    if (!targetFreqMap.has(freqKey)) {
+      targetFreqMap.set(freqKey, node);
+    }
+  });
+  nodes.forEach((node) => {
+    node.baseVoiceId = null;
+  });
   const playingVoices = voices.filter((voice) => voice && !voice.releasing);
   const playingKeys = new Set();
+  const playingFreqKeys = new Set();
   playingVoices.forEach((voice) => {
-    const node = nodeById.get(voice.nodeId);
-    const key = getSnapshotNodeKey(node);
+    const key = getSnapshotNodeKey(nodeById.get(voice.nodeId));
     if (key) {
       playingKeys.add(key);
+    }
+    if (Number.isFinite(voice.freq)) {
+      playingFreqKeys.add(voice.freq.toFixed(6));
     }
   });
   if (snapshotConnectCommonTones) {
     playingVoices.forEach((voice) => {
-      const node = nodeById.get(voice.nodeId);
-      const key = getSnapshotNodeKey(node);
-      if (!key || !targetKeys.has(key)) {
+      const freqKey = Number.isFinite(voice.freq) ? voice.freq.toFixed(6) : null;
+      if (!freqKey || !targetFreqKeys.has(freqKey)) {
         stopVoice(voice, false);
+        return;
+      }
+      const node = targetFreqMap.get(freqKey);
+      if (node) {
+        voice.nodeId = node.id;
+        voice.ratioKey = getNodeRatioKey(node);
+        if (!node.baseVoiceId) {
+          node.baseVoiceId = voice.id;
+        }
       }
     });
   } else {
-    stopAllVoicesSmooth();
+    stopAllVoices();
+    voices = [];
+    patternVoices.clear();
     playingKeys.clear();
+    playingFreqKeys.clear();
   }
   targetKeys.forEach((key) => {
-    if (playingKeys.has(key)) {
+    const entry = targetNodes.get(key);
+    if (!entry) {
       return;
     }
-    const node = getNodeBySnapshotKey(key);
-    if (!node) {
+    if (playingFreqKeys.has(entry.freqKey)) {
       return;
     }
     const voice = startVoice({
-      nodeId: node.id,
+      nodeId: entry.node.id,
       octave: 0,
-      freq: node.freq,
+      freq: entry.node.freq,
       source: "snapshot",
     });
     if (voice) {
-      node.baseVoiceId = voice.id;
+      entry.node.baseVoiceId = voice.id;
     }
   });
+  logSnapshotDebug("after-restore", snapshot);
 }
 
 function getSnapshotIndexFromEvent(event) {
@@ -2931,6 +3208,95 @@ function getSnapshotIndexFromEvent(event) {
     }
   }
   return null;
+}
+
+function getSnapshotIndexFromKeyboard(event) {
+  if (!event) {
+    return null;
+  }
+  const code = String(event.code || "");
+  if (code.startsWith("Digit")) {
+    const digit = code.slice(5);
+    if (digit === "0") {
+      return 9;
+    }
+    if (digit >= "1" && digit <= "9") {
+      return Number(digit) - 1;
+    }
+  }
+  if (code.startsWith("Key")) {
+    const letter = code.slice(3).toLowerCase();
+    return snapshotKeyToSlot.has(letter) ? snapshotKeyToSlot.get(letter) : null;
+  }
+  const key = String(event.key || "").toLowerCase();
+  if (!key) {
+    return null;
+  }
+  return snapshotKeyToSlot.has(key) ? snapshotKeyToSlot.get(key) : null;
+}
+
+function getSnapshotLetterIndexFromEvent(event) {
+  const code = String(event.code || "");
+  if (code.startsWith("Key")) {
+    const letter = code.slice(3).toLowerCase();
+    return snapshotLetterKeyToSlot.has(letter) ? snapshotLetterKeyToSlot.get(letter) : null;
+  }
+  const key = String(event.key || "").toLowerCase();
+  if (!key) {
+    return null;
+  }
+  return snapshotLetterKeyToSlot.has(key) ? snapshotLetterKeyToSlot.get(key) : null;
+}
+
+function setKeyboardModeDisabled(disabled) {
+  if (!keyboardModeSelect) {
+    return;
+  }
+  if (disabled) {
+    if (!snapshotKeyboardPrevMode) {
+      snapshotKeyboardPrevMode = keyboardModeSelect.value || "off";
+    }
+    keyboardModeSelect.value = "off";
+    keyboardModeSelect.disabled = true;
+    keyboardModeSelect.dispatchEvent(new Event("change"));
+    return;
+  }
+  keyboardModeSelect.disabled = false;
+  if (snapshotKeyboardPrevMode) {
+    keyboardModeSelect.value = snapshotKeyboardPrevMode;
+    snapshotKeyboardPrevMode = "";
+    keyboardModeSelect.dispatchEvent(new Event("change"));
+  }
+}
+
+function buildSnapshotKeyboard() {
+  if (!snapshotKeyboardKeys) {
+    return;
+  }
+  snapshotKeyboardKeys.innerHTML = "";
+  snapshotKeyToSlot.clear();
+  snapshotLetterKeyToSlot.clear();
+  let slotIndex = 0;
+  SNAPSHOT_KEY_ROWS.forEach((row) => {
+    const rowEl = document.createElement("div");
+    rowEl.className = "snapshot-keyboard-row";
+    row.forEach((key) => {
+      const slot = slotIndex % snapshotLetterSlots.length;
+      snapshotLetterKeyToSlot.set(key, slot);
+      snapshotKeyToSlot.set(key, slot);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "snapshot-key";
+      button.dataset.key = key;
+      button.dataset.slot = String(slot);
+      const label = document.createElement("span");
+      label.textContent = key.toUpperCase();
+      button.appendChild(label);
+      rowEl.appendChild(button);
+      slotIndex += 1;
+    });
+    snapshotKeyboardKeys.appendChild(rowEl);
+  });
 }
 
 function disableVoiceLfo(voice) {
@@ -4592,6 +4958,38 @@ function ensureIsomorphicMaps() {
 function handleKeyDown(event) {
   const tag = event.target.tagName;
   if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
+    return;
+  }
+  const keyboardModeEnabled = snapshotKeyboardModeToggle
+    ? snapshotKeyboardModeToggle.checked
+    : snapshotKeyboardMode;
+  const keyboardMappingActive = snapshotKeyboardActiveToggle
+    ? snapshotKeyboardActiveToggle.checked
+    : snapshotKeyboardActive;
+  if (keyboardModeEnabled && keyboardMappingActive && getSnapshotIndexFromKeyboard(event) != null) {
+    return;
+  }
+  if (event.code === "Space") {
+    if (layoutMode) {
+      return;
+    }
+    if (document.activeElement !== canvas) {
+      return;
+    }
+    if (event.shiftKey) {
+      event.preventDefault();
+      allNotesOff();
+      return;
+    }
+    if (!patternSequenceState || !patternActiveNodes.length) {
+      return;
+    }
+    event.preventDefault();
+    if (patternPlayerState === "playing") {
+      stopPatternPlayback();
+    } else {
+      startPatternPlayback();
+    }
     return;
   }
   const key = event.key.toLowerCase();
@@ -10806,6 +11204,7 @@ function startVoice(options) {
     nodeId: options.nodeId,
     octave: effectiveOctave,
     freq: effectiveFreq,
+    ratioKey: node ? getNodeRatioKey(node) : null,
     oscillator,
     envGain,
     lfoGain,
@@ -13471,6 +13870,28 @@ function updateLfoDepth() {
   }
 }
 
+function updateLfoRate() {
+  if (!lfoRateSlider) {
+    return;
+  }
+  const raw = Number(lfoRateSlider.value);
+  const t = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) / 100 : 0.5;
+  lfoRate = LFO_RATE_MIN * Math.pow(LFO_RATE_RANGE, t);
+  if (lfoRateReadout) {
+    lfoRateReadout.textContent = `${lfoRate.toFixed(1)}x`;
+  }
+}
+
+function setLfoRateSlider(value) {
+  if (!lfoRateSlider) {
+    return;
+  }
+  const safe = Number.isFinite(value) && value > 0 ? value : 1;
+  const t = Math.log(safe / LFO_RATE_MIN) / Math.log(LFO_RATE_RANGE);
+  const clamped = Math.min(1, Math.max(0, Number.isFinite(t) ? t : 0.5));
+  lfoRateSlider.value = String(Math.round(clamped * 100));
+}
+
 function drawAxes(axisEntry) {
   ctx.lineWidth = 1.5;
 
@@ -13619,7 +14040,7 @@ function getLfoValue(voice, nowMs) {
   if (!voice.lfoActive || voice.lfoHalfPeriod <= 0) {
     return 1;
   }
-  const elapsed = (nowMs - voice.lfoStartMs) / 1000;
+  const elapsed = ((nowMs - voice.lfoStartMs) / 1000) * lfoRate;
   if (elapsed < 0) {
     return 1;
   }
@@ -14859,11 +15280,11 @@ function updateUiHint() {
 
   if (!is3DMode) {
     uiHint.textContent =
-      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO.\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to pan. Scroll to zoom.";
+      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO.\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\nDrag to pan. Scroll to zoom.";
     return;
   }
   uiHint.textContent =
-    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
+    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
 }
 
 function resetUiHintToDefault() {
@@ -15156,6 +15577,9 @@ function updateBannerMessage() {
   if (!bannerMessage) {
     return;
   }
+  if (tempBannerActive) {
+    return;
+  }
   const interactionMode = getInteractionMode();
   let nextKey = "";
   let nextText = "";
@@ -15208,6 +15632,32 @@ function updateBannerMessage() {
   }
   bannerMessage.classList.toggle("banner-interactive", nextInteractive);
   bannerMessage.hidden = false;
+}
+
+function showTemporaryBanner(text, durationMs = 2000) {
+  if (!bannerMessage) {
+    return;
+  }
+  tempBannerActive = true;
+  if (tempBannerTimer) {
+    clearTimeout(tempBannerTimer);
+  }
+  if (tempBannerHideTimer) {
+    clearTimeout(tempBannerHideTimer);
+  }
+  bannerMessage.classList.remove("banner-interactive");
+  bannerMessage.classList.remove("is-fading");
+  bannerMessage.textContent = text;
+  bannerMessage.hidden = false;
+  const fadeDelay = Math.max(0, durationMs - 500);
+  tempBannerTimer = setTimeout(() => {
+    bannerMessage.classList.add("is-fading");
+  }, fadeDelay);
+  tempBannerHideTimer = setTimeout(() => {
+    tempBannerActive = false;
+    bannerMessage.classList.remove("is-fading");
+    updateBannerMessage();
+  }, durationMs);
 }
 
 function drawAnalysisWatermark() {
@@ -18729,6 +19179,7 @@ function getPresetState() {
     synth: {
       volume: Number(volumeSlider.value),
       lfoDepth: Number(lfoDepthSlider.value),
+      lfoRate,
       keyboardMode: keyboardModeSelect ? keyboardModeSelect.value : "off",
       customPianoMap: serializeCustomPianoMap(),
       waveform: waveformSelect ? waveformSelect.value : "sine",
@@ -18929,6 +19380,13 @@ function applyPresetState(state, options = {}) {
     snapshotActiveIndex = Number.isFinite(state.snapshotActive)
       ? Math.trunc(state.snapshotActive)
       : snapshotActiveIndex;
+    updateSnapshotUi();
+  }
+  if (Array.isArray(state.snapshotsLetters)) {
+    applyLetterSnapshotsFromPreset(state.snapshotsLetters);
+    snapshotActiveLetterKey = typeof state.snapshotActiveLetter === "string"
+      ? state.snapshotActiveLetter
+      : snapshotActiveLetterKey;
     updateSnapshotUi();
   }
   const layoutState = state.layout && typeof state.layout === "object" ? state.layout : null;
@@ -19167,6 +19625,10 @@ function applyPresetState(state, options = {}) {
     if (Number.isFinite(state.synth.lfoDepth) && lfoDepthSlider) {
       lfoDepthSlider.value = String(state.synth.lfoDepth);
       updateLfoDepth();
+    }
+    if (Number.isFinite(state.synth.lfoRate) && lfoRateSlider) {
+      setLfoRateSlider(state.synth.lfoRate);
+      updateLfoRate();
     }
     if (keyboardModeSelect && typeof state.synth.keyboardMode === "string") {
       keyboardModeSelect.value = state.synth.keyboardMode;
@@ -22642,6 +23104,11 @@ if (presetSortSelect) {
     renderPresetList();
   });
 }
+snapshotKeyboardContainer = document.getElementById("snapshot-keyboard");
+snapshotKeyboardKeys = document.getElementById("snapshot-keyboard-keys");
+if (snapshotKeyboardContainer) {
+  buildSnapshotKeyboard();
+}
 window.addEventListener("keydown", (event) => {
   if (event.defaultPrevented) {
     return;
@@ -22650,11 +23117,68 @@ window.addEventListener("keydown", (event) => {
   if (targetTag === "INPUT" || targetTag === "TEXTAREA" || targetTag === "SELECT") {
     return;
   }
-  if (document.activeElement !== canvas) {
+  const keyboardModeEnabled = snapshotKeyboardModeToggle
+    ? snapshotKeyboardModeToggle.checked
+    : snapshotKeyboardMode;
+  const keyboardMappingActive = snapshotKeyboardActiveToggle
+    ? snapshotKeyboardActiveToggle.checked
+    : snapshotKeyboardActive;
+  if (snapshotDebugEnabled) {
+    console.log("[snapshot-keydown]", {
+      key: event.key,
+      code: event.code,
+      alt: event.altKey,
+      shift: event.shiftKey,
+      ctrl: event.ctrlKey,
+      meta: event.metaKey,
+      mappingEnabled: keyboardModeEnabled,
+      mappingActive: keyboardMappingActive,
+      target: event.target && event.target.tagName,
+    });
+  }
+  if (document.activeElement !== canvas && !(keyboardModeEnabled && keyboardMappingActive)) {
     return;
   }
-  const index = getSnapshotIndexFromEvent(event);
-  if (index == null) {
+  const letterIndex = keyboardModeEnabled ? getSnapshotLetterIndexFromEvent(event) : null;
+  const numberIndex = getSnapshotIndexFromEvent(event);
+  if (keyboardModeEnabled && keyboardMappingActive && snapshotDebugEnabled) {
+    console.log("[snapshot-keyboard]", {
+      code: event.code,
+      key: event.key,
+      alt: event.altKey,
+      shift: event.shiftKey,
+      ctrl: event.ctrlKey,
+      meta: event.metaKey,
+      letterIndex,
+      numberIndex,
+    });
+  }
+  if (snapshotDebugEnabled && keyboardModeEnabled) {
+    console.log("[snapshot-keyboard-state]", {
+      enabled: keyboardModeEnabled,
+      active: keyboardMappingActive,
+      letterIndex,
+      numberIndex,
+    });
+  }
+  if (keyboardModeEnabled && keyboardMappingActive && letterIndex != null) {
+    if (event.altKey && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault();
+      const letter = String(event.code || "").replace("Key", "").toLowerCase();
+      saveSnapshotLetter(letter, letterIndex);
+      return;
+    }
+    if (!event.altKey && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault();
+      const letter = String(event.code || "").replace("Key", "").toLowerCase();
+      recallSnapshotLetter(letter, letterIndex);
+      return;
+    }
+  }
+  if (numberIndex == null) {
+    return;
+  }
+  if (keyboardModeEnabled && !keyboardMappingActive && document.activeElement !== canvas) {
     return;
   }
   const isSave = event.altKey && !event.metaKey && !event.ctrlKey;
@@ -22664,9 +23188,9 @@ window.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
   if (isSave) {
-    saveSnapshot(index);
+    saveSnapshot(numberIndex);
   } else {
-    recallSnapshot(index);
+    recallSnapshot(numberIndex);
   }
 });
 const snapshotResetButton = document.getElementById("snapshot-reset");
@@ -22711,15 +23235,42 @@ if (snapshotConnectToggle) {
   });
   snapshotConnectToggle.disabled = !snapshotRestorePlayNodes;
 }
-const snapshotAxesToggle = document.getElementById("snapshot-include-axes");
-if (snapshotAxesToggle) {
-  snapshotAxesToggle.addEventListener("change", () => {
-    snapshotIncludeAxes = snapshotAxesToggle.checked;
-    if (snapshotIncludeAxes && snapshotDeferToggle) {
-      snapshotDeferToCycleEnd = true;
-      snapshotDeferToggle.checked = true;
-    }
+const snapshotRestoreViewToggle = document.getElementById("snapshot-restore-view");
+if (snapshotRestoreViewToggle) {
+  snapshotRestoreViewToggle.addEventListener("change", () => {
+    snapshotRestoreView = snapshotRestoreViewToggle.checked;
   });
+}
+const snapshotKeyboardModeToggle = document.getElementById("snapshot-keyboard-mode");
+const snapshotKeyboardActiveToggle = document.getElementById("snapshot-keyboard-active");
+if (snapshotKeyboardModeToggle) {
+  snapshotKeyboardModeToggle.addEventListener("change", () => {
+    snapshotKeyboardMode = snapshotKeyboardModeToggle.checked;
+    if (snapshotKeyboardMode) {
+      snapshotKeyboardActive = true;
+      if (snapshotKeyboardActiveToggle) {
+        snapshotKeyboardActiveToggle.checked = true;
+      }
+      setKeyboardModeDisabled(true);
+    } else {
+      snapshotKeyboardActive = false;
+      if (snapshotKeyboardActiveToggle) {
+        snapshotKeyboardActiveToggle.checked = false;
+      }
+      setKeyboardModeDisabled(false);
+    }
+    if (snapshotKeyboardActiveToggle) {
+      snapshotKeyboardActiveToggle.disabled = !snapshotKeyboardMode;
+    }
+    updateSnapshotUi();
+  });
+}
+if (snapshotKeyboardActiveToggle) {
+  snapshotKeyboardActiveToggle.addEventListener("change", () => {
+    snapshotKeyboardActive = snapshotKeyboardActiveToggle.checked;
+    updateSnapshotUi();
+  });
+  snapshotKeyboardActiveToggle.disabled = !snapshotKeyboardMode;
 }
 const snapshotCopyButton = document.getElementById("snapshot-copy");
 if (snapshotCopyButton) {
@@ -22762,6 +23313,13 @@ if (snapshotOptionsToggle && snapshotOptionsMenu) {
   });
 }
 updateSnapshotUi();
+if (snapshotKeyboardModeToggle) {
+  snapshotKeyboardModeToggle.checked = snapshotKeyboardMode;
+}
+if (snapshotKeyboardActiveToggle) {
+  snapshotKeyboardActiveToggle.checked = snapshotKeyboardActive;
+  snapshotKeyboardActiveToggle.disabled = !snapshotKeyboardMode;
+}
 if (intervalChartButton) {
   intervalChartButton.addEventListener("click", () => {
     openIntervalChart();
@@ -24144,6 +24702,9 @@ if (uiHint) {
 }
 if (bannerMessage) {
   bannerMessage.addEventListener("click", (event) => {
+    if (tempBannerActive) {
+      return;
+    }
     const target = event.target instanceof Element ? event.target : bannerMessage;
     const actionEl = target.closest("[data-layout-banner]");
     const layoutAction = actionEl ? actionEl.getAttribute("data-layout-banner") : null;
@@ -24197,6 +24758,13 @@ if (lfoDepthSlider) {
     updateLfoDepth();
     schedulePresetUrlUpdate();
   });
+}
+if (lfoRateSlider) {
+  lfoRateSlider.addEventListener("input", () => {
+    updateLfoRate();
+    schedulePresetUrlUpdate();
+  });
+  updateLfoRate();
 }
 waveformSelect.addEventListener("change", () => {
   const snapshot = [...voices];
@@ -24551,8 +25119,25 @@ window.addEventListener("pointerdown", enableAudioFromGesture);
 window.addEventListener("keydown", enableAudioFromGesture);
 window.addEventListener("keydown", handleKeyDown);
 window.addEventListener("keyup", handleKeyUp);
+window.snapshotDebug = {
+  enable: () => {
+    snapshotDebugEnabled = true;
+  },
+  disable: () => {
+    snapshotDebugEnabled = false;
+  },
+};
 window.addEventListener("keydown", (event) => {
   syncCapsLockState(event);
+  const keyboardModeEnabled = snapshotKeyboardModeToggle
+    ? snapshotKeyboardModeToggle.checked
+    : snapshotKeyboardMode;
+  const keyboardMappingActive = snapshotKeyboardActiveToggle
+    ? snapshotKeyboardActiveToggle.checked
+    : snapshotKeyboardActive;
+  if (keyboardModeEnabled && keyboardMappingActive && getSnapshotIndexFromKeyboard(event) != null) {
+    return;
+  }
   if (
     layoutCustomLabelDialog &&
     layoutCustomLabelDialog.open &&

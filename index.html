@@ -658,16 +658,6 @@
 
     <section class="panel synth-panel">
       <div class="synth-group">
-        <label for="volume">Main Volume (dB)</label>
-        <input id="volume" type="range" min="-60" max="0" step="1" value="-12" />
-        <span id="volume-readout">-12 dB</span>
-      </div>
-      <div class="synth-group">
-        <label for="lfo-depth">LFO Depth</label>
-        <input id="lfo-depth" type="range" min="0" max="1" step="0.01" value="1" />
-        <span id="lfo-depth-readout">100%</span>
-      </div>
-      <div class="synth-group">
         <div id="keyboard-map-popover" class="keyboard-map-popover" hidden>
           <div class="piano-keys" role="group" aria-label="Piano keys">
             <div class="piano-keys-white">
@@ -739,15 +729,6 @@
         </div>
         <div id="keyboard-help" class="keyboard-help" aria-live="polite"></div>
       </div>
-      <div class="synth-group">
-        <label for="waveform">Waveform</label>
-        <select id="waveform">
-          <option value="sine">Sine</option>
-          <option value="triangle">Triangle</option>
-          <option value="square">Square</option>
-          <option value="sawtooth">Sawtooth</option>
-        </select>
-      </div>
       <div class="synth-group snapshot-group">
         <div class="snapshot-header">
           <span>Snapshots</span>
@@ -761,7 +742,7 @@
             Defer to cycle end
           </label>
           <label class="snapshot-toggle">
-            <input id="snapshot-restore-play" type="checkbox" />
+            <input id="snapshot-restore-play" type="checkbox" checked />
             Restore playing nodes
           </label>
           <label class="snapshot-toggle snapshot-subtoggle">
@@ -769,8 +750,12 @@
             Connect common tones
           </label>
           <label class="snapshot-toggle">
-            <input id="snapshot-include-axes" type="checkbox" />
-            Include axis ratios (defer only)
+            <input id="snapshot-restore-view" type="checkbox" checked />
+            Restore view
+          </label>
+          <label class="snapshot-toggle">
+            <input id="snapshot-keyboard-mode" type="checkbox" />
+            Use letter keys
           </label>
         </div>
         <div id="snapshot-grid" class="snapshot-grid" role="group" aria-label="Snapshots">
@@ -786,37 +771,68 @@
           <button type="button" class="snapshot-slot" data-slot="9" title="Alt+0 save, 0 recall">0</button>
         </div>
       </div>
-      <div class="synth-group envelope-toggle">
-        <label class="visually-hidden" for="envelope-toggle">Envelope Panel</label>
-        <button id="envelope-toggle" type="button" aria-expanded="false" aria-controls="envelope-panel">Envelope</button>
+      <div id="snapshot-keyboard" class="snapshot-keyboard" hidden>
+        <div class="snapshot-keyboard-row snapshot-keyboard-row-head">
+          <input id="snapshot-keyboard-active" type="checkbox" aria-label="Letters active" />
+          <div id="snapshot-keyboard-keys" class="snapshot-keyboard-keys"></div>
+        </div>
       </div>
-      <div class="synth-group animation-toggle">
-        <label class="visually-hidden" for="animation-toggle">Animation Panel</label>
-        <button id="animation-toggle" type="button" aria-expanded="false" aria-controls="animation-panel">Play</button>
+      <div class="synth-actions">
+        <div class="synth-group synth-slider-group">
+          <label for="volume">Volume</label>
+          <input id="volume" type="range" min="-60" max="0" step="1" value="-12" />
+          <span id="volume-readout">-12 dB</span>
+        </div>
+        <div class="synth-group envelope-toggle">
+          <label class="visually-hidden" for="envelope-toggle">Synth Panel</label>
+          <button id="envelope-toggle" type="button" aria-expanded="false" aria-controls="envelope-panel">Synth</button>
+        </div>
+        <div class="synth-group animation-toggle">
+          <label class="visually-hidden" for="animation-toggle">Animation Panel</label>
+          <button id="animation-toggle" type="button" aria-expanded="false" aria-controls="animation-panel">Play</button>
+        </div>
       </div>
     </section>
 
     <aside id="envelope-panel" class="panel envelope-panel" hidden>
-      <div class="envelope-panel-header">Envelope</div>
+      <div class="envelope-panel-header">Synth</div>
       <div class="synth-group">
+        <label for="waveform">Waveform</label>
+        <select id="waveform">
+          <option value="sine">Sine</option>
+          <option value="triangle">Triangle</option>
+          <option value="square">Square</option>
+          <option value="sawtooth">Sawtooth</option>
+        </select>
+      </div>
+      <div class="envelope-panel-section-title">Envelope</div>
+      <div class="synth-group envelope-slider">
         <label for="attack">Attack</label>
-        <input id="attack" type="range" min="0.005" max="15" step="0.005" value="0.02" />
-        <span id="attack-readout">0.02s</span>
+        <div class="envelope-slider-row">
+          <input id="attack" type="range" min="0.005" max="15" step="0.005" value="0.02" />
+          <span id="attack-readout">0.02s</span>
+        </div>
       </div>
-      <div class="synth-group">
+      <div class="synth-group envelope-slider">
         <label for="decay">Decay</label>
-        <input id="decay" type="range" min="0.01" max="15" step="0.01" value="0.2" />
-        <span id="decay-readout">0.20s</span>
+        <div class="envelope-slider-row">
+          <input id="decay" type="range" min="0.01" max="15" step="0.01" value="0.2" />
+          <span id="decay-readout">0.20s</span>
+        </div>
       </div>
-      <div class="synth-group">
+      <div class="synth-group envelope-slider">
         <label for="sustain">Sustain</label>
-        <input id="sustain" type="range" min="0" max="1" step="0.01" value="0.6" />
-        <span id="sustain-readout">0.60</span>
+        <div class="envelope-slider-row">
+          <input id="sustain" type="range" min="0" max="1" step="0.01" value="0.6" />
+          <span id="sustain-readout">0.60</span>
+        </div>
       </div>
-      <div class="synth-group">
+      <div class="synth-group envelope-slider">
         <label for="release">Release</label>
-        <input id="release" type="range" min="0.01" max="15" step="0.01" value="0.6" />
-        <span id="release-readout">0.60s</span>
+        <div class="envelope-slider-row">
+          <input id="release" type="range" min="0.01" max="15" step="0.01" value="0.6" />
+          <span id="release-readout">0.60s</span>
+        </div>
       </div>
       <div class="synth-group">
         <label for="one-shot">Envelope</label>
@@ -836,6 +852,21 @@
             <input type="radio" name="envelope-time" value="tempo" />
             Clock to tempo
           </label>
+        </div>
+      </div>
+      <div class="envelope-panel-section-title">LFO</div>
+      <div class="synth-group envelope-slider">
+        <label for="lfo-depth">Depth</label>
+        <div class="envelope-slider-row">
+          <input id="lfo-depth" type="range" min="0" max="1" step="0.01" value="1" />
+          <span id="lfo-depth-readout">100%</span>
+        </div>
+      </div>
+      <div class="synth-group envelope-slider">
+        <label for="lfo-rate">Rate</label>
+        <div class="envelope-slider-row">
+          <input id="lfo-rate" type="range" min="0" max="100" step="1" value="50" />
+          <span id="lfo-rate-readout">1.0x</span>
         </div>
       </div>
     </aside>

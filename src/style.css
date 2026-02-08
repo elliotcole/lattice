@@ -1458,6 +1458,7 @@ button:active {
   align-items: flex-start;
   gap: 4px;
   min-width: 160px;
+  position: relative;
 }
 
 .snapshot-header {
@@ -1489,6 +1490,29 @@ button:active {
 
 .snapshot-toggle input {
   margin: 0;
+}
+
+.snapshot-subtoggle {
+  margin-left: 14px;
+  font-size: 9px;
+}
+
+.snapshot-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--panel-bg, #ffffff);
+  border: 1px solid var(--line);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  margin-top: 0;
+  z-index: 20;
+}
+
+.snapshot-options[hidden] {
+  display: none;
 }
 
 .snapshot-grid {

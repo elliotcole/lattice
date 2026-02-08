@@ -374,6 +374,7 @@ let lHeld = false;
 let customTextHeld = false;
 let fHeld = false;
 let oHeld = false;
+let mHeld = false;
 let suppressClickAfterRespell = false;
 
 function resetHeldModifiers() {
@@ -387,6 +388,7 @@ function resetHeldModifiers() {
   zKeyHeld = false;
   xKeyHeld = false;
   yKeyHeld = false;
+  mHeld = false;
   customTextHeld = false;
 }
 const midiActiveNotes = new Map();
@@ -1397,6 +1399,9 @@ let snapshotActiveIndex = -1;
 let pendingSnapshotIndex = -1;
 let pendingSnapshotState = null;
 let snapshotDeferToCycleEnd = false;
+let snapshotRestorePlayNodes = false;
+let snapshotConnectCommonTones = false;
+let snapshotIncludeAxes = false;
 let customNodes = [];
 let nextCustomNodeId = 200000;
 let pendingCustomAction = null;
@@ -2350,14 +2355,18 @@ function scheduleNextPatternEvent(delayMs) {
     if (pendingSnapshotState && snapshotDeferToCycleEnd && patternSequenceState) {
       const cycleLength = getSequenceOrderIndices().length;
       if (cycleLength && patternStepCounter > 0 && patternStepCounter % cycleLength === 0) {
-        const nextState = pendingSnapshotState;
+        const nextSnapshot = pendingSnapshotState;
         const nextIndex = pendingSnapshotIndex;
         pendingSnapshotState = null;
         pendingSnapshotIndex = -1;
         snapshotActiveIndex = nextIndex;
-        applyPresetState(nextState, { skipLayoutModeSwitch: true, skipStopVoices: true });
+        applyPresetState(nextSnapshot.state, {
+          skipLayoutModeSwitch: true,
+          skipStopVoices: true,
+        });
         updateSnapshotUi();
         resetPatternCycle();
+        restoreSnapshotPlayState(nextSnapshot);
         if (patternPlayerState === "playing") {
           scheduleNextPatternEvent(0);
         }
@@ -2623,6 +2632,9 @@ function buildSnapshotState() {
   delete state.layout;
   delete state.play;
   delete state.synth;
+  if (!snapshotIncludeAxes) {
+    delete state.ratios;
+  }
   if (layoutMode && layoutPrevState) {
     state.mode3d = Boolean(layoutPrevState.is3DMode);
     state.view = {
@@ -2642,7 +2654,98 @@ function buildSnapshotState() {
       rotY: view.rotY,
     };
   }
+  if (!state.view || !Number.isFinite(state.view.zoom)) {
+    state.view = {
+      zoom: view.zoom,
+      offsetX: view.offsetX,
+      offsetY: view.offsetY,
+      rotX: view.rotX,
+      rotY: view.rotY,
+    };
+  }
   return JSON.parse(JSON.stringify(state));
+}
+
+function getSnapshotNodeKey(node) {
+  if (!node) {
+    return null;
+  }
+  if (node.isCustom) {
+    const source = Array.isArray(node.sourceExponents)
+      ? node.sourceExponents
+      : null;
+    if (!source || source.length < 2 || node.customSlot == null) {
+      return null;
+    }
+    const [x, y, z = 0] = source;
+    return `custom:${x},${y},${z}|${node.customSlot}`;
+  }
+  if (!Number.isFinite(node.exponentX) || !Number.isFinite(node.exponentY)) {
+    return null;
+  }
+  return `grid:${node.exponentX},${node.exponentY},${node.exponentZ || 0}`;
+}
+
+function getNodeBySnapshotKey(key) {
+  if (!key || typeof key !== "string") {
+    return null;
+  }
+  if (key.startsWith("grid:")) {
+    const parts = key.slice(5).split(",");
+    if (parts.length < 3) {
+      return null;
+    }
+    const [ex, ey, ez] = parts.map(Number);
+    return (
+      nodes.find(
+        (node) =>
+          !node.isCustom &&
+          node.exponentX === ex &&
+          node.exponentY === ey &&
+          (node.exponentZ || 0) === ez
+      ) || null
+    );
+  }
+  if (key.startsWith("custom:")) {
+    const rest = key.slice(7);
+    const [expPart, slotPart] = rest.split("|");
+    if (!expPart || slotPart == null) {
+      return null;
+    }
+    const parts = expPart.split(",").map(Number);
+    if (parts.length < 2) {
+      return null;
+    }
+    const [ex, ey, ez = 0] = parts;
+    const slot = Number(slotPart);
+    return (
+      nodes.find(
+        (node) =>
+          node.isCustom &&
+          Array.isArray(node.sourceExponents) &&
+          node.sourceExponents[0] === ex &&
+          node.sourceExponents[1] === ey &&
+          (node.sourceExponents[2] || 0) === ez &&
+          node.customSlot === slot
+      ) || null
+    );
+  }
+  return null;
+}
+
+function getPlayingSnapshotKeys() {
+  const keys = new Set();
+  voices.forEach((voice) => {
+    if (!voice || voice.releasing || !Number.isFinite(voice.nodeId)) {
+      return;
+    }
+    const node = nodeById.get(voice.nodeId);
+    const key = getSnapshotNodeKey(node);
+    if (key) {
+      keys.add(key);
+    }
+  });
+  return Array.from(keys);
 }
 
 function serializeSnapshotsForPreset() {
@@ -2670,7 +2773,7 @@ function applySnapshotsFromPreset(value) {
     if (!Number.isFinite(index) || index < 0 || index >= snapshotSlots.length) {
       return;
     }
-    if (!snapshot || typeof snapshot !== "object") {
+    if (!snapshot || typeof snapshot !== "object" || !snapshot.state) {
       return;
     }
     snapshotSlots[index] = snapshot;
@@ -2714,7 +2817,11 @@ function saveSnapshot(index) {
   if (!state) {
     return;
   }
-  snapshotSlots[index] = state;
+  snapshotSlots[index] = {
+    state,
+    playKeys: getPlayingSnapshotKeys(),
+    includeAxes: snapshotIncludeAxes,
+  };
   updateSnapshotUi();
 }
 
@@ -2722,18 +2829,20 @@ function recallSnapshot(index) {
   if (index < 0 || index >= snapshotSlots.length) {
     return;
   }
-  const state = snapshotSlots[index];
-  if (!state) {
+  const snapshot = snapshotSlots[index];
+  if (!snapshot || !snapshot.state) {
     return;
   }
-  if (snapshotDeferToCycleEnd && patternPlayerState === "playing") {
+  const requiresDefer = snapshotDeferToCycleEnd || snapshot.includeAxes;
+  if (requiresDefer && patternPlayerState === "playing") {
     pendingSnapshotIndex = index;
-    pendingSnapshotState = state;
+    pendingSnapshotState = snapshot;
     return;
   }
   snapshotActiveIndex = index;
-  applyPresetState(state, { skipLayoutModeSwitch: true, skipStopVoices: true });
+  applyPresetState(snapshot.state, { skipLayoutModeSwitch: true, skipStopVoices: true });
   buildPatternStates(true);
+  restoreSnapshotPlayState(snapshot);
   updateSnapshotUi();
 }
 
@@ -2741,6 +2850,55 @@ function clearSnapshots() {
   snapshotSlots.fill(null);
   snapshotActiveIndex = -1;
   updateSnapshotUi();
+}
+
+function restoreSnapshotPlayState(snapshot) {
+  if (!snapshotRestorePlayNodes || !snapshot || !snapshot.playKeys) {
+    return;
+  }
+  if (!audioCtx || audioCtx.state !== "running") {
+    return;
+  }
+  const targetKeys = new Set(snapshot.playKeys);
+  const playingVoices = voices.filter((voice) => voice && !voice.releasing);
+  const playingKeys = new Set();
+  playingVoices.forEach((voice) => {
+    const node = nodeById.get(voice.nodeId);
+    const key = getSnapshotNodeKey(node);
+    if (key) {
+      playingKeys.add(key);
+    }
+  });
+  if (snapshotConnectCommonTones) {
+    playingVoices.forEach((voice) => {
+      const node = nodeById.get(voice.nodeId);
+      const key = getSnapshotNodeKey(node);
+      if (!key || !targetKeys.has(key)) {
+        stopVoice(voice, false);
+      }
+    });
+  } else {
+    stopAllVoicesSmooth();
+    playingKeys.clear();
+  }
+  targetKeys.forEach((key) => {
+    if (playingKeys.has(key)) {
+      return;
+    }
+    const node = getNodeBySnapshotKey(key);
+    if (!node) {
+      return;
+    }
+    const voice = startVoice({
+      nodeId: node.id,
+      octave: 0,
+      freq: node.freq,
+      source: "snapshot",
+    });
+    if (voice) {
+      node.baseVoiceId = voice.id;
+    }
+  });
 }
 
 function getSnapshotIndexFromEvent(event) {
@@ -10782,6 +10940,11 @@ function stopAllVoices() {
   active.forEach((voice) => stopVoice(voice, true));
 }
 
+function stopAllVoicesSmooth() {
+  const active = [...voices];
+  active.forEach((voice) => stopVoice(voice, false));
+}
+
 function enableAudio() {
   if (!audioCtx) {
     audioCtx = new AudioContext();
@@ -12195,6 +12358,13 @@ function onPointerUp(event) {
       }
     }
     const hit = hitTestScreen(screenPoint);
+    if (mHeld && hit) {
+      const projected = projectPoint(hit.coordinate || { x: 0, y: 0, z: 0 });
+      view.offsetX = -projected.x;
+      view.offsetY = -projected.y;
+      draw();
+      return;
+    }
     if (addIntervalMode) {
       if (hit && hit.active) {
         setAddIntervalMode(false);
@@ -14689,11 +14859,11 @@ function updateUiHint() {
 
   if (!is3DMode) {
     uiHint.textContent =
-      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to pan. Scroll to zoom.";
+      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO.\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to pan. Scroll to zoom.";
     return;
   }
   uiHint.textContent =
-    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
+    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
 }
 
 function resetUiHintToDefault() {
@@ -22525,6 +22695,32 @@ if (snapshotDeferToggle) {
     snapshotDeferToCycleEnd = snapshotDeferToggle.checked;
   });
 }
+const snapshotRestoreToggle = document.getElementById("snapshot-restore-play");
+if (snapshotRestoreToggle) {
+  snapshotRestoreToggle.addEventListener("change", () => {
+    snapshotRestorePlayNodes = snapshotRestoreToggle.checked;
+    if (snapshotConnectToggle) {
+      snapshotConnectToggle.disabled = !snapshotRestorePlayNodes;
+    }
+  });
+}
+const snapshotConnectToggle = document.getElementById("snapshot-connect-tones");
+if (snapshotConnectToggle) {
+  snapshotConnectToggle.addEventListener("change", () => {
+    snapshotConnectCommonTones = snapshotConnectToggle.checked;
+  });
+  snapshotConnectToggle.disabled = !snapshotRestorePlayNodes;
+}
+const snapshotAxesToggle = document.getElementById("snapshot-include-axes");
+if (snapshotAxesToggle) {
+  snapshotAxesToggle.addEventListener("change", () => {
+    snapshotIncludeAxes = snapshotAxesToggle.checked;
+    if (snapshotIncludeAxes && snapshotDeferToggle) {
+      snapshotDeferToCycleEnd = true;
+      snapshotDeferToggle.checked = true;
+    }
+  });
+}
 const snapshotCopyButton = document.getElementById("snapshot-copy");
 if (snapshotCopyButton) {
   snapshotCopyButton.addEventListener("click", async () => {
@@ -22539,6 +22735,30 @@ if (snapshotCopyButton) {
     } catch (error) {
       showFileSharePopover("Couldn't copy snapshot URL. Try again.");
     }
+  });
+}
+const snapshotOptionsToggle = document.getElementById("snapshot-options-toggle");
+const snapshotOptionsMenu = document.getElementById("snapshot-options");
+if (snapshotOptionsToggle && snapshotOptionsMenu) {
+  snapshotOptionsToggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const shouldShow = snapshotOptionsMenu.hidden;
+    snapshotOptionsMenu.hidden = !shouldShow;
+    snapshotOptionsToggle.setAttribute("aria-expanded", shouldShow ? "true" : "false");
+  });
+  document.addEventListener("click", (event) => {
+    if (snapshotOptionsMenu.hidden) {
+      return;
+    }
+    if (
+      event.target === snapshotOptionsMenu ||
+      snapshotOptionsMenu.contains(event.target) ||
+      event.target === snapshotOptionsToggle
+    ) {
+      return;
+    }
+    snapshotOptionsMenu.hidden = true;
+    snapshotOptionsToggle.setAttribute("aria-expanded", "false");
   });
 }
 updateSnapshotUi();
@@ -24374,6 +24594,9 @@ window.addEventListener("keydown", (event) => {
   if (event.key.toLowerCase() === "i") {
     iHeld = true;
   }
+  if (event.key.toLowerCase() === "m") {
+    mHeld = true;
+  }
 if (triangleLabelDialog) {
   triangleLabelDialog.addEventListener("close", () => {
     if (!triangleLabelTargetKey || !triangleLabelTargetTri) {
@@ -24577,6 +24800,9 @@ window.addEventListener("keyup", (event) => {
   }
   if (event.key.toLowerCase() === "i") {
     iHeld = false;
+  }
+  if (event.key.toLowerCase() === "m") {
+    mHeld = false;
   }
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = false;

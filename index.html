@@ -754,6 +754,18 @@
             Restore view
           </label>
           <label class="snapshot-toggle">
+            <input id="snapshot-restore-sequence" type="checkbox" checked />
+            Restore sequence
+          </label>
+          <label class="snapshot-toggle">
+            <input id="snapshot-restore-lfos" type="checkbox" checked />
+            Restore LFOs
+          </label>
+          <label class="snapshot-toggle snapshot-subtoggle">
+            <input id="snapshot-restore-lfo-phase" type="checkbox" />
+            Restore phase
+          </label>
+          <label class="snapshot-toggle">
             <input id="snapshot-keyboard-mode" type="checkbox" />
             Use letter keys
           </label>
@@ -809,14 +821,30 @@
       <div class="synth-group envelope-slider">
         <label for="attack">Attack</label>
         <div class="envelope-slider-row">
-          <input id="attack" type="range" min="0.005" max="15" step="0.005" value="0.02" />
+          <input
+            id="attack"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value="0"
+            data-default="0.02"
+          />
           <span id="attack-readout">0.02s</span>
         </div>
       </div>
       <div class="synth-group envelope-slider">
         <label for="decay">Decay</label>
         <div class="envelope-slider-row">
-          <input id="decay" type="range" min="0.01" max="15" step="0.01" value="0.2" />
+          <input
+            id="decay"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value="0"
+            data-default="0.2"
+          />
           <span id="decay-readout">0.20s</span>
         </div>
       </div>
@@ -830,7 +858,15 @@
       <div class="synth-group envelope-slider">
         <label for="release">Release</label>
         <div class="envelope-slider-row">
-          <input id="release" type="range" min="0.01" max="15" step="0.01" value="0.6" />
+          <input
+            id="release"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value="0"
+            data-default="0.6"
+          />
           <span id="release-readout">0.60s</span>
         </div>
       </div>

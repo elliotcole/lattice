@@ -369,6 +369,9 @@ let lfoRate = 1;
 const LFO_RATE_MIN = 0.1;
 const LFO_RATE_MAX = 10;
 const LFO_RATE_RANGE = LFO_RATE_MAX / LFO_RATE_MIN;
+const ENVELOPE_MIN = 0.005;
+const ENVELOPE_MAX = 15;
+const ENVELOPE_CURVE = 2;
 let lfoArmingId = null;
 let lfoArmingStart = 0;
 let lfoAnimating = false;
@@ -1418,10 +1421,14 @@ let snapshotActiveIndex = -1;
 let pendingSnapshotIndex = -1;
 let pendingSnapshotState = null;
 let pendingSnapshotLetterKey = "";
+let pendingSnapshotAtNextEvent = false;
 let snapshotDeferToCycleEnd = false;
 let snapshotRestorePlayNodes = true;
 let snapshotConnectCommonTones = false;
 let snapshotRestoreView = true;
+let snapshotRestoreSequence = true;
+let snapshotRestoreLfos = true;
+let snapshotRestoreLfoPhase = false;
 let snapshotKeyboardMode = false;
 let snapshotKeyboardActive = false;
 let snapshotKeyboardPrevMode = "";
@@ -1854,6 +1861,127 @@ function updatePatternLengthReadout() {
       : `${patternLengthValue.toFixed(2)} beats`;
 }
 
+function getSnapshotPatternState() {
+  if (patternPlayerState !== "playing") {
+    return null;
+  }
+  if (!patternSequenceState || !patternRhythmState || !patternOctaveState) {
+    return null;
+  }
+  return {
+    sequence: patternSequenceState.type,
+    rhythm: patternRhythmState.type,
+    octave: patternOctaveState.type,
+  };
+}
+
+function applySnapshotPatternState(snapshotPattern) {
+  if (!snapshotPattern) {
+    return;
+  }
+  const sequenceType = snapshotPattern.sequence || "ascending";
+  const rhythmType = snapshotPattern.rhythm || "steady";
+  const octaveType = snapshotPattern.octave || "unison";
+  if (sequencePatternSelect) {
+    sequencePatternSelect.value = sequenceType;
+  }
+  if (rhythmPatternSelect) {
+    rhythmPatternSelect.value = rhythmType;
+  }
+  if (octavePatternSelect) {
+    octavePatternSelect.value = octaveType;
+  }
+  buildPatternStates(false);
+}
+
+function getSnapshotLfoState() {
+  const entries = [];
+  const seen = new Set();
+  const now = performance.now();
+  voices.forEach((voice) => {
+    if (!voice || !voice.lfoActive || voice.lfoHalfPeriod <= 0) {
+      return;
+    }
+    const node = nodeById.get(voice.nodeId);
+    const key = getSnapshotNodeKey(node);
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    entries.push({
+      key,
+      half: Number(voice.lfoHalfPeriod) || 0,
+      curve: Number.isFinite(voice.lfoCurve) ? voice.lfoCurve : 1,
+      startOffsetMs: Number.isFinite(voice.lfoStartMs) ? voice.lfoStartMs - now : 0,
+    });
+  });
+  return entries.length ? entries : null;
+}
+
+function restoreSnapshotLfos(snapshot) {
+  if (!snapshotRestoreLfos || !snapshot || !Array.isArray(snapshot.lfos)) {
+    return;
+  }
+  const now = performance.now();
+  snapshot.lfos.forEach((entry) => {
+    if (!entry || !entry.key) {
+      return;
+    }
+    const node = getNodeBySnapshotKey(entry.key);
+    if (!node) {
+      return;
+    }
+    if (node.baseVoiceId) {
+      const base = findVoiceById(node.baseVoiceId);
+      if (base) {
+        stopVoice(base, false);
+      }
+      node.baseVoiceId = null;
+    }
+    voices.forEach((voice) => {
+      if (voice.nodeId === node.id && voice.lfoActive) {
+        stopVoice(voice, false);
+      }
+    });
+    const half = Number(entry.half) || 0;
+    if (half <= 0) {
+      return;
+    }
+    const startOffsetMs = Number(entry.startOffsetMs) || 0;
+    const startMs = snapshotRestoreLfoPhase ? now + startOffsetMs : now;
+    const voice = startVoice({
+      nodeId: node.id,
+      octave: 0,
+      freq: node.freq,
+      lfoActive: true,
+      lfoHalfPeriod: half,
+      lfoStartMs: startMs,
+      lfoCurve: Number.isFinite(entry.curve) ? entry.curve : 1,
+      source: "snapshot-lfo",
+    });
+    if (voice) {
+      const attack = getEnvelopeAttackSeconds() || 0.02;
+      const fadeIn = Math.max(0.03, attack);
+      const nowSec = audioCtx ? audioCtx.currentTime : 0;
+      const nowMs = performance.now();
+      const minGain = 1 - lfoDepth;
+      const targetGain = (1 - lfoDepth) + lfoDepth * getLfoValue(voice, nowMs);
+      voice.lfoGain.gain.cancelScheduledValues(nowSec);
+      voice.lfoGain.gain.setValueAtTime(minGain, nowSec);
+      voice.lfoGain.gain.linearRampToValueAtTime(targetGain, nowSec + fadeIn);
+      node.baseVoiceId = voice.id;
+      ensureLfoLoop();
+    }
+  });
+}
+
+function startPatternPlaybackFromSnapshot() {
+  patternStepCounter = 0;
+  patternPlayerState = "playing";
+  updateScoreButton();
+  scheduleNextPatternEvent(0);
+}
+
 function updateLfoPlayButton() {
   if (!lfoPlayToggle) {
     return;
@@ -1875,20 +2003,29 @@ function envelopeToSeconds(value) {
 }
 
 function getEnvelopeAttackSeconds() {
-  return envelopeToSeconds(attackSlider.value);
+  return envelopeToSeconds(getEnvelopeSliderValue(attackSlider));
 }
 
 function getEnvelopeDecaySeconds() {
-  return envelopeToSeconds(decaySlider.value);
+  return envelopeToSeconds(getEnvelopeSliderValue(decaySlider));
 }
 
 function getEnvelopeReleaseSeconds() {
-  return envelopeToSeconds(releaseSlider.value);
+  return envelopeToSeconds(getEnvelopeSliderValue(releaseSlider));
 }
 
 function stopPatternVoices() {
   patternVoices.forEach((voice) => stopVoice(voice));
   patternVoices = new Set();
+}
+
+function clearPatternTimers() {
+  if (patternNextTimer) {
+    clearTimeout(patternNextTimer);
+    patternNextTimer = null;
+  }
+  patternOffTimers.forEach((timer) => clearTimeout(timer));
+  patternOffTimers = [];
 }
 
 function getActiveNodeOrder() {
@@ -2369,6 +2506,39 @@ function nextOctaveOffset() {
   return value;
 }
 
+function applyPendingSnapshotForPattern(nextSnapshot, nextIndex, nextLetter) {
+  pendingSnapshotState = null;
+  pendingSnapshotIndex = -1;
+  pendingSnapshotLetterKey = "";
+  pendingSnapshotAtNextEvent = false;
+  if (nextIndex >= 0) {
+    snapshotActiveIndex = nextIndex;
+  }
+  if (nextLetter) {
+    snapshotActiveLetterKey = nextLetter;
+  }
+  applyPresetState(nextSnapshot.state, {
+    skipLayoutModeSwitch: true,
+    skipStopVoices: true,
+  });
+  updateSnapshotUi();
+  if (snapshotRestoreSequence) {
+    if (nextSnapshot.pattern) {
+      clearPatternTimers();
+      stopPatternVoices();
+      applySnapshotPatternState(nextSnapshot.pattern);
+    } else {
+      stopPatternPlayback();
+      restoreSnapshotPlayState(nextSnapshot);
+      restoreSnapshotLfos(nextSnapshot);
+      return false;
+    }
+  }
+  restoreSnapshotPlayState(nextSnapshot);
+  restoreSnapshotLfos(nextSnapshot);
+  return true;
+}
+
 function scheduleNextPatternEvent(delayMs) {
   if (patternNextTimer) {
     clearTimeout(patternNextTimer);
@@ -2377,32 +2547,24 @@ function scheduleNextPatternEvent(delayMs) {
     if (patternPlayerState !== "playing") {
       return;
     }
-    if (pendingSnapshotState && snapshotDeferToCycleEnd && patternSequenceState) {
+    if (pendingSnapshotState && patternSequenceState) {
       const cycleLength = getSequenceOrderIndices().length;
-      if (cycleLength && patternStepCounter > 0 && patternStepCounter % cycleLength === 0) {
+      const atCycleEnd =
+        cycleLength && patternStepCounter > 0 && patternStepCounter % cycleLength === 0;
+      const shouldApply =
+        snapshotDeferToCycleEnd ? atCycleEnd : pendingSnapshotAtNextEvent;
+      if (shouldApply) {
         const nextSnapshot = pendingSnapshotState;
         const nextIndex = pendingSnapshotIndex;
         const nextLetter = pendingSnapshotLetterKey;
-        pendingSnapshotState = null;
-        pendingSnapshotIndex = -1;
-        pendingSnapshotLetterKey = "";
-        if (nextIndex >= 0) {
-          snapshotActiveIndex = nextIndex;
+        const continuePattern = applyPendingSnapshotForPattern(
+          nextSnapshot,
+          nextIndex,
+          nextLetter
+        );
+        if (!continuePattern) {
+          return;
         }
-        if (nextLetter) {
-          snapshotActiveLetterKey = nextLetter;
-        }
-        applyPresetState(nextSnapshot.state, {
-          skipLayoutModeSwitch: true,
-          skipStopVoices: true,
-        });
-        updateSnapshotUi();
-        resetPatternCycle();
-        restoreSnapshotPlayState(nextSnapshot);
-        if (patternPlayerState === "playing") {
-          scheduleNextPatternEvent(0);
-        }
-        return;
       }
     }
     const isOneShot = Boolean(oneShotCheckbox && oneShotCheckbox.checked);
@@ -2802,10 +2964,13 @@ function getNodeBySnapshotKey(key) {
   return null;
 }
 
-function getPlayingSnapshotKeys() {
+function getPlayingSnapshotKeys({ excludePattern = false } = {}) {
   const keys = new Set();
   voices.forEach((voice) => {
     if (!voice || voice.releasing || !Number.isFinite(voice.nodeId)) {
+      return;
+    }
+    if (excludePattern && voice.source === "pattern") {
       return;
     }
     const key = getSnapshotNodeKey(nodeById.get(voice.nodeId));
@@ -2901,6 +3066,17 @@ function buildSnapshotPresetUrl() {
   if (snapshotActiveLetterKey) {
     state.snapshotActiveLetter = snapshotActiveLetterKey;
   }
+  state.snapshotSettings = {
+    deferToCycleEnd: snapshotDeferToCycleEnd,
+    restorePlayNodes: snapshotRestorePlayNodes,
+    connectCommonTones: snapshotConnectCommonTones,
+    restoreView: snapshotRestoreView,
+    restoreSequence: snapshotRestoreSequence,
+    restoreLfos: snapshotRestoreLfos,
+    restoreLfoPhase: snapshotRestoreLfoPhase,
+    useLetterKeys: snapshotKeyboardMode,
+    lettersActive: snapshotKeyboardActive,
+  };
   const encoded = encodePresetState(state);
   return `${window.location.origin}/#${PRESET_PARAM}=${encoded}`;
 }
@@ -3012,10 +3188,30 @@ function saveSnapshot(index) {
   if (!state) {
     return;
   }
+  if (snapshotDebugEnabled) {
+    console.groupCollapsed(`[snapshot-save] ${index}`);
+    const voiceInfo = voices.map((voice) => ({
+      id: voice.id,
+      nodeId: voice.nodeId,
+      source: voice.source,
+      freq: Number.isFinite(voice.freq) ? Number(voice.freq.toFixed(3)) : null,
+      releasing: voice.releasing,
+    }));
+    console.log("voices", voiceInfo);
+    console.groupEnd();
+  }
   snapshotSlots[index] = {
     state,
-    playKeys: getPlayingSnapshotKeys(),
+    playKeys: getPlayingSnapshotKeys({ excludePattern: patternPlayerState === "playing" }),
+    pattern: getSnapshotPatternState(),
+    lfos: getSnapshotLfoState(),
   };
+  if (snapshotDebugEnabled) {
+    console.groupCollapsed(`[snapshot-save-keys] ${index}`);
+    console.log("playKeys", snapshotSlots[index].playKeys);
+    console.log("pattern", snapshotSlots[index].pattern);
+    console.groupEnd();
+  }
   updateSnapshotUi();
   const displayIndex = index === 9 ? 0 : index + 1;
   showTemporaryBanner(`Snapshot ${displayIndex} saved`);
@@ -3029,10 +3225,30 @@ function saveSnapshotLetter(letter, index) {
   if (!state) {
     return;
   }
+  if (snapshotDebugEnabled) {
+    console.groupCollapsed(`[snapshot-save-letter] ${letter}`);
+    const voiceInfo = voices.map((voice) => ({
+      id: voice.id,
+      nodeId: voice.nodeId,
+      source: voice.source,
+      freq: Number.isFinite(voice.freq) ? Number(voice.freq.toFixed(3)) : null,
+      releasing: voice.releasing,
+    }));
+    console.log("voices", voiceInfo);
+    console.groupEnd();
+  }
   snapshotLetterSlots[index] = {
     state,
-    playKeys: getPlayingSnapshotKeys(),
+    playKeys: getPlayingSnapshotKeys({ excludePattern: patternPlayerState === "playing" }),
+    pattern: getSnapshotPatternState(),
+    lfos: getSnapshotLfoState(),
   };
+  if (snapshotDebugEnabled) {
+    console.groupCollapsed(`[snapshot-save-letter-keys] ${letter}`);
+    console.log("playKeys", snapshotLetterSlots[index].playKeys);
+    console.log("pattern", snapshotLetterSlots[index].pattern);
+    console.groupEnd();
+  }
   snapshotActiveLetterKey = letter;
   updateSnapshotUi();
   showTemporaryBanner(`Snapshot ${letter.toUpperCase()} saved`);
@@ -3053,14 +3269,37 @@ function recallSnapshotLetter(letter, index) {
   if (snapshotDeferToCycleEnd && patternPlayerState === "playing") {
     pendingSnapshotIndex = -1;
     pendingSnapshotState = { ...snapshot, state: snapshotState };
+    pendingSnapshotLetterKey = letter;
     snapshotActiveLetterKey = letter;
     updateSnapshotUi();
+    pendingSnapshotAtNextEvent = false;
+    return;
+  }
+  if (patternPlayerState === "playing") {
+    pendingSnapshotIndex = -1;
+    pendingSnapshotState = { ...snapshot, state: snapshotState };
+    pendingSnapshotLetterKey = letter;
+    snapshotActiveLetterKey = letter;
+    updateSnapshotUi();
+    pendingSnapshotAtNextEvent = true;
     return;
   }
   snapshotActiveLetterKey = letter;
   applyPresetState(snapshotState, { skipLayoutModeSwitch: true, skipStopVoices: true });
-  buildPatternStates(true);
+  if (snapshotRestoreSequence) {
+    if (snapshot.pattern) {
+      stopPatternPlayback();
+      applySnapshotPatternState(snapshot.pattern);
+      startPatternPlaybackFromSnapshot();
+    } else {
+      stopPatternPlayback();
+      buildPatternStates(true);
+    }
+  } else {
+    buildPatternStates(true);
+  }
   restoreSnapshotPlayState(snapshot);
+  restoreSnapshotLfos(snapshot);
   updateSnapshotUi();
 }
 
@@ -3080,12 +3319,32 @@ function recallSnapshot(index) {
     pendingSnapshotIndex = index;
     pendingSnapshotState = { ...snapshot, state: snapshotState };
     pendingSnapshotLetterKey = "";
+    pendingSnapshotAtNextEvent = false;
+    return;
+  }
+  if (patternPlayerState === "playing") {
+    pendingSnapshotIndex = index;
+    pendingSnapshotState = { ...snapshot, state: snapshotState };
+    pendingSnapshotLetterKey = "";
+    pendingSnapshotAtNextEvent = true;
     return;
   }
   snapshotActiveIndex = index;
   applyPresetState(snapshotState, { skipLayoutModeSwitch: true, skipStopVoices: true });
-  buildPatternStates(true);
+  if (snapshotRestoreSequence) {
+    if (snapshot.pattern) {
+      stopPatternPlayback();
+      applySnapshotPatternState(snapshot.pattern);
+      startPatternPlaybackFromSnapshot();
+    } else {
+      stopPatternPlayback();
+      buildPatternStates(true);
+    }
+  } else {
+    buildPatternStates(true);
+  }
   restoreSnapshotPlayState(snapshot);
+  restoreSnapshotLfos(snapshot);
   updateSnapshotUi();
 }
 
@@ -3102,11 +3361,34 @@ function restoreSnapshotPlayState(snapshot) {
   if (!audioCtx || audioCtx.state !== "running") {
     return;
   }
-  logSnapshotDebug("before-restore", snapshot);
-  const targetKeys = new Set(snapshot.playKeys);
+  if (snapshotDebugEnabled) {
+    console.groupCollapsed("[snapshot-restore-play]");
+    console.log("playKeys", snapshot.playKeys);
+    const voiceInfo = voices.map((voice) => ({
+      id: voice.id,
+      nodeId: voice.nodeId,
+      source: voice.source,
+      freq: Number.isFinite(voice.freq) ? Number(voice.freq.toFixed(3)) : null,
+      releasing: voice.releasing,
+    }));
+    console.log("voices-before", voiceInfo);
+    console.groupEnd();
+  }
+  const lfoKeySet = new Set();
+  if (snapshotRestoreLfos && snapshot.lfos) {
+    snapshot.lfos.forEach((entry) => {
+      if (entry && entry.key) {
+        lfoKeySet.add(entry.key);
+      }
+    });
+  }
+  const targetKeys = new Set(
+    snapshot.playKeys.filter((key) => (lfoKeySet.size ? !lfoKeySet.has(key) : true))
+  );
   const targetFreqKeys = new Set();
   const targetNodes = new Map();
   const targetFreqMap = new Map();
+  const targetLfoFreqKeys = new Set();
   targetKeys.forEach((key) => {
     const node = getNodeBySnapshotKey(key);
     if (!node || !Number.isFinite(node.freq)) {
@@ -3119,6 +3401,18 @@ function restoreSnapshotPlayState(snapshot) {
       targetFreqMap.set(freqKey, node);
     }
   });
+  if (snapshotRestoreLfos && snapshot && Array.isArray(snapshot.lfos)) {
+    snapshot.lfos.forEach((entry) => {
+      if (!entry || !entry.key) {
+        return;
+      }
+      const node = getNodeBySnapshotKey(entry.key);
+      if (!node || !Number.isFinite(node.freq)) {
+        return;
+      }
+      targetLfoFreqKeys.add(node.freq.toFixed(6));
+    });
+  }
   nodes.forEach((node) => {
     node.baseVoiceId = null;
   });
@@ -3141,6 +3435,13 @@ function restoreSnapshotPlayState(snapshot) {
         stopVoice(voice, false);
         return;
       }
+      if (snapshotRestoreLfos) {
+        const shouldBeLfo = targetLfoFreqKeys.has(freqKey);
+        if (voice.lfoActive !== shouldBeLfo) {
+          stopVoice(voice, false);
+          return;
+        }
+      }
       const node = targetFreqMap.get(freqKey);
       if (node) {
         voice.nodeId = node.id;
@@ -3150,8 +3451,23 @@ function restoreSnapshotPlayState(snapshot) {
         }
       }
     });
+    playingKeys.clear();
+    playingFreqKeys.clear();
+    voices.forEach((voice) => {
+      if (!voice || voice.releasing) {
+        return;
+      }
+      const key = getSnapshotNodeKey(nodeById.get(voice.nodeId));
+      if (key) {
+        playingKeys.add(key);
+      }
+      if (Number.isFinite(voice.freq)) {
+        playingFreqKeys.add(voice.freq.toFixed(6));
+      }
+    });
   } else {
-    stopAllVoices();
+    const activeVoices = [...voices];
+    activeVoices.forEach((voice) => stopVoice(voice, false));
     voices = [];
     patternVoices.clear();
     playingKeys.clear();
@@ -3175,7 +3491,18 @@ function restoreSnapshotPlayState(snapshot) {
       entry.node.baseVoiceId = voice.id;
     }
   });
-  logSnapshotDebug("after-restore", snapshot);
+  if (snapshotDebugEnabled) {
+    console.groupCollapsed("[snapshot-restore-play-after]");
+    const voiceInfo = voices.map((voice) => ({
+      id: voice.id,
+      nodeId: voice.nodeId,
+      source: voice.source,
+      freq: Number.isFinite(voice.freq) ? Number(voice.freq.toFixed(3)) : null,
+      releasing: voice.releasing,
+    }));
+    console.log("voices-after", voiceInfo);
+    console.groupEnd();
+  }
 }
 
 function getSnapshotIndexFromEvent(event) {
@@ -8179,6 +8506,9 @@ function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
   if (!connectOrphansEnabled || !orphanGuideEdges.size) {
     return;
   }
+  const labelFont = layoutMode ? layoutLineLabelFont : "Noto Serif";
+  const labelWeight = layoutMode ? layoutLineLabelFontWeight : 400;
+  const labelSize = layoutMode ? getLayoutLineLabelSize() : 14;
   ctx.save();
   ctx.lineWidth = 1.5;
   orphanGuideEdges.forEach((edgeKey) => {
@@ -8220,10 +8550,21 @@ function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
     const uy = dy / dist;
     const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
     const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-    ctx.beginPath();
-    ctx.moveTo(start.x + ux * startRadius, start.y + uy * startRadius);
-    ctx.lineTo(end.x - ux * endRadius, end.y - uy * endRadius);
-    ctx.stroke();
+    const labelText = getEdgeLabelText(a, b);
+    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
+    drawCanvasEdgeSegment({
+      start,
+      end,
+      startRadius,
+      endRadius,
+      color: themeColors.nodeStroke,
+      label,
+      labelFont,
+      labelWeight,
+      labelSize,
+      alpha: edgeAlpha,
+      labelAlpha: Math.min(1, (edgeAlpha + 1) * 0.3),
+    });
   });
   ctx.restore();
 }
@@ -13464,6 +13805,57 @@ function hitTestEdgeLabel(screenPoint) {
       bestDistance = distance;
     }
   });
+  if (connectOrphansEnabled && orphanGuideEdges.size) {
+    orphanGuideEdges.forEach((edgeKey) => {
+      const parts = edgeKey.split("|");
+      if (parts.length !== 2) {
+        return;
+      }
+      const a = nodeById.get(Number(parts[0]));
+      const b = nodeById.get(Number(parts[1]));
+      if (!a || !b) {
+        return;
+      }
+      const labelText = getEdgeLabelText(a, b);
+      if (!labelText) {
+        return;
+      }
+      const startEntry = nodePosMap.get(a.id);
+      const endEntry = nodePosMap.get(b.id);
+      if (!startEntry || !endEntry) {
+        return;
+      }
+      const start = startEntry.pos;
+      const end = endEntry.pos;
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      if (!dist) {
+        return;
+      }
+      const ux = dx / dist;
+      const uy = dy / dist;
+      const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+      const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+      const lineStart = {
+        x: start.x + ux * startRadius,
+        y: start.y + uy * startRadius,
+      };
+      const lineEnd = {
+        x: end.x - ux * endRadius,
+        y: end.y - uy * endRadius,
+      };
+      const lineLen = Math.max(0, dist - startRadius - endRadius);
+      if (lineLen <= 0) {
+        return;
+      }
+      const distance = distanceToSegment(screenPoint, lineStart, lineEnd);
+      if (distance <= hitThreshold && distance < bestDistance) {
+        best = { a, b };
+        bestDistance = distance;
+      }
+    });
+  }
   return best;
 }
 
@@ -13852,12 +14244,45 @@ function updateVolume() {
   masterGain.gain.setTargetAtTime(amplitude, audioCtx.currentTime, 0.01);
 }
 
+function getEnvelopeSliderValue(slider) {
+  if (!slider) {
+    return ENVELOPE_MIN;
+  }
+  const raw = Number(slider.value);
+  const t = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) / 100 : 0;
+  const curved = Math.pow(t, ENVELOPE_CURVE);
+  return ENVELOPE_MIN + (ENVELOPE_MAX - ENVELOPE_MIN) * curved;
+}
+
+function setEnvelopeSliderFromValue(slider, value) {
+  if (!slider) {
+    return;
+  }
+  const safe =
+    Number.isFinite(value) && value > 0 ? Math.min(ENVELOPE_MAX, Math.max(ENVELOPE_MIN, value)) : ENVELOPE_MIN;
+  const t = (safe - ENVELOPE_MIN) / (ENVELOPE_MAX - ENVELOPE_MIN);
+  const clamped = Math.min(1, Math.max(0, Number.isFinite(t) ? t : 0));
+  slider.value = String(Math.round(Math.pow(clamped, 1 / ENVELOPE_CURVE) * 100));
+}
+
+function initEnvelopeSliders() {
+  if (attackSlider && attackSlider.dataset.default) {
+    setEnvelopeSliderFromValue(attackSlider, Number(attackSlider.dataset.default));
+  }
+  if (decaySlider && decaySlider.dataset.default) {
+    setEnvelopeSliderFromValue(decaySlider, Number(decaySlider.dataset.default));
+  }
+  if (releaseSlider && releaseSlider.dataset.default) {
+    setEnvelopeSliderFromValue(releaseSlider, Number(releaseSlider.dataset.default));
+  }
+}
+
 function updateEnvelopeReadouts() {
   const unit = envelopeTimeMode === "tempo" ? " beats" : "s";
-  attackReadout.textContent = `${Number(attackSlider.value).toFixed(2)}${unit}`;
-  decayReadout.textContent = `${Number(decaySlider.value).toFixed(2)}${unit}`;
+  attackReadout.textContent = `${getEnvelopeSliderValue(attackSlider).toFixed(2)}${unit}`;
+  decayReadout.textContent = `${getEnvelopeSliderValue(decaySlider).toFixed(2)}${unit}`;
   sustainReadout.textContent = `${Number(sustainSlider.value).toFixed(2)}`;
-  releaseReadout.textContent = `${Number(releaseSlider.value).toFixed(2)}${unit}`;
+  releaseReadout.textContent = `${getEnvelopeSliderValue(releaseSlider).toFixed(2)}${unit}`;
 }
 
 function updateLfoDepth() {
@@ -19183,10 +19608,10 @@ function getPresetState() {
       keyboardMode: keyboardModeSelect ? keyboardModeSelect.value : "off",
       customPianoMap: serializeCustomPianoMap(),
       waveform: waveformSelect ? waveformSelect.value : "sine",
-      attack: Number(attackSlider.value),
-      decay: Number(decaySlider.value),
+      attack: getEnvelopeSliderValue(attackSlider),
+      decay: getEnvelopeSliderValue(decaySlider),
       sustain: Number(sustainSlider.value),
-      release: Number(releaseSlider.value),
+      release: getEnvelopeSliderValue(releaseSlider),
       oneShot: Boolean(oneShotCheckbox && oneShotCheckbox.checked),
       envelopeTimeMode,
     },
@@ -19387,6 +19812,68 @@ function applyPresetState(state, options = {}) {
     snapshotActiveLetterKey = typeof state.snapshotActiveLetter === "string"
       ? state.snapshotActiveLetter
       : snapshotActiveLetterKey;
+    updateSnapshotUi();
+  }
+  if (state.snapshotSettings && typeof state.snapshotSettings === "object") {
+    const settings = state.snapshotSettings;
+    if (typeof settings.deferToCycleEnd === "boolean") {
+      snapshotDeferToCycleEnd = settings.deferToCycleEnd;
+    }
+    if (typeof settings.restorePlayNodes === "boolean") {
+      snapshotRestorePlayNodes = settings.restorePlayNodes;
+    }
+    if (typeof settings.connectCommonTones === "boolean") {
+      snapshotConnectCommonTones = settings.connectCommonTones;
+    }
+    if (typeof settings.restoreView === "boolean") {
+      snapshotRestoreView = settings.restoreView;
+    }
+    if (typeof settings.restoreSequence === "boolean") {
+      snapshotRestoreSequence = settings.restoreSequence;
+    }
+    if (typeof settings.restoreLfos === "boolean") {
+      snapshotRestoreLfos = settings.restoreLfos;
+    }
+    if (typeof settings.restoreLfoPhase === "boolean") {
+      snapshotRestoreLfoPhase = settings.restoreLfoPhase;
+    }
+    if (typeof settings.useLetterKeys === "boolean") {
+      snapshotKeyboardMode = settings.useLetterKeys;
+    }
+    if (typeof settings.lettersActive === "boolean") {
+      snapshotKeyboardActive = settings.lettersActive;
+    }
+    if (snapshotDeferToggle) {
+      snapshotDeferToggle.checked = snapshotDeferToCycleEnd;
+    }
+    if (snapshotRestoreToggle) {
+      snapshotRestoreToggle.checked = snapshotRestorePlayNodes;
+    }
+    if (snapshotConnectToggle) {
+      snapshotConnectToggle.checked = snapshotConnectCommonTones;
+      snapshotConnectToggle.disabled = !snapshotRestorePlayNodes;
+    }
+    if (snapshotRestoreViewToggle) {
+      snapshotRestoreViewToggle.checked = snapshotRestoreView;
+    }
+    if (snapshotRestoreSequenceToggle) {
+      snapshotRestoreSequenceToggle.checked = snapshotRestoreSequence;
+    }
+    if (snapshotRestoreLfosToggle) {
+      snapshotRestoreLfosToggle.checked = snapshotRestoreLfos;
+    }
+    if (snapshotRestoreLfoPhaseToggle) {
+      snapshotRestoreLfoPhaseToggle.checked = snapshotRestoreLfoPhase;
+      snapshotRestoreLfoPhaseToggle.disabled = !snapshotRestoreLfos;
+    }
+    if (snapshotKeyboardModeToggle) {
+      snapshotKeyboardModeToggle.checked = snapshotKeyboardMode;
+    }
+    if (snapshotKeyboardActiveToggle) {
+      snapshotKeyboardActiveToggle.checked = snapshotKeyboardActive;
+      snapshotKeyboardActiveToggle.disabled = !snapshotKeyboardMode;
+    }
+    setKeyboardModeDisabled(snapshotKeyboardMode);
     updateSnapshotUi();
   }
   const layoutState = state.layout && typeof state.layout === "object" ? state.layout : null;
@@ -19665,16 +20152,16 @@ function applyPresetState(state, options = {}) {
       waveformSelect.dispatchEvent(new Event("change"));
     }
     if (Number.isFinite(state.synth.attack)) {
-      attackSlider.value = String(state.synth.attack);
+      setEnvelopeSliderFromValue(attackSlider, Number(state.synth.attack));
     }
     if (Number.isFinite(state.synth.decay)) {
-      decaySlider.value = String(state.synth.decay);
+      setEnvelopeSliderFromValue(decaySlider, Number(state.synth.decay));
     }
     if (Number.isFinite(state.synth.sustain)) {
       sustainSlider.value = String(state.synth.sustain);
     }
     if (Number.isFinite(state.synth.release)) {
-      releaseSlider.value = String(state.synth.release);
+      setEnvelopeSliderFromValue(releaseSlider, Number(state.synth.release));
     }
     if (oneShotCheckbox && typeof state.synth.oneShot === "boolean") {
       oneShotCheckbox.checked = state.synth.oneShot;
@@ -23241,6 +23728,28 @@ if (snapshotRestoreViewToggle) {
     snapshotRestoreView = snapshotRestoreViewToggle.checked;
   });
 }
+const snapshotRestoreSequenceToggle = document.getElementById("snapshot-restore-sequence");
+if (snapshotRestoreSequenceToggle) {
+  snapshotRestoreSequenceToggle.addEventListener("change", () => {
+    snapshotRestoreSequence = snapshotRestoreSequenceToggle.checked;
+  });
+}
+const snapshotRestoreLfosToggle = document.getElementById("snapshot-restore-lfos");
+const snapshotRestoreLfoPhaseToggle = document.getElementById("snapshot-restore-lfo-phase");
+if (snapshotRestoreLfosToggle) {
+  snapshotRestoreLfosToggle.addEventListener("change", () => {
+    snapshotRestoreLfos = snapshotRestoreLfosToggle.checked;
+    if (snapshotRestoreLfoPhaseToggle) {
+      snapshotRestoreLfoPhaseToggle.disabled = !snapshotRestoreLfos;
+    }
+  });
+}
+if (snapshotRestoreLfoPhaseToggle) {
+  snapshotRestoreLfoPhaseToggle.addEventListener("change", () => {
+    snapshotRestoreLfoPhase = snapshotRestoreLfoPhaseToggle.checked;
+  });
+  snapshotRestoreLfoPhaseToggle.disabled = !snapshotRestoreLfos;
+}
 const snapshotKeyboardModeToggle = document.getElementById("snapshot-keyboard-mode");
 const snapshotKeyboardActiveToggle = document.getElementById("snapshot-keyboard-active");
 if (snapshotKeyboardModeToggle) {
@@ -23319,6 +23828,16 @@ if (snapshotKeyboardModeToggle) {
 if (snapshotKeyboardActiveToggle) {
   snapshotKeyboardActiveToggle.checked = snapshotKeyboardActive;
   snapshotKeyboardActiveToggle.disabled = !snapshotKeyboardMode;
+}
+if (snapshotRestoreSequenceToggle) {
+  snapshotRestoreSequenceToggle.checked = snapshotRestoreSequence;
+}
+if (snapshotRestoreLfosToggle) {
+  snapshotRestoreLfosToggle.checked = snapshotRestoreLfos;
+}
+if (snapshotRestoreLfoPhaseToggle) {
+  snapshotRestoreLfoPhaseToggle.checked = snapshotRestoreLfoPhase;
+  snapshotRestoreLfoPhaseToggle.disabled = !snapshotRestoreLfos;
 }
 if (intervalChartButton) {
   intervalChartButton.addEventListener("click", () => {
@@ -24995,6 +25514,7 @@ if (patternLengthModeInputs.length) {
     });
   });
 }
+initEnvelopeSliders();
 updateEnvelopeReadouts();
 updateLfoDepth();
 updateTempoReadout();

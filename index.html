@@ -16,11 +16,12 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/index-63g-rW9v.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/style-BndN34Nb.css">
+    <script type="module" crossorigin src="./assets/index-CVhdkBwb.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/style-BeoJL7w1.css">
   </head>
   <body>
     <canvas id="lattice" tabindex="0" aria-label="Tuning lattice"></canvas>
+    <div id="layout-overlay" class="layout-overlay" hidden></div>
 
     <main class="app">
       <div class="top-bar">
@@ -61,10 +62,6 @@
             <select id="ratio-z" class="narrow-select ratio-z"></select>
           </div>
         </div>
-        <div class="help-toggle">
-          <input id="show-help" type="checkbox" checked />
-          <label for="show-help">Show help</label>
-        </div>
         </div>
         <dialog id="fundamental-spelling-dialog" class="custom-ratio-dialog">
           <div class="dialog-content">
@@ -92,23 +89,20 @@
               <input id="load-lattice-input" type="file" accept="application/json" hidden />
             </div>
             <div class="control-group preset-toggle">
-              <button id="preset-toggle" type="button" aria-expanded="false" aria-controls="preset-panel">
+              <button id="preset-toggle" type="button" aria-expanded="false" aria-controls="preset-overlay">
                 Presets
               </button>
-              <div id="preset-panel" class="panel preset-panel" hidden>
-                <ul id="preset-list" class="preset-list"></ul>
-              </div>
             </div>
-            <div class="control-group analysis-toggle">
-              <button id="analysis-toggle" type="button" aria-expanded="false" aria-controls="analysis-panel">
-                Analysis
+            <div class="control-group calculate-toggle">
+              <button id="calculate-toggle" type="button" aria-expanded="false" aria-controls="calculate-panel">
+                Calculate
               </button>
-              <div id="analysis-panel" class="panel analysis-panel" hidden>
-                <div class="analysis-mode-buttons">
-                  <button type="button" data-analysis-mode="none" class="is-active">None</button>
-                  <button type="button" data-analysis-mode="distances">Distances</button>
-                  <button type="button" data-analysis-mode="commas">Microtonal Intervals</button>
-                </div>
+              <div id="calculate-panel" class="panel calculate-panel" hidden>
+                <button id="find-ratio" type="button" class="button-full">Find Ratios</button>
+                <button id="add-interval" type="button" class="button-full">Find Interval</button>
+                <button id="build-intervals" type="button" class="button-full">
+                  Build from Intervals
+                </button>
               </div>
             </div>
             <div class="control-group options-toggle">
@@ -133,6 +127,16 @@
                     <button type="button" data-cents-precision="0">0</button>
                     <button type="button" data-cents-precision="1">1</button>
                     <button type="button" data-cents-precision="2">2</button>
+                  </div>
+                </div>
+                <div class="control-group control-group-inline">
+                  <input id="connect-orphans" type="checkbox" />
+                  <label for="connect-orphans">Connect orphans</label>
+                </div>
+                <div class="control-group">
+                  <div class="control-inline">
+                    <input id="directional-ratio-labels" type="checkbox" />
+                    <label for="directional-ratio-labels">Directional ratio labels</label>
                   </div>
                 </div>
                
@@ -160,6 +164,10 @@
           <div id="ui-hint" class="ui-hint"></div>
           <div id="banner-message" class="ui-hint banner-message" hidden></div>
         </div>
+        <div class="help-toggle help-toggle-right">
+          <input id="show-help" type="checkbox" checked />
+          <label for="show-help">Show help</label>
+        </div>
       </div>
     </main>
 
@@ -177,6 +185,12 @@
           </div>
         </div>
         <div class="control-group">
+          <button id="layout-freeze" type="button" class="button-full">Freeze &amp; Edit Layout</button>
+        </div>
+        <div class="control-group">
+          <button id="layout-share-link" type="button" class="button-full">Save &amp; Copy Link</button>
+        </div>
+        <div class="control-group">
           <label for="layout-page-size">Page Size</label>
           <select id="layout-page-size">
             <option value="letter">Letter</option>
@@ -189,12 +203,6 @@
             <option value="portrait">Portrait</option>
             <option value="landscape" selected>Landscape</option>
           </select>
-        </div>
-        <div class="control-group">
-          <div class="control-inline">
-            <input id="layout-lock-position" type="checkbox" checked />
-            <span>Separate Layout</span>
-          </div>
         </div>
         <div class="control-group">
           <input id="layout-title" type="text" placeholder="Title" aria-label="Title" />
@@ -241,6 +249,16 @@
         <div class="control-group control-group-inline">
           <label for="layout-node-size">Node</label>
           <input id="layout-node-size" type="range" min="18" max="70" step="1" value="35" />
+        </div>
+        <div class="nav-3d-title">Align</div>
+        <div class="control-group">
+          <div class="control-inline layout-align-row">
+            <button id="layout-align-x" type="button">X</button>
+            <button id="layout-align-y" type="button">Y</button>
+          </div>
+          <div class="control-inline layout-align-row">
+            <button id="layout-straighten" type="button">Straighten</button>
+          </div>
         </div>
         <div id="layout-key-mappings-group" class="nav-3d-accordion-body" hidden>
           <div
@@ -312,6 +330,12 @@
             </div>
             <div class="control-group">
               <div class="control-inline">
+                <input id="layout-show-ratio-cents" type="checkbox" />
+                <label for="layout-show-ratio-cents">Cents</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
                 <input id="layout-show-hz" type="checkbox" />
                 <label for="layout-show-hz">Hz</label>
               </div>
@@ -328,11 +352,18 @@
                 <label for="layout-line-labels-toggle">Line labels</label>
               </div>
             </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="layout-show-distances" type="checkbox" checked />
+                <label for="layout-show-distances">Distances</label>
+                <button type="button" class="inline-link" data-distance-select>edit</button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="nav-3d-title">Export</div>
         <div class="control-group">
-          <div class="control-inline">
+          <div class="control-inline layout-align-row">
             <button id="export-svg" type="button">SVG</button>
             <button id="export-pdf" type="button">PDF</button>
           </div>
@@ -527,6 +558,36 @@
             <input id="layout-axis-size" type="range" min="10" max="36" step="1" value="19" />
           </div>
         </label>
+        <label>
+          Line Labels Font
+          <div class="layout-font-controls">
+            <select id="layout-line-label-font">
+              <option value="Lexend">Lexend</option>
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+<option value="Lato">Lato</option>
+<option value="PT Sans">PT Sans</option>
+<option value="PT Serif">PT Serif</option>
+<option value="iAWriterDuoS">iAWriterDuoS</option>
+<option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <select id="layout-line-label-weight">
+              <option value="200">Extra Light</option>
+              <option value="300">Light</option>
+              <option value="400">Regular</option>
+              <option value="500">Medium</option>
+              <option value="600">Semi Bold</option>
+              <option value="700">Bold</option>
+            </select>
+          </div>
+          <div class="layout-font-size">
+            <span>Size</span>
+            <input id="layout-line-label-size" type="range" min="8" max="28" step="1" value="13" />
+          </div>
+        </label>
         <div id="layout-custom-size-group" hidden>
           <label id="layout-custom-font-group" hidden>
             Custom Text Font
@@ -597,16 +658,6 @@
     </div>
 
     <section class="panel synth-panel">
-      <div class="synth-group">
-        <label for="volume">Main Volume (dB)</label>
-        <input id="volume" type="range" min="-60" max="0" step="1" value="-12" />
-        <span id="volume-readout">-12 dB</span>
-      </div>
-      <div class="synth-group">
-        <label for="lfo-depth">LFO Depth</label>
-        <input id="lfo-depth" type="range" min="0" max="1" step="0.01" value="1" />
-        <span id="lfo-depth-readout">100%</span>
-      </div>
       <div class="synth-group">
         <div id="keyboard-map-popover" class="keyboard-map-popover" hidden>
           <div class="piano-keys" role="group" aria-label="Piano keys">
@@ -679,6 +730,85 @@
         </div>
         <div id="keyboard-help" class="keyboard-help" aria-live="polite"></div>
       </div>
+      <div class="synth-group snapshot-group">
+        <div class="snapshot-header">
+          <span>Snapshots</span>
+          <button id="snapshot-options-toggle" type="button" aria-expanded="false" aria-controls="snapshot-options">Options</button>
+          <button id="snapshot-copy" type="button">Save &amp; Copy</button>
+          <button id="snapshot-reset" type="button">Reset</button>
+        </div>
+        <div id="snapshot-options" class="snapshot-options" hidden>
+          <label class="snapshot-toggle">
+            <input id="snapshot-defer" type="checkbox" />
+            Defer to cycle end
+          </label>
+          <label class="snapshot-toggle">
+            <input id="snapshot-restore-play" type="checkbox" checked />
+            Restore playing nodes
+          </label>
+          <label class="snapshot-toggle snapshot-subtoggle">
+            <input id="snapshot-connect-tones" type="checkbox" />
+            Connect common tones
+          </label>
+          <label class="snapshot-toggle">
+            <input id="snapshot-restore-view" type="checkbox" checked />
+            Restore view
+          </label>
+          <label class="snapshot-toggle">
+            <input id="snapshot-restore-sequence" type="checkbox" checked />
+            Restore sequence
+          </label>
+          <label class="snapshot-toggle">
+            <input id="snapshot-restore-lfos" type="checkbox" checked />
+            Restore LFOs
+          </label>
+          <label class="snapshot-toggle snapshot-subtoggle">
+            <input id="snapshot-restore-lfo-phase" type="checkbox" />
+            Restore phase
+          </label>
+          <label class="snapshot-toggle">
+            <input id="snapshot-keyboard-mode" type="checkbox" />
+            Use letter keys
+          </label>
+        </div>
+        <div id="snapshot-grid" class="snapshot-grid" role="group" aria-label="Snapshots">
+          <button type="button" class="snapshot-slot" data-slot="0" title="Alt+1 save, 1 recall">1</button>
+          <button type="button" class="snapshot-slot" data-slot="1" title="Alt+2 save, 2 recall">2</button>
+          <button type="button" class="snapshot-slot" data-slot="2" title="Alt+3 save, 3 recall">3</button>
+          <button type="button" class="snapshot-slot" data-slot="3" title="Alt+4 save, 4 recall">4</button>
+          <button type="button" class="snapshot-slot" data-slot="4" title="Alt+5 save, 5 recall">5</button>
+          <button type="button" class="snapshot-slot" data-slot="5" title="Alt+6 save, 6 recall">6</button>
+          <button type="button" class="snapshot-slot" data-slot="6" title="Alt+7 save, 7 recall">7</button>
+          <button type="button" class="snapshot-slot" data-slot="7" title="Alt+8 save, 8 recall">8</button>
+          <button type="button" class="snapshot-slot" data-slot="8" title="Alt+9 save, 9 recall">9</button>
+          <button type="button" class="snapshot-slot" data-slot="9" title="Alt+0 save, 0 recall">0</button>
+        </div>
+      </div>
+      <div id="snapshot-keyboard" class="snapshot-keyboard" hidden>
+        <div class="snapshot-keyboard-row snapshot-keyboard-row-head">
+          <input id="snapshot-keyboard-active" type="checkbox" aria-label="Letters active" />
+          <div id="snapshot-keyboard-keys" class="snapshot-keyboard-keys"></div>
+        </div>
+      </div>
+      <div class="synth-actions">
+        <div class="synth-group synth-slider-group">
+          <label for="volume">Volume</label>
+          <input id="volume" type="range" min="-60" max="0" step="1" value="-12" />
+          <span id="volume-readout">-12 dB</span>
+        </div>
+        <div class="synth-group envelope-toggle">
+          <label class="visually-hidden" for="envelope-toggle">Synth Panel</label>
+          <button id="envelope-toggle" type="button" aria-expanded="false" aria-controls="envelope-panel">Synth</button>
+        </div>
+        <div class="synth-group animation-toggle">
+          <label class="visually-hidden" for="animation-toggle">Animation Panel</label>
+          <button id="animation-toggle" type="button" aria-expanded="false" aria-controls="animation-panel">Play</button>
+        </div>
+      </div>
+    </section>
+
+    <aside id="envelope-panel" class="panel envelope-panel" hidden>
+      <div class="envelope-panel-header">Synth</div>
       <div class="synth-group">
         <label for="waveform">Waveform</label>
         <select id="waveform">
@@ -688,37 +818,58 @@
           <option value="sawtooth">Sawtooth</option>
         </select>
       </div>
-      <div class="synth-group envelope-toggle">
-        <label class="visually-hidden" for="envelope-toggle">Envelope Panel</label>
-        <button id="envelope-toggle" type="button" aria-expanded="false" aria-controls="envelope-panel">Envelope</button>
-      </div>
-      <div class="synth-group animation-toggle">
-        <label class="visually-hidden" for="animation-toggle">Animation Panel</label>
-        <button id="animation-toggle" type="button" aria-expanded="false" aria-controls="animation-panel">Play</button>
-      </div>
-    </section>
-
-    <aside id="envelope-panel" class="panel envelope-panel" hidden>
-      <div class="envelope-panel-header">Envelope</div>
-      <div class="synth-group">
+      <div class="envelope-panel-section-title">Envelope</div>
+      <div class="synth-group envelope-slider">
         <label for="attack">Attack</label>
-        <input id="attack" type="range" min="0.005" max="15" step="0.005" value="0.02" />
-        <span id="attack-readout">0.02s</span>
+        <div class="envelope-slider-row">
+          <input
+            id="attack"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value="0"
+            data-default="0.02"
+          />
+          <span id="attack-readout">0.02s</span>
+        </div>
       </div>
-      <div class="synth-group">
+      <div class="synth-group envelope-slider">
         <label for="decay">Decay</label>
-        <input id="decay" type="range" min="0.01" max="15" step="0.01" value="0.2" />
-        <span id="decay-readout">0.20s</span>
+        <div class="envelope-slider-row">
+          <input
+            id="decay"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value="0"
+            data-default="0.2"
+          />
+          <span id="decay-readout">0.20s</span>
+        </div>
       </div>
-      <div class="synth-group">
+      <div class="synth-group envelope-slider">
         <label for="sustain">Sustain</label>
-        <input id="sustain" type="range" min="0" max="1" step="0.01" value="0.6" />
-        <span id="sustain-readout">0.60</span>
+        <div class="envelope-slider-row">
+          <input id="sustain" type="range" min="0" max="1" step="0.01" value="0.6" />
+          <span id="sustain-readout">0.60</span>
+        </div>
       </div>
-      <div class="synth-group">
+      <div class="synth-group envelope-slider">
         <label for="release">Release</label>
-        <input id="release" type="range" min="0.01" max="15" step="0.01" value="0.6" />
-        <span id="release-readout">0.60s</span>
+        <div class="envelope-slider-row">
+          <input
+            id="release"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value="0"
+            data-default="0.6"
+          />
+          <span id="release-readout">0.60s</span>
+        </div>
       </div>
       <div class="synth-group">
         <label for="one-shot">Envelope</label>
@@ -738,6 +889,21 @@
             <input type="radio" name="envelope-time" value="tempo" />
             Clock to tempo
           </label>
+        </div>
+      </div>
+      <div class="envelope-panel-section-title">LFO</div>
+      <div class="synth-group envelope-slider">
+        <label for="lfo-depth">Depth</label>
+        <div class="envelope-slider-row">
+          <input id="lfo-depth" type="range" min="0" max="1" step="0.01" value="1" />
+          <span id="lfo-depth-readout">100%</span>
+        </div>
+      </div>
+      <div class="synth-group envelope-slider">
+        <label for="lfo-rate">Rate</label>
+        <div class="envelope-slider-row">
+          <input id="lfo-rate" type="range" min="0" max="100" step="1" value="50" />
+          <span id="lfo-rate-readout">1.0x</span>
         </div>
       </div>
     </aside>
@@ -960,6 +1126,12 @@
             </div>
             <div class="control-group">
               <div class="control-inline">
+                <input id="show-ratio-cents" type="checkbox" />
+                <label for="show-ratio-cents">Cents</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
                 <input id="show-hz" type="checkbox" />
                 <label for="show-hz">Hz</label>
               </div>
@@ -974,6 +1146,19 @@
               <div class="control-inline">
                 <input id="line-labels-toggle" type="checkbox" checked />
                 <label for="line-labels-toggle">Line labels</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="analysis-show-distances" type="checkbox" checked />
+                <label for="analysis-show-distances">Distances</label>
+                <button type="button" class="inline-link" data-distance-select>edit</button>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="analysis-show-microtonal" type="checkbox" />
+                <label for="analysis-show-microtonal">Interval Overlay</label>
               </div>
             </div>
             <div class="control-group" hidden>
@@ -1022,12 +1207,13 @@
     </dialog>
     <dialog id="credits-dialog" class="custom-ratio-dialog credits-dialog">
       <div class="credits-content">
-        <div class="dialog-title">Tuning Lattice v1b</div>
+        <div class="dialog-title">Tuning Lattice v1.1b</div>
        
         <p>
-          thanks to Michael Harrison, Johnny MacMillan, and Ben Hjertmann for feedback
+          thanks to Michael Harrison, Johnny MacMillan, Ben Hjertmann, and Chris Otto for feedback
           &amp; suggestions
         </p>
+        <p>&amp; special thanks to Michael Harrison for teaching me how to draw a chart</p>
         <p class="credits-contact">
           Questions, bugs, requests, email me at elliot . c . cole @ gmail.com
         </p>
@@ -1044,6 +1230,7 @@
         </label>
         <menu class="dialog-actions">
           <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="none">No label</button>
           <button type="submit" value="confirm">OK</button>
         </menu>
       </form>
@@ -1091,6 +1278,201 @@
         </menu>
       </form>
     </dialog>
+    <dialog id="distance-label-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form">
+        <div class="dialog-title">Interval Name</div>
+        <label>
+          Text
+          <input type="text" id="distance-label-input" maxlength="80" />
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="none">No label</button>
+          <button type="submit" value="confirm">OK</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="find-ratio-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form" id="find-ratio-form">
+        <div class="dialog-title">Find Ratios</div>
+        <label>
+          Enter ratios (1485:1024 or 1485/1024)
+          <textarea id="find-ratio-input" rows="6" required></textarea>
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="find" autofocus>Find</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="build-intervals-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form" id="build-intervals-form">
+        <div class="dialog-title">Build from intervals</div>
+        <label>
+          One ratio per line (e.g. 5/3, 9/8)
+          <textarea id="build-intervals-input" rows="8"></textarea>
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="build">OK</button>
+        </menu>
+        <div id="build-intervals-preview" class="build-intervals-preview">
+          <div class="build-intervals-line">
+            <span class="build-intervals-endpoint start"></span>
+            <span class="build-intervals-endpoint end"></span>
+            <div id="build-intervals-ticks" class="build-intervals-ticks"></div>
+          </div>
+          <div id="build-intervals-warning" class="build-intervals-warning" hidden>
+            Intervals exceed an octave.
+          </div>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="add-interval-dialog" class="custom-ratio-dialog interval-dialog">
+      <form method="dialog" class="custom-ratio-form" id="add-interval-form">
+        <div class="dialog-title">Select interval</div>
+        <label>
+          Interval list
+          <select id="add-interval-select"></select>
+        </label>
+        <label>
+          Custom ratio
+          <input id="add-interval-input" type="text" placeholder="e.g. 81:80 or 81/80" />
+        </label>
+        <label>
+          Interval
+          <select id="add-interval-direction">
+            <option value="above" selected>Above</option>
+            <option value="below">Below</option>
+          </select>
+        </label>
+        <menu class="dialog-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button type="submit" value="add" autofocus>Add</button>
+        </menu>
+      </form>
+    </dialog>
+    <div id="interval-chart-overlay" class="interval-chart-overlay" hidden>
+      <div class="interval-chart-window" role="dialog" aria-modal="true" aria-label="Interval chart">
+        <div class="interval-chart-header">
+          <div class="interval-chart-title">Calculate Interval</div>
+        </div>
+        <div class="interval-chart-subheader">
+          <label>
+            Add an interval
+            <select id="interval-chart-direction">
+              <option value="above" selected>above</option>
+              <option value="below">below</option>
+            </select>
+            <span id="interval-chart-source-ratio"></span>
+          </label>
+        </div>
+        <div class="interval-chart-body">
+          <div class="interval-chart-filters">
+            <div class="interval-chart-filter-title">Types</div>
+            <div class="interval-chart-filter-actions">
+              <button id="interval-chart-select-all" type="button">Select all</button>
+              <button id="interval-chart-select-none" type="button">None</button>
+            </div>
+            <div class="interval-chart-filter-extra">
+              <label class="interval-chart-type">
+                <input id="interval-chart-superparticular" type="checkbox" />
+                <span>Superparticular only</span>
+              </label>
+            </div>
+            <div id="interval-chart-type-list" class="interval-chart-type-list"></div>
+          </div>
+          <div class="interval-chart-table-column">
+            <div class="interval-chart-toolbar interval-chart-toolbar-search">
+              <input
+                id="interval-chart-search"
+                type="search"
+                placeholder="Search ratios, names, types, sources..."
+              />
+              <label class="interval-chart-listen">
+                <input id="interval-chart-listen" type="checkbox" />
+                <span>Listen</span>
+              </label>
+            </div>
+            <div class="interval-chart-table-wrap">
+              <div class="interval-chart-toolbar"></div>
+              <div id="interval-chart-custom-active" class="interval-chart-custom-active" hidden>
+                Custom ratio selected — table disabled
+              </div>
+              <table class="interval-chart-table">
+                <thead>
+                  <tr>
+                    <th>Ratio</th>
+                    <th>Computed Cents</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Prime factors</th>
+                    <th>Description</th>
+                    <th>Source</th>
+                  </tr>
+                </thead>
+                <tbody id="interval-chart-table-body"></tbody>
+              </table>
+            <div class="interval-chart-custom">
+              <label class="interval-chart-custom-label">
+                Custom Ratio
+                <input
+                  id="interval-chart-custom-ratio"
+                  type="text"
+                  placeholder="Or use a custom ratio (e.g. 81:80 or 128/75)"
+                />
+              </label>
+              <label class="interval-chart-custom-label">
+                Custom Text
+                <input
+                  id="interval-chart-custom-text"
+                  type="text"
+                  placeholder="Optional label suffix"
+                />
+              </label>
+            </div>
+          </div>
+          </div>
+        </div>
+        <div class="interval-chart-actions">
+          <button id="interval-chart-calc" type="button" class="button-full">
+            Calculate Interval
+          </button>
+          <button id="interval-chart-close" type="button" class="button-full">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div id="preset-overlay" class="preset-overlay" hidden>
+      <div class="preset-window" role="dialog" aria-modal="true" aria-label="Presets">
+        <div class="preset-header">
+          <div class="preset-title">Presets</div>
+        </div>
+        <div class="preset-body preset-body-single">
+          <div class="preset-main">
+            <div class="preset-toolbar">
+              <input
+                id="preset-search"
+                type="search"
+                placeholder="Search presets..."
+                autocomplete="off"
+              />
+              <label class="preset-sort">
+                <span>Sort</span>
+                <select id="preset-sort">
+                  <option value="default" selected>Default</option>
+                  <option value="title">Title (A–Z)</option>
+                  <option value="creator">Creator (A–Z)</option>
+                </select>
+              </label>
+            </div>
+            <div id="preset-list" class="preset-list"></div>
+          </div>
+        </div>
+        <div class="preset-actions">
+          <button id="preset-close" type="button" class="button-full">Close</button>
+        </div>
+      </div>
+    </div>
 
   </body>
 </html>

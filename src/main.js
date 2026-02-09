@@ -152,6 +152,8 @@ const keyboardMapKeys = keyboardMapPopover
   : [];
 const fundamentalInput = document.getElementById("fundamental");
 const fundamentalNoteSelect = document.getElementById("fundamental-note");
+const fundamentalOctaveDown = document.getElementById("fundamental-octave-down");
+const fundamentalOctaveUp = document.getElementById("fundamental-octave-up");
 const a4Input = document.getElementById("a4");
 const ratioXSelect = document.getElementById("ratio-x");
 const ratioYSelect = document.getElementById("ratio-y");
@@ -375,6 +377,7 @@ const LFO_RATE_RANGE = LFO_RATE_MAX / LFO_RATE_MIN;
 const ENVELOPE_MIN = 0.005;
 const ENVELOPE_MAX = 15;
 const ENVELOPE_CURVE = 2;
+const FUNDAMENTAL_CUSTOM_VALUE = "hz";
 let lfoArmingId = null;
 let lfoArmingStart = 0;
 let lfoAnimating = false;
@@ -5666,6 +5669,10 @@ function populateFundamentalNotes() {
   const startMidi = 0;
   const endMidi = 96;
   fundamentalNoteSelect.innerHTML = "";
+  const customOption = document.createElement("option");
+  customOption.value = FUNDAMENTAL_CUSTOM_VALUE;
+  customOption.textContent = "Specify in Hz";
+  fundamentalNoteSelect.appendChild(customOption);
   for (let midi = startMidi; midi <= endMidi; midi += 1) {
     const option = document.createElement("option");
     option.value = String(midi);
@@ -5676,13 +5683,18 @@ function populateFundamentalNotes() {
 
 function updateFundamentalNotes() {
   const a4 = Number(a4Input.value) || 440;
-  const selectedMidi = Number(fundamentalNoteSelect.value || 0);
+  const selectedValue = fundamentalNoteSelect.value || "";
   Array.from(fundamentalNoteSelect.options).forEach((option) => {
     const midi = Number(option.value);
+    if (option.value === FUNDAMENTAL_CUSTOM_VALUE) {
+      option.textContent = "Specify in Hz";
+      return;
+    }
     const freq = midiToFrequency(midi, a4);
     option.textContent = `${midiToFundamentalNoteName(midi)} (${freq.toFixed(2)} Hz)`;
   });
-  fundamentalNoteSelect.value = String(selectedMidi);
+  fundamentalNoteSelect.value =
+    selectedValue === FUNDAMENTAL_CUSTOM_VALUE ? FUNDAMENTAL_CUSTOM_VALUE : String(selectedValue);
 }
 
 function syncFundamentalNoteSelect() {
@@ -5692,7 +5704,28 @@ function syncFundamentalNoteSelect() {
   }
   const a4 = Number(a4Input.value) || 440;
   const { midi } = getNearestEtInfo(freq, a4);
-  fundamentalNoteSelect.value = String(midi);
+  const target = midiToFrequency(midi, a4);
+  if (Math.abs(target - freq) <= 0.01) {
+    fundamentalNoteSelect.value = String(midi);
+  } else {
+    fundamentalNoteSelect.value = FUNDAMENTAL_CUSTOM_VALUE;
+  }
+}
+
+function adjustFundamentalByFactor(factor) {
+  if (!fundamentalInput) {
+    return;
+  }
+  const current = Number(fundamentalInput.value);
+  if (!Number.isFinite(current) || current <= 0) {
+    return;
+  }
+  const min = Number(fundamentalInput.min) || 0;
+  const max = Number(fundamentalInput.max) || Infinity;
+  const next = Math.min(max, Math.max(min, current * factor));
+  fundamentalInput.value = String(next);
+  syncFundamentalNoteSelect();
+  updateNodeFrequencies();
 }
 
 function populateWaveformOptions() {
@@ -5723,6 +5756,9 @@ function populateWaveformOptions() {
 }
 
 function onFundamentalNoteChange() {
+  if (fundamentalNoteSelect.value === FUNDAMENTAL_CUSTOM_VALUE) {
+    return;
+  }
   const midi = Number(fundamentalNoteSelect.value);
   const a4 = Number(a4Input.value) || 440;
   const freq = midiToFrequency(midi, a4);
@@ -13159,23 +13195,12 @@ function onPointerUp(event) {
     if (!layoutMode && fHeld && hit) {
       const freq = Number(hit.freq);
       if (Number.isFinite(freq)) {
-        const a4 = Number(a4Input.value) || 440;
-        let prevMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
-        if (!Number.isFinite(prevMidi)) {
-          const fallback = getNearestEtInfo(Number(fundamentalInput.value) || 220, a4);
-          prevMidi = fallback.midi;
-        }
-        const nearest = getNearestEtInfo(freq, a4);
-        const prevOctave = Math.floor(prevMidi / 12);
-        let targetMidi = prevOctave * 12 + (nearest.midi % 12);
-        targetMidi = Math.max(0, Math.min(96, targetMidi));
-        const targetFreq = midiToFrequency(targetMidi, a4);
         const displayInfo = getDisplayNoteInfo(hit);
         if (displayInfo && displayInfo.pitchClass) {
           fundamentalSpelling = getFundamentalSpellingFromPitchClass(displayInfo.pitchClass);
         }
-        fundamentalInput.value = String(targetFreq);
-        fundamentalNoteSelect.value = String(targetMidi);
+        fundamentalInput.value = String(freq);
+        fundamentalNoteSelect.value = FUNDAMENTAL_CUSTOM_VALUE;
         updateFundamentalNotes();
         if (spellingMode === "simple") {
           nodeSpellingOverrides.clear();
@@ -25306,6 +25331,16 @@ fundamentalInput.addEventListener("input", () => {
   syncFundamentalNoteSelect();
   updateNodeFrequencies();
 });
+if (fundamentalOctaveDown) {
+  fundamentalOctaveDown.addEventListener("click", () => {
+    adjustFundamentalByFactor(0.5);
+  });
+}
+if (fundamentalOctaveUp) {
+  fundamentalOctaveUp.addEventListener("click", () => {
+    adjustFundamentalByFactor(2);
+  });
+}
 ratioXSelect.addEventListener("change", updateNodeRatios);
 ratioYSelect.addEventListener("change", updateNodeRatios);
 if (ratioZSelect) {

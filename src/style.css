@@ -516,6 +516,15 @@ body.theme-dark .banner-message:not([hidden]) {
   margin-left: 4px;
 }
 
+.tiny-button {
+  height: 22px;
+  min-width: 30px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1;
+}
+
 .inline-label {
   font-size: 12px;
   letter-spacing: 0.2px;

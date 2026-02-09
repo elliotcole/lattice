@@ -317,6 +317,9 @@ let intervalChartSuperparticularOnly = false;
 const INTERACTION_MODE_LABELS = {
   "distance-edit": "Distance Edit",
   "microtonal-intervals": "Interval Overlay",
+  "axis-x": "X Axis Mode",
+  "axis-y": "Y Axis Mode",
+  "axis-z": "Z Axis Mode",
 };
 const DISTANCE_MODE_HELP =
   "Distance Edit\nDrag between nodes to create distance lines.\nDrag label to slide, drag line to curve.\nOption-click line to delete.\nDouble-click label to change interval name.\nESC or double-click background to exit.";
@@ -1364,6 +1367,7 @@ function activateAxisFromHit(axis, node) {
   }
   updateAddModeFromShift();
   updateUiHint();
+  updateBannerMessage();
   syncAnalysisLayerToggles();
   schedulePresetUrlUpdate();
   draw();
@@ -1377,6 +1381,7 @@ function deactivateAxisMode() {
   popAxisStack();
   updateAddModeFromShift();
   updateUiHint();
+  updateBannerMessage();
   schedulePresetUrlUpdate();
   draw();
   return true;
@@ -2520,6 +2525,7 @@ function applyPendingSnapshotForPattern(nextSnapshot, nextIndex, nextLetter) {
   applyPresetState(nextSnapshot.state, {
     skipLayoutModeSwitch: true,
     skipStopVoices: true,
+    preserveViewMode: true,
   });
   updateSnapshotUi();
   if (snapshotRestoreSequence) {
@@ -3285,7 +3291,11 @@ function recallSnapshotLetter(letter, index) {
     return;
   }
   snapshotActiveLetterKey = letter;
-  applyPresetState(snapshotState, { skipLayoutModeSwitch: true, skipStopVoices: true });
+  applyPresetState(snapshotState, {
+    skipLayoutModeSwitch: true,
+    skipStopVoices: true,
+    preserveViewMode: true,
+  });
   if (snapshotRestoreSequence) {
     if (snapshot.pattern) {
       stopPatternPlayback();
@@ -3330,7 +3340,11 @@ function recallSnapshot(index) {
     return;
   }
   snapshotActiveIndex = index;
-  applyPresetState(snapshotState, { skipLayoutModeSwitch: true, skipStopVoices: true });
+  applyPresetState(snapshotState, {
+    skipLayoutModeSwitch: true,
+    skipStopVoices: true,
+    preserveViewMode: true,
+  });
   if (snapshotRestoreSequence) {
     if (snapshot.pattern) {
       stopPatternPlayback();
@@ -12502,6 +12516,19 @@ function onCanvasDoubleClick(event) {
     setMicrotonalIntervalsMode(false);
     return;
   }
+  if (!layoutMode && axisModeActive()) {
+    const screenPoint = { x: event.offsetX, y: event.offsetY };
+    const hit = hitTestScreen(screenPoint);
+    if (!hit) {
+      clearAxisStack();
+      updateAddModeFromShift();
+      updateUiHint();
+      updateBannerMessage();
+      schedulePresetUrlUpdate();
+      draw();
+      return;
+    }
+  }
   if (distanceSelectMode) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const labelHit = hitTestDistanceLabel(screenPoint);
@@ -15615,6 +15642,13 @@ function getInteractionMode() {
   if (distanceSelectMode && analysisLayers.distances) {
     return "distance-edit";
   }
+  if (axisModeActive()) {
+    const activeAxis = getActiveAxisEntry();
+    if (activeAxis && (activeAxis.axis === "x" || activeAxis.axis === "y" || activeAxis.axis === "z")) {
+      return `axis-${activeAxis.axis}`;
+    }
+    return "axis-x";
+  }
   if (layoutMode && layoutAlignMode) {
     if (layoutAlignMode === "y") {
       return "align-y";
@@ -15649,7 +15683,7 @@ function updateUiHint() {
     uiHintKey = nextKey;
     uiHintDismissed = false;
   }
-  if (!helpEnabled || uiHintDismissed || axisModeActive()) {
+  if (!helpEnabled || uiHintDismissed) {
     setUiHintVisibility(false);
     return;
   }
@@ -15676,6 +15710,21 @@ function updateUiHint() {
   if (interactionMode === "align-straighten") {
     uiHint.textContent =
       "Straighten mode\nClick two nodes to set the line.\nAny other nodes clicked will align.";
+    return;
+  }
+  if (interactionMode === "axis-x") {
+    uiHint.textContent =
+      "Editing along X axis. \nClick to create nodes, option-click to delete.\nPress ESC to exit.";
+    return;
+  }
+  if (interactionMode === "axis-y") {
+    uiHint.textContent =
+      "Editing along Y axis. \nClick to create nodes, option-click to delete.\nPress ESC to exit.";
+    return;
+  }
+  if (interactionMode === "axis-z") {
+    uiHint.textContent =
+      "Editing along Z axis. \nClick to create nodes, option-click to delete.\nPress ESC to exit.";
     return;
   }
   if (layoutMode) {
@@ -19800,6 +19849,7 @@ function applyPresetState(state, options = {}) {
   if (!state || typeof state !== "object") {
     return;
   }
+  const preserveViewMode = Boolean(options.preserveViewMode);
   if (Array.isArray(state.snapshots)) {
     applySnapshotsFromPreset(state.snapshots);
     snapshotActiveIndex = Number.isFinite(state.snapshotActive)
@@ -19884,6 +19934,17 @@ function applyPresetState(state, options = {}) {
       setLayoutMode(presetLayoutMode, { force: true });
     }
     if (!presetLayoutMode) {
+      if (!preserveViewMode) {
+        is3DMode = presetWants3D;
+        if (mode3dCheckbox) {
+          mode3dCheckbox.checked = presetWants3D;
+        }
+        updateNavPanelVisibility();
+        syncViewModeControls();
+      }
+    }
+  } else if (!layoutMode) {
+    if (!preserveViewMode) {
       is3DMode = presetWants3D;
       if (mode3dCheckbox) {
         mode3dCheckbox.checked = presetWants3D;
@@ -19891,13 +19952,6 @@ function applyPresetState(state, options = {}) {
       updateNavPanelVisibility();
       syncViewModeControls();
     }
-  } else if (!layoutMode) {
-    is3DMode = presetWants3D;
-    if (mode3dCheckbox) {
-      mode3dCheckbox.checked = presetWants3D;
-    }
-    updateNavPanelVisibility();
-    syncViewModeControls();
   }
   analysisLayers.distances = false;
   analysisLayers.microtonal = false;
@@ -20031,12 +20085,18 @@ function applyPresetState(state, options = {}) {
     ? state.triangleLabels
     : null;
   if (mode3dCheckbox) {
-    mode3dCheckbox.checked = wants3D;
+    if (!preserveViewMode) {
+      mode3dCheckbox.checked = wants3D;
+    }
   }
-  is3DMode = wants3D;
-  isFlattened2D = false;
-  updateNavPanelVisibility();
-  syncViewModeControls();
+  if (!preserveViewMode) {
+    is3DMode = wants3D;
+  }
+  isFlattened2D = preserveViewMode ? (!is3DMode && wants3D) : false;
+  if (!preserveViewMode) {
+    updateNavPanelVisibility();
+    syncViewModeControls();
+  }
   if (ratioZSelect) {
     ratioZSelect.hidden = false;
   }

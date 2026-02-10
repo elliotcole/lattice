@@ -531,6 +531,25 @@ body.theme-dark .banner-message:not([hidden]) {
   color: var(--muted-ink);
 }
 
+.synth-mode-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.synth-mode-toggle {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.synth-mode-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink);
+}
+
 .fundamental-spelling-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

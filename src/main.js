@@ -1,4 +1,8 @@
 import { customOscillatorTypes, customOscillators } from "./custom-oscillators";
+import { loadSoundfont, startPresetNote } from "sfumato";
+import soundfontUrl from "./soundfonts/HSStrings.sf2?url";
+const karplusWorkletUrl = new URL("./karplus-worklet.js", import.meta.url);
+const resonatorWorkletUrl = new URL("./modal-resonator-worklet.js", import.meta.url);
 import intervalChartData from "./interval-names.json";
 import opentype from "opentype.js";
 const canvas = document.getElementById("lattice");
@@ -169,6 +173,12 @@ const lfoRateSlider = document.getElementById("lfo-rate");
 const lfoRateReadout = document.getElementById("lfo-rate-readout");
 const keyboardModeSelect = document.getElementById("keyboard-mode");
 const waveformSelect = document.getElementById("waveform");
+const soundfontPresetSelect = document.getElementById("soundfont-preset");
+const physicalModelSelect = document.getElementById("physical-model");
+const waveformSelectGroup = document.getElementById("waveform-select-group");
+const soundfontSelectGroup = document.getElementById("soundfont-select-group");
+const physicalSelectGroup = document.getElementById("physical-select-group");
+const synthModeInputs = document.querySelectorAll('input[name="synth-mode"]');
 const attackSlider = document.getElementById("attack");
 const decaySlider = document.getElementById("decay");
 const sustainSlider = document.getElementById("sustain");
@@ -367,6 +377,14 @@ function syncNavViewSliders() {
 
 let audioCtx = null;
 let masterGain = null;
+let karplusWorkletReady = false;
+let karplusWorkletLoading = null;
+let resonatorWorkletReady = false;
+let resonatorWorkletLoading = null;
+let soundfontData = null;
+let soundfontPreset = null;
+let soundfontLoading = null;
+let soundfontPresetList = [];
 let hoverNodeId = null;
 let themeColors = null;
 let lfoDepth = 1;
@@ -378,6 +396,9 @@ const ENVELOPE_MIN = 0.005;
 const ENVELOPE_MAX = 15;
 const ENVELOPE_CURVE = 2;
 const FUNDAMENTAL_CUSTOM_VALUE = "hz";
+const KARPLUS_WAVEFORM = "plucked";
+const RESONANT_WAVEFORM = "resonant";
+const SOUNDFONT_WAVEFORM = "soundfont";
 let lfoArmingId = null;
 let lfoArmingStart = 0;
 let lfoAnimating = false;
@@ -386,6 +407,10 @@ let lfoPresetPlaying = false;
 let midiAccess = null;
 let midiInput = null;
 let midiEnabled = false;
+let oneShotPrevValue = null;
+let synthMode = "waveform";
+let soundfontPresetIndex = 0;
+let currentSynthWaveform = "";
 let rHeld = false;
 let tHeld = false;
 let lHeld = false;
@@ -5753,6 +5778,124 @@ function populateWaveformOptions() {
     waveformSelect.appendChild(option);
   });
   waveformSelect.value = waveforms.includes(selected) ? selected : "sine";
+}
+
+function populateSoundfontPresets() {
+  if (!soundfontPresetSelect) {
+    return;
+  }
+  soundfontPresetSelect.innerHTML = "";
+  soundfontPresetList = [];
+  if (soundfontData && Array.isArray(soundfontData.presets)) {
+    soundfontData.presets.forEach((preset) => {
+      const name = preset.header && preset.header.name ? preset.header.name : "";
+      if (name === "FINALE" || name === "ENSEMBLE 2") {
+        return;
+      }
+      soundfontPresetList.push(preset);
+    });
+    soundfontPresetList.forEach((preset, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      const name = preset.header && preset.header.name ? preset.header.name : `Preset ${index + 1}`;
+      option.textContent = name;
+      soundfontPresetSelect.appendChild(option);
+    });
+    soundfontPresetIndex = Math.min(
+      Math.max(0, soundfontPresetIndex),
+      Math.max(0, soundfontPresetList.length - 1)
+    );
+    soundfontPresetSelect.value = String(soundfontPresetIndex);
+    soundfontPreset = soundfontPresetList[soundfontPresetIndex] || soundfontPresetList[0] || null;
+  }
+}
+
+function syncSynthModeUI() {
+  if (waveformSelectGroup) {
+    waveformSelectGroup.hidden = synthMode !== "waveform";
+    waveformSelectGroup.style.display = synthMode === "waveform" ? "" : "none";
+  }
+  if (soundfontSelectGroup) {
+    soundfontSelectGroup.hidden = synthMode !== "soundfont";
+    soundfontSelectGroup.style.display = synthMode === "soundfont" ? "" : "none";
+  }
+  if (physicalSelectGroup) {
+    physicalSelectGroup.hidden = synthMode !== "physical";
+    physicalSelectGroup.style.display = synthMode === "physical" ? "" : "none";
+  }
+  if (synthModeInputs.length) {
+    synthModeInputs.forEach((input) => {
+      input.checked = input.value === synthMode;
+    });
+  }
+}
+
+function getCurrentWaveformType() {
+  if (synthMode === "soundfont") {
+    return SOUNDFONT_WAVEFORM;
+  }
+  if (synthMode === "physical") {
+    return physicalModelSelect ? physicalModelSelect.value || KARPLUS_WAVEFORM : KARPLUS_WAVEFORM;
+  }
+  return waveformSelect ? waveformSelect.value || "sine" : "sine";
+}
+
+function syncOneShotForWaveform(type) {
+  if (!oneShotCheckbox) {
+    return;
+  }
+  if (type === KARPLUS_WAVEFORM) {
+    if (oneShotPrevValue == null) {
+      oneShotPrevValue = oneShotCheckbox.checked;
+    }
+    oneShotCheckbox.checked = true;
+    oneShotCheckbox.disabled = true;
+  } else {
+    oneShotCheckbox.disabled = false;
+    if (oneShotPrevValue != null) {
+      oneShotCheckbox.checked = oneShotPrevValue;
+      oneShotPrevValue = null;
+    }
+  }
+  updatePatternLengthAvailability();
+}
+
+function handleSynthTypeChange() {
+  const nextType = getCurrentWaveformType();
+  syncOneShotForWaveform(nextType);
+  if (nextType === SOUNDFONT_WAVEFORM) {
+    ensureSoundfontLoaded();
+  }
+  if (nextType === KARPLUS_WAVEFORM) {
+    ensureKarplusWorklet();
+  }
+  if (nextType === RESONANT_WAVEFORM) {
+    ensureResonatorWorklet();
+  }
+  if (currentSynthWaveform === nextType) {
+    schedulePresetUrlUpdate();
+    return;
+  }
+  currentSynthWaveform = nextType;
+  const snapshot = [...voices];
+  snapshot.forEach((voice) => {
+    const wasBase = nodes.find((node) => node.baseVoiceId === voice.id);
+    stopVoice(voice, true);
+    const newVoice = startVoice({
+      nodeId: voice.nodeId,
+      octave: voice.octave,
+      freq: voice.freq,
+      lfoActive: voice.lfoActive,
+      lfoHalfPeriod: voice.lfoHalfPeriod,
+      lfoStartMs: voice.lfoStartMs,
+      lfoCurve: voice.lfoCurve,
+      source: voice.source,
+    });
+    if (newVoice && wasBase) {
+      wasBase.baseVoiceId = newVoice.id;
+    }
+  });
+  schedulePresetUrlUpdate();
 }
 
 function onFundamentalNoteChange() {
@@ -11565,17 +11708,97 @@ function startVoice(options) {
     ? baseFreq * Math.pow(2, octaveShift)
     : options.freq;
   const velocity = Math.max(0, Math.min(1, Number(options.velocity ?? 1)));
-  const waveformType = waveformSelect.value || "sine";
-  const oscillator = CUSTOM_WAVEFORMS.has(waveformType)
-    ? customOscillators[waveformType](audioCtx)
-    : audioCtx.createOscillator();
+  const waveformType = getCurrentWaveformType();
+  let oscillator = null;
+  if (waveformType === KARPLUS_WAVEFORM) {
+    ensureKarplusWorklet();
+    if (karplusWorkletReady) {
+      try {
+        oscillator = new AudioWorkletNode(audioCtx, "karplus-strong", {
+          numberOfOutputs: 1,
+          outputChannelCount: [1],
+          parameterData: {
+            frequency: Number.isFinite(effectiveFreq) ? effectiveFreq : 220,
+            damping: 0.985,
+          },
+        });
+        if (oscillator.port) {
+          oscillator.port.postMessage({ type: "trigger" });
+        }
+      } catch (error) {
+        oscillator = audioCtx.createOscillator();
+      }
+    } else {
+      oscillator = audioCtx.createOscillator();
+    }
+  } else if (waveformType === RESONANT_WAVEFORM) {
+    ensureResonatorWorklet();
+    if (resonatorWorkletReady) {
+      try {
+        oscillator = new AudioWorkletNode(audioCtx, "modal-resonator", {
+          numberOfOutputs: 1,
+          outputChannelCount: [1],
+          parameterData: {
+            frequency: Number.isFinite(effectiveFreq) ? effectiveFreq : 220,
+          brightness: 0.45,
+          },
+        });
+        if (oscillator.port) {
+          oscillator.port.postMessage({ type: "trigger" });
+        }
+      } catch (error) {
+        oscillator = audioCtx.createOscillator();
+      }
+    } else {
+      oscillator = audioCtx.createOscillator();
+    }
+  } else if (waveformType === SOUNDFONT_WAVEFORM) {
+  if (soundfontData && soundfontPreset) {
+    const sfCtx = {
+      currentTime: audioCtx.currentTime,
+        destination: null,
+        createGain: audioCtx.createGain.bind(audioCtx),
+        createBuffer: audioCtx.createBuffer.bind(audioCtx),
+        createBufferSource: audioCtx.createBufferSource.bind(audioCtx),
+        createStereoPanner: audioCtx.createStereoPanner.bind(audioCtx),
+      };
+      oscillator = {
+        type: "soundfont",
+        start: () => {},
+        stop: () => {},
+        disconnect: () => {},
+        port: null,
+      };
+      // Use envGain as the destination so ADSR/LFO apply downstream.
+      sfCtx.destination = audioCtx.createGain();
+      const sfDestination = sfCtx.destination;
+      const midi = 69 + 12 * Math.log2((Number.isFinite(effectiveFreq) ? effectiveFreq : 220) / (Number(a4Input.value) || 440));
+      const stopFn = startPresetNote(sfCtx, soundfontPreset, midi, audioCtx.currentTime);
+      oscillator.sfStop = stopFn;
+      oscillator.sfOutput = sfDestination;
+    } else {
+      oscillator = audioCtx.createOscillator();
+    }
+  } else if (CUSTOM_WAVEFORMS.has(waveformType)) {
+    oscillator = customOscillators[waveformType](audioCtx);
+  } else {
+    oscillator = audioCtx.createOscillator();
+  }
   const envGain = audioCtx.createGain();
   const lfoGain = audioCtx.createGain();
 
-  if (!CUSTOM_WAVEFORMS.has(waveformType)) {
+  if (
+    waveformType !== KARPLUS_WAVEFORM &&
+    waveformType !== RESONANT_WAVEFORM &&
+    !CUSTOM_WAVEFORMS.has(waveformType) &&
+    oscillator &&
+    "type" in oscillator
+  ) {
     oscillator.type = waveformType;
   }
-  oscillator.frequency.value = effectiveFreq;
+  if (oscillator && "frequency" in oscillator && Number.isFinite(effectiveFreq)) {
+    oscillator.frequency.value = effectiveFreq;
+  }
   const isOneShot =
     Boolean(oneShotCheckbox && oneShotCheckbox.checked) && !options.ignoreOneShot;
   envGain.gain.setValueAtTime(0.0001, now);
@@ -11615,6 +11838,10 @@ function startVoice(options) {
     lfoCurve: Number.isFinite(options.lfoCurve) ? options.lfoCurve : 1,
     source: options.source || "keyboard",
     loopOffRecorded: false,
+    usesWorklet: waveformType === KARPLUS_WAVEFORM || waveformType === RESONANT_WAVEFORM,
+    usesSoundfont: waveformType === SOUNDFONT_WAVEFORM,
+    sfStop: oscillator && oscillator.sfStop ? oscillator.sfStop : null,
+    sfOutput: oscillator && oscillator.sfOutput ? oscillator.sfOutput : null,
   };
 
   if (isOneShot) {
@@ -11625,18 +11852,24 @@ function startVoice(options) {
   }
 
   lfoGain.gain.value = voice.lfoActive ? getLfoGainValue(voice, performance.now()) : 1;
-  oscillator.connect(envGain).connect(lfoGain).connect(masterGain);
-  oscillator.start(now);
-  oscillator.onended = () => {
-    oscillator.disconnect();
-    if (envGain) {
-      envGain.disconnect();
-    }
-    if (lfoGain) {
-      lfoGain.disconnect();
-    }
-    removeVoiceById(voice.id);
-  };
+  if (voice.sfOutput) {
+    voice.sfOutput.connect(envGain).connect(lfoGain).connect(masterGain);
+  } else if (oscillator && typeof oscillator.connect === "function") {
+    oscillator.connect(envGain).connect(lfoGain).connect(masterGain);
+  }
+  if (typeof oscillator.start === "function") {
+    oscillator.start(now);
+    oscillator.onended = () => {
+      oscillator.disconnect();
+      if (envGain) {
+        envGain.disconnect();
+      }
+      if (lfoGain) {
+        lfoGain.disconnect();
+      }
+      removeVoiceById(voice.id);
+    };
+  }
 
   voices.push(voice);
 
@@ -11676,6 +11909,7 @@ function stopVoice(voice, immediate = false) {
   }
 
   const osc = voice.oscillator;
+  const hasStop = typeof osc.stop === "function" && !voice.usesWorklet;
   const envGain = voice.envGain;
   const lfoGain = voice.lfoGain;
   voice.oscillator = null;
@@ -11700,9 +11934,57 @@ function stopVoice(voice, immediate = false) {
       lfoGain.gain.setValueAtTime(1, now);
     }
     envGain.gain.exponentialRampToValueAtTime(0.0001, now + release);
-    osc.stop(now + release + 0.05);
+    if (voice.usesSoundfont && voice.sfStop) {
+      voice.sfStop(now);
+      const timeoutMs = (release + 0.1) * 1000;
+      setTimeout(() => {
+        if (voice.sfOutput) {
+          voice.sfOutput.disconnect();
+        }
+        if (envGain) {
+          envGain.disconnect();
+        }
+        if (lfoGain) {
+          lfoGain.disconnect();
+        }
+        removeVoiceById(voice.id);
+      }, timeoutMs);
+    } else if (hasStop) {
+      osc.stop(now + release + 0.05);
+    } else {
+      const timeoutMs = (release + 0.05) * 1000;
+      setTimeout(() => {
+        if (typeof osc.disconnect === "function") {
+          osc.disconnect();
+        }
+        if (envGain) {
+          envGain.disconnect();
+        }
+        if (lfoGain) {
+          lfoGain.disconnect();
+        }
+        removeVoiceById(voice.id);
+      }, timeoutMs);
+    }
   } else {
-    osc.stop(now + 0.1);
+    if (voice.usesSoundfont && voice.sfStop) {
+      voice.sfStop(now);
+      setTimeout(() => {
+        if (voice.sfOutput) {
+          voice.sfOutput.disconnect();
+        }
+        removeVoiceById(voice.id);
+      }, 150);
+    } else if (hasStop) {
+      osc.stop(now + 0.1);
+    } else {
+      setTimeout(() => {
+        if (typeof osc.disconnect === "function") {
+          osc.disconnect();
+        }
+        removeVoiceById(voice.id);
+      }, 150);
+    }
   }
 
   if (looperState === "recording" && voice.source !== "looper" && !voice.loopOffRecorded) {
@@ -11743,6 +12025,9 @@ function enableAudio() {
     updateVolume();
   }
 
+  ensureKarplusWorklet();
+  ensureResonatorWorklet();
+  ensureSoundfontLoaded();
   if (audioCtx.state === "suspended") {
     audioCtx.resume();
   }
@@ -14294,6 +14579,62 @@ function updateVolume() {
   }
   const amplitude = Math.pow(10, db / 20);
   masterGain.gain.setTargetAtTime(amplitude, audioCtx.currentTime, 0.01);
+}
+
+function ensureKarplusWorklet() {
+  if (!audioCtx || karplusWorkletReady || karplusWorkletLoading) {
+    return;
+  }
+  karplusWorkletLoading = audioCtx.audioWorklet
+    .addModule(karplusWorkletUrl)
+    .then(() => {
+      karplusWorkletReady = true;
+    })
+    .catch(() => {
+      karplusWorkletReady = false;
+    })
+    .finally(() => {
+      karplusWorkletLoading = null;
+    });
+}
+
+function ensureResonatorWorklet() {
+  if (!audioCtx || resonatorWorkletReady || resonatorWorkletLoading) {
+    return;
+  }
+  resonatorWorkletLoading = audioCtx.audioWorklet
+    .addModule(resonatorWorkletUrl)
+    .then(() => {
+      resonatorWorkletReady = true;
+    })
+    .catch(() => {
+      resonatorWorkletReady = false;
+    })
+    .finally(() => {
+      resonatorWorkletLoading = null;
+    });
+}
+
+async function ensureSoundfontLoaded() {
+  if (soundfontData || soundfontLoading) {
+    return soundfontLoading || Promise.resolve();
+  }
+  soundfontLoading = loadSoundfont(soundfontUrl)
+    .then((sf2) => {
+      soundfontData = sf2;
+      if (sf2 && Array.isArray(sf2.presets) && sf2.presets.length) {
+        soundfontPreset = sf2.presets[0];
+      }
+      populateSoundfontPresets();
+    })
+    .catch(() => {
+      soundfontData = null;
+      soundfontPreset = null;
+    })
+    .finally(() => {
+      soundfontLoading = null;
+    });
+  return soundfontLoading;
 }
 
 function getEnvelopeSliderValue(slider) {
@@ -19681,7 +20022,10 @@ function getPresetState() {
       lfoRate,
       keyboardMode: keyboardModeSelect ? keyboardModeSelect.value : "off",
       customPianoMap: serializeCustomPianoMap(),
+      mode: synthMode,
       waveform: waveformSelect ? waveformSelect.value : "sine",
+      soundfontPreset: soundfontPresetIndex,
+      physicalModel: physicalModelSelect ? physicalModelSelect.value : KARPLUS_WAVEFORM,
       attack: getEnvelopeSliderValue(attackSlider),
       decay: getEnvelopeSliderValue(decaySlider),
       sustain: Number(sustainSlider.value),
@@ -20232,10 +20576,20 @@ function applyPresetState(state, options = {}) {
     } else {
       pendingCustomPianoMap = [];
     }
+    if (typeof state.synth.mode === "string") {
+      synthMode = state.synth.mode;
+    }
     if (waveformSelect && typeof state.synth.waveform === "string") {
       waveformSelect.value = state.synth.waveform;
-      waveformSelect.dispatchEvent(new Event("change"));
     }
+    if (physicalModelSelect && typeof state.synth.physicalModel === "string") {
+      physicalModelSelect.value = state.synth.physicalModel;
+    }
+    if (Number.isFinite(state.synth.soundfontPreset)) {
+      soundfontPresetIndex = Math.trunc(state.synth.soundfontPreset);
+    }
+    syncSynthModeUI();
+    handleSynthTypeChange();
     if (Number.isFinite(state.synth.attack)) {
       setEnvelopeSliderFromValue(attackSlider, Number(state.synth.attack));
     }
@@ -25381,26 +25735,36 @@ if (lfoRateSlider) {
   updateLfoRate();
 }
 waveformSelect.addEventListener("change", () => {
-  const snapshot = [...voices];
-  snapshot.forEach((voice) => {
-    const wasBase = nodes.find((node) => node.baseVoiceId === voice.id);
-    stopVoice(voice, true);
-    const newVoice = startVoice({
-      nodeId: voice.nodeId,
-      octave: voice.octave,
-      freq: voice.freq,
-      lfoActive: voice.lfoActive,
-      lfoHalfPeriod: voice.lfoHalfPeriod,
-      lfoStartMs: voice.lfoStartMs,
-      lfoCurve: voice.lfoCurve,
-      source: voice.source,
-    });
-    if (newVoice && wasBase) {
-      wasBase.baseVoiceId = newVoice.id;
-    }
-  });
-  schedulePresetUrlUpdate();
+  handleSynthTypeChange();
 });
+if (synthModeInputs.length) {
+  synthModeInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      const selected = document.querySelector('input[name="synth-mode"]:checked');
+      synthMode = selected ? selected.value : "waveform";
+      syncSynthModeUI();
+      handleSynthTypeChange();
+    });
+  });
+}
+  if (soundfontPresetSelect) {
+    soundfontPresetSelect.addEventListener("change", () => {
+      const nextIndex = Number(soundfontPresetSelect.value);
+      if (Number.isFinite(nextIndex)) {
+        soundfontPresetIndex = nextIndex;
+        if (soundfontPresetList.length) {
+          soundfontPreset =
+            soundfontPresetList[soundfontPresetIndex] || soundfontPresetList[0] || null;
+        }
+      }
+      handleSynthTypeChange();
+    });
+  }
+if (physicalModelSelect) {
+  physicalModelSelect.addEventListener("change", () => {
+    handleSynthTypeChange();
+  });
+}
 keyboardModeSelect.addEventListener("change", () => {
   if (keyboardModeSelect.value === "off") {
     resetUiHintToDefault();
@@ -25611,6 +25975,12 @@ if (patternLengthModeInputs.length) {
 }
 initEnvelopeSliders();
 updateEnvelopeReadouts();
+if (synthModeInputs.length) {
+  const selected = document.querySelector('input[name="synth-mode"]:checked');
+  synthMode = selected ? selected.value : synthMode;
+}
+syncSynthModeUI();
+currentSynthWaveform = getCurrentWaveformType();
 updateLfoDepth();
 updateTempoReadout();
 updatePatternLengthReadout();

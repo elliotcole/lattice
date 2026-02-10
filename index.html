@@ -811,12 +811,40 @@
     <aside id="envelope-panel" class="panel envelope-panel" hidden>
       <div class="envelope-panel-header">Synth</div>
       <div class="synth-group">
+        <label class="synth-mode-label">Sound</label>
+        <div class="synth-mode-toggle" role="radiogroup" aria-label="Sound type">
+          <label class="synth-mode-option">
+            <input type="radio" name="synth-mode" value="waveform" checked />
+            <span>Waveform</span>
+          </label>
+          <label class="synth-mode-option">
+            <input type="radio" name="synth-mode" value="soundfont" />
+            <span>Soundfont</span>
+          </label>
+          <label class="synth-mode-option">
+            <input type="radio" name="synth-mode" value="physical" />
+            <span>Physical</span>
+          </label>
+        </div>
+      </div>
+      <div class="synth-group" id="waveform-select-group">
         <label for="waveform">Waveform</label>
         <select id="waveform">
           <option value="sine">Sine</option>
           <option value="triangle">Triangle</option>
           <option value="square">Square</option>
           <option value="sawtooth">Sawtooth</option>
+        </select>
+      </div>
+      <div class="synth-group" id="soundfont-select-group" hidden>
+        <label for="soundfont-preset">Soundfont</label>
+        <select id="soundfont-preset"></select>
+      </div>
+      <div class="synth-group" id="physical-select-group" hidden>
+        <label for="physical-model">Physical model</label>
+        <select id="physical-model">
+          <option value="plucked">Karplus‑Strong</option>
+          <option value="resonant">Resonator bank</option>
         </select>
       </div>
       <div class="envelope-panel-section-title">Envelope</div>
@@ -1215,6 +1243,7 @@
           &amp; suggestions
         </p>
         <p>&amp; special thanks to Michael Harrison for teaching me how to draw a chart</p>
+        <p>Many interval names come from Kyle Gann's <a href="https://www.kylegann.com/Octave.html" target="_blank">Anatomy of an Octave</a></p>
         <p class="credits-contact">
           Questions, bugs, requests, email me at elliot . c . cole @ gmail.com
         </p>

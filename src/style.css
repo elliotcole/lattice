@@ -561,6 +561,14 @@ body.theme-dark .banner-message:not([hidden]) {
   color: var(--muted-ink);
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
 .arrow-sep {
   font-size: 12px;
   color: var(--muted-ink);

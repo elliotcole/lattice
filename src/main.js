@@ -245,6 +245,7 @@ const layoutCustomLabelDialog = document.getElementById("layout-custom-label-dia
 const layoutCustomLabelInput = document.getElementById("layout-custom-label-input");
 const customRatioNumerator = document.getElementById("custom-ratio-numerator");
 const customRatioDenominator = document.getElementById("custom-ratio-denominator");
+const customRatioReduceToggle = document.getElementById("custom-ratio-reduce");
 const attackReadout = document.getElementById("attack-readout");
 const decayReadout = document.getElementById("decay-readout");
 const sustainReadout = document.getElementById("sustain-readout");
@@ -411,6 +412,7 @@ let oneShotPrevValue = null;
 let synthMode = "waveform";
 let soundfontPresetIndex = 0;
 let currentSynthWaveform = "";
+let lastCustomOctaveReduce = true;
 let rHeld = false;
 let tHeld = false;
 let lHeld = false;
@@ -3967,6 +3969,7 @@ function createCustomNodeFromSource(sourceNode, slot, factorNumerator, factorDen
     isCustom: true,
     octaveShift: 0,
     octaveShiftManual: false,
+    octaveReduce: true,
   };
   layoutNodeShapes.set(node.id, "diamond");
   return node;
@@ -4067,23 +4070,37 @@ function refreshCustomNodes() {
     if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
       return;
     }
-    const normalized = normalizeRatioToOctave(numerator, denominator);
-    if (!normalized) {
-      return;
+    if (customNode.octaveReduce === false) {
+      customNode.numerator = numerator;
+      customNode.denominator = denominator;
+      customNode.derivedNumerator = numerator;
+      customNode.derivedDenominator = denominator;
+      customNode.octaveShift = 0;
+      customNode.octaveShiftManual = true;
+      const ratioValue = numerator / denominator;
+      if (!Number.isFinite(ratioValue)) {
+        return;
+      }
+      customNode.freq = fundamental * ratioValue;
+    } else {
+      const normalized = normalizeRatioToOctave(numerator, denominator);
+      if (!normalized) {
+        return;
+      }
+      const reduced = reduceFraction(normalized.numerator, normalized.denominator);
+      customNode.numerator = reduced.numerator;
+      customNode.denominator = reduced.denominator;
+      customNode.derivedNumerator = reduced.numerator;
+      customNode.derivedDenominator = reduced.denominator;
+      if (!customNode.octaveShiftManual) {
+        customNode.octaveShift = normalized.shift;
+      }
+      const ratioValue = reduced.numerator / reduced.denominator;
+      if (!Number.isFinite(ratioValue)) {
+        return;
+      }
+      customNode.freq = fundamental * ratioValue;
     }
-    const reduced = reduceFraction(normalized.numerator, normalized.denominator);
-    customNode.numerator = reduced.numerator;
-    customNode.denominator = reduced.denominator;
-    customNode.derivedNumerator = reduced.numerator;
-    customNode.derivedDenominator = reduced.denominator;
-    if (!customNode.octaveShiftManual) {
-      customNode.octaveShift = normalized.shift;
-    }
-    const ratioValue = reduced.numerator / reduced.denominator;
-    if (!Number.isFinite(ratioValue)) {
-      return;
-    }
-    customNode.freq = fundamental * ratioValue;
     const etInfo = getNearestEtInfo(customNode.freq, a4);
     customNode.cents_from_et = etInfo.cents;
     customNode.note_name = etInfo.name;
@@ -4102,7 +4119,7 @@ function refreshCustomNodes() {
   invalidateLabelCache();
 }
 
-function createCustomNodeForSource(sourceId, numerator, denominator) {
+function createCustomNodeForSource(sourceId, numerator, denominator, { octaveShift = 0, octaveReduce = true } = {}) {
   const source = nodeById.get(sourceId);
   if (!source || !source.active) {
     return;
@@ -4115,16 +4132,22 @@ function createCustomNodeForSource(sourceId, numerator, denominator) {
   if (!node) {
     return;
   }
+  node.octaveReduce = octaveReduce;
+  node.octaveShift = Number.isFinite(octaveShift) ? octaveShift : 0;
+  node.octaveShiftManual = true;
   addCustomNodeToScene(node);
 }
 
-function updateCustomNodeFactor(nodeId, numerator, denominator) {
+function updateCustomNodeFactor(nodeId, numerator, denominator, { octaveShift = 0, octaveReduce = true } = {}) {
   const node = nodeById.get(nodeId);
   if (!node || !node.isCustom) {
     return;
   }
   node.factorNumerator = Math.max(1, numerator);
   node.factorDenominator = Math.max(1, denominator);
+  node.octaveReduce = octaveReduce;
+  node.octaveShift = Number.isFinite(octaveShift) ? octaveShift : 0;
+  node.octaveShiftManual = true;
   refreshCustomNodes();
   draw();
   schedulePresetUrlUpdate();
@@ -4134,16 +4157,34 @@ function applyCustomDialogResult(numerator, denominator) {
   if (!pendingCustomAction) {
     return;
   }
+  const reduceEnabled = customRatioReduceToggle ? customRatioReduceToggle.checked : true;
+  lastCustomOctaveReduce = reduceEnabled;
   lastCustomFactor = {
     numerator,
     denominator,
   };
-  const factorNumerator = Math.max(1, Math.trunc(numerator));
-  const factorDenominator = Math.max(1, Math.trunc(denominator));
+  let factorNumerator = Math.max(1, Math.trunc(numerator));
+  let factorDenominator = Math.max(1, Math.trunc(denominator));
+  let octaveShift = 0;
+  if (reduceEnabled) {
+    const normalized = normalizeRatioToOctave(factorNumerator, factorDenominator);
+    if (normalized) {
+      const reduced = reduceFraction(normalized.numerator, normalized.denominator);
+      factorNumerator = reduced.numerator;
+      factorDenominator = reduced.denominator;
+      octaveShift = normalized.shift;
+    }
+  }
   if (pendingCustomAction.type === "create") {
-    createCustomNodeForSource(pendingCustomAction.sourceId, factorNumerator, factorDenominator);
+    createCustomNodeForSource(pendingCustomAction.sourceId, factorNumerator, factorDenominator, {
+      octaveShift: reduceEnabled ? octaveShift : 0,
+      octaveReduce: reduceEnabled,
+    });
   } else if (pendingCustomAction.type === "edit") {
-    updateCustomNodeFactor(pendingCustomAction.nodeId, factorNumerator, factorDenominator);
+    updateCustomNodeFactor(pendingCustomAction.nodeId, factorNumerator, factorDenominator, {
+      octaveShift: reduceEnabled ? octaveShift : 0,
+      octaveReduce: reduceEnabled,
+    });
   }
   pendingCustomAction = null;
 }
@@ -4171,6 +4212,7 @@ function openCustomRatioDialog(action) {
     if (node) {
       numerator = node.factorNumerator || numerator;
       denominator = node.factorDenominator || denominator;
+      lastCustomOctaveReduce = node.octaveReduce !== false;
     }
   }
   if (customRatioNumerator) {
@@ -4178,6 +4220,9 @@ function openCustomRatioDialog(action) {
   }
   if (customRatioDenominator) {
     customRatioDenominator.value = String(denominator);
+  }
+  if (customRatioReduceToggle) {
+    customRatioReduceToggle.checked = lastCustomOctaveReduce;
   }
   if (customRatioDialog && typeof customRatioDialog.showModal === "function") {
     customRatioDialog.showModal();
@@ -4215,6 +4260,9 @@ function handleCustomRatioDialogClose() {
   if (customRatioDialog.returnValue !== "confirm") {
     pendingCustomAction = null;
     return;
+  }
+  if (customRatioReduceToggle) {
+    lastCustomOctaveReduce = customRatioReduceToggle.checked;
   }
   const numerator = Number(customRatioNumerator ? customRatioNumerator.value : lastCustomFactor.numerator);
   const denominator = Number(customRatioDenominator ? customRatioDenominator.value : lastCustomFactor.denominator);
@@ -15447,6 +15495,9 @@ function findOrCreateRatioTargetNode(target) {
   if (!node) {
     return null;
   }
+  node.octaveReduce = true;
+  node.octaveShift = 0;
+  node.octaveShiftManual = false;
   node.active = true;
   addCustomNodeToScene(node);
   return node;
@@ -15542,6 +15593,34 @@ function buildFromIntervalsInput(value) {
     alert("Please enter one or more ratios.");
     return;
   }
+  const axisPrimes = getAxisPrimeValues();
+  let requiresDepth = false;
+  let previewNumerator = 1;
+  let previewDenominator = 1;
+  lines.forEach((line) => {
+    const parsed = parseRatioInputWithDivider(line);
+    if (!parsed) {
+      return;
+    }
+    if (parsed.numerator === 1 && parsed.denominator === 1) {
+      return;
+    }
+    previewNumerator *= parsed.numerator;
+    previewDenominator *= parsed.denominator;
+    const reduced = reduceFraction(previewNumerator, previewDenominator);
+    previewNumerator = reduced.numerator;
+    previewDenominator = reduced.denominator;
+    const target = normalizeRatio(previewNumerator, previewDenominator);
+    const factors = factorizeRatio(target.numerator, target.denominator);
+    const desiredZ = axisPrimes.z ? factors.get(axisPrimes.z) || 0 : 0;
+    if (desiredZ !== 0) {
+      requiresDepth = true;
+    }
+  });
+  const startedIn2D = !is3DMode;
+  if (requiresDepth && startedIn2D) {
+    set3DMode(true);
+  }
   let currentNumerator = 1;
   let currentDenominator = 1;
   let handled = 0;
@@ -15569,6 +15648,10 @@ function buildFromIntervalsInput(value) {
   });
   if (!handled) {
     alert("Please enter ratios like 5:3 or 9/8.");
+  }
+  if (requiresDepth && startedIn2D) {
+    applyBestView({ cycle: true });
+    set3DMode(false, { preserveDepth: true });
   }
 }
 
@@ -19664,6 +19747,8 @@ function getPresetState() {
     customSlot: node.customSlot,
     factorNumerator: node.factorNumerator,
     factorDenominator: node.factorDenominator,
+    octaveReduce: node.octaveReduce !== false,
+    octaveShift: Number.isFinite(node.octaveShift) ? node.octaveShift : 0,
     position: { x: node.coordinate.x, y: node.coordinate.y },
     active: Boolean(node.active),
   }));
@@ -20129,7 +20214,12 @@ function applyPresetCustomNodes(entries) {
     if (slot == null) {
       return;
     }
-    const node = createCustomNodeFromSource(source, slot, numerator, denominator);
+    const octaveReduce = entry.octaveReduce !== false;
+    const octaveShift = Number.isFinite(entry.octaveShift) ? Number(entry.octaveShift) : 0;
+    const node = createCustomNodeFromSource(source, slot, numerator, denominator, {
+      octaveReduce,
+      octaveShift: octaveReduce ? octaveShift : 0,
+    });
     if (!node) {
       return;
     }

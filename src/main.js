@@ -114,6 +114,11 @@ const exportPdfButton = document.getElementById("export-pdf");
 const midiEnable = document.getElementById("midi-enable");
 const midiPortSelect = document.getElementById("midi-port");
 const midiChannelSelect = document.getElementById("midi-channel");
+const midiOutEnable = document.getElementById("midi-out-enable");
+const midiOutPortSelect = document.getElementById("midi-out-port");
+const midiOutBendInput = document.getElementById("midi-out-bend");
+const midiMenuToggle = document.getElementById("midi-menu-toggle");
+const midiMenuPanel = document.getElementById("midi-menu-panel");
 const presetToggle = document.getElementById("preset-toggle");
 const presetOverlay = document.getElementById("preset-overlay");
 const presetList = document.getElementById("preset-list");
@@ -408,6 +413,11 @@ let lfoPresetPlaying = false;
 let midiAccess = null;
 let midiInput = null;
 let midiEnabled = false;
+let midiOutEnabled = false;
+let midiOutDevice = null;
+let midiOutBendRange = 2;
+const midiOutActive = new Map();
+const midiOutChannelPool = Array.from({ length: 15 }, (_, i) => i + 2);
 let oneShotPrevValue = null;
 let synthMode = "waveform";
 let soundfontPresetIndex = 0;
@@ -5383,7 +5393,16 @@ function handleKeyDown(event) {
   const keyboardMappingActive = snapshotKeyboardActiveToggle
     ? snapshotKeyboardActiveToggle.checked
     : snapshotKeyboardActive;
-  if (keyboardModeEnabled && keyboardMappingActive && getSnapshotIndexFromKeyboard(event) != null) {
+  const snapshotLetterIndex =
+    keyboardModeEnabled && keyboardMappingActive ? getSnapshotLetterIndexFromEvent(event) : null;
+  const snapshotLetterHasSlot =
+    snapshotLetterIndex != null && Boolean(snapshotLetterSlots[snapshotLetterIndex]);
+  const snapshotLetterShortcutActive =
+    keyboardModeEnabled &&
+    keyboardMappingActive &&
+    snapshotLetterIndex != null &&
+    ((event.altKey && !event.metaKey && !event.ctrlKey) || snapshotLetterHasSlot);
+  if (snapshotLetterShortcutActive) {
     return;
   }
   if (event.code === "Space") {
@@ -11931,6 +11950,8 @@ function startVoice(options) {
     oscillator.stop(stopAt);
   }
 
+  sendMidiOutNoteOn(voice);
+
   if (looperState === "recording" && voice.source !== "looper") {
     const t = performance.now() - looperStartMs;
     looperEvents.push({ type: "on", nodeId: voice.nodeId, t, octave: voice.octave });
@@ -11955,6 +11976,8 @@ function stopVoice(voice, immediate = false) {
   if (!voice || !voice.oscillator || !audioCtx) {
     return;
   }
+
+  sendMidiOutNoteOff(voice);
 
   const osc = voice.oscillator;
   const hasStop = typeof osc.stop === "function" && !voice.usesWorklet;
@@ -12226,6 +12249,129 @@ function handleMidiMessage(event) {
   }
 }
 
+function populateMidiOutputs() {
+  if (!midiOutPortSelect || !midiAccess) {
+    return;
+  }
+  const current = midiOutPortSelect.value;
+  midiOutPortSelect.innerHTML = "";
+  const outputs = Array.from(midiAccess.outputs.values());
+  if (!outputs.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No MIDI outputs";
+    midiOutPortSelect.appendChild(option);
+    return;
+  }
+  outputs.forEach((output) => {
+    const option = document.createElement("option");
+    option.value = output.id;
+    option.textContent = output.name || `MIDI ${output.id}`;
+    midiOutPortSelect.appendChild(option);
+  });
+  const nextValue = outputs.find((output) => output.id === current) ? current : outputs[0].id;
+  midiOutPortSelect.value = nextValue;
+  selectMidiOutput(nextValue);
+}
+
+function selectMidiOutput(outputId) {
+  if (!midiAccess) {
+    return;
+  }
+  const nextOutput = Array.from(midiAccess.outputs.values()).find(
+    (output) => output.id === outputId
+  );
+  midiOutDevice = nextOutput || null;
+  if (midiOutEnabled && midiOutDevice) {
+    sendMidiOutPitchBendRange();
+  }
+}
+
+function sendMidiOutRpn(channel, msb, lsb, dataMsb, dataLsb = 0) {
+  if (!midiOutDevice) {
+    return;
+  }
+  const status = 0xb0 | (channel - 1);
+  midiOutDevice.send([status, 101, msb]);
+  midiOutDevice.send([status, 100, lsb]);
+  midiOutDevice.send([status, 6, dataMsb]);
+  midiOutDevice.send([status, 38, dataLsb]);
+  midiOutDevice.send([status, 101, 127]);
+  midiOutDevice.send([status, 100, 127]);
+}
+
+function sendMidiOutPitchBendRange() {
+  const range = Math.min(12, Math.max(0.1, Number(midiOutBendRange) || 2));
+  midiOutBendRange = range;
+  midiOutChannelPool.forEach((channel) => {
+    sendMidiOutRpn(channel, 0, 0, Math.round(range), 0);
+  });
+}
+
+function sendMidiOutPitchBend(channel, bendValue) {
+  if (!midiOutDevice) {
+    return;
+  }
+  const value = Math.max(0, Math.min(16383, Math.round(bendValue)));
+  const lsb = value & 0x7f;
+  const msb = (value >> 7) & 0x7f;
+  midiOutDevice.send([0xe0 | (channel - 1), lsb, msb]);
+}
+
+function allocateMidiOutChannel() {
+  if (!midiOutChannelPool.length) {
+    return null;
+  }
+  return midiOutChannelPool.shift();
+}
+
+function releaseMidiOutChannel(channel) {
+  if (!channel || midiOutChannelPool.includes(channel)) {
+    return;
+  }
+  midiOutChannelPool.push(channel);
+}
+
+function sendMidiOutNoteOn(voice) {
+  if (!midiOutEnabled || !midiOutDevice || !voice) {
+    return;
+  }
+  if (voice.source === "midi") {
+    return;
+  }
+  const channel = allocateMidiOutChannel();
+  if (!channel) {
+    return;
+  }
+  const freq = Number(voice.freq);
+  if (!Number.isFinite(freq) || freq <= 0) {
+    releaseMidiOutChannel(channel);
+    return;
+  }
+  const a4 = Number(a4Input.value) || 440;
+  const midiFloat = 69 + 12 * Math.log2(freq / a4);
+  const baseMidi = Math.min(127, Math.max(0, Math.round(midiFloat)));
+  const delta = midiFloat - baseMidi;
+  const bend = 8192 + (delta / midiOutBendRange) * 8192;
+  sendMidiOutPitchBend(channel, bend);
+  const velocity = Math.min(127, Math.max(1, Math.round((voice.velocity ?? 1) * 127)));
+  midiOutDevice.send([0x90 | (channel - 1), baseMidi, velocity]);
+  midiOutActive.set(voice.id, { channel, note: baseMidi });
+}
+
+function sendMidiOutNoteOff(voice) {
+  if (!midiOutDevice || !voice) {
+    return;
+  }
+  const entry = midiOutActive.get(voice.id);
+  if (!entry) {
+    return;
+  }
+  midiOutDevice.send([0x80 | (entry.channel - 1), entry.note, 0]);
+  midiOutActive.delete(voice.id);
+  releaseMidiOutChannel(entry.channel);
+}
+
 function selectMidiInput(inputId) {
   if (!midiAccess) {
     return;
@@ -12251,9 +12397,11 @@ async function initMidi() {
     midiAccess = await navigator.requestMIDIAccess();
     midiAccess.onstatechange = () => {
       populateMidiPorts();
+      populateMidiOutputs();
     };
     populateMidiPorts();
     populateMidiChannels();
+    populateMidiOutputs();
   } catch (error) {
     console.warn("MIDI access failed", error);
   }
@@ -18096,6 +18244,33 @@ function toggleRatioWheelPanel() {
   syncTopMenuPanelState();
 }
 
+function toggleMidiMenuPanel() {
+  if (!midiMenuToggle || !midiMenuPanel) {
+    return;
+  }
+  const isOpen = midiMenuToggle.getAttribute("aria-expanded") === "true";
+  if (!isOpen) {
+    closeTopMenus("midi");
+  }
+  midiMenuToggle.setAttribute("aria-expanded", String(!isOpen));
+  midiMenuPanel.hidden = isOpen;
+  midiMenuPanel.classList.toggle("panel-open", !isOpen);
+  const parentPanel = midiMenuToggle.closest(".panel");
+  if (parentPanel) {
+    parentPanel.classList.toggle("panel-open", !isOpen);
+  }
+  syncTopMenuPanelState();
+}
+
+function closeMidiMenuPanel() {
+  if (!midiMenuToggle || !midiMenuPanel) {
+    return;
+  }
+  midiMenuToggle.setAttribute("aria-expanded", "false");
+  midiMenuPanel.hidden = true;
+  midiMenuPanel.classList.remove("panel-open");
+}
+
 function openFindRatioDialog() {
   if (!findRatioDialog || !findRatioInput) {
     return;
@@ -18247,6 +18422,9 @@ function closeTopMenus(except = "") {
   if (except !== "ratio-wheel") {
     closeRatioWheelPanel();
   }
+  if (except !== "midi") {
+    closeMidiMenuPanel();
+  }
   syncTopMenuPanelState();
 }
 
@@ -18266,7 +18444,8 @@ function syncTopMenuPanelState() {
     (calculatePanel && !calculatePanel.hidden) ||
     (presetOverlay && !presetOverlay.hidden) ||
     (filePanel && !filePanel.hidden) ||
-    (ratioWheelPanel && !ratioWheelPanel.hidden);
+    (ratioWheelPanel && !ratioWheelPanel.hidden) ||
+    (midiMenuPanel && !midiMenuPanel.hidden);
   if (controlActionsPanel) {
     controlActionsPanel.classList.toggle("panel-open", topMenusOpen);
   }
@@ -24185,10 +24364,12 @@ window.addEventListener("keydown", (event) => {
       return;
     }
     if (!event.altKey && !event.metaKey && !event.ctrlKey) {
-      event.preventDefault();
-      const letter = String(event.code || "").replace("Key", "").toLowerCase();
-      recallSnapshotLetter(letter, letterIndex);
-      return;
+      if (snapshotLetterSlots[letterIndex]) {
+        event.preventDefault();
+        const letter = String(event.code || "").replace("Key", "").toLowerCase();
+        recallSnapshotLetter(letter, letterIndex);
+        return;
+      }
     }
   }
   if (numberIndex == null) {
@@ -25638,6 +25819,41 @@ if (midiPortSelect) {
     selectMidiInput(midiPortSelect.value);
   });
 }
+if (midiOutEnable) {
+  midiOutEnable.addEventListener("change", async () => {
+    midiOutEnabled = midiOutEnable.checked;
+    if (midiOutEnabled && !midiAccess) {
+      await initMidi();
+    }
+    if (midiOutEnabled && midiOutDevice) {
+      sendMidiOutPitchBendRange();
+    } else if (!midiOutEnabled) {
+      const active = [...midiOutActive.entries()];
+      active.forEach(([voiceId]) => {
+        const voice = findVoiceById(voiceId);
+        if (voice) {
+          sendMidiOutNoteOff(voice);
+        }
+      });
+    }
+  });
+}
+if (midiOutPortSelect) {
+  midiOutPortSelect.addEventListener("change", () => {
+    selectMidiOutput(midiOutPortSelect.value);
+  });
+}
+if (midiOutBendInput) {
+  midiOutBendInput.addEventListener("input", () => {
+    const value = Number(midiOutBendInput.value);
+    if (Number.isFinite(value) && value > 0) {
+      midiOutBendRange = value;
+      if (midiOutEnabled && midiOutDevice) {
+        sendMidiOutPitchBendRange();
+      }
+    }
+  });
+}
 if (envelopeToggle) {
   envelopeToggle.addEventListener("click", toggleEnvelopePanel);
 }
@@ -25646,6 +25862,9 @@ if (animationToggle) {
 }
 if (ratioWheelToggle) {
   ratioWheelToggle.addEventListener("click", toggleRatioWheelPanel);
+}
+if (midiMenuToggle) {
+  midiMenuToggle.addEventListener("click", toggleMidiMenuPanel);
 }
 if (ratioWheelLarge) {
   ratioWheelLarge.addEventListener("mousemove", handleRatioWheelHover);
@@ -26071,6 +26290,15 @@ if (synthModeInputs.length) {
 }
 syncSynthModeUI();
 currentSynthWaveform = getCurrentWaveformType();
+if (midiOutEnable) {
+  midiOutEnabled = midiOutEnable.checked;
+}
+if (midiOutBendInput) {
+  const value = Number(midiOutBendInput.value);
+  if (Number.isFinite(value) && value > 0) {
+    midiOutBendRange = value;
+  }
+}
 updateLfoDepth();
 updateTempoReadout();
 updatePatternLengthReadout();
@@ -26210,7 +26438,16 @@ window.addEventListener("keydown", (event) => {
   const keyboardMappingActive = snapshotKeyboardActiveToggle
     ? snapshotKeyboardActiveToggle.checked
     : snapshotKeyboardActive;
-  if (keyboardModeEnabled && keyboardMappingActive && getSnapshotIndexFromKeyboard(event) != null) {
+  const snapshotLetterIndex =
+    keyboardModeEnabled && keyboardMappingActive ? getSnapshotLetterIndexFromEvent(event) : null;
+  const snapshotLetterHasSlot =
+    snapshotLetterIndex != null && Boolean(snapshotLetterSlots[snapshotLetterIndex]);
+  const snapshotLetterShortcutActive =
+    keyboardModeEnabled &&
+    keyboardMappingActive &&
+    snapshotLetterIndex != null &&
+    ((event.altKey && !event.metaKey && !event.ctrlKey) || snapshotLetterHasSlot);
+  if (snapshotLetterShortcutActive) {
     return;
   }
   if (

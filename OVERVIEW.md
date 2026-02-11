@@ -1,17 +1,16 @@
 # Tuning Lattice — Overview
 
-Tuning Lattice is an interactive, audio‑enabled tool for exploring just‑intonation lattices, interval relationships, and microtonal structures. It combines a visual lattice editor with a synth engine, snapshot system, and export tools so you can analyze, audition, and publish tunings and interval networks quickly.
+Tuning Lattice is an interactive tool for exploring just‑intonation lattices, interval relationships, and microtonal structures. It combines a visual lattice editor with a synth engine, MIDI input and retuned MIDI output, snapshot system, and export tools so you can analyze, audition, and publish tunings and interval networks quickly.
 
 ## What it can do (at a glance)
 
 ### Visual lattice & navigation
 - 2D and 3D lattice views with smooth zoom, pan, and rotation.
-- Customizable axis ratios (X/Y/Z), grid depth, and view controls.
+- Customizable axis ratios (X/Y/Z) for primes up to 97, plus Custom Nodes for more dimensions.
 - Layout mode for print‑style positioning with editable spacing and label placement.
-- Node collision‑avoidance for labels and detailed visual control of node shapes.
 
 ### Nodes, ratios, and intervals
-- Add nodes by ratio, interval, or direct multiplication from existing nodes.
+- Add nodes by ratio, interval, or direct lattice connections from existing nodes.
 - Guide nodes, custom nodes, and distance lines between nodes.
 - Interval chart and searchable ratio database with filtering by type.
 - Microtonal interval overlay to reveal common interval names between nodes.

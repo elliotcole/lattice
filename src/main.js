@@ -165,6 +165,8 @@ const fundamentalNoteSelect = document.getElementById("fundamental-note");
 const fundamentalOctaveDown = document.getElementById("fundamental-octave-down");
 const fundamentalOctaveUp = document.getElementById("fundamental-octave-up");
 const a4Input = document.getElementById("a4");
+const tiltInput = document.getElementById("tilt");
+const tiltReadout = document.getElementById("tilt-readout");
 const ratioXSelect = document.getElementById("ratio-x");
 const ratioYSelect = document.getElementById("ratio-y");
 const ratioZSelect = document.getElementById("ratio-z");
@@ -367,6 +369,40 @@ let tempBannerHideTimer = null;
 
 function clampZoom(value) {
   return Math.min(2.2, Math.max(0.5, value));
+}
+
+function clampTiltDeg(value) {
+  return Math.min(45, Math.max(-45, value));
+}
+
+function updateTiltReadout() {
+  if (!tiltReadout) {
+    return;
+  }
+  const shown = Math.abs(latticeTiltDeg) < 0.05 ? 0 : latticeTiltDeg;
+  tiltReadout.textContent = `${shown.toFixed(shown % 1 === 0 ? 0 : 1)}\u00b0`;
+}
+
+function setLatticeTilt(nextTiltDeg, options = {}) {
+  const { syncControl = true } = options;
+  const numeric = Number(nextTiltDeg);
+  const clamped = Number.isFinite(numeric) ? clampTiltDeg(numeric) : 0;
+  if (Math.abs(clamped - latticeTiltDeg) < 1e-6) {
+    if (syncControl && tiltInput) {
+      tiltInput.value = String(clamped);
+    }
+    updateTiltReadout();
+    return;
+  }
+  latticeTiltDeg = clamped;
+  const radians = (clamped * Math.PI) / 180;
+  tiltCos = Math.cos(radians);
+  tiltSin = Math.sin(radians);
+  markIsomorphicDirty();
+  if (syncControl && tiltInput) {
+    tiltInput.value = String(clamped);
+  }
+  updateTiltReadout();
 }
 
 function clampCameraDistance(value) {
@@ -1598,6 +1634,7 @@ let showKeyMappings = true;
 let layoutKeyMappingMode = "hide";
 let showHelpEnabled = true;
 let connectOrphansEnabled = false;
+let latticeTiltDeg = 0;
 let orphanGuideNodes = new Set();
 let orphanGuideEdges = new Set();
 let uiHintDismissed = false;
@@ -1618,6 +1655,8 @@ let labelCacheDataVersion = 0;
 const textWidthCache = new Map();
 let drawPending = false;
 const DEBUG_CENTS = false;
+let tiltCos = 1;
+let tiltSin = 0;
 const DEBUG_R_CLICK = false;
 
 const LAYOUT_PX_PER_IN = 96;
@@ -6271,9 +6310,11 @@ function projectPointWithAngles(point, rotX, rotY, disableScale = false) {
 
 function worldToScreen(point, disableScale = false) {
   const projected = projectPoint(point, disableScale);
+  const tiltedX = projected.x * tiltCos - projected.y * tiltSin;
+  const tiltedY = projected.x * tiltSin + projected.y * tiltCos;
   return {
-    x: (projected.x + view.offsetX) * view.zoom + canvas.clientWidth / 2,
-    y: (projected.y + view.offsetY) * view.zoom + canvas.clientHeight / 2,
+    x: (tiltedX + view.offsetX) * view.zoom + canvas.clientWidth / 2,
+    y: (tiltedY + view.offsetY) * view.zoom + canvas.clientHeight / 2,
     depth: projected.depth,
     scale: projected.scale,
     scaleRaw: projected.scaleRaw,
@@ -6283,9 +6324,13 @@ function worldToScreen(point, disableScale = false) {
 }
 
 function screenToWorld(point) {
+  const projectedX = (point.x - canvas.clientWidth / 2) / view.zoom - view.offsetX;
+  const projectedY = (point.y - canvas.clientHeight / 2) / view.zoom - view.offsetY;
+  const untiltedX = projectedX * tiltCos + projectedY * tiltSin;
+  const untiltedY = -projectedX * tiltSin + projectedY * tiltCos;
   return {
-    x: (point.x - canvas.clientWidth / 2) / view.zoom - view.offsetX,
-    y: (point.y - canvas.clientHeight / 2) / view.zoom - view.offsetY,
+    x: untiltedX,
+    y: untiltedY,
   };
 }
 
@@ -6342,8 +6387,10 @@ function screenDeltaToWorldDelta(delta, baseCoord, disableScale = false) {
   };
   const camera = worldToCamera(safeBase, disableScale);
   const scale = camera.scale || 1;
-  const dx1 = delta.x / (view.zoom * scale);
-  const dy1 = delta.y / (view.zoom * scale);
+  const untiltedDeltaX = delta.x * tiltCos + delta.y * tiltSin;
+  const untiltedDeltaY = -delta.x * tiltSin + delta.y * tiltCos;
+  const dx1 = untiltedDeltaX / (view.zoom * scale);
+  const dy1 = untiltedDeltaY / (view.zoom * scale);
   const nextCamera = {
     x1: camera.x1 + dx1,
     y1: camera.y1 + dy1,
@@ -7851,6 +7898,42 @@ function getDetailLabelPosition({
   const fallbackRect = getAnchoredRect(anchorX, anchorY, fallbackDx, fallbackDy);
   placedRects.push(fallbackRect);
   return { x: fallbackRect.left, y: fallbackRect.top };
+}
+
+function draw2DKeyMappingLabel({
+  labelText,
+  pos,
+  radius,
+  alpha,
+  color,
+  collision,
+  ignoreId = null,
+}) {
+  if (!labelText || !collision) {
+    return;
+  }
+  const fontSize = 11;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `${fontSize}px "Lexend", sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  const width = Math.max(1, ctx.measureText(labelText).width);
+  const height = fontSize;
+  const distance = radius + 1;
+  const labelPos = getDetailLabelPosition({
+    center: pos,
+    baseOffset: { x: -distance, y: -distance },
+    width,
+    height,
+    circles: collision.circles,
+    placedRects: collision.rects,
+    segments: collision.segments,
+    ignoreId,
+  });
+  ctx.fillStyle = color;
+  ctx.fillText(labelText, labelPos.x, labelPos.y);
+  ctx.restore();
 }
 
 function getLayoutKeyMappingOffset(node, radius, scale = 1) {
@@ -11896,14 +11979,15 @@ function draw() {
         if (is3DMode) {
           drawKeyBanner(pos, radius, keyLabel, alpha);
         } else {
-          ctx.save();
-          ctx.globalAlpha = alpha;
-          ctx.font = '11px "Lexend", sans-serif';
-          ctx.textAlign = "right";
-          ctx.textBaseline = "bottom";
-          ctx.fillStyle = themeColors.textSecondary;
-          ctx.fillText(keyLabel, pos.x - radius - 3, pos.y - radius - 3);
-          ctx.restore();
+          draw2DKeyMappingLabel({
+            labelText: keyLabel,
+            pos,
+            radius,
+            alpha,
+            color: themeColors.textSecondary,
+            collision: detailLabelCollision,
+            ignoreId: node.id,
+          });
         }
       }
     }
@@ -11914,14 +11998,15 @@ function draw() {
         if (is3DMode) {
           drawKeyBanner(pos, radius, keyLabel, alpha);
         } else {
-          ctx.save();
-          ctx.globalAlpha = alpha;
-          ctx.font = '11px "Lexend", sans-serif';
-          ctx.textAlign = "right";
-          ctx.textBaseline = "bottom";
-          ctx.fillStyle = themeColors.textSecondary;
-          ctx.fillText(keyLabel, pos.x - radius - 3, pos.y - radius - 3);
-          ctx.restore();
+          draw2DKeyMappingLabel({
+            labelText: keyLabel,
+            pos,
+            radius,
+            alpha,
+            color: themeColors.textSecondary,
+            collision: detailLabelCollision,
+            ignoreId: node.id,
+          });
         }
       }
     }
@@ -11967,14 +12052,15 @@ function draw() {
         } else if (is3DMode) {
           drawKeyBanner(pos, radius, keyLabel, alpha);
         } else {
-          ctx.save();
-          ctx.globalAlpha = alpha;
-          ctx.font = '11px "Lexend", sans-serif';
-          ctx.textAlign = "right";
-          ctx.textBaseline = "bottom";
-          ctx.fillStyle = themeColors.textSecondary;
-          ctx.fillText(keyLabel, pos.x - radius - 3, pos.y - radius - 3);
-          ctx.restore();
+          draw2DKeyMappingLabel({
+            labelText: keyLabel,
+            pos,
+            radius,
+            alpha,
+            color: themeColors.textSecondary,
+            collision: detailLabelCollision,
+            ignoreId: node.id,
+          });
         }
       }
     }
@@ -20468,6 +20554,7 @@ function getPresetState() {
     customNodes: customState,
     mode3d: is3DMode,
     connectOrphans: connectOrphansEnabled,
+    tiltDeg: latticeTiltDeg,
     distances: analysisLayers.distances,
     view: {
       zoom: view.zoom,
@@ -21670,6 +21757,11 @@ function applyPresetState(state, options = {}) {
     if (connectOrphansToggle) {
       connectOrphansToggle.checked = connectOrphansEnabled;
     }
+  }
+  if (Number.isFinite(state.tiltDeg)) {
+    setLatticeTilt(state.tiltDeg);
+  } else {
+    setLatticeTilt(0);
   }
   if (typeof state.directionalRatioLabels === "boolean") {
     directionalRatioLabels = state.directionalRatioLabels;
@@ -24344,6 +24436,7 @@ if (directionalRatioLabelsToggle) {
 if (connectOrphansToggle) {
   connectOrphansToggle.checked = connectOrphansEnabled;
 }
+setLatticeTilt(latticeTiltDeg);
 if (hejiEnabledToggle) {
   hejiEnabledToggle.checked = hejiEnabled;
 }
@@ -24559,6 +24652,13 @@ if (navDistanceInput) {
   navDistanceInput.addEventListener("input", () => {
     cameraDistance = clampCameraDistance(Number(navDistanceInput.value) || 0);
     draw();
+  });
+}
+if (tiltInput) {
+  tiltInput.addEventListener("input", () => {
+    setLatticeTilt(tiltInput.value, { syncControl: false });
+    draw();
+    schedulePresetUrlUpdate();
   });
 }
 exportScaleButton.addEventListener("click", exportToScaleWorkshop);

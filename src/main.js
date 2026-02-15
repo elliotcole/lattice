@@ -130,6 +130,7 @@ const distanceSelectTriggers = document.querySelectorAll("[data-distance-select]
 const fileToggle = document.getElementById("file-toggle");
 const filePanel = document.getElementById("file-panel");
 const sharePresetButton = document.getElementById("share-preset");
+const openTunerButton = document.getElementById("open-tuner");
 const fileSharePopover = document.getElementById("file-share-popover");
 const saveLatticeButton = document.getElementById("save-lattice");
 const loadLatticeButton = document.getElementById("load-lattice");
@@ -1463,6 +1464,7 @@ const snapshotLetterKeyToSlot = new Map();
 let snapshotKeyboardContainer = null;
 let snapshotKeyboardKeys = null;
 let snapshotActiveIndex = -1;
+let snapshotBaseState = null;
 let pendingSnapshotIndex = -1;
 let pendingSnapshotState = null;
 let pendingSnapshotLetterKey = "";
@@ -3027,6 +3029,106 @@ function getPlayingSnapshotKeys({ excludePattern = false } = {}) {
   return Array.from(keys);
 }
 
+function deepEqualSnapshotValue(a, b) {
+  if (a === b) {
+    return true;
+  }
+  if (typeof a !== typeof b) {
+    return false;
+  }
+  if (a == null || b == null) {
+    return false;
+  }
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    for (let i = 0; i < a.length; i += 1) {
+      if (!deepEqualSnapshotValue(a[i], b[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (typeof a === "object") {
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) {
+      return false;
+    }
+    for (const key of keysA) {
+      if (!Object.prototype.hasOwnProperty.call(b, key)) {
+        return false;
+      }
+      if (!deepEqualSnapshotValue(a[key], b[key])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+function diffSnapshotState(base, next) {
+  if (!base || !next || typeof base !== "object" || typeof next !== "object") {
+    return next;
+  }
+  const diff = {};
+  Object.keys(next).forEach((key) => {
+    if (!Object.prototype.hasOwnProperty.call(next, key)) {
+      return;
+    }
+    const nextValue = next[key];
+    const baseValue = base[key];
+    if (deepEqualSnapshotValue(baseValue, nextValue)) {
+      return;
+    }
+    if (
+      nextValue &&
+      baseValue &&
+      typeof nextValue === "object" &&
+      typeof baseValue === "object" &&
+      !Array.isArray(nextValue) &&
+      !Array.isArray(baseValue)
+    ) {
+      const childDiff = diffSnapshotState(baseValue, nextValue);
+      if (childDiff && Object.keys(childDiff).length) {
+        diff[key] = childDiff;
+      }
+      return;
+    }
+    diff[key] = nextValue;
+  });
+  return diff;
+}
+
+function mergeSnapshotState(base, diff) {
+  if (!diff || typeof diff !== "object") {
+    return base ? JSON.parse(JSON.stringify(base)) : diff;
+  }
+  if (!base || typeof base !== "object") {
+    return JSON.parse(JSON.stringify(diff));
+  }
+  const result = Array.isArray(base) ? [...base] : { ...base };
+  Object.keys(diff).forEach((key) => {
+    const value = diff[key];
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      base &&
+      typeof base[key] === "object" &&
+      base[key] &&
+      !Array.isArray(base[key])
+    ) {
+      result[key] = mergeSnapshotState(base[key], value);
+    } else {
+      result[key] = JSON.parse(JSON.stringify(value));
+    }
+  });
+  return result;
+}
+
 function serializeSnapshotsForPreset() {
   const entries = [];
   snapshotSlots.forEach((snapshot, index) => {
@@ -3063,7 +3165,13 @@ function applySnapshotsFromPreset(value) {
     if (!Number.isFinite(index) || index < 0 || index >= snapshotSlots.length) {
       return;
     }
-    if (!snapshot || typeof snapshot !== "object" || !snapshot.state) {
+    if (!snapshot || typeof snapshot !== "object") {
+      return;
+    }
+    if (!snapshot.state && snapshot.diff && snapshotBaseState) {
+      snapshot.state = mergeSnapshotState(snapshotBaseState, snapshot.diff);
+    }
+    if (!snapshot.state) {
       return;
     }
     snapshotSlots[index] = snapshot;
@@ -3085,7 +3193,13 @@ function applyLetterSnapshotsFromPreset(value) {
     if (!Number.isFinite(index) || index < 0 || index >= snapshotLetterSlots.length) {
       return;
     }
-    if (!snapshot || typeof snapshot !== "object" || !snapshot.state) {
+    if (!snapshot || typeof snapshot !== "object") {
+      return;
+    }
+    if (!snapshot.state && snapshot.diff && snapshotBaseState) {
+      snapshot.state = mergeSnapshotState(snapshotBaseState, snapshot.diff);
+    }
+    if (!snapshot.state) {
       return;
     }
     snapshotLetterSlots[index] = snapshot;
@@ -3093,38 +3207,171 @@ function applyLetterSnapshotsFromPreset(value) {
   updateSnapshotUi();
 }
 
+function buildSnapshotSetPayload({ compact = true } = {}) {
+  const snapshots = serializeSnapshotsForPreset();
+  const letterSnapshots = serializeLetterSnapshotsForPreset();
+  const baseCandidate =
+    snapshotBaseState ||
+    (snapshots.length ? snapshots[0][1] && snapshots[0][1].state : null) ||
+    buildSnapshotState();
+  const base = baseCandidate ? JSON.parse(JSON.stringify(baseCandidate)) : null;
+  const compactSnapshots = compact
+    ? snapshots.map(([index, snapshot]) => {
+        const diff = base && snapshot.state ? diffSnapshotState(base, snapshot.state) : null;
+        const entry = {
+          diff: diff && Object.keys(diff).length ? diff : null,
+          playKeys: snapshot.playKeys,
+          pattern: snapshot.pattern,
+          lfos: snapshot.lfos,
+        };
+        if (!entry.diff) {
+          entry.state = snapshot.state;
+        }
+        return [index, entry];
+      })
+    : snapshots;
+  const compactLetters = compact
+    ? letterSnapshots.map(([index, snapshot]) => {
+        const diff = base && snapshot.state ? diffSnapshotState(base, snapshot.state) : null;
+        const entry = {
+          diff: diff && Object.keys(diff).length ? diff : null,
+          playKeys: snapshot.playKeys,
+          pattern: snapshot.pattern,
+          lfos: snapshot.lfos,
+        };
+        if (!entry.diff) {
+          entry.state = snapshot.state;
+        }
+        return [index, entry];
+      })
+    : letterSnapshots;
+  return {
+    v: 1,
+    base,
+    snapshots: compactSnapshots,
+    snapshotsLetters: compactLetters,
+    snapshotActive: snapshotActiveIndex >= 0 ? snapshotActiveIndex : null,
+    snapshotActiveLetter: snapshotActiveLetterKey || null,
+    snapshotSettings: {
+      deferToCycleEnd: snapshotDeferToCycleEnd,
+      restorePlayNodes: snapshotRestorePlayNodes,
+      connectCommonTones: snapshotConnectCommonTones,
+      restoreView: snapshotRestoreView,
+      restoreSequence: snapshotRestoreSequence,
+      restoreLfos: snapshotRestoreLfos,
+      restoreLfoPhase: snapshotRestoreLfoPhase,
+      useLetterKeys: snapshotKeyboardMode,
+      lettersActive: snapshotKeyboardActive,
+    },
+  };
+}
+
+function applySnapshotSetPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+  snapshotBaseState = payload.base || null;
+  if (Array.isArray(payload.snapshots)) {
+    applySnapshotsFromPreset(payload.snapshots);
+  }
+  if (Array.isArray(payload.snapshotsLetters)) {
+    applyLetterSnapshotsFromPreset(payload.snapshotsLetters);
+  }
+  if (Number.isFinite(payload.snapshotActive)) {
+    snapshotActiveIndex = Math.trunc(payload.snapshotActive);
+  }
+  if (typeof payload.snapshotActiveLetter === "string") {
+    snapshotActiveLetterKey = payload.snapshotActiveLetter;
+  }
+  if (payload.snapshotSettings && typeof payload.snapshotSettings === "object") {
+    const settings = payload.snapshotSettings;
+    snapshotDeferToCycleEnd = Boolean(settings.deferToCycleEnd);
+    snapshotRestorePlayNodes = Boolean(settings.restorePlayNodes);
+    snapshotConnectCommonTones = Boolean(settings.connectCommonTones);
+    snapshotRestoreView = Boolean(settings.restoreView);
+    snapshotRestoreSequence = Boolean(settings.restoreSequence);
+    snapshotRestoreLfos = Boolean(settings.restoreLfos);
+    snapshotRestoreLfoPhase = Boolean(settings.restoreLfoPhase);
+    snapshotKeyboardMode = Boolean(settings.useLetterKeys);
+    snapshotKeyboardActive = Boolean(settings.lettersActive);
+  }
+  if (snapshotDeferToggle) {
+    snapshotDeferToggle.checked = snapshotDeferToCycleEnd;
+  }
+  if (snapshotRestoreToggle) {
+    snapshotRestoreToggle.checked = snapshotRestorePlayNodes;
+  }
+  if (snapshotConnectToggle) {
+    snapshotConnectToggle.checked = snapshotConnectCommonTones;
+    snapshotConnectToggle.disabled = !snapshotRestorePlayNodes;
+  }
+  if (snapshotRestoreViewToggle) {
+    snapshotRestoreViewToggle.checked = snapshotRestoreView;
+  }
+  if (snapshotRestoreSequenceToggle) {
+    snapshotRestoreSequenceToggle.checked = snapshotRestoreSequence;
+  }
+  if (snapshotRestoreLfosToggle) {
+    snapshotRestoreLfosToggle.checked = snapshotRestoreLfos;
+  }
+  if (snapshotRestoreLfoPhaseToggle) {
+    snapshotRestoreLfoPhaseToggle.checked = snapshotRestoreLfoPhase;
+    snapshotRestoreLfoPhaseToggle.disabled = !snapshotRestoreLfos;
+  }
+  if (snapshotKeyboardModeToggle) {
+    snapshotKeyboardModeToggle.checked = snapshotKeyboardMode;
+  }
+  if (snapshotKeyboardActiveToggle) {
+    snapshotKeyboardActiveToggle.checked = snapshotKeyboardActive;
+    snapshotKeyboardActiveToggle.disabled = !snapshotKeyboardMode;
+  }
+  setKeyboardModeDisabled(snapshotKeyboardMode);
+  updateSnapshotUi();
+  return true;
+}
+
 function buildSnapshotPresetUrl() {
   const state = getPresetState();
   if (!state) {
     return null;
   }
-  const snapshots = serializeSnapshotsForPreset();
-  if (snapshots.length) {
-    state.snapshots = snapshots;
+  const snapshotPayload = buildSnapshotSetPayload({ compact: true });
+  if (snapshotPayload.snapshots.length) {
+    state.snapshots = snapshotPayload.snapshots;
   }
-  const letterSnapshots = serializeLetterSnapshotsForPreset();
-  if (letterSnapshots.length) {
-    state.snapshotsLetters = letterSnapshots;
+  if (snapshotPayload.snapshotsLetters.length) {
+    state.snapshotsLetters = snapshotPayload.snapshotsLetters;
   }
-  if (snapshotActiveIndex >= 0) {
-    state.snapshotActive = snapshotActiveIndex;
+  if (snapshotPayload.base) {
+    state.snapshotBase = snapshotPayload.base;
   }
-  if (snapshotActiveLetterKey) {
-    state.snapshotActiveLetter = snapshotActiveLetterKey;
+  if (snapshotPayload.snapshotActive != null) {
+    state.snapshotActive = snapshotPayload.snapshotActive;
   }
-  state.snapshotSettings = {
-    deferToCycleEnd: snapshotDeferToCycleEnd,
-    restorePlayNodes: snapshotRestorePlayNodes,
-    connectCommonTones: snapshotConnectCommonTones,
-    restoreView: snapshotRestoreView,
-    restoreSequence: snapshotRestoreSequence,
-    restoreLfos: snapshotRestoreLfos,
-    restoreLfoPhase: snapshotRestoreLfoPhase,
-    useLetterKeys: snapshotKeyboardMode,
-    lettersActive: snapshotKeyboardActive,
-  };
+  if (snapshotPayload.snapshotActiveLetter) {
+    state.snapshotActiveLetter = snapshotPayload.snapshotActiveLetter;
+  }
+  state.snapshotSettings = snapshotPayload.snapshotSettings;
   const encoded = encodePresetState(state);
   return `${window.location.origin}/#${PRESET_PARAM}=${encoded}`;
+}
+
+function exportSnapshotSetToFile() {
+  const payload = buildSnapshotSetPayload({ compact: true });
+  if (!payload.snapshots.length && !payload.snapshotsLetters.length) {
+    showFileSharePopover("Nothing to export yet.");
+    return;
+  }
+  const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `tuning-lattice-snapshots-${Date.now()}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  showFileSharePopover("Snapshot file downloaded.");
 }
 
 function updateSnapshotUi() {
@@ -20488,6 +20735,7 @@ function applyPresetState(state, options = {}) {
     return;
   }
   const preserveViewMode = Boolean(options.preserveViewMode);
+  snapshotBaseState = state.snapshotBase || null;
   if (Array.isArray(state.snapshots)) {
     applySnapshotsFromPreset(state.snapshots);
     snapshotActiveIndex = Number.isFinite(state.snapshotActive)
@@ -21626,6 +21874,48 @@ function formatActiveRatiosForScaleWorkshop() {
   return withoutOctave
     .map((item) => `${item.numerator}/${item.denominator}`)
     .join("\n");
+}
+
+function collectActiveNodeRatiosForTuner() {
+  const seen = new Set();
+  return nodes
+    .filter((node) => node && node.active)
+    .map((node) => reduceFraction(node.numerator, node.denominator))
+    .filter((item) => item && item.numerator > 0 && item.denominator > 0)
+    .map((item) => ({
+      numerator: item.numerator,
+      denominator: item.denominator,
+      ratio: item.numerator / item.denominator,
+    }))
+    .sort((a, b) => a.ratio - b.ratio)
+    .filter((item) => {
+      const key = `${item.numerator}/${item.denominator}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .map((item) => `${item.numerator}/${item.denominator}`);
+}
+
+function openTunerFromFileMenu() {
+  const params = new URLSearchParams();
+  const fundamental = Number(fundamentalInput && fundamentalInput.value);
+  const a4 = Number(a4Input && a4Input.value);
+  if (Number.isFinite(fundamental) && fundamental > 0) {
+    params.set("fundamental", String(fundamental));
+  }
+  if (Number.isFinite(a4) && a4 > 0) {
+    params.set("a4", String(a4));
+  }
+  const ratios = collectActiveNodeRatiosForTuner();
+  if (ratios.length) {
+    params.set("ratios", ratios.join(","));
+  }
+  const query = params.toString();
+  const target = `./tuner/${query ? `?${query}` : ""}`;
+  window.location.href = target;
 }
 
 async function copyTextToClipboard(text) {
@@ -24124,6 +24414,12 @@ if (sharePresetButton) {
     }
   });
 }
+if (openTunerButton) {
+  openTunerButton.addEventListener("click", () => {
+    openTunerFromFileMenu();
+    closeFilePanel();
+  });
+}
 window.addEventListener("hashchange", () => {
   const presetState = readPresetFromUrl();
   if (presetState) {
@@ -24492,6 +24788,10 @@ if (snapshotKeyboardActiveToggle) {
   snapshotKeyboardActiveToggle.disabled = !snapshotKeyboardMode;
 }
 const snapshotCopyButton = document.getElementById("snapshot-copy");
+const snapshotExportButton = document.getElementById("snapshot-export");
+const snapshotImportButton = document.getElementById("snapshot-import");
+const snapshotImportInput = document.getElementById("snapshot-import-input");
+const SNAPSHOT_URL_MAX_LENGTH = 12000;
 if (snapshotCopyButton) {
   snapshotCopyButton.addEventListener("click", async () => {
     const url = buildSnapshotPresetUrl();
@@ -24499,11 +24799,51 @@ if (snapshotCopyButton) {
       showFileSharePopover("Nothing to copy yet.");
       return;
     }
+    if (url.length > SNAPSHOT_URL_MAX_LENGTH) {
+      const shouldExport = window.confirm(
+        "Snapshot URL is very large and may not work. Export a snapshot file instead?"
+      );
+      if (shouldExport) {
+        exportSnapshotSetToFile();
+      } else {
+        showFileSharePopover("Snapshot URL too large to copy safely.");
+      }
+      return;
+    }
     try {
       await copyTextToClipboard(url);
       showFileSharePopover("Snapshot URL copied.");
     } catch (error) {
       showFileSharePopover("Couldn't copy snapshot URL. Try again.");
+    }
+  });
+}
+if (snapshotExportButton) {
+  snapshotExportButton.addEventListener("click", () => {
+    exportSnapshotSetToFile();
+  });
+}
+if (snapshotImportButton && snapshotImportInput) {
+  snapshotImportButton.addEventListener("click", () => {
+    snapshotImportInput.value = "";
+    snapshotImportInput.click();
+  });
+  snapshotImportInput.addEventListener("change", async () => {
+    const file = snapshotImportInput.files && snapshotImportInput.files[0];
+    if (!file) {
+      return;
+    }
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const applied = applySnapshotSetPayload(payload);
+      if (!applied) {
+        showFileSharePopover("Snapshot file not recognized.");
+        return;
+      }
+      showFileSharePopover("Snapshots imported.");
+    } catch (error) {
+      showFileSharePopover("Couldn't import snapshot file.");
     }
   });
 }

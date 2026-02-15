@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tuning Lattice Tuner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Lexend:wght@200..700&family=Noto+Serif:wght@400..700&family=IBM+Plex+Sans:wght@300..700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <section class="viz-wrap">
+      <canvas id="viz" width="760" height="640"></canvas>
+      <div id="mic-overlay" class="mic-overlay">
+        <p><a id="activate-mic-link" href="#">Activate</a> microphone</p>
+      </div>
+    </section>
+
+    <main class="left-rail panel">
+      <header class="rail-top">
+        <button id="tuner-toggle" type="button" class="tuner-toggle">Tuner</button>
+        <button id="startBtn" type="button">Mic</button>
+      </header>
+
+      <div class="rail-body" id="rail-body">
+        <section class="controls">
+          <div class="control-group">
+            <label for="fundamental-note">Fundamental</label>
+            <div class="fundamental-line">
+              <select id="fundamental-note"></select>
+              <input id="fundamental" type="number" min="20" max="2000" step="0.01" value="261.63" />
+              <span class="suffix">Hz</span>
+              <button id="fundamental-octave-down" type="button" class="tiny-button">/2</button>
+              <button id="fundamental-octave-up" type="button" class="tiny-button">x2</button>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label for="ratios-input">Ratios</label>
+            <input
+              id="ratios-input"
+              type="text"
+              value="1/1, 9/8, 5/4, 4/3, 3/2, 5/3, 15/8, 2/1"
+              spellcheck="false"
+            />
+            <small>Comma or space separated</small>
+          </div>
+
+          <div class="control-group">
+            <label>Show</label>
+            <div class="show-line">
+              <label class="checkline compact">
+                <input id="show-note-names" type="checkbox" checked />
+                <span>Note names</span>
+              </label>
+              <label class="checkline compact">
+                <input id="show-12et" type="checkbox" checked />
+                <span>12-ET Labels</span>
+              </label>
+              <label class="checkline compact">
+                <input id="decay-mode" type="checkbox" />
+                <span>Decay</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label>Range</label>
+            <div class="range-line">
+              <div class="inline-ranges">
+                <input id="range-bottom" type="range" min="0" max="12" step="1" value="0" />
+                <input id="range-top" type="range" min="12" max="48" step="1" value="12" />
+              </div>
+              <span id="range-readout">0..+12</span>
+            </div>
+            <input id="range-bottom-number" type="number" min="-12" max="0" step="1" value="0" hidden />
+            <input id="range-top-number" type="number" min="12" max="48" step="1" value="12" hidden />
+          </div>
+
+          <div class="control-group">
+            <label for="a4">A4 Reference (Hz)</label>
+            <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
+          </div>
+
+          <div class="control-group">
+            <label>Reference Tone</label>
+            <div class="fundamental-row reference-row">
+              <button id="reference-toggle" type="button">Play</button>
+              <span class="suffix">Level</span>
+              <input id="reference-level" type="range" min="-30" max="0" step="1" value="-14" />
+            </div>
+          </div>
+        </section>
+        <label class="theme-toggle" for="theme-toggle">
+          <input id="theme-toggle" type="checkbox" />
+          <span>Dark mode</span>
+        </label>
+        <p id="status" class="status"></p>
+      </div>
+    </main>
+
+    <aside id="mic-panel" class="panel mic-panel" hidden>
+      <button id="mic-power-toggle" type="button" class="tiny-button">Turn Mic On</button>
+      <label for="mic-gain">Mic Input Volume</label>
+      <input id="mic-gain" type="range" min="0.25" max="4" step="0.01" value="1" />
+      <div class="mic-meter" aria-hidden="true">
+        <div id="mic-meter-fill" class="mic-meter-fill"></div>
+      </div>
+      <div id="mic-meter-text" class="meter-text">Input: --</div>
+      <div class="tools-toggles">
+        <button id="analysis-toggle" type="button" class="tiny-button">Settings</button>
+        <button id="calibrate-toggle" type="button" class="tiny-button">Calibrate</button>
+      </div>
+      <div class="mic-subpanels">
+        <section id="analysis-panel" class="panel tools-panel" hidden>
+          <div class="tools-title">Settings</div>
+          <div class="tool-grid">
+            <label for="analysis-rms-threshold">RMS Gate</label>
+            <input id="analysis-rms-threshold" type="number" min="0.001" max="0.2" step="0.001" value="0.01" />
+
+            <label for="analysis-rms-window">RMS Window (frames)</label>
+            <input id="analysis-rms-window" type="number" min="1" max="32" step="1" value="4" />
+
+            <label for="analysis-corr-threshold">Correlation Gate</label>
+            <input
+              id="analysis-corr-threshold"
+              type="number"
+              min="0.5"
+              max="0.99"
+              step="0.01"
+              value="0.88"
+            />
+
+            <label for="analysis-min-freq">Min Freq (Hz)</label>
+            <input id="analysis-min-freq" type="number" min="20" max="400" step="1" value="70" />
+
+            <label for="analysis-max-freq">Max Freq (Hz)</label>
+            <input id="analysis-max-freq" type="number" min="300" max="3000" step="1" value="1400" />
+
+            <label for="analysis-jump-threshold">Jump Threshold (st)</label>
+            <input
+              id="analysis-jump-threshold"
+              type="number"
+              min="0.1"
+              max="6"
+              step="0.05"
+              value="0.65"
+            />
+
+            <label for="analysis-jump-confirm">Jump Confirm Frames</label>
+            <input id="analysis-jump-confirm" type="number" min="1" max="8" step="1" value="2" />
+
+            <label for="analysis-smooth-follow">Smooth Follow</label>
+            <input id="analysis-smooth-follow" type="number" min="0.01" max="0.5" step="0.01" value="0.18" />
+
+            <label for="analysis-idle-decay">Idle Decay</label>
+            <input id="analysis-idle-decay" type="number" min="0.8" max="0.995" step="0.005" value="0.95" />
+
+            <label for="analysis-range-margin">Range Margin (st)</label>
+            <input id="analysis-range-margin" type="number" min="0" max="4" step="0.05" value="0.75" />
+
+            <label for="analysis-out-range-hold">Out-of-range Hold (frames)</label>
+            <input id="analysis-out-range-hold" type="number" min="1" max="60" step="1" value="8" />
+          </div>
+        </section>
+
+        <section id="calibrate-panel" class="panel tools-panel" hidden>
+          <div class="tools-title">Calibration</div>
+          <div class="debug-actions">
+            <button id="cal-record-toggle" type="button" class="tiny-button">Start Rec</button>
+            <button id="cal-play-toggle" type="button" class="tiny-button">Play Rec</button>
+            <button id="cal-run" type="button" class="tiny-button">Run Candidates</button>
+            <button id="cal-reset" type="button" class="tiny-button">Reset</button>
+          </div>
+          <div id="cal-status" class="meter-text">Record 10-20s of your source, then run candidates.</div>
+          <div id="cal-playback-status" class="meter-text">Playback: --</div>
+        </section>
+      </div>
+    </aside>
+
+    <section id="cal-window" class="cal-window" hidden>
+      <article class="panel cal-window-card">
+        <header class="cal-window-head">
+          <h2>Calibration Candidates</h2>
+          <button id="cal-window-close" type="button" class="tiny-button">Close</button>
+        </header>
+        <div id="cal-window-status" class="meter-text"></div>
+        <div id="cal-candidates" class="cal-candidates"></div>
+      </article>
+    </section>
+
+    <section class="readout-float">
+      <article class="card">
+        <div class="label">Detected</div>
+        <div id="hz" class="value">-- Hz</div>
+      </article>
+      <article class="card">
+        <div class="label">Nearest 12-ET</div>
+        <div id="note" class="value">--</div>
+      </article>
+      <article class="card">
+        <div class="label">Cents</div>
+        <div id="cents" class="value">--</div>
+      </article>
+    </section>
+
+    <dialog id="fundamental-spelling-dialog" class="spelling-dialog">
+      <div class="dialog-content">
+        <h2>Spell fundamental:</h2>
+        <div class="dialog-actions">
+          <button id="fundamental-spelling-sharp" type="button"></button>
+          <button id="fundamental-spelling-flat" type="button"></button>
+        </div>
+      </div>
+    </dialog>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

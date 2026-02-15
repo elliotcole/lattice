@@ -3,6 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      if (/\/tuner$/.test(window.location.pathname)) {
+        window.location.replace(
+          `${window.location.pathname}/${window.location.search}${window.location.hash}`,
+        );
+      }
+    </script>
     <title>Tuning Lattice</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,7 +23,7 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/index-BTJix4u7.js"></script>
+    <script type="module" crossorigin src="./assets/index-C7XeduzI.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/style-BzK53Z6g.css">
   </head>
   <body>
@@ -85,6 +92,7 @@
                 <button id="share-preset" type="button" class="button-full">Share</button>
                 <button id="save-lattice" type="button" class="button-full">Save Lattice</button>
                 <button id="load-lattice" type="button" class="button-full">Load Lattice</button>
+                <button id="open-tuner" type="button" class="button-full">Open Tuner</button>
                 <button id="export-scale" type="button" class="button-full">Export to Scale Workshop</button>
                 <div id="file-share-popover" class="panel file-share-popover" hidden></div>
               </div>
@@ -751,8 +759,11 @@
           <span>Snapshots</span>
           <button id="snapshot-options-toggle" type="button" aria-expanded="false" aria-controls="snapshot-options">Options</button>
           <button id="snapshot-copy" type="button">Save &amp; Copy</button>
+          <button id="snapshot-export" type="button">Export</button>
+          <button id="snapshot-import" type="button">Import</button>
           <button id="snapshot-reset" type="button">Reset</button>
         </div>
+        <input id="snapshot-import-input" type="file" accept="application/json" hidden />
         <div id="snapshot-options" class="snapshot-options" hidden>
           <label class="snapshot-toggle">
             <input id="snapshot-defer" type="checkbox" />

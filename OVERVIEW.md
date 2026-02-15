@@ -5,36 +5,34 @@ Tuning Lattice is an interactive tool for exploring just‑intonation lattices, 
 ## What it can do (at a glance)
 
 ### Visual lattice & navigation
-- 2D and 3D lattice views with smooth zoom, pan, and rotation.
+- 2D and 3D lattice views with zoom, pan, and rotation.
 - Customizable axis ratios (X/Y/Z) for primes up to 97, plus Custom Nodes for more dimensions.
 - Layout mode for print‑style positioning with editable spacing and label placement.
 
 ### Nodes, ratios, and intervals
 - Add nodes by ratio, interval, or direct lattice connections from existing nodes.
-- Guide nodes, custom nodes, and distance lines between nodes.
-- Interval chart and searchable ratio database with filtering by type.
-- Microtonal interval overlay to reveal common interval names between nodes.
-- Interval labels on edges with optional custom naming and visibility toggles.
+- Draw distance lines between nodes to calculate and label any relationship.
+- Microtonal interval overlay reveals common interval names between nodes.
 
 ### Audio and playback
-- Built‑in synth with waveform selection and envelope controls.
+- Built‑in synth with tone selection and envelope controls.
 - Per‑node playback, LFO assignment, and playback octave shifts.
 - Pattern/sequence generator for rhythmic playback and traversal of active nodes.
 - Tempo, rhythm, and octave pattern controls for automated playback.
+- MIDI Out with per-note pitchbend for controlling software synths with accurate tuning.
 
 ### Snapshots & live switching
-- Save and recall multiple lattice snapshots instantly with number keys.
-- Optional letter‑key snapshot grid for quick performance switching.
-- Deferred snapshot switching for smooth transitions during sequences.
-- Snapshot settings for restoring view, play state, LFOs, and sequences.
+- Save and recall multiple lattice snapshots for composition and performance
+- Snapshot settings can restore view, play state, LFOs, and sequences.
 
 ### Layout & export
 - Page Layout mode for print‑ready designs with typography controls.
 - SVG and PDF export aligned with on‑screen layout styling.
-- Adjustable line label typography separate from node labels.
 
 ### Input & interaction
 - Fast keyboard gestures to add intervals, set axes, assign LFOs, and more.
+- Keyboard input modes map letters to 2 octave piano layout, isomorphic shapes, or custom layouts.
+- MIDI input
 - Contextual help/banner hints for active modes and editing states.
 - Undo/redo support for layout edits and axis legend adjustments.
 

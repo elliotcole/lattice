@@ -20,22 +20,39 @@
       </div>
     </section>
 
+    <div class="tuner-title">
+      <h1>Tuner</h1>
+    </div>
+
     <main class="left-rail panel">
       <header class="rail-top">
-        <button id="tuner-toggle" type="button" class="tuner-toggle">Tuner</button>
-        <button id="startBtn" type="button">Mic</button>
+        <button
+          id="tuner-toggle"
+          type="button"
+          class="panel-icon-toggle"
+          aria-label="Toggle tuner panel"
+          aria-expanded="true"
+        >
+          ▾
+        </button>
       </header>
 
       <div class="rail-body" id="rail-body">
         <section class="controls">
+          <button id="startBtn" type="button" class="mic-open-button">Mic</button>
+
           <div class="control-group">
             <label for="fundamental-note">Fundamental</label>
-            <div class="fundamental-line">
+            <div class="fundamental-main-line">
               <select id="fundamental-note"></select>
               <input id="fundamental" type="number" min="20" max="2000" step="0.01" value="261.63" />
               <span class="suffix">Hz</span>
+            </div>
+            <div class="fundamental-tools-line">
               <button id="fundamental-octave-down" type="button" class="tiny-button">/2</button>
               <button id="fundamental-octave-up" type="button" class="tiny-button">x2</button>
+              <label for="a4" class="a4-inline-label">A4 =</label>
+              <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
             </div>
           </div>
 
@@ -65,6 +82,14 @@
                 <input id="decay-mode" type="checkbox" />
                 <span>Decay</span>
               </label>
+              <label class="checkline compact">
+                <input id="color-families" type="checkbox" />
+                <span>Color</span>
+              </label>
+              <label class="checkline compact">
+                <input id="show-cents-deviation" type="checkbox" checked />
+                <span>Cents deviation</span>
+              </label>
             </div>
           </div>
 
@@ -72,18 +97,10 @@
             <label>Range</label>
             <div class="range-line">
               <div class="inline-ranges">
-                <input id="range-bottom" type="range" min="0" max="12" step="1" value="0" />
-                <input id="range-top" type="range" min="12" max="48" step="1" value="12" />
+                <input id="range-size" type="range" min="12" max="36" step="1" value="12" />
               </div>
               <span id="range-readout">0..+12</span>
             </div>
-            <input id="range-bottom-number" type="number" min="-12" max="0" step="1" value="0" hidden />
-            <input id="range-top-number" type="number" min="12" max="48" step="1" value="12" hidden />
-          </div>
-
-          <div class="control-group">
-            <label for="a4">A4 Reference (Hz)</label>
-            <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
           </div>
 
           <div class="control-group">
@@ -166,6 +183,29 @@
             <label for="analysis-out-range-hold">Out-of-range Hold (frames)</label>
             <input id="analysis-out-range-hold" type="number" min="1" max="60" step="1" value="8" />
           </div>
+          <div class="tools-title">Anomaly Capture</div>
+          <div class="tool-grid">
+            <label for="anomaly-enabled">Enable</label>
+            <input id="anomaly-enabled" type="checkbox" />
+
+            <label for="anomaly-threshold-st">Jump Threshold (st)</label>
+            <input id="anomaly-threshold-st" type="number" min="1" max="24" step="0.5" value="7" />
+
+            <label for="anomaly-pre-ms">Pre (ms)</label>
+            <input id="anomaly-pre-ms" type="number" min="200" max="4000" step="50" value="1200" />
+
+            <label for="anomaly-post-ms">Post (ms)</label>
+            <input id="anomaly-post-ms" type="number" min="200" max="4000" step="50" value="1200" />
+
+            <label for="anomaly-cooldown-ms">Cooldown (ms)</label>
+            <input id="anomaly-cooldown-ms" type="number" min="200" max="5000" step="50" value="1200" />
+          </div>
+          <div class="debug-actions">
+            <button id="anomaly-clear" type="button" class="tiny-button">Clear</button>
+            <button id="anomaly-copy-json" type="button" class="tiny-button">Copy JSON</button>
+            <button id="anomaly-copy-csv" type="button" class="tiny-button">Copy CSV</button>
+          </div>
+          <div id="anomaly-status" class="meter-text">Captures: 0</div>
         </section>
 
         <section id="calibrate-panel" class="panel tools-panel" hidden>

@@ -56,6 +56,18 @@ const HEJI_RULES = [
   { mode: "repeat", ratio: 43, axis: "any", glyphPos: "é", glyphNeg: "è" },
   { mode: "repeat", ratio: 47, axis: "any", glyphPos: "í", glyphNeg: "ì" },
 ];
+const PRIMES_UP_TO_97 = [
+  2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83,
+  89, 97,
+];
+const PRIME_FAMILY_COLORS = new Map(
+  PRIMES_UP_TO_97.map((prime, index) => {
+    const hue = Math.round((index * 137.508) % 360);
+    const saturation = 68;
+    const lightness = 58;
+    return [prime, `hsl(${hue} ${saturation}% ${lightness}%)`];
+  })
+);
 
 const startBtn = document.getElementById("startBtn");
 const tunerToggle = document.getElementById("tuner-toggle");
@@ -76,10 +88,9 @@ const a4Input = document.getElementById("a4");
 const ratiosInput = document.getElementById("ratios-input");
 const showNoteNamesToggle = document.getElementById("show-note-names");
 const decayModeToggle = document.getElementById("decay-mode");
-const rangeBottomInput = document.getElementById("range-bottom");
-const rangeBottomNumberInput = document.getElementById("range-bottom-number");
-const rangeTopInput = document.getElementById("range-top");
-const rangeTopNumberInput = document.getElementById("range-top-number");
+const colorFamiliesToggle = document.getElementById("color-families");
+const showCentsDeviationToggle = document.getElementById("show-cents-deviation");
+const rangeSizeInput = document.getElementById("range-size");
 const rangeReadout = document.getElementById("range-readout");
 const show12EtToggle = document.getElementById("show-12et");
 const referenceToggle = document.getElementById("reference-toggle");
@@ -106,11 +117,15 @@ const analysisSmoothFollowInput = document.getElementById("analysis-smooth-follo
 const analysisIdleDecayInput = document.getElementById("analysis-idle-decay");
 const analysisRangeMarginInput = document.getElementById("analysis-range-margin");
 const analysisOutRangeHoldInput = document.getElementById("analysis-out-range-hold");
-const debugRecordToggle = document.getElementById("debug-record-toggle");
-const debugClearButton = document.getElementById("debug-clear");
-const debugCopyJsonButton = document.getElementById("debug-copy-json");
-const debugCopyCsvButton = document.getElementById("debug-copy-csv");
-const debugStatus = document.getElementById("debug-status");
+const anomalyEnabledInput = document.getElementById("anomaly-enabled");
+const anomalyThresholdInput = document.getElementById("anomaly-threshold-st");
+const anomalyPreMsInput = document.getElementById("anomaly-pre-ms");
+const anomalyPostMsInput = document.getElementById("anomaly-post-ms");
+const anomalyCooldownMsInput = document.getElementById("anomaly-cooldown-ms");
+const anomalyClearButton = document.getElementById("anomaly-clear");
+const anomalyCopyJsonButton = document.getElementById("anomaly-copy-json");
+const anomalyCopyCsvButton = document.getElementById("anomaly-copy-csv");
+const anomalyStatus = document.getElementById("anomaly-status");
 const calRecordToggle = document.getElementById("cal-record-toggle");
 const calPlayToggle = document.getElementById("cal-play-toggle");
 const calRunButton = document.getElementById("cal-run");
@@ -145,15 +160,25 @@ let referenceEnabled = false;
 
 let detectedPitchHz = null;
 let smoothSemitone = null;
+let displaySemitone = null;
 let liveHasActivePitch = false;
+let liveOutOfRangeDirection = 0;
 let pendingJumpSemitone = null;
 let pendingJumpFrames = 0;
 let pendingOctaveSemitone = null;
 let pendingOctaveFrames = 0;
 let liveMedianSemitoneHistory = [];
+let liveOnsetSemitoneHistory = [];
+let inactivePitchFrames = 0;
+let pendingOutOfRangeDirection = 0;
+let pendingOutOfRangeFrames = 0;
+let liveAcceptedRawSemitone = null;
+let livePendingRawJumpSemitone = null;
+let livePendingRawJumpFrames = 0;
 let bottomDragActive = false;
 let bottomDragStartY = 0;
-let bottomDragStartValue = 0;
+let rangeOffsetStartValue = 0;
+let rangeOffsetSemitones = 0;
 let outOfRangeFrames = 0;
 let rmsWindowValues = [];
 let frameCounter = 0;
@@ -175,16 +200,34 @@ const analysisConfig = {
   octaveFlipTolerance: 0.45,
   octaveFlipConfirmFrames: 3,
   smoothFollow: 0.18,
+  stabilityDeadbandCents: 6,
+  stabilityFollow: 0.02,
+  stabilityMinCorrelation: 0.985,
   idleDecay: 0.95,
+  onsetConfirmFrames: 3,
+  onsetStabilitySemitones: 1.1,
+  onsetResetFrames: 8,
+  outOfRangeClampConfirmFrames: 2,
+  outOfRangeClampCorrelation: 0.97,
+  discontinuityThresholdSt: 2.8,
+  discontinuityConfirmFrames: 2,
+  discontinuityOctaveConfirmFrames: 4,
   rangeMargin: 0.75,
   outOfRangeHoldFrames: 8,
 };
 
-const debugRecorder = {
-  recording: false,
-  startedAtMs: 0,
-  frames: [],
-  maxFrames: 4000,
+const anomalyCapture = {
+  enabled: false,
+  thresholdSt: 7,
+  preMs: 1200,
+  postMs: 1200,
+  cooldownMs: 1200,
+  maxRingMs: 12000,
+  ringFrames: [],
+  captures: [],
+  activeCapture: null,
+  lastTriggerMs: 0,
+  prevFrame: null,
 };
 
 const calibrationState = {
@@ -214,12 +257,161 @@ const calibrationRanges = {
   octaveFlipTolerance: [0.2, 1.2],
   octaveFlipConfirmFrames: [1, 6],
   smoothFollow: [0.05, 0.35],
+  stabilityDeadbandCents: [0, 20],
+  stabilityFollow: [0.001, 0.12],
+  stabilityMinCorrelation: [0.9, 0.999],
   idleDecay: [0.86, 0.985],
+  onsetConfirmFrames: [2, 8],
+  onsetStabilitySemitones: [0.3, 2.5],
+  onsetResetFrames: [3, 24],
+  outOfRangeClampConfirmFrames: [1, 6],
+  outOfRangeClampCorrelation: [0.9, 0.999],
+  discontinuityThresholdSt: [0.8, 8],
+  discontinuityConfirmFrames: [1, 8],
+  discontinuityOctaveConfirmFrames: [2, 10],
   rangeMargin: [0.2, 2.2],
   outOfRangeHoldFrames: [3, 24],
 };
 const THEME_STORAGE_KEY = "tuner-theme";
+const SETTINGS_STORAGE_KEY = "tuner-settings-v1";
 const trueSpellingLimitCache = new Map();
+
+function readCookie(name) {
+  const encoded = `${encodeURIComponent(name)}=`;
+  const chunks = document.cookie ? document.cookie.split(";") : [];
+  for (const chunk of chunks) {
+    const trimmed = chunk.trim();
+    if (trimmed.startsWith(encoded)) {
+      return decodeURIComponent(trimmed.slice(encoded.length));
+    }
+  }
+  return null;
+}
+
+function writeCookie(name, value, maxAgeSeconds = 31536000) {
+  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/; max-age=${maxAgeSeconds}; SameSite=Lax`;
+}
+
+function readStoredSettings() {
+  let raw = null;
+  try {
+    raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+  } catch (_error) {
+    // no-op
+  }
+  if (!raw) {
+    raw = readCookie(SETTINGS_STORAGE_KEY);
+  }
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeStoredSettings(settings) {
+  const serialized = JSON.stringify(settings);
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, serialized);
+  } catch (_error) {
+    // no-op
+  }
+  writeCookie(SETTINGS_STORAGE_KEY, serialized);
+}
+
+function collectCurrentSettings() {
+  return {
+    fundamental: Number(fundamentalInput ? fundamentalInput.value : 261.63) || 261.63,
+    a4: Number(a4Input ? a4Input.value : 440) || 440,
+    ratios: String(ratiosInput ? ratiosInput.value : ""),
+    range: Number(rangeSizeInput ? rangeSizeInput.value : 12) || 12,
+    rangeOffset: Number(rangeOffsetSemitones) || 0,
+    show12Et: Boolean(show12EtToggle ? show12EtToggle.checked : true),
+    showNoteNames: Boolean(showNoteNamesToggle ? showNoteNamesToggle.checked : true),
+    showCentsDeviation: Boolean(showCentsDeviationToggle ? showCentsDeviationToggle.checked : true),
+    decayMode: Boolean(decayModeToggle ? decayModeToggle.checked : false),
+    colorFamilies: Boolean(colorFamiliesToggle ? colorFamiliesToggle.checked : false),
+    anomalyCapture: {
+      enabled: Boolean(anomalyCapture.enabled),
+      thresholdSt: anomalyCapture.thresholdSt,
+      preMs: anomalyCapture.preMs,
+      postMs: anomalyCapture.postMs,
+      cooldownMs: anomalyCapture.cooldownMs,
+    },
+    referenceLevel: Number(referenceLevel ? referenceLevel.value : -14) || -14,
+    micGain: Number(micGainInput ? micGainInput.value : 1) || 1,
+    fundamentalSpelling: fundamentalSpelling === "flat" ? "flat" : "sharp",
+    analysisConfig: { ...analysisConfig },
+  };
+}
+
+function persistSettings() {
+  writeStoredSettings(collectCurrentSettings());
+}
+
+function formatQueryNumber(value, digits = 6) {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+  return String(Number(value.toFixed(digits)));
+}
+
+function normalizeRatiosForQuery(raw) {
+  if (typeof raw !== "string") {
+    return "";
+  }
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function syncStateToQueryString() {
+  try {
+    const current = new URL(window.location.href);
+    const params = current.searchParams;
+    const fundamental = Number(fundamentalInput ? fundamentalInput.value : NaN);
+    const a4 = Number(a4Input ? a4Input.value : NaN);
+    const refDb = Number(referenceLevel ? referenceLevel.value : NaN);
+    const ratios = normalizeRatiosForQuery(ratiosInput ? ratiosInput.value : "");
+
+    if (Number.isFinite(fundamental) && fundamental > 0) {
+      params.set("fundamental", formatQueryNumber(fundamental));
+    } else {
+      params.delete("fundamental");
+    }
+    if (Number.isFinite(a4) && a4 > 0) {
+      params.set("a4", formatQueryNumber(a4));
+    } else {
+      params.delete("a4");
+    }
+    if (ratios) {
+      params.set("ratios", ratios);
+    } else {
+      params.delete("ratios");
+    }
+    if (Number.isFinite(refDb)) {
+      params.set("referenceLevel", formatQueryNumber(refDb, 2));
+    } else {
+      params.delete("referenceLevel");
+    }
+    params.set("referenceOn", referenceEnabled ? "1" : "0");
+
+    const search = params.toString();
+    const nextUrl = `${current.pathname}${search ? `?${search}` : ""}${current.hash || ""}`;
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextUrl !== currentUrl) {
+      history.replaceState(null, "", nextUrl);
+    }
+  } catch (_error) {
+    // no-op
+  }
+}
 
 function hasLiveAudioTrack(mediaStream) {
   if (!mediaStream || typeof mediaStream.getAudioTracks !== "function") {
@@ -356,21 +548,52 @@ function parseRatiosList(value) {
     if (!ratio) continue;
     const reduced = reduceFraction(ratio.numerator, ratio.denominator);
     if (!reduced.numerator || !reduced.denominator) continue;
-    const key = `${reduced.numerator}/${reduced.denominator}`;
+    const octave = reduceToOctave(reduced.numerator, reduced.denominator);
+    const octaveReduced = reduceFraction(octave.numerator, octave.denominator);
+    const key = `${octaveReduced.numerator}/${octaveReduced.denominator}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const octave = reduceToOctave(reduced.numerator, reduced.denominator);
     parsed.push({
-      numerator: reduced.numerator,
-      denominator: reduced.denominator,
-      ratio: reduced.numerator / reduced.denominator,
-      octaveRatio: octave.ratio,
-      octaveSemitone: 12 * Math.log2(octave.ratio),
-      label: `${reduced.numerator}/${reduced.denominator}`,
+      numerator: octaveReduced.numerator,
+      denominator: octaveReduced.denominator,
+      ratio: octaveReduced.numerator / octaveReduced.denominator,
+      octaveRatio: octaveReduced.numerator / octaveReduced.denominator,
+      octaveSemitone: 12 * Math.log2(octaveReduced.numerator / octaveReduced.denominator),
+      label: `${octaveReduced.numerator}/${octaveReduced.denominator}`,
     });
   }
 
   return parsed.sort((a, b) => a.ratio - b.ratio);
+}
+
+function getLargestPrimeFactorUpTo97(value) {
+  let n = Math.abs(Math.trunc(value));
+  if (!Number.isFinite(n) || n <= 1) {
+    return null;
+  }
+  let largest = null;
+  for (const prime of PRIMES_UP_TO_97) {
+    if (prime * prime > n) {
+      break;
+    }
+    while (n % prime === 0) {
+      largest = prime;
+      n = Math.trunc(n / prime);
+    }
+  }
+  if (n > 1 && PRIME_FAMILY_COLORS.has(n)) {
+    largest = n;
+  }
+  return largest;
+}
+
+function getRatioPrimeFamily(numerator, denominator) {
+  const numeratorPrime = getLargestPrimeFactorUpTo97(numerator);
+  const denominatorPrime = getLargestPrimeFactorUpTo97(denominator);
+  if (numeratorPrime && denominatorPrime) {
+    return Math.max(numeratorPrime, denominatorPrime);
+  }
+  return numeratorPrime || denominatorPrime || null;
 }
 
 function parsePitchClass(pitchClass) {
@@ -872,6 +1095,8 @@ function adjustFundamentalByFactor(factor) {
   refreshMarkers();
   updateReferenceFrequency();
   rebuildAnalysisChain();
+  persistSettings();
+  syncStateToQueryString();
 }
 
 function applyFundamentalSpelling(nextSpelling) {
@@ -885,6 +1110,8 @@ function applyFundamentalSpelling(nextSpelling) {
     syncFundamentalNoteSelect();
   }
   hideFundamentalSpellingDialog();
+  persistSettings();
+  syncStateToQueryString();
 }
 
 function onFundamentalNoteChange() {
@@ -897,28 +1124,134 @@ function onFundamentalNoteChange() {
   refreshMarkers();
   updateReferenceFrequency();
   rebuildAnalysisChain();
+  persistSettings();
+  syncStateToQueryString();
 }
 
 function parseIncomingQuery() {
   const params = new URLSearchParams(window.location.search);
+  const overrides = {
+    fundamental: false,
+    a4: false,
+    ratios: false,
+    referenceLevel: false,
+    referenceOn: false,
+  };
   const queryFundamental = Number(params.get("fundamental"));
   const queryA4 = Number(params.get("a4"));
   const queryRatios = params.get("ratios");
+  const queryReferenceLevel = Number(params.get("referenceLevel"));
+  const queryReferenceOn = params.get("referenceOn");
 
   if (Number.isFinite(queryA4) && queryA4 > 0) {
     a4Input.value = String(queryA4);
+    overrides.a4 = true;
   }
   if (Number.isFinite(queryFundamental) && queryFundamental > 0) {
     fundamentalInput.value = String(queryFundamental);
+    overrides.fundamental = true;
   }
   if (typeof queryRatios === "string" && queryRatios.trim()) {
-    const normalized = queryRatios
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .join(", ");
+    const normalized = normalizeRatiosForQuery(queryRatios);
     ratiosInput.value = normalized;
+    overrides.ratios = true;
   }
+  if (referenceLevel && Number.isFinite(queryReferenceLevel)) {
+    referenceLevel.value = String(clampNumber(queryReferenceLevel, -30, 0, -14));
+    overrides.referenceLevel = true;
+  }
+  if (queryReferenceOn === "0" || queryReferenceOn === "1") {
+    overrides.referenceOn = true;
+  }
+  return overrides;
+}
+
+function applyStoredSettings(
+  queryOverrides = { fundamental: false, a4: false, ratios: false, referenceLevel: false, referenceOn: false }
+) {
+  const settings = readStoredSettings();
+  if (!settings) {
+    return null;
+  }
+
+  if (!queryOverrides.a4 && Number.isFinite(Number(settings.a4)) && Number(settings.a4) > 0) {
+    a4Input.value = String(settings.a4);
+  }
+  if (
+    !queryOverrides.fundamental &&
+    Number.isFinite(Number(settings.fundamental)) &&
+    Number(settings.fundamental) > 0
+  ) {
+    fundamentalInput.value = String(settings.fundamental);
+  }
+  if (!queryOverrides.ratios && typeof settings.ratios === "string" && settings.ratios.trim()) {
+    ratiosInput.value = normalizeRatiosForQuery(settings.ratios);
+  }
+  const storedRange = Number(settings.range);
+  if (rangeSizeInput && Number.isFinite(storedRange)) {
+    rangeSizeInput.value = String(clampNumber(storedRange, 12, 36, 12));
+  } else if (rangeSizeInput && Number.isFinite(Number(settings.rangeTop))) {
+    rangeSizeInput.value = String(clampNumber(Number(settings.rangeTop), 12, 36, 12));
+  }
+  const storedOffset = Number(settings.rangeOffset);
+  if (Number.isFinite(storedOffset)) {
+    rangeOffsetSemitones = clampNumber(storedOffset, -12, 24, 0);
+  } else if (Number.isFinite(Number(settings.rangeBottom))) {
+    rangeOffsetSemitones = -clampNumber(Number(settings.rangeBottom), 0, 12, 0);
+  }
+  const currentRange = getRangeSemitoneValue();
+  rangeOffsetSemitones = clampNumber(rangeOffsetSemitones, -12, 36 - currentRange, 0);
+  if (typeof settings.show12Et === "boolean") {
+    show12EtToggle.checked = settings.show12Et;
+  }
+  if (showNoteNamesToggle && typeof settings.showNoteNames === "boolean") {
+    showNoteNamesToggle.checked = settings.showNoteNames;
+  }
+  if (showCentsDeviationToggle && typeof settings.showCentsDeviation === "boolean") {
+    showCentsDeviationToggle.checked = settings.showCentsDeviation;
+  }
+  if (decayModeToggle && typeof settings.decayMode === "boolean") {
+    decayModeToggle.checked = settings.decayMode;
+  }
+  if (colorFamiliesToggle && typeof settings.colorFamilies === "boolean") {
+    colorFamiliesToggle.checked = settings.colorFamilies;
+  }
+  if (settings.anomalyCapture && typeof settings.anomalyCapture === "object") {
+    const ac = settings.anomalyCapture;
+    if (typeof ac.enabled === "boolean") {
+      anomalyCapture.enabled = ac.enabled;
+    }
+    if (Number.isFinite(Number(ac.thresholdSt))) {
+      anomalyCapture.thresholdSt = clampNumber(Number(ac.thresholdSt), 1, 24, 7);
+    }
+    if (Number.isFinite(Number(ac.preMs))) {
+      anomalyCapture.preMs = clampNumber(Number(ac.preMs), 200, 4000, 1200);
+    }
+    if (Number.isFinite(Number(ac.postMs))) {
+      anomalyCapture.postMs = clampNumber(Number(ac.postMs), 200, 4000, 1200);
+    }
+    if (Number.isFinite(Number(ac.cooldownMs))) {
+      anomalyCapture.cooldownMs = clampNumber(Number(ac.cooldownMs), 200, 5000, 1200);
+    }
+  }
+  if (
+    !queryOverrides.referenceLevel &&
+    referenceLevel &&
+    Number.isFinite(Number(settings.referenceLevel))
+  ) {
+    referenceLevel.value = String(clampNumber(Number(settings.referenceLevel), -30, 0, -14));
+  }
+  if (micGainInput && Number.isFinite(Number(settings.micGain))) {
+    micGainInput.value = String(clampNumber(Number(settings.micGain), 0.25, 4, 1));
+  }
+  if (settings.fundamentalSpelling === "flat" || settings.fundamentalSpelling === "sharp") {
+    fundamentalSpelling = settings.fundamentalSpelling;
+  }
+  if (settings.analysisConfig && typeof settings.analysisConfig === "object") {
+    applyAnalysisConfig(settings.analysisConfig);
+  }
+
+  return settings;
 }
 
 function dbToGain(db) {
@@ -1107,6 +1440,8 @@ async function toggleReferenceTone() {
   } else {
     await startReferenceTone();
   }
+  persistSettings();
+  syncStateToQueryString();
 }
 
 function getCssVar(name, fallback) {
@@ -1164,20 +1499,33 @@ function refreshMarkers() {
   for (const ratio of ratioItems) {
     const noteLabelInfo = getRatioNoteLabelInfo(ratio);
     const base = ratio.octaveSemitone;
+    const primeFamily = getRatioPrimeFamily(ratio.numerator, ratio.denominator);
+    const isUnisonRatio = ratio.numerator === 1 && ratio.denominator === 1;
+    const isOctaveRatio = ratio.numerator === 2 && ratio.denominator === 1;
     for (let k = -6; k <= 6; k += 1) {
       const semi = base + 12 * k;
       if (semi < minSemi - 0.001 || semi > maxSemi + 0.001) continue;
       if (hasUnison && hasOctave) {
-        const isUnison = ratio.numerator === 1 && ratio.denominator === 1;
-        const isOctave = ratio.numerator === 2 && ratio.denominator === 1;
-        if (isUnison && Math.abs(semi) > 0.001) continue;
-        if (isOctave && Math.abs(semi) <= 0.001) continue;
+        if (isUnisonRatio && Math.abs(semi) > 0.001) continue;
+        if (isOctaveRatio && Math.abs(semi) <= 0.001) continue;
+      }
+      const baseLabel = getOctaveReducedDisplayRatioLabel(ratio);
+      let ratioLabel = baseLabel;
+      if (isUnisonRatio || isOctaveRatio) {
+        const octaveStep = Math.round(semi / 12);
+        if (Math.abs(semi - octaveStep * 12) <= 0.02) {
+          const octaveOrdinal = octaveStep + 1;
+          if (octaveOrdinal >= 1) {
+            ratioLabel = `${octaveOrdinal}/1`;
+          }
+        }
       }
       markers.push({
         semitone: semi,
-        label: getOctaveReducedDisplayRatioLabel(ratio),
-        ratioLabel: getOctaveReducedDisplayRatioLabel(ratio),
+        label: ratioLabel,
+        ratioLabel,
         noteLabelInfo,
+        primeFamily,
       });
     }
   }
@@ -1203,13 +1551,27 @@ function drawViz() {
   const maxSemi = bounds.max;
   const decayEnabled = Boolean(decayModeToggle && decayModeToggle.checked);
   const lineX = Math.round(width * (decayEnabled ? 0.62 : 0.45));
-  const gridLeftX = Math.max(18, lineX - 86);
-  const gridRightX = Math.min(width - 18, lineX + 176);
-  const etLabelX = gridRightX - 4;
-  const etLineEndX = etLabelX - 28;
+  const gridRightX = Math.min(width - 6, lineX + 248);
+  const etLabelX = gridRightX;
+  const etLineEndX = etLabelX - 52;
+  const octaveGuideLeftX = Math.max(18, lineX - Math.max(24, etLineEndX - lineX));
   const padTop = 30;
   const padBottom = 30;
   const innerHeight = Math.max(40, height - padTop - padBottom);
+  const visibleSpan = Math.max(12, maxSemi - minSemi);
+  const showNoteNames = Boolean(showNoteNamesToggle && showNoteNamesToggle.checked);
+  const minSpan = 12;
+  const maxSpan = 60;
+  const spanMix = Math.min(1, Math.max(0, (visibleSpan - minSpan) / (maxSpan - minSpan)));
+  const spanScaledFontSize = 14 + (1 - spanMix) * 14;
+  const densityMultiplier = showNoteNames ? 1.25 : 1;
+  const markerDensity = (ratioMarkers.length / visibleSpan) * densityMultiplier;
+  const densityStart = 1.0;
+  const densityEnd = 3.2;
+  const densityMix = Math.min(1, Math.max(0, (markerDensity - densityStart) / (densityEnd - densityStart)));
+  const densityReducedFont = spanScaledFontSize - densityMix * 8;
+  const ratioLabelFontSize = Math.max(10, Math.min(28, densityReducedFont));
+  const etLabelFontSize = ratioLabelFontSize;
 
   const yForSemitone = (semi) => {
     const t = (semi - minSemi) / (maxSemi - minSemi);
@@ -1222,10 +1584,22 @@ function drawViz() {
   const lineColor = getCssVar("--viz-line", "#4fa9ff");
   const ratioColor = getCssVar("--viz-ratio", "#d2e2ff");
   const etColor = getCssVar("--viz-et", "#9fb6d4");
+  const colorFamiliesEnabled = Boolean(colorFamiliesToggle && colorFamiliesToggle.checked);
+  const familyFallbackColor = ratioColor;
   const blobGood = getCssVar("--viz-blob-good", "rgba(97,245,177,0.95)");
   const blobWarn = getCssVar("--viz-blob-warn", "rgba(246,198,93,0.95)");
   const blobBad = getCssVar("--viz-blob-bad", "rgba(255,109,109,0.95)");
   const toneColorFor = (tone) => (tone === "warn" ? blobWarn : tone === "bad" ? blobBad : blobGood);
+  const markerColorFor = (marker) => {
+    if (!colorFamiliesEnabled) {
+      return ratioColor;
+    }
+    const familyPrime = marker && Number.isFinite(marker.primeFamily) ? marker.primeFamily : null;
+    if (!familyPrime) {
+      return familyFallbackColor;
+    }
+    return PRIME_FAMILY_COLORS.get(familyPrime) || familyFallbackColor;
+  };
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = vizBg;
@@ -1238,10 +1612,23 @@ function drawViz() {
       ctx.strokeStyle = isOctave ? gridStrong : grid;
       ctx.lineWidth = isOctave ? 1.4 : 1;
       ctx.beginPath();
-      ctx.moveTo(gridLeftX, y);
+      ctx.moveTo(lineX, y);
       ctx.lineTo(etLineEndX, y);
       ctx.stroke();
     }
+  }
+
+  for (let semi = Math.ceil(minSemi); semi <= Math.floor(maxSemi); semi += 1) {
+    if (semi % 12 !== 0) {
+      continue;
+    }
+    const y = yForSemitone(semi);
+    ctx.strokeStyle = grid;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(lineX, y);
+    ctx.lineTo(octaveGuideLeftX, y);
+    ctx.stroke();
   }
 
   ctx.strokeStyle = lineColor;
@@ -1251,19 +1638,15 @@ function drawViz() {
   ctx.lineTo(lineX, height - padBottom);
   ctx.stroke();
 
-  ctx.font = "14px 'IBM Plex Sans', sans-serif";
+  ctx.font = `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif`;
   ctx.textBaseline = "middle";
-  const showNoteNames = Boolean(showNoteNamesToggle && showNoteNamesToggle.checked);
-  const hasActiveInput = Number.isFinite(smoothSemitone) && liveHasActivePitch;
-  let nearestMarkerIndex = -1;
+  const hasActiveInput = Number.isFinite(displaySemitone) && liveHasActivePitch;
   let nearestMarker = null;
   if (hasActiveInput) {
-    for (let index = 0; index < ratioMarkers.length; index += 1) {
-      const marker = ratioMarkers[index];
-      const diff = Math.abs(marker.semitone - smoothSemitone);
+    for (const marker of ratioMarkers) {
+      const diff = Math.abs(marker.semitone - displaySemitone);
       if (!nearestMarker || diff < nearestMarker.diff) {
         nearestMarker = { diff, marker };
-        nearestMarkerIndex = index;
       }
     }
   }
@@ -1277,18 +1660,33 @@ function drawViz() {
     return width;
   }
 
-  function drawRatioMarkerText(marker, side, anchorX, y) {
-    const parts = [{ text: marker.ratioLabel || marker.label, font: "14px 'IBM Plex Sans', sans-serif" }];
+  function getRatioMarkerTextParts(marker) {
+    const parts = [
+      { text: marker.ratioLabel || marker.label, font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif` },
+    ];
     if (showNoteNames && marker.noteLabelInfo) {
-      parts.push({ text: " \u00b7 ", font: "14px 'IBM Plex Sans', sans-serif" });
-      parts.push({ text: marker.noteLabelInfo.baseText || marker.noteLabelInfo.pitchClass || "", font: "14px 'IBM Plex Sans', sans-serif" });
+      parts.push({ text: " \u00b7 ", font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif` });
+      parts.push({
+        text: marker.noteLabelInfo.baseText || marker.noteLabelInfo.pitchClass || "",
+        font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif`,
+      });
       if (marker.noteLabelInfo.suffixText) {
-        parts.push({ text: marker.noteLabelInfo.suffixText, font: "14px 'HEJI2Text', 'IBM Plex Sans', sans-serif" });
+        parts.push({
+          text: marker.noteLabelInfo.suffixText,
+          font: `${ratioLabelFontSize}px 'HEJI2Text', 'IBM Plex Sans', sans-serif`,
+        });
       }
     }
+    return parts;
+  }
 
-    const totalWidth = parts.reduce((sum, part) => sum + measureLabelPart(part.text, part.font), 0);
-    let x = side === "right" ? anchorX : anchorX - totalWidth;
+  function getPartsTotalWidth(parts) {
+    return parts.reduce((sum, part) => sum + measureLabelPart(part.text, part.font), 0);
+  }
+
+  function drawRatioMarkerText(parts, side, anchorX, y, totalWidth) {
+    const width = Number.isFinite(totalWidth) ? totalWidth : getPartsTotalWidth(parts);
+    let x = side === "right" ? anchorX : anchorX - width;
     for (const part of parts) {
       if (!part.text) continue;
       ctx.font = part.font;
@@ -1298,87 +1696,117 @@ function drawViz() {
     }
   }
 
-  const labelHeight = 12;
+  const labelHeight = Math.max(12, ratioLabelFontSize * 0.9);
   const labelPad = 2;
-  const laneStep = 20;
-  const laneOccupancy = { left: [], right: [] };
+  const laneStep = Math.max(20, ratioLabelFontSize * 1.4);
+  const collisionProximityX = Math.max(6, ratioLabelFontSize * 0.35);
+  const collisionProximityY = Math.max(6, ratioLabelFontSize * 0.3);
+  const labelRects = [];
   let alternateOnOverlap = false;
 
-  function overlapsInLane(side, lane, y) {
-    const intervals = laneOccupancy[side][lane] || [];
-    const minY = y - labelHeight / 2 - labelPad;
-    const maxY = y + labelHeight / 2 + labelPad;
-    for (const interval of intervals) {
-      if (!(maxY < interval.minY || minY > interval.maxY)) {
-        return true;
-      }
-    }
-    return false;
+  function getLabelRect(side, anchorX, y, totalWidth) {
+    const left = side === "right" ? anchorX : anchorX - totalWidth;
+    const right = left + totalWidth;
+    return {
+      left,
+      right,
+      top: y - labelHeight / 2 - labelPad,
+      bottom: y + labelHeight / 2 + labelPad,
+    };
   }
 
-  function occupyLane(side, lane, y) {
-    const minY = y - labelHeight / 2 - labelPad;
-    const maxY = y + labelHeight / 2 + labelPad;
-    if (!laneOccupancy[side][lane]) {
-      laneOccupancy[side][lane] = [];
+  function rectsOverlap(a, b, padX = 0, padY = 0) {
+    return !(
+      a.right + padX <= b.left - padX ||
+      a.left - padX >= b.right + padX ||
+      a.bottom + padY <= b.top - padY ||
+      a.top - padY >= b.bottom + padY
+    );
+  }
+
+  function isRectVisible(rect) {
+    return rect.left >= 4 && rect.right <= width - 4;
+  }
+
+  function findPlacementForMarker(y, totalWidth, primarySide = "left") {
+    const secondarySide = primarySide === "left" ? "right" : "left";
+    const maxLaneSearch = 120;
+    for (let laneIndex = 0; laneIndex <= maxLaneSearch; laneIndex += 1) {
+      const primaryOffset = Math.max(18, ratioLabelFontSize * 1.25) + laneIndex * laneStep;
+      const primaryAnchorX = primarySide === "right" ? lineX + primaryOffset : lineX - primaryOffset;
+      const primaryRect = getLabelRect(primarySide, primaryAnchorX, y, totalWidth);
+      const primaryCollision = labelRects.some((existing) =>
+        rectsOverlap(primaryRect, existing, collisionProximityX, collisionProximityY)
+      );
+      if (!primaryCollision && isRectVisible(primaryRect)) {
+        return { side: primarySide, lane: laneIndex, anchorX: primaryAnchorX, rect: primaryRect };
+      }
+
+      const secondaryOffset = Math.max(18, ratioLabelFontSize * 1.25) + laneIndex * laneStep;
+      const secondaryAnchorX = secondarySide === "right" ? lineX + secondaryOffset : lineX - secondaryOffset;
+      const secondaryRect = getLabelRect(secondarySide, secondaryAnchorX, y, totalWidth);
+      const secondaryCollision = labelRects.some((existing) =>
+        rectsOverlap(secondaryRect, existing, collisionProximityX, collisionProximityY)
+      );
+      if (!secondaryCollision && isRectVisible(secondaryRect)) {
+        return { side: secondarySide, lane: laneIndex, anchorX: secondaryAnchorX, rect: secondaryRect };
+      }
     }
-    laneOccupancy[side][lane].push({ minY, maxY });
+
+    const fallbackLane = maxLaneSearch + 1;
+    const fallbackOffset = Math.max(18, ratioLabelFontSize * 1.25) + fallbackLane * laneStep;
+    const fallbackAnchorX = primarySide === "right" ? lineX + fallbackOffset : lineX - fallbackOffset;
+    const fallbackRect = getLabelRect(primarySide, fallbackAnchorX, y, totalWidth);
+    return { side: primarySide, lane: fallbackLane, anchorX: fallbackAnchorX, rect: fallbackRect };
   }
 
   for (let index = 0; index < ratioMarkers.length; index += 1) {
     const marker = ratioMarkers[index];
-    const isNearestMarker = hasActiveInput && index === nearestMarkerIndex;
-    const markerAlpha = hasActiveInput ? (isNearestMarker ? 1 : 0.5) : 1;
+    const markerAlpha = 1;
+    const markerColor = markerColorFor(marker);
     const y = yForSemitone(marker.semitone);
-    ctx.globalAlpha = markerAlpha;
-    ctx.strokeStyle = ratioColor;
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(lineX - 13, y);
-    ctx.lineTo(lineX + 13, y);
-    ctx.stroke();
+    const parts = getRatioMarkerTextParts(marker);
+    const totalWidth = getPartsTotalWidth(parts);
+    const baselineOffset = Math.max(18, ratioLabelFontSize * 1.25);
+    const baselineAnchorX = lineX - baselineOffset;
+    const baselineRect = getLabelRect("left", baselineAnchorX, y, totalWidth);
+    const baselineCollision =
+      !isRectVisible(baselineRect) ||
+      labelRects.some((existing) =>
+        rectsOverlap(baselineRect, existing, collisionProximityX, collisionProximityY)
+      );
 
-    ctx.fillStyle = ratioColor;
     let side = "left";
-    let lane = 0;
-    const baselineOverlaps = overlapsInLane("left", 0, y);
-
-    if (baselineOverlaps) {
+    let anchorX = baselineAnchorX;
+    let labelRect = baselineRect;
+    if (baselineCollision) {
       alternateOnOverlap = !alternateOnOverlap;
       const primarySide = alternateOnOverlap ? "right" : "left";
-      const secondarySide = primarySide === "left" ? "right" : "left";
-      let placed = false;
-
-      for (let laneIndex = 0; laneIndex <= 8; laneIndex += 1) {
-        if (!overlapsInLane(primarySide, laneIndex, y)) {
-          side = primarySide;
-          lane = laneIndex;
-          placed = true;
-          break;
-        }
-        if (!overlapsInLane(secondarySide, laneIndex, y)) {
-          side = secondarySide;
-          lane = laneIndex;
-          placed = true;
-          break;
-        }
-      }
-
-      if (!placed) {
-        side = primarySide;
-        lane = 9;
-      }
+      const placement = findPlacementForMarker(y, totalWidth, primarySide);
+      side = placement.side;
+      anchorX = placement.anchorX;
+      labelRect = placement.rect;
     }
 
-    const offset = 18 + lane * laneStep;
-    const anchorX = side === "right" ? lineX + offset : lineX - offset;
-    drawRatioMarkerText(marker, side, anchorX, y);
-    occupyLane(side, lane, y);
+    const connectorEndX = side === "right" ? anchorX - 5 : anchorX + 5;
+
+    ctx.globalAlpha = markerAlpha;
+    ctx.strokeStyle = markerColor;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(lineX, y);
+    ctx.lineTo(connectorEndX, y);
+    ctx.stroke();
+
+    ctx.fillStyle = markerColor;
+    drawRatioMarkerText(parts, side, anchorX, y, totalWidth);
+    labelRects.push(labelRect);
     ctx.globalAlpha = 1;
   }
 
   if (show12EtToggle.checked) {
     const fundamentalMidi = 69 + 12 * Math.log2(fundamental / a4);
+    ctx.font = `${etLabelFontSize}px 'IBM Plex Sans', sans-serif`;
     for (let semi = Math.ceil(minSemi); semi <= Math.floor(maxSemi); semi += 1) {
       const y = yForSemitone(semi);
       const midi = Math.round(fundamentalMidi + semi);
@@ -1427,32 +1855,24 @@ function drawViz() {
         const color = toneColorFor(next.tone);
 
         ctx.strokeStyle = color;
-        ctx.globalAlpha = alpha * 0.24;
-        ctx.lineWidth = 14;
-        ctx.beginPath();
-        ctx.moveTo(prev.x, prev.y);
-        ctx.lineTo(next.x, next.y);
-        ctx.stroke();
-
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = alpha * 0.66;
-        ctx.lineWidth = 4.8;
+        ctx.globalAlpha = alpha * 0.92;
+        ctx.lineWidth = 1.2 + 4.2 * alpha;
         ctx.beginPath();
         ctx.moveTo(prev.x, prev.y);
         ctx.lineTo(next.x, next.y);
         ctx.stroke();
       }
 
-      for (let i = 0; i < visible.length; i += 2) {
-        const point = visible[i];
-        const radius = 2 + point.alpha * 6;
-        const glow = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
-        glow.addColorStop(0, toneColorFor(point.tone));
+      const head = visible[visible.length - 1];
+      if (head) {
+        const radius = 4 + head.alpha * 7;
+        const glow = ctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, radius);
+        glow.addColorStop(0, toneColorFor(head.tone));
         glow.addColorStop(1, "rgba(97,245,177,0)");
-        ctx.globalAlpha = point.alpha * Math.max(0.1, point.strength) * 0.5;
+        ctx.globalAlpha = head.alpha * Math.max(0.15, head.strength) * 0.42;
         ctx.fillStyle = glow;
         ctx.beginPath();
-        ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+        ctx.arc(head.x, head.y, radius, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.restore();
@@ -1460,28 +1880,30 @@ function drawViz() {
   }
 
   if (hasActiveInput) {
-    const y = yForSemitone(smoothSemitone);
+    const y =
+      liveOutOfRangeDirection < 0
+        ? height
+        : liveOutOfRangeDirection > 0
+          ? 0
+          : yForSemitone(displaySemitone);
+    const displayFreq = fundamental > 0 ? fundamental * Math.pow(2, displaySemitone / 12) : null;
+    const etInfo = Number.isFinite(displayFreq) ? getNearestEtInfo(displayFreq, a4) : null;
     const centsOff = nearestMarker ? nearestMarker.diff * 100 : 0;
+    const centsSigned = etInfo ? etInfo.cents : 0;
     const blobColor =
       centsOff <= 8 ? blobGood : centsOff <= 24 ? blobWarn : blobBad;
 
-    const gradient = ctx.createRadialGradient(lineX, y, 3, lineX, y, 18);
-    gradient.addColorStop(0, blobColor);
-    gradient.addColorStop(1, "rgba(97,245,177,0)");
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(lineX, y, 18, 0, Math.PI * 2);
-    ctx.fill();
-
     ctx.fillStyle = blobColor;
     ctx.beginPath();
-    ctx.arc(lineX, y, 6, 0, Math.PI * 2);
+    ctx.arc(lineX, y, 10, 0, Math.PI * 2);
     ctx.fill();
 
-    if (nearestMarker) {
+    if (etInfo && (!showCentsDeviationToggle || showCentsDeviationToggle.checked)) {
       ctx.textAlign = "left";
       ctx.fillStyle = etColor;
-      ctx.fillText(`${nearestMarker.marker.label} (${Math.round(centsOff)}c)`, lineX + 34, y - 18);
+      const centsRounded = Math.round(centsSigned);
+      const centsText = centsRounded === 0 ? "0" : `${centsRounded > 0 ? "+" : ""}${centsRounded}`;
+      ctx.fillText(`${centsText}c`, lineX + 34, y - 18);
     }
   }
 }
@@ -1514,6 +1936,14 @@ function detectPitchWithConfig(buffer, sampleRate, windowedRms, rawRms, cfg) {
     return { frequency: null, correlation: 0, reason: "rms_gate", rmsRaw: rawRms, rmsWindowed: windowedRms };
   }
 
+  function correlationAtOffset(offset) {
+    let corr = 0;
+    for (let i = 0; i < size - offset; i += 1) {
+      corr += Math.abs(buffer[i] - buffer[i + offset]);
+    }
+    return 1 - corr / (size - offset);
+  }
+
   let bestOffset = -1;
   let bestCorrelation = 0;
   const minFreq = Math.max(20, cfg.minFreq);
@@ -1522,11 +1952,7 @@ function detectPitchWithConfig(buffer, sampleRate, windowedRms, rawRms, cfg) {
   const maxOffset = Math.floor(sampleRate / minFreq);
 
   for (let offset = minOffset; offset <= maxOffset; offset += 1) {
-    let correlation = 0;
-    for (let i = 0; i < size - offset; i += 1) {
-      correlation += Math.abs(buffer[i] - buffer[i + offset]);
-    }
-    correlation = 1 - correlation / (size - offset);
+    const correlation = correlationAtOffset(offset);
     if (correlation > bestCorrelation) {
       bestCorrelation = correlation;
       bestOffset = offset;
@@ -1545,8 +1971,21 @@ function detectPitchWithConfig(buffer, sampleRate, windowedRms, rawRms, cfg) {
       rmsWindowed: windowedRms,
     };
   }
+  let refinedOffset = bestOffset;
+  // Sub-sample peak interpolation reduces integer-lag quantization jitter.
+  if (bestOffset > minOffset && bestOffset < maxOffset) {
+    const corrPrev = correlationAtOffset(bestOffset - 1);
+    const corrMid = bestCorrelation;
+    const corrNext = correlationAtOffset(bestOffset + 1);
+    const denom = corrPrev - 2 * corrMid + corrNext;
+    if (Math.abs(denom) > 1e-9) {
+      const shift = 0.5 * (corrPrev - corrNext) / denom;
+      const clampedShift = Math.max(-1, Math.min(1, shift));
+      refinedOffset = bestOffset + clampedShift;
+    }
+  }
   return {
-    frequency: sampleRate / bestOffset,
+    frequency: sampleRate / refinedOffset,
     correlation: bestCorrelation,
     reason: "ok",
     rmsRaw: rawRms,
@@ -1589,13 +2028,85 @@ function updateInputMeter(buffer) {
   micMeterText.textContent = `Input: ${state} (${Math.round(db)} dB)`;
 }
 
-function updateTrackedSemitone(candidateSemitone) {
+function resetLiveTrackingState(clearSmooth = false) {
+  pendingJumpSemitone = null;
+  pendingJumpFrames = 0;
+  pendingOctaveSemitone = null;
+  pendingOctaveFrames = 0;
+  liveMedianSemitoneHistory = [];
+  liveOnsetSemitoneHistory = [];
+  inactivePitchFrames = 0;
+  pendingOutOfRangeDirection = 0;
+  pendingOutOfRangeFrames = 0;
+  liveAcceptedRawSemitone = null;
+  livePendingRawJumpSemitone = null;
+  livePendingRawJumpFrames = 0;
+  if (clearSmooth) {
+    smoothSemitone = null;
+    displaySemitone = null;
+  }
+}
+
+function gateRawPitchCandidate(rawPitch, fundamental) {
+  if (!Number.isFinite(rawPitch) || rawPitch <= 0 || !Number.isFinite(fundamental) || fundamental <= 0) {
+    return { pitchHz: null, reason: "no_raw" };
+  }
+  const rawSemitone = 12 * Math.log2(rawPitch / fundamental);
+  if (!Number.isFinite(rawSemitone)) {
+    return { pitchHz: null, reason: "invalid_raw" };
+  }
+
+  const threshold = Math.max(0.1, Number(analysisConfig.discontinuityThresholdSt) || 2.8);
+  const confirmFrames = Math.max(1, Math.round(analysisConfig.discontinuityConfirmFrames || 2));
+  const octaveConfirmFrames = Math.max(
+    1,
+    Math.round(analysisConfig.discontinuityOctaveConfirmFrames || Math.max(confirmFrames + 1, 4))
+  );
+  const octaveTolerance = Math.max(0.05, Number(analysisConfig.octaveFlipTolerance) || 0.45);
+
+  if (!Number.isFinite(liveAcceptedRawSemitone)) {
+    liveAcceptedRawSemitone = rawSemitone;
+    livePendingRawJumpSemitone = null;
+    livePendingRawJumpFrames = 0;
+    return { pitchHz: rawPitch, reason: "accepted_initial" };
+  }
+
+  const jumpDelta = Math.abs(rawSemitone - liveAcceptedRawSemitone);
+  if (jumpDelta <= threshold) {
+    liveAcceptedRawSemitone = rawSemitone;
+    livePendingRawJumpSemitone = null;
+    livePendingRawJumpFrames = 0;
+    return { pitchHz: rawPitch, reason: "accepted_nearby" };
+  }
+
+  const octaveLike = Math.abs(jumpDelta - 12) <= octaveTolerance;
+  const requiredFrames = octaveLike ? octaveConfirmFrames : confirmFrames;
+  const nearPending =
+    Number.isFinite(livePendingRawJumpSemitone) &&
+    Math.abs(rawSemitone - livePendingRawJumpSemitone) <= threshold;
+  if (nearPending) {
+    livePendingRawJumpFrames += 1;
+    livePendingRawJumpSemitone = livePendingRawJumpSemitone * 0.65 + rawSemitone * 0.35;
+  } else {
+    livePendingRawJumpSemitone = rawSemitone;
+    livePendingRawJumpFrames = 1;
+  }
+
+  if (livePendingRawJumpFrames >= requiredFrames && Number.isFinite(livePendingRawJumpSemitone)) {
+    liveAcceptedRawSemitone = livePendingRawJumpSemitone;
+    livePendingRawJumpSemitone = null;
+    livePendingRawJumpFrames = 0;
+    return {
+      pitchHz: fundamental * Math.pow(2, liveAcceptedRawSemitone / 12),
+      reason: octaveLike ? "accepted_octave_jump" : "accepted_far_jump",
+    };
+  }
+  return { pitchHz: null, reason: octaveLike ? "rejected_octave_jump" : "rejected_far_jump" };
+}
+
+function updateTrackedSemitone(candidateSemitone, correlation = 1) {
   if (!Number.isFinite(candidateSemitone)) {
-    pendingJumpSemitone = null;
-    pendingJumpFrames = 0;
-    pendingOctaveSemitone = null;
-    pendingOctaveFrames = 0;
-    liveMedianSemitoneHistory = [];
+    resetLiveTrackingState(false);
     return false;
   }
 
@@ -1647,6 +2158,7 @@ function updateTrackedSemitone(candidateSemitone) {
     pendingOctaveFrames = 0;
   }
 
+  const unclampedCandidate = stabilizedCandidate;
   if (!confirmedOctaveJump) {
     const maxStep = Math.max(0.05, Number(analysisConfig.maxSemitoneStepPerFrame) || 0.9);
     const stepDelta = stabilizedCandidate - smoothSemitone;
@@ -1655,13 +2167,22 @@ function updateTrackedSemitone(candidateSemitone) {
     }
   }
 
-  const jumpThreshold = analysisConfig.jumpThreshold;
-  const jumpDelta = Math.abs(stabilizedCandidate - smoothSemitone);
-  if (jumpDelta <= jumpThreshold) {
+  const jumpThreshold = Math.max(0.01, Number(analysisConfig.jumpThreshold) || 0.65);
+  const unclampedJumpDelta = Math.abs(unclampedCandidate - smoothSemitone);
+  if (unclampedJumpDelta <= jumpThreshold) {
+    const stableDeadbandSt = Math.max(0, Number(analysisConfig.stabilityDeadbandCents) || 0) / 100;
+    const stableFollow = clampNumber(Number(analysisConfig.stabilityFollow), 0.0005, 0.2, 0.02);
+    const stableCorrFloor = clampNumber(Number(analysisConfig.stabilityMinCorrelation), 0.8, 0.999, 0.985);
+    if (unclampedJumpDelta <= stableDeadbandSt && Number(correlation) >= stableCorrFloor) {
+      smoothSemitone = smoothSemitone * (1 - stableFollow) + stabilizedCandidate * stableFollow;
+      pendingJumpSemitone = null;
+      pendingJumpFrames = 0;
+      return true;
+    }
     const baseFollow = Number(analysisConfig.smoothFollow);
     const dynamicFollow = Math.min(
       0.95,
-      Math.max(0.01, baseFollow + Math.min(0.55, jumpDelta * 0.07))
+      Math.max(0.01, baseFollow + Math.min(0.55, unclampedJumpDelta * 0.07))
     );
     const follow = confirmedOctaveJump ? Math.max(dynamicFollow, 0.6) : dynamicFollow;
     smoothSemitone = smoothSemitone * (1 - follow) + stabilizedCandidate * follow;
@@ -1672,10 +2193,10 @@ function updateTrackedSemitone(candidateSemitone) {
 
   const nearPending =
     Number.isFinite(pendingJumpSemitone) &&
-    Math.abs(stabilizedCandidate - pendingJumpSemitone) <= jumpThreshold;
+    Math.abs(unclampedCandidate - pendingJumpSemitone) <= jumpThreshold;
   if (nearPending) {
     pendingJumpFrames += 1;
-    pendingJumpSemitone = pendingJumpSemitone * 0.65 + stabilizedCandidate * 0.35;
+    pendingJumpSemitone = pendingJumpSemitone * 0.65 + unclampedCandidate * 0.35;
     if (pendingJumpFrames >= Math.max(1, Math.round(analysisConfig.jumpConfirmFrames))) {
       smoothSemitone = smoothSemitone * 0.65 + pendingJumpSemitone * 0.35;
       pendingJumpSemitone = null;
@@ -1685,19 +2206,18 @@ function updateTrackedSemitone(candidateSemitone) {
     return false;
   }
 
-  pendingJumpSemitone = stabilizedCandidate;
+  pendingJumpSemitone = unclampedCandidate;
   pendingJumpFrames = 1;
   return false;
 }
 
 function updateReadout(freq, options = {}) {
   const a4 = Number(a4Input.value) || 440;
-  const showOutOfRange = Boolean(options.outOfRange);
   if (!freq || !Number.isFinite(freq)) {
-    hzEl.textContent = showOutOfRange ? "Out of range" : "-- Hz";
+    hzEl.textContent = "-- Hz";
     noteEl.textContent = "--";
     centsEl.textContent = "--";
-    statusEl.textContent = showOutOfRange ? "Detected pitch is outside current range" : "Listening...";
+    statusEl.textContent = "Listening...";
     return;
   }
   const nearest = getNearestEtInfo(freq, a4);
@@ -1709,11 +2229,8 @@ function updateReadout(freq, options = {}) {
 }
 
 function getVisualizationSemitoneBounds() {
-  const bottomSlider = Number(rangeBottomInput ? rangeBottomInput.value : 0);
-  const bottom = Number.isFinite(bottomSlider) ? -bottomSlider : 0;
-  const top = Number(rangeTopInput ? rangeTopInput.value : 12);
-  const min = Number.isFinite(bottom) ? bottom : -12;
-  const max = Number.isFinite(top) ? top : 12;
+  const min = getBottomSemitoneValue();
+  const max = getTopSemitoneValue();
   if (min >= max) {
     return { min: 0, max: 12 };
   }
@@ -1741,14 +2258,14 @@ function updateDecayTrail(nowMs) {
   }
   const cutoff = nowMs - trailDurationMs;
   decayTrailPoints = decayTrailPoints.filter((point) => point && point.t >= cutoff);
-  if (!liveHasActivePitch || !Number.isFinite(smoothSemitone)) {
+  if (!liveHasActivePitch || !Number.isFinite(displaySemitone)) {
     return;
   }
   if (!lastDecayTrailSampleMs || nowMs - lastDecayTrailSampleMs >= 20) {
     let nearestDiff = null;
     for (let index = 0; index < ratioMarkers.length; index += 1) {
       const marker = ratioMarkers[index];
-      const diff = Math.abs(marker.semitone - smoothSemitone);
+      const diff = Math.abs(marker.semitone - displaySemitone);
       if (!Number.isFinite(nearestDiff) || diff < nearestDiff) {
         nearestDiff = diff;
       }
@@ -1756,7 +2273,7 @@ function updateDecayTrail(nowMs) {
     const centsOff = Number.isFinite(nearestDiff) ? nearestDiff * 100 : 0;
     const tone = centsOff <= 8 ? "good" : centsOff <= 24 ? "warn" : "bad";
     decayTrailPoints.push({
-      semitone: smoothSemitone,
+      semitone: displaySemitone,
       t: nowMs,
       tone,
       strength: Math.max(0.08, Math.min(1, liveInputStrength || 0)),
@@ -1767,45 +2284,20 @@ function updateDecayTrail(nowMs) {
 
 function normalizePitchToRange(rawPitch, fundamental, bounds, margin, referenceSemitone = null) {
   if (!Number.isFinite(rawPitch) || rawPitch <= 0 || !Number.isFinite(fundamental) || fundamental <= 0) {
-    return { frequency: null, semitone: null, inRange: false, adjusted: false };
+    return { frequency: null, semitone: null, inRange: false, adjusted: false, outDirection: 0 };
   }
   const rawSemitone = 12 * Math.log2(rawPitch / fundamental);
   const minAllowed = bounds.min - margin;
   const maxAllowed = bounds.max + margin;
   const isInRange = (semi) => semi >= minAllowed && semi <= maxAllowed;
-  if (isInRange(rawSemitone)) {
-    return { frequency: rawPitch, semitone: rawSemitone, inRange: true, adjusted: false };
-  }
-
-  let best = null;
-  const target = Number.isFinite(referenceSemitone)
-    ? referenceSemitone
-    : (bounds.min + bounds.max) / 2;
-  for (let octaveShift = -2; octaveShift <= 2; octaveShift += 1) {
-    const frequency = rawPitch * Math.pow(2, octaveShift);
-    if (!Number.isFinite(frequency) || frequency <= 0) {
-      continue;
-    }
-    const semitone = rawSemitone + octaveShift * 12;
-    if (!isInRange(semitone)) {
-      continue;
-    }
-    const distance = Math.abs(semitone - target);
-    if (!best || distance < best.distance) {
-      best = { frequency, semitone, distance, adjusted: octaveShift !== 0 };
-    }
-  }
-
-  if (best) {
-    return {
-      frequency: best.frequency,
-      semitone: best.semitone,
-      inRange: true,
-      adjusted: best.adjusted,
-    };
-  }
-
-  return { frequency: rawPitch, semitone: rawSemitone, inRange: false, adjusted: false };
+  const outDirection = rawSemitone < bounds.min ? -1 : rawSemitone > bounds.max ? 1 : 0;
+  return {
+    frequency: rawPitch,
+    semitone: rawSemitone,
+    inRange: isInRange(rawSemitone),
+    adjusted: false,
+    outDirection,
+  };
 }
 
 function renderLoop() {
@@ -1819,68 +2311,162 @@ function renderLoop() {
     const rmsCeil = Math.max(rmsFloor * 10, 0.08);
     liveInputStrength = Math.max(0, Math.min(1, (rmsWindowed - rmsFloor) / (rmsCeil - rmsFloor)));
     const detection = detectPitch(timeData, audioContext.sampleRate, rmsWindowed, rmsRaw);
-    const rawPitch = detection.frequency;
+    const rawPitchDetected = detection.frequency;
     const fundamental = Number(fundamentalInput.value) || 261.63;
+    const rawGate = gateRawPitchCandidate(rawPitchDetected, fundamental);
+    const rawPitch = rawGate.pitchHz;
+    const hasDetectedRaw = Boolean(rawPitchDetected && Number.isFinite(rawPitchDetected));
     const bounds = getVisualizationSemitoneBounds();
     const margin = Math.max(0, analysisConfig.rangeMargin);
-    const normalized = normalizePitchToRange(
-      rawPitch,
-      fundamental,
-      bounds,
-      margin,
-      smoothSemitone
-    );
+    const normalized = normalizePitchToRange(rawPitch, fundamental, bounds, margin, smoothSemitone);
     const inRange = normalized.inRange;
     const pitch = inRange ? normalized.frequency : null;
-    detectedPitchHz = pitch;
-    liveHasActivePitch = Boolean(pitch && Number.isFinite(pitch));
+    const hasUsablePitch = Boolean(pitch && Number.isFinite(pitch));
+    detectedPitchHz = null;
+    liveHasActivePitch = false;
     if (rawPitch && Number.isFinite(rawPitch) && !inRange) {
       outOfRangeFrames += 1;
+      liveOutOfRangeDirection = normalized.outDirection || 0;
+      const clampConfirmFrames = Math.max(1, Math.round(analysisConfig.outOfRangeClampConfirmFrames || 2));
+      const clampCorrGate = clampNumber(
+        Number(analysisConfig.outOfRangeClampCorrelation),
+        0.5,
+        0.999,
+        0.97
+      );
+      const confidentOutOfRange = Number(detection.correlation) >= clampCorrGate;
+      if (liveOutOfRangeDirection !== pendingOutOfRangeDirection || !confidentOutOfRange) {
+        pendingOutOfRangeDirection = liveOutOfRangeDirection;
+        pendingOutOfRangeFrames = confidentOutOfRange ? 1 : 0;
+      } else {
+        pendingOutOfRangeFrames += 1;
+      }
+      const canClampToEdge =
+        confidentOutOfRange &&
+        pendingOutOfRangeDirection !== 0 &&
+        pendingOutOfRangeFrames >= clampConfirmFrames;
+      if (canClampToEdge) {
+        displaySemitone = liveOutOfRangeDirection < 0 ? bounds.min : bounds.max;
+        liveHasActivePitch = true;
+      } else {
+        displaySemitone = null;
+        liveHasActivePitch = false;
+      }
     } else {
       outOfRangeFrames = 0;
+      liveOutOfRangeDirection = 0;
+      pendingOutOfRangeDirection = 0;
+      pendingOutOfRangeFrames = 0;
     }
-    if (pitch && Number.isFinite(pitch) && fundamental > 0) {
+
+    if (hasUsablePitch && detection.reason === "ok") {
+      inactivePitchFrames = 0;
+    } else {
+      inactivePitchFrames += 1;
+    }
+    if (inactivePitchFrames >= Math.max(1, Math.round(analysisConfig.onsetResetFrames || 8))) {
+      resetLiveTrackingState(true);
+    }
+
+    if (hasUsablePitch && fundamental > 0) {
       const semi = Number.isFinite(normalized.semitone)
         ? normalized.semitone
         : 12 * Math.log2(pitch / fundamental);
-      updateTrackedSemitone(semi);
-    } else if (Number.isFinite(smoothSemitone)) {
+      if (Number.isFinite(smoothSemitone)) {
+        liveOnsetSemitoneHistory = [];
+        updateTrackedSemitone(semi, detection.correlation);
+        displaySemitone = Number.isFinite(smoothSemitone) ? smoothSemitone : semi;
+      } else {
+        const onsetCorrFloor = Math.max(Number(analysisConfig.correlationThreshold) || 0.88, 0.94);
+        const onsetRmsFloor = Math.max((Number(analysisConfig.rmsThreshold) || 0.01) * 2.2, 0.02);
+        const onsetStableFrames = Math.max(1, Math.round(analysisConfig.onsetConfirmFrames || 3));
+        const onsetStability = Math.max(0.1, Number(analysisConfig.onsetStabilitySemitones) || 1.1);
+        const onsetTrusted = detection.correlation >= onsetCorrFloor && rmsWindowed >= onsetRmsFloor;
+        if (!onsetTrusted) {
+          liveOnsetSemitoneHistory = [];
+          displaySemitone = null;
+        } else {
+          liveOnsetSemitoneHistory.push(semi);
+          if (liveOnsetSemitoneHistory.length > onsetStableFrames) {
+            liveOnsetSemitoneHistory.splice(0, liveOnsetSemitoneHistory.length - onsetStableFrames);
+          }
+          if (liveOnsetSemitoneHistory.length >= onsetStableFrames) {
+            let minSemi = Infinity;
+            let maxSemi = -Infinity;
+            for (const value of liveOnsetSemitoneHistory) {
+              if (value < minSemi) minSemi = value;
+              if (value > maxSemi) maxSemi = value;
+            }
+            if (maxSemi - minSemi <= onsetStability) {
+              smoothSemitone = median(liveOnsetSemitoneHistory);
+              displaySemitone = smoothSemitone;
+              pendingJumpSemitone = null;
+              pendingJumpFrames = 0;
+              pendingOctaveSemitone = null;
+              pendingOctaveFrames = 0;
+              liveMedianSemitoneHistory = [];
+              liveOnsetSemitoneHistory = [];
+            } else {
+              displaySemitone = null;
+            }
+          } else {
+            displaySemitone = null;
+          }
+        }
+      }
+      liveHasActivePitch = Number.isFinite(displaySemitone);
+    } else if (hasDetectedRaw && !rawPitch && Number.isFinite(smoothSemitone)) {
+      // Rejected discontinuity frame: hold stable estimate instead of decaying/resetting.
+      displaySemitone = smoothSemitone;
+      liveHasActivePitch = true;
+    } else if (!hasDetectedRaw && Number.isFinite(smoothSemitone)) {
       smoothSemitone *= analysisConfig.idleDecay;
       if (Math.abs(smoothSemitone) > 200 || !Number.isFinite(smoothSemitone)) {
         smoothSemitone = null;
       }
-      pendingJumpSemitone = null;
-      pendingJumpFrames = 0;
-      pendingOctaveSemitone = null;
-      pendingOctaveFrames = 0;
-      liveMedianSemitoneHistory = [];
+      resetLiveTrackingState(false);
+      displaySemitone = null;
+      liveHasActivePitch = false;
+      liveOutOfRangeDirection = 0;
+    } else if (!hasDetectedRaw) {
+      resetLiveTrackingState(false);
+      displaySemitone = null;
+      liveHasActivePitch = false;
+      liveOutOfRangeDirection = 0;
     }
+    const filteredReadoutPitch =
+      Number.isFinite(displaySemitone) && liveHasActivePitch && fundamental > 0
+        ? fundamental * Math.pow(2, displaySemitone / 12)
+        : null;
+    detectedPitchHz = filteredReadoutPitch;
     const showOutOfRange = outOfRangeFrames >= Math.max(1, Math.round(analysisConfig.outOfRangeHoldFrames));
-    updateReadout(pitch, { outOfRange: showOutOfRange });
+    updateReadout(filteredReadoutPitch, { outOfRange: showOutOfRange });
 
-    if (debugRecorder.recording) {
-      const bounds = getVisualizationSemitoneBounds();
-      frameCounter += 1;
-      debugRecorder.frames.push({
-        i: frameCounter,
-        t_ms: Math.round(nowMs - debugRecorder.startedAtMs),
-        raw_pitch_hz: rawPitch,
-        normalized_pitch_hz: normalized.frequency,
-        in_range: Boolean(inRange),
-        used_pitch_hz: pitch,
-        smooth_semitone: smoothSemitone,
-        rms_raw: detection.rmsRaw,
-        rms_windowed: detection.rmsWindowed,
-        correlation: detection.correlation,
-        reason: detection.reason,
-        min_semitone: bounds.min,
-        max_semitone: bounds.max,
-      });
-      if (debugRecorder.frames.length > debugRecorder.maxFrames) {
-        debugRecorder.frames.splice(0, debugRecorder.frames.length - debugRecorder.maxFrames);
-      }
-      updateDebugStatus();
-    }
+    const frame = {
+      i: ++frameCounter,
+      t_ms: Math.round(nowMs),
+      detected_pitch_hz: rawPitchDetected,
+      raw_pitch_hz: rawPitch,
+      raw_semitone:
+        rawPitch && Number.isFinite(rawPitch) && fundamental > 0 ? 12 * Math.log2(rawPitch / fundamental) : null,
+      raw_gate_reason: rawGate.reason,
+      normalized_pitch_hz: normalized.frequency,
+      in_range: Boolean(inRange),
+      out_direction: normalized.outDirection || 0,
+      used_pitch_hz: pitch,
+      display_semitone: displaySemitone,
+      smooth_semitone: smoothSemitone,
+      rms_raw: detection.rmsRaw,
+      rms_windowed: detection.rmsWindowed,
+      correlation: detection.correlation,
+      reason: detection.reason,
+      min_semitone: bounds.min,
+      max_semitone: bounds.max,
+    };
+    pushAnomalyFrame(frame, nowMs);
+    maybeTriggerAnomaly(frame, nowMs);
+    updateActiveAnomalyCapture(frame, nowMs);
+    anomalyCapture.prevFrame = frame;
   }
 
   updateDecayTrail(nowMs);
@@ -1937,11 +2523,24 @@ function toggleMicPanel() {
   if (!micPanel) {
     return;
   }
+  positionMicPanel();
   const opening = micPanel.hidden;
   micPanel.hidden = !opening;
   if (startBtn) {
     startBtn.classList.toggle("button-on", opening);
   }
+}
+
+function positionMicPanel() {
+  if (!micPanel || !startBtn) {
+    return;
+  }
+  if (window.matchMedia("(max-width: 760px)").matches) {
+    micPanel.style.top = "";
+    return;
+  }
+  const micButtonRect = startBtn.getBoundingClientRect();
+  micPanel.style.top = `${Math.max(12, Math.round(micButtonRect.top))}px`;
 }
 
 function stopMic() {
@@ -1956,12 +2555,8 @@ function stopMic() {
   resetMicGraphState();
   liveHasActivePitch = false;
   detectedPitchHz = null;
-  smoothSemitone = null;
-  pendingJumpSemitone = null;
-  pendingJumpFrames = 0;
-  pendingOctaveSemitone = null;
-  pendingOctaveFrames = 0;
-  liveMedianSemitoneHistory = [];
+  resetLiveTrackingState(true);
+  liveOutOfRangeDirection = 0;
   outOfRangeFrames = 0;
   rmsWindowValues = [];
   decayTrailPoints = [];
@@ -1989,19 +2584,14 @@ function updateMicUiState() {
 
 function updateRangeReadout() {
   const bounds = getVisualizationSemitoneBounds();
-  rangeReadout.textContent = `${bounds.min >= 0 ? "+" : ""}${bounds.min}..+${bounds.max}`;
+  rangeReadout.textContent = `${bounds.min >= 0 ? "+" : ""}${bounds.min}..${
+    bounds.max >= 0 ? "+" : ""
+  }${bounds.max}`;
 }
 
 function syncRangeNumberBoxesFromSliders() {
-  if (rangeBottomInput && rangeBottomNumberInput) {
-    const bottomSlider = Number(rangeBottomInput.value);
-    const bottomValue = Number.isFinite(bottomSlider) ? -bottomSlider : 0;
-    rangeBottomNumberInput.value = String(bottomValue);
-  }
-  if (rangeTopInput && rangeTopNumberInput) {
-    const topValue = Number(rangeTopInput.value);
-    rangeTopNumberInput.value = String(Number.isFinite(topValue) ? topValue : 12);
-  }
+  // Kept for compatibility with existing init/update call sites.
+  // Range is now represented by one slider plus offset state.
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -2011,33 +2601,35 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(max, Math.max(min, value));
 }
 
+function getRangeSemitoneValue() {
+  const value = Number(rangeSizeInput ? rangeSizeInput.value : 12);
+  return Number.isFinite(value) ? value : 12;
+}
+
 function getBottomSemitoneValue() {
-  const slider = Number(rangeBottomInput ? rangeBottomInput.value : 0);
-  return Number.isFinite(slider) ? -slider : 0;
+  const maxOffset = 36 - getRangeSemitoneValue();
+  return clampNumber(Number(rangeOffsetSemitones), -12, maxOffset, 0);
 }
 
 function getTopSemitoneValue() {
-  const top = Number(rangeTopInput ? rangeTopInput.value : 12);
-  return Number.isFinite(top) ? top : 12;
+  return getBottomSemitoneValue() + getRangeSemitoneValue();
 }
 
-function setBottomSemitoneValue(bottomSemitone) {
-  if (!rangeBottomInput) {
+function setRangeSemitoneValue(rangeSemitone) {
+  if (!rangeSizeInput) {
     return;
   }
-  const clamped = clampNumber(bottomSemitone, -12, 0, 0);
-  rangeBottomInput.value = String(-clamped);
+  const clamped = clampNumber(rangeSemitone, 12, 36, 12);
+  rangeSizeInput.value = String(clamped);
+  rangeOffsetSemitones = clampNumber(getBottomSemitoneValue(), -12, 36 - clamped, 0);
   syncRangeNumberBoxesFromSliders();
   updateRangeReadout();
   refreshMarkers();
 }
 
-function setTopSemitoneValue(topSemitone) {
-  if (!rangeTopInput) {
-    return;
-  }
-  const clamped = clampNumber(topSemitone, 12, 48, 12);
-  rangeTopInput.value = String(clamped);
+function setRangeOffsetSemitoneValue(offsetSemitone) {
+  const range = getRangeSemitoneValue();
+  rangeOffsetSemitones = clampNumber(offsetSemitone, -12, 36 - range, 0);
   syncRangeNumberBoxesFromSliders();
   updateRangeReadout();
   refreshMarkers();
@@ -2059,15 +2651,17 @@ async function copyText(text) {
   document.body.removeChild(textarea);
 }
 
-function updateDebugStatus(message = "") {
-  if (!debugStatus) {
+function updateAnomalyStatus(message = "") {
+  if (!anomalyStatus) {
     return;
   }
-  const prefix = `Frames: ${debugRecorder.frames.length}${debugRecorder.recording ? " (recording)" : ""}`;
-  debugStatus.textContent = message ? `${prefix} · ${message}` : prefix;
+  const captures = anomalyCapture.captures.length;
+  const activeText = anomalyCapture.activeCapture ? " (capturing)" : "";
+  const prefix = `Captures: ${captures}${activeText}`;
+  anomalyStatus.textContent = message ? `${prefix} · ${message}` : prefix;
 }
 
-function debugFramesToCsv(frames) {
+function framesToCsv(frames) {
   if (!frames.length) {
     return "i,t_ms,raw_pitch_hz,in_range,used_pitch_hz,smooth_semitone,rms_raw,rms_windowed,correlation,reason,min_semitone,max_semitone\n";
   }
@@ -2089,6 +2683,96 @@ function debugFramesToCsv(frames) {
   return `${lines.join("\n")}\n`;
 }
 
+function pushAnomalyFrame(frame, nowMs) {
+  anomalyCapture.ringFrames.push(frame);
+  const cutoff = nowMs - anomalyCapture.maxRingMs;
+  while (anomalyCapture.ringFrames.length && anomalyCapture.ringFrames[0].t_ms < cutoff) {
+    anomalyCapture.ringFrames.shift();
+  }
+}
+
+function startAnomalyCapture(nowMs, reason) {
+  const preCutoff = nowMs - anomalyCapture.preMs;
+  const preFrames = anomalyCapture.ringFrames.filter((frame) => frame.t_ms >= preCutoff);
+  anomalyCapture.activeCapture = {
+    reason,
+    startedAtMs: nowMs,
+    frames: preFrames.slice(),
+  };
+  anomalyCapture.lastTriggerMs = nowMs;
+  updateAnomalyStatus(`triggered: ${reason}`);
+}
+
+function maybeTriggerAnomaly(frame, nowMs) {
+  if (!anomalyCapture.enabled || anomalyCapture.activeCapture) {
+    return;
+  }
+  if (nowMs - anomalyCapture.lastTriggerMs < anomalyCapture.cooldownMs) {
+    return;
+  }
+  const prev = anomalyCapture.prevFrame;
+  let reason = "";
+  if (
+    prev &&
+    Number.isFinite(prev.raw_semitone) &&
+    Number.isFinite(frame.raw_semitone) &&
+    Math.abs(frame.raw_semitone - prev.raw_semitone) >= anomalyCapture.thresholdSt
+  ) {
+    reason = "raw semitone jump";
+  } else if (
+    prev &&
+    prev.in_range &&
+    !frame.in_range &&
+    frame.out_direction < 0 &&
+    Number.isFinite(frame.raw_semitone) &&
+    Number.isFinite(frame.display_semitone) &&
+    Math.abs(frame.raw_semitone - frame.display_semitone) >= anomalyCapture.thresholdSt * 0.5
+  ) {
+    reason = "dropped out of range (low)";
+  }
+  if (reason) {
+    startAnomalyCapture(nowMs, reason);
+  }
+}
+
+function updateActiveAnomalyCapture(frame, nowMs) {
+  if (!anomalyCapture.activeCapture) {
+    return;
+  }
+  anomalyCapture.activeCapture.frames.push(frame);
+  if (nowMs - anomalyCapture.activeCapture.startedAtMs >= anomalyCapture.postMs) {
+    anomalyCapture.captures.push(anomalyCapture.activeCapture);
+    anomalyCapture.activeCapture = null;
+    updateAnomalyStatus("capture complete");
+  }
+}
+
+function getAnomalyFramesForExport() {
+  if (!anomalyCapture.captures.length) {
+    return [];
+  }
+  const latest = anomalyCapture.captures[anomalyCapture.captures.length - 1];
+  return latest && Array.isArray(latest.frames) ? latest.frames : [];
+}
+
+function syncAnomalyControls() {
+  if (anomalyEnabledInput) {
+    anomalyEnabledInput.checked = anomalyCapture.enabled;
+  }
+  if (anomalyThresholdInput) {
+    anomalyThresholdInput.value = String(anomalyCapture.thresholdSt);
+  }
+  if (anomalyPreMsInput) {
+    anomalyPreMsInput.value = String(Math.round(anomalyCapture.preMs));
+  }
+  if (anomalyPostMsInput) {
+    anomalyPostMsInput.value = String(Math.round(anomalyCapture.postMs));
+  }
+  if (anomalyCooldownMsInput) {
+    anomalyCooldownMsInput.value = String(Math.round(anomalyCapture.cooldownMs));
+  }
+}
+
 function bindAnalysisNumberInput(input, configKey, min, max, fallback, round = false) {
   if (!input) {
     return;
@@ -2100,6 +2784,7 @@ function bindAnalysisNumberInput(input, configKey, min, max, fallback, round = f
     if (round) {
       input.value = String(Math.round(value));
     }
+    persistSettings();
   });
 }
 
@@ -2133,6 +2818,7 @@ function applyAnalysisConfig(config) {
   if (analysisRangeMarginInput) analysisRangeMarginInput.value = String(analysisConfig.rangeMargin);
   if (analysisOutRangeHoldInput)
     analysisOutRangeHoldInput.value = String(Math.round(analysisConfig.outOfRangeHoldFrames));
+  persistSettings();
 }
 
 function randomInRange(min, max) {
@@ -2155,6 +2841,10 @@ function makeRandomCandidate(base = null, fine = false) {
       key === "minFreq" ||
       key === "maxFreq" ||
       key === "jumpConfirmFrames" ||
+      key === "onsetConfirmFrames" ||
+      key === "onsetResetFrames" ||
+      key === "discontinuityConfirmFrames" ||
+      key === "discontinuityOctaveConfirmFrames" ||
       key === "outOfRangeHoldFrames";
     if (fine && base) {
       next[key] = mutateAround(base[key], min, max, 0.12, integer);
@@ -2176,7 +2866,12 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
   let pendingFrames = 0;
   let pendingOctave = null;
   let pendingOctaveFrames = 0;
+  let acceptedRawSemitone = null;
+  let pendingRawJumpSemitone = null;
+  let pendingRawJumpFrames = 0;
   const medianBuffer = [];
+  const onsetBuffer = [];
+  let inactiveFrames = 0;
   let outOfRangeCount = 0;
   let validCount = 0;
   let jumpCount = 0;
@@ -2195,7 +2890,52 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
     }
     const windowedRms = rmsWindow.reduce((sum, value) => sum + value, 0) / rmsWindow.length;
     const detection = detectPitchWithConfig(slice, sampleRate, windowedRms, rawRms, cfg);
-    const rawPitch = detection.frequency;
+    const rawPitchDetected = detection.frequency;
+    const hasDetectedRaw = Boolean(rawPitchDetected && Number.isFinite(rawPitchDetected));
+    let rawPitch = null;
+    if (hasDetectedRaw && fundamental > 0) {
+      const rawSemitoneDetected = 12 * Math.log2(rawPitchDetected / fundamental);
+      const rawThreshold = Math.max(0.1, Number(cfg.discontinuityThresholdSt) || 2.8);
+      const rawConfirmFrames = Math.max(1, Math.round(cfg.discontinuityConfirmFrames || 2));
+      const rawOctaveConfirmFrames = Math.max(
+        1,
+        Math.round(cfg.discontinuityOctaveConfirmFrames || Math.max(rawConfirmFrames + 1, 4))
+      );
+      const rawOctaveTolerance = Math.max(0.05, Number(cfg.octaveFlipTolerance) || 0.45);
+      if (!Number.isFinite(acceptedRawSemitone)) {
+        acceptedRawSemitone = rawSemitoneDetected;
+        pendingRawJumpSemitone = null;
+        pendingRawJumpFrames = 0;
+        rawPitch = rawPitchDetected;
+      } else {
+        const rawJumpDelta = Math.abs(rawSemitoneDetected - acceptedRawSemitone);
+        if (rawJumpDelta <= rawThreshold) {
+          acceptedRawSemitone = rawSemitoneDetected;
+          pendingRawJumpSemitone = null;
+          pendingRawJumpFrames = 0;
+          rawPitch = rawPitchDetected;
+        } else {
+          const rawOctaveLike = Math.abs(rawJumpDelta - 12) <= rawOctaveTolerance;
+          const rawRequiredFrames = rawOctaveLike ? rawOctaveConfirmFrames : rawConfirmFrames;
+          const rawNearPending =
+            Number.isFinite(pendingRawJumpSemitone) &&
+            Math.abs(rawSemitoneDetected - pendingRawJumpSemitone) <= rawThreshold;
+          if (rawNearPending) {
+            pendingRawJumpFrames += 1;
+            pendingRawJumpSemitone = pendingRawJumpSemitone * 0.65 + rawSemitoneDetected * 0.35;
+          } else {
+            pendingRawJumpSemitone = rawSemitoneDetected;
+            pendingRawJumpFrames = 1;
+          }
+          if (pendingRawJumpFrames >= rawRequiredFrames && Number.isFinite(pendingRawJumpSemitone)) {
+            acceptedRawSemitone = pendingRawJumpSemitone;
+            pendingRawJumpSemitone = null;
+            pendingRawJumpFrames = 0;
+            rawPitch = fundamental * Math.pow(2, acceptedRawSemitone / 12);
+          }
+        }
+      }
+    }
     confidenceTotal += detection.correlation || 0;
     usedCount += 1;
 
@@ -2222,8 +2962,58 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
       }
     }
 
+    const hasUsablePitch = Boolean(pitch && Number.isFinite(pitch) && detection.reason === "ok");
+    const hasRejectedRawJump = hasDetectedRaw && !rawPitch;
+    if (hasUsablePitch || hasRejectedRawJump) {
+      inactiveFrames = 0;
+    } else {
+      inactiveFrames += 1;
+    }
+    if (inactiveFrames >= Math.max(1, Math.round(cfg.onsetResetFrames || 8))) {
+      smooth = null;
+      pending = null;
+      pendingFrames = 0;
+      pendingOctave = null;
+      pendingOctaveFrames = 0;
+      acceptedRawSemitone = null;
+      pendingRawJumpSemitone = null;
+      pendingRawJumpFrames = 0;
+      medianBuffer.length = 0;
+      onsetBuffer.length = 0;
+    }
+
     if (pitch && Number.isFinite(pitch)) {
       const semi = 12 * Math.log2(pitch / fundamental);
+      if (!Number.isFinite(smooth)) {
+        const onsetCorrFloor = Math.max(Number(cfg.correlationThreshold) || 0.88, 0.94);
+        const onsetRmsFloor = Math.max((Number(cfg.rmsThreshold) || 0.01) * 2.2, 0.02);
+        const onsetStableFrames = Math.max(1, Math.round(cfg.onsetConfirmFrames || 3));
+        const onsetStability = Math.max(0.1, Number(cfg.onsetStabilitySemitones) || 1.1);
+        const onsetTrusted = detection.correlation >= onsetCorrFloor && windowedRms >= onsetRmsFloor;
+        if (onsetTrusted) {
+          onsetBuffer.push(semi);
+          if (onsetBuffer.length > onsetStableFrames) {
+            onsetBuffer.splice(0, onsetBuffer.length - onsetStableFrames);
+          }
+          if (onsetBuffer.length >= onsetStableFrames) {
+            let minSemi = Infinity;
+            let maxSemi = -Infinity;
+            for (const value of onsetBuffer) {
+              if (value < minSemi) minSemi = value;
+              if (value > maxSemi) maxSemi = value;
+            }
+            if (maxSemi - minSemi <= onsetStability) {
+              smooth = median(onsetBuffer);
+              onsetBuffer.length = 0;
+            }
+          }
+        } else {
+          onsetBuffer.length = 0;
+        }
+      } else {
+        onsetBuffer.length = 0;
+      }
+
       const medianWindowFrames = Math.max(1, Math.round(cfg.medianWindowFrames || 1));
       medianBuffer.push(semi);
       if (medianBuffer.length > medianWindowFrames) {
@@ -2269,10 +3059,11 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
 
       if (allowUpdate) {
         if (!Number.isFinite(smooth)) {
-          smooth = candidateSemi;
           pending = null;
           pendingFrames = 0;
+          displaySemitone = null;
         } else {
+          const unclampedCandidateSemi = candidateSemi;
           if (!confirmedOctaveJump) {
             const maxStep = Math.max(0.05, Number(cfg.maxSemitoneStepPerFrame) || 0.9);
             const stepDelta = candidateSemi - smooth;
@@ -2280,20 +3071,30 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
               candidateSemi = smooth + Math.sign(stepDelta) * maxStep;
             }
           }
-          const delta = Math.abs(candidateSemi - smooth);
-          if (delta <= cfg.jumpThreshold) {
-            const baseFollow = Number(cfg.smoothFollow);
-            const dynamicFollow = Math.min(
-              0.95,
-              Math.max(0.01, baseFollow + Math.min(0.55, delta * 0.07))
-            );
-            const follow = confirmedOctaveJump ? Math.max(dynamicFollow, 0.6) : dynamicFollow;
-            smooth = smooth * (1 - follow) + candidateSemi * follow;
-            pending = null;
-            pendingFrames = 0;
-          } else if (Number.isFinite(pending) && Math.abs(candidateSemi - pending) <= cfg.jumpThreshold) {
+          const jumpThreshold = Math.max(0.01, Number(cfg.jumpThreshold) || 0.65);
+          const delta = Math.abs(unclampedCandidateSemi - smooth);
+          if (delta <= jumpThreshold) {
+            const stableDeadbandSt = Math.max(0, Number(cfg.stabilityDeadbandCents) || 0) / 100;
+            const stableFollow = clampNumber(Number(cfg.stabilityFollow), 0.0005, 0.2, 0.02);
+            const stableCorrFloor = clampNumber(Number(cfg.stabilityMinCorrelation), 0.8, 0.999, 0.985);
+            if (delta <= stableDeadbandSt && Number(detection.correlation) >= stableCorrFloor) {
+              smooth = smooth * (1 - stableFollow) + candidateSemi * stableFollow;
+              pending = null;
+              pendingFrames = 0;
+            } else {
+              const baseFollow = Number(cfg.smoothFollow);
+              const dynamicFollow = Math.min(
+                0.95,
+                Math.max(0.01, baseFollow + Math.min(0.55, delta * 0.07))
+              );
+              const follow = confirmedOctaveJump ? Math.max(dynamicFollow, 0.6) : dynamicFollow;
+              smooth = smooth * (1 - follow) + candidateSemi * follow;
+              pending = null;
+              pendingFrames = 0;
+            }
+          } else if (Number.isFinite(pending) && Math.abs(unclampedCandidateSemi - pending) <= jumpThreshold) {
             pendingFrames += 1;
-            pending = pending * 0.65 + candidateSemi * 0.35;
+            pending = pending * 0.65 + unclampedCandidateSemi * 0.35;
             if (pendingFrames >= Math.max(1, Math.round(cfg.jumpConfirmFrames))) {
               smooth = smooth * 0.65 + pending * 0.35;
               pending = null;
@@ -2302,16 +3103,18 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
               jumpCount += 1;
             }
           } else {
-            pending = candidateSemi;
+            pending = unclampedCandidateSemi;
             pendingFrames = 1;
             jumpCount += 1;
           }
+          displaySemitone = smooth;
         }
-        displaySemitone = smooth;
       } else {
         pending = null;
         pendingFrames = 0;
       }
+    } else if (hasDetectedRaw && !rawPitch && Number.isFinite(smooth)) {
+      displaySemitone = smooth;
     } else if (Number.isFinite(smooth)) {
       smooth *= cfg.idleDecay;
       if (!Number.isFinite(smooth) || Math.abs(smooth) > 200) {
@@ -2713,11 +3516,14 @@ async function toggleCalibrationPlayback() {
   updateCalPlayButton();
 }
 
-parseIncomingQuery();
+const queryOverrides = parseIncomingQuery();
+const storedSettings = applyStoredSettings(queryOverrides);
 initTheme();
-fundamentalSpelling = getFundamentalSpellingFromPitchClass(
-  getNearestEtInfo(Number(fundamentalInput.value) || 261.63, Number(a4Input.value) || 440).pitchClass
-);
+if (!(storedSettings && (storedSettings.fundamentalSpelling === "flat" || storedSettings.fundamentalSpelling === "sharp"))) {
+  fundamentalSpelling = getFundamentalSpellingFromPitchClass(
+    getNearestEtInfo(Number(fundamentalInput.value) || 261.63, Number(a4Input.value) || 440).pitchClass
+  );
+}
 populateFundamentalNotes();
 updateFundamentalNotes();
 syncFundamentalNoteSelect();
@@ -2727,6 +3533,8 @@ refreshMarkers();
 updateReferenceButton();
 updateMicUiState();
 resizeCanvas();
+positionMicPanel();
+syncStateToQueryString();
 drawViz();
 rafId = requestAnimationFrame(renderLoop);
 
@@ -2756,8 +3564,12 @@ if (activateMicLink) {
 if (tunerToggle && leftRail) {
   tunerToggle.addEventListener("click", () => {
     leftRail.classList.toggle("is-collapsed");
-    if (leftRail.classList.contains("is-collapsed") && micPanel) {
+    const isCollapsed = leftRail.classList.contains("is-collapsed");
+    tunerToggle.textContent = isCollapsed ? "▸" : "▾";
+    tunerToggle.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+    if (isCollapsed && micPanel) {
       micPanel.hidden = true;
+      micPanel.style.top = "";
       if (startBtn) {
         startBtn.classList.remove("button-on");
       }
@@ -2774,41 +3586,33 @@ if (themeToggle) {
 
 ratiosInput.addEventListener("input", () => {
   refreshMarkers();
+  persistSettings();
+  syncStateToQueryString();
 });
 
-if (rangeBottomInput) {
-  rangeBottomInput.addEventListener("input", () => {
-    syncRangeNumberBoxesFromSliders();
-    updateRangeReadout();
-    refreshMarkers();
+if (rangeSizeInput) {
+  rangeSizeInput.addEventListener("input", () => {
+    const value = clampNumber(Number(rangeSizeInput.value), 12, 36, 12);
+    setRangeSemitoneValue(value);
+    persistSettings();
   });
 }
 
-if (rangeTopInput) {
-  rangeTopInput.addEventListener("input", () => {
-    syncRangeNumberBoxesFromSliders();
-    updateRangeReadout();
-    refreshMarkers();
-  });
-}
-
-if (rangeBottomNumberInput && rangeBottomInput) {
-  rangeBottomNumberInput.addEventListener("input", () => {
-    const value = clampNumber(Number(rangeBottomNumberInput.value), -12, 0, 0);
-    setBottomSemitoneValue(value);
-  });
-}
-
-if (rangeTopNumberInput && rangeTopInput) {
-  rangeTopNumberInput.addEventListener("input", () => {
-    const value = clampNumber(Number(rangeTopNumberInput.value), 12, 48, 12);
-    setTopSemitoneValue(value);
-  });
-}
-
-show12EtToggle.addEventListener("change", drawViz);
+show12EtToggle.addEventListener("change", () => {
+  drawViz();
+  persistSettings();
+});
 if (showNoteNamesToggle) {
-  showNoteNamesToggle.addEventListener("change", drawViz);
+  showNoteNamesToggle.addEventListener("change", () => {
+    drawViz();
+    persistSettings();
+  });
+}
+if (showCentsDeviationToggle) {
+  showCentsDeviationToggle.addEventListener("change", () => {
+    drawViz();
+    persistSettings();
+  });
 }
 if (decayModeToggle) {
   decayModeToggle.addEventListener("change", () => {
@@ -2817,6 +3621,13 @@ if (decayModeToggle) {
       lastDecayTrailSampleMs = 0;
     }
     drawViz();
+    persistSettings();
+  });
+}
+if (colorFamiliesToggle) {
+  colorFamiliesToggle.addEventListener("change", () => {
+    drawViz();
+    persistSettings();
   });
 }
 
@@ -2825,6 +3636,8 @@ fundamentalInput.addEventListener("input", () => {
   refreshMarkers();
   updateReferenceFrequency();
   rebuildAnalysisChain();
+  persistSettings();
+  syncStateToQueryString();
 });
 
 a4Input.addEventListener("input", () => {
@@ -2840,6 +3653,8 @@ a4Input.addEventListener("input", () => {
   refreshMarkers();
   updateReferenceFrequency();
   rebuildAnalysisChain();
+  persistSettings();
+  syncStateToQueryString();
 });
 
 fundamentalNoteSelect.addEventListener("change", onFundamentalNoteChange);
@@ -2879,12 +3694,15 @@ if (referenceToggle) {
 if (referenceLevel) {
   referenceLevel.addEventListener("input", () => {
     updateReferenceLevel();
+    persistSettings();
+    syncStateToQueryString();
   });
 }
 
 if (micGainInput) {
   micGainInput.addEventListener("input", () => {
     updateMicGain();
+    persistSettings();
   });
 }
 
@@ -2921,51 +3739,72 @@ if (calibrateToggle) {
   });
 }
 
-if (debugRecordToggle) {
-  debugRecordToggle.addEventListener("click", () => {
-    debugRecorder.recording = !debugRecorder.recording;
-    if (debugRecorder.recording) {
-      debugRecorder.startedAtMs = performance.now();
-      frameCounter = 0;
-      debugRecordToggle.textContent = "Stop Rec";
-    } else {
-      debugRecordToggle.textContent = "Start Rec";
-    }
-    updateDebugStatus();
+if (anomalyEnabledInput) {
+  anomalyEnabledInput.addEventListener("change", () => {
+    anomalyCapture.enabled = anomalyEnabledInput.checked;
+    persistSettings();
+    updateAnomalyStatus(anomalyCapture.enabled ? "enabled" : "disabled");
   });
 }
-
-if (debugClearButton) {
-  debugClearButton.addEventListener("click", () => {
-    debugRecorder.frames = [];
-    frameCounter = 0;
-    updateDebugStatus("cleared");
+if (anomalyThresholdInput) {
+  anomalyThresholdInput.addEventListener("input", () => {
+    anomalyCapture.thresholdSt = clampNumber(Number(anomalyThresholdInput.value), 1, 24, 7);
+    persistSettings();
   });
 }
-
-if (debugCopyJsonButton) {
-  debugCopyJsonButton.addEventListener("click", async () => {
+if (anomalyPreMsInput) {
+  anomalyPreMsInput.addEventListener("input", () => {
+    anomalyCapture.preMs = clampNumber(Number(anomalyPreMsInput.value), 200, 4000, 1200);
+    anomalyPreMsInput.value = String(Math.round(anomalyCapture.preMs));
+    persistSettings();
+  });
+}
+if (anomalyPostMsInput) {
+  anomalyPostMsInput.addEventListener("input", () => {
+    anomalyCapture.postMs = clampNumber(Number(anomalyPostMsInput.value), 200, 4000, 1200);
+    anomalyPostMsInput.value = String(Math.round(anomalyCapture.postMs));
+    persistSettings();
+  });
+}
+if (anomalyCooldownMsInput) {
+  anomalyCooldownMsInput.addEventListener("input", () => {
+    anomalyCapture.cooldownMs = clampNumber(Number(anomalyCooldownMsInput.value), 200, 5000, 1200);
+    anomalyCooldownMsInput.value = String(Math.round(anomalyCapture.cooldownMs));
+    persistSettings();
+  });
+}
+if (anomalyClearButton) {
+  anomalyClearButton.addEventListener("click", () => {
+    anomalyCapture.captures = [];
+    anomalyCapture.activeCapture = null;
+    updateAnomalyStatus("cleared");
+  });
+}
+if (anomalyCopyJsonButton) {
+  anomalyCopyJsonButton.addEventListener("click", async () => {
+    const frames = getAnomalyFramesForExport();
     try {
-      await copyText(JSON.stringify(debugRecorder.frames));
-      updateDebugStatus("copied json");
+      await copyText(JSON.stringify(frames));
+      updateAnomalyStatus("copied json");
     } catch (_error) {
-      updateDebugStatus("copy failed");
+      updateAnomalyStatus("copy failed");
     }
   });
 }
-
-if (debugCopyCsvButton) {
-  debugCopyCsvButton.addEventListener("click", async () => {
+if (anomalyCopyCsvButton) {
+  anomalyCopyCsvButton.addEventListener("click", async () => {
+    const frames = getAnomalyFramesForExport();
     try {
-      await copyText(debugFramesToCsv(debugRecorder.frames));
-      updateDebugStatus("copied csv");
+      await copyText(framesToCsv(frames));
+      updateAnomalyStatus("copied csv");
     } catch (_error) {
-      updateDebugStatus("copy failed");
+      updateAnomalyStatus("copy failed");
     }
   });
 }
 
-updateDebugStatus();
+syncAnomalyControls();
+updateAnomalyStatus();
 resetCalibration();
 
 if (calRecordToggle) {
@@ -3009,6 +3848,7 @@ if (calWindowClose) {
 
 window.addEventListener("resize", () => {
   resizeCanvas();
+  positionMicPanel();
   drawViz();
 });
 
@@ -3017,8 +3857,9 @@ canvas.addEventListener(
   (event) => {
     event.preventDefault();
     const direction = event.deltaY < 0 ? 1 : -1;
-    const nextTop = getTopSemitoneValue() + direction;
-    setTopSemitoneValue(nextTop);
+    const nextRange = getRangeSemitoneValue() + direction;
+    setRangeSemitoneValue(nextRange);
+    persistSettings();
   },
   { passive: false }
 );
@@ -3026,7 +3867,7 @@ canvas.addEventListener(
 canvas.addEventListener("pointerdown", (event) => {
   bottomDragActive = true;
   bottomDragStartY = event.clientY;
-  bottomDragStartValue = getBottomSemitoneValue();
+  rangeOffsetStartValue = getBottomSemitoneValue();
   canvas.setPointerCapture(event.pointerId);
 });
 
@@ -3036,8 +3877,9 @@ canvas.addEventListener("pointermove", (event) => {
   }
   const deltaY = event.clientY - bottomDragStartY;
   const semitoneOffset = Math.round(deltaY / 14);
-  const nextBottom = bottomDragStartValue + semitoneOffset;
-  setBottomSemitoneValue(nextBottom);
+  const nextOffset = rangeOffsetStartValue + semitoneOffset;
+  setRangeOffsetSemitoneValue(nextOffset);
+  persistSettings();
 });
 
 function stopBottomDrag(event) {

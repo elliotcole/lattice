@@ -21915,7 +21915,7 @@ function openTunerFromFileMenu() {
   }
   const query = params.toString();
   const target = `./tuner/${query ? `?${query}` : ""}`;
-  window.location.href = target;
+  window.open(target, "_blank", "noopener,noreferrer");
 }
 
 async function copyTextToClipboard(text) {
@@ -26350,7 +26350,15 @@ if (ratioZSelect) {
   ratioZSelect.addEventListener("change", updateNodeRatios);
 }
 a4Input.addEventListener("input", () => {
+  const a4 = Number(a4Input.value) || 440;
+  if (fundamentalNoteSelect.value !== FUNDAMENTAL_CUSTOM_VALUE) {
+    const selectedMidi = Number(fundamentalNoteSelect.value);
+    if (Number.isFinite(selectedMidi)) {
+      fundamentalInput.value = String(midiToFrequency(selectedMidi, a4));
+    }
+  }
   updateFundamentalNotes();
+  syncFundamentalNoteSelect();
   updateNodeFrequencies();
 });
 fundamentalNoteSelect.addEventListener("change", onFundamentalNoteChange);

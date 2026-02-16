@@ -4197,10 +4197,12 @@ const CUSTOM_SLOT_VECTORS = [
 ];
 
 function getCustomSlotOffset(slot) {
-  const vector = CUSTOM_SLOT_VECTORS[(slot % CUSTOM_SLOT_VECTORS.length + CUSTOM_SLOT_VECTORS.length) % CUSTOM_SLOT_VECTORS.length];
+  const normalizedSlot = Number.isFinite(slot) ? Math.max(0, Math.trunc(slot)) : 0;
+  const ring = Math.floor(normalizedSlot / CUSTOM_SLOT_VECTORS.length) + 1;
+  const vector = CUSTOM_SLOT_VECTORS[normalizedSlot % CUSTOM_SLOT_VECTORS.length];
   return {
-    x: vector.x * GRID_SPACING,
-    y: vector.y * GRID_SPACING,
+    x: vector.x * GRID_SPACING * ring,
+    y: vector.y * GRID_SPACING * ring,
   };
 }
 
@@ -4210,12 +4212,11 @@ function getCustomNodesForSource(sourceId) {
 
 function findNextCustomSlot(sourceId) {
   const used = new Set(getCustomNodesForSource(sourceId).map((node) => node.customSlot));
-  for (let index = 0; index < 4; index += 1) {
-    if (!used.has(index)) {
-      return index;
-    }
+  let index = 0;
+  while (used.has(index)) {
+    index += 1;
   }
-  return null;
+  return index;
 }
 
 function computeCustomNodeCoordinate(sourceNode, slot) {
@@ -4282,6 +4283,13 @@ function insertCustomNode(node) {
 
 function addCustomNodeToScene(node) {
   insertCustomNode(node);
+  if (node && node.isCustom && !showLineLabels) {
+    const sourceNode = nodeById.get(node.sourceNodeId);
+    const edgeKey = getEdgeKey(sourceNode, node);
+    if (edgeKey) {
+      lineLabelOverrides.set(edgeKey, true);
+    }
+  }
   refreshCustomNodes();
   updatePitchInstances();
   markIsomorphicDirty();
@@ -9605,6 +9613,18 @@ function getEdgeLabelText(a, b) {
   return null;
 }
 
+function getCustomConnectionLabelText(customNode) {
+  if (!customNode) {
+    return null;
+  }
+  const numerator = Number(customNode.factorNumerator);
+  const denominator = Number(customNode.factorDenominator);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return null;
+  }
+  return formatIntervalRatio(numerator, denominator);
+}
+
 function getEdgeKey(a, b) {
   if (!a || !b) {
     return "";
@@ -11039,17 +11059,18 @@ function drawCustomConnections(nodePosMap) {
     );
     const connectionAlpha =
       axisActive && !isEdgeOnAxisEntry(source, node, axisEntry) ? AXIS_DIM_FACTOR : 1;
+    const labelText = getCustomConnectionLabelText(node);
+    const label = shouldShowEdgeLabel(source, node) ? labelText : null;
     drawCanvasEdgeSegment({
       start,
       end,
       startRadius,
       endRadius,
       color: themeColors.edge,
-      label: formatIntervalRatio(node.factorNumerator, node.factorDenominator),
+      label,
       labelFont,
       labelWeight,
       labelSize,
-      forceLabel: true,
       alpha: connectionAlpha,
     });
   });
@@ -13900,8 +13921,15 @@ function onPointerUp(event) {
     return;
   }
   if (layoutMode) {
+    const wasRotatingInLayout = view.rotating;
     if (view.dragging) {
       view.dragging = false;
+    }
+    if (view.rotating) {
+      view.rotating = false;
+    }
+    if (wasRotatingInLayout) {
+      markIsomorphicDirty();
     }
     view.reducedEffects = false;
     return;
@@ -14718,6 +14746,63 @@ function hitTestEdgeLabel(screenPoint) {
       const distance = distanceToSegment(screenPoint, lineStart, lineEnd);
       if (distance <= hitThreshold && distance < bestDistance) {
         best = { a, b };
+        bestDistance = distance;
+      }
+    });
+  }
+  if (customNodes.length) {
+    const edgeOutset = 1;
+    customNodes.forEach((node) => {
+      if (!node.active) {
+        return;
+      }
+      const source = nodeById.get(node.sourceNodeId);
+      if (!source) {
+        return;
+      }
+      const labelText = getCustomConnectionLabelText(node);
+      if (!labelText) {
+        return;
+      }
+      const startEntry = nodePosMap.get(source.id);
+      const endEntry = nodePosMap.get(node.id);
+      if (!startEntry || !endEntry) {
+        return;
+      }
+      const start = startEntry.pos;
+      const end = endEntry.pos;
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      if (!dist) {
+        return;
+      }
+      const ux = dx / dist;
+      const uy = dy / dist;
+      const startRadius = Math.max(
+        0,
+        getNodeEdgeRadius(source, ux, uy, startEntry.radius) + edgeOutset
+      );
+      const customEdgeInset = Math.max(0, Math.round(endEntry.radius * 0.03));
+      const endRadius = Math.max(
+        0,
+        getNodeEdgeRadius(node, ux, uy, endEntry.radius) + edgeOutset - customEdgeInset
+      );
+      const lineStart = {
+        x: start.x + ux * startRadius,
+        y: start.y + uy * startRadius,
+      };
+      const lineEnd = {
+        x: end.x - ux * endRadius,
+        y: end.y - uy * endRadius,
+      };
+      const lineLen = Math.max(0, dist - startRadius - endRadius);
+      if (lineLen <= 0) {
+        return;
+      }
+      const distance = distanceToSegment(screenPoint, lineStart, lineEnd);
+      if (distance <= hitThreshold && distance < bestDistance) {
+        best = { a: source, b: node };
         bestDistance = distance;
       }
     });
@@ -20718,7 +20803,7 @@ function applyPresetCustomNodes(entries) {
       return;
     }
     let slot = Number.isFinite(entry.customSlot)
-      ? Math.max(0, Math.min(3, Math.trunc(entry.customSlot)))
+      ? Math.max(0, Math.trunc(entry.customSlot))
       : null;
     const usedSlots = new Set(getCustomNodesForSource(source.id).map((node) => node.customSlot));
     if (slot == null || usedSlots.has(slot)) {

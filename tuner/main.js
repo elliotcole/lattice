@@ -1532,6 +1532,63 @@ function refreshMarkers() {
   ratioMarkers = markers.sort((a, b) => b.semitone - a.semitone);
 }
 
+function getRatioLabelForSemitone(ratio, semitone) {
+  if (!ratio) {
+    return "--";
+  }
+  const isUnisonRatio = ratio.numerator === 1 && ratio.denominator === 1;
+  const isOctaveRatio = ratio.numerator === 2 && ratio.denominator === 1;
+  if (isUnisonRatio || isOctaveRatio) {
+    const octaveStep = Math.round(semitone / 12);
+    if (Math.abs(semitone - octaveStep * 12) <= 0.02) {
+      const octaveOrdinal = octaveStep + 1;
+      if (octaveOrdinal >= 1) {
+        return `${octaveOrdinal}/1`;
+      }
+    }
+  }
+  return getOctaveReducedDisplayRatioLabel(ratio) || ratio.label || "--";
+}
+
+function getNearestRatioAtSemitone(semitone) {
+  if (!Number.isFinite(semitone) || !Array.isArray(ratioItems) || ratioItems.length === 0) {
+    return null;
+  }
+  let best = null;
+  for (const ratio of ratioItems) {
+    const base = Number(ratio.octaveSemitone);
+    if (!Number.isFinite(base)) {
+      continue;
+    }
+    const k0 = Math.round((semitone - base) / 12);
+    for (let dk = -1; dk <= 1; dk += 1) {
+      const k = k0 + dk;
+      const markerSemitone = base + 12 * k;
+      const delta = semitone - markerSemitone;
+      const absDelta = Math.abs(delta);
+      if (!best || absDelta < best.absDelta) {
+        best = {
+          ratio,
+          markerSemitone,
+          deltaSemitone: delta,
+          absDelta,
+          label: getRatioLabelForSemitone(ratio, markerSemitone),
+        };
+      }
+    }
+  }
+  if (!best) {
+    return null;
+  }
+  return {
+    ratio: best.ratio,
+    markerSemitone: best.markerSemitone,
+    cents: best.deltaSemitone * 100,
+    centsAbs: best.absDelta * 100,
+    label: best.label,
+  };
+}
+
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
   const width = canvas.clientWidth;
@@ -1641,15 +1698,6 @@ function drawViz() {
   ctx.font = `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif`;
   ctx.textBaseline = "middle";
   const hasActiveInput = Number.isFinite(displaySemitone) && liveHasActivePitch;
-  let nearestMarker = null;
-  if (hasActiveInput) {
-    for (const marker of ratioMarkers) {
-      const diff = Math.abs(marker.semitone - displaySemitone);
-      if (!nearestMarker || diff < nearestMarker.diff) {
-        nearestMarker = { diff, marker };
-      }
-    }
-  }
 
   function measureLabelPart(text, font) {
     if (!text) return 0;
@@ -1886,10 +1934,9 @@ function drawViz() {
         : liveOutOfRangeDirection > 0
           ? 0
           : yForSemitone(displaySemitone);
-    const displayFreq = fundamental > 0 ? fundamental * Math.pow(2, displaySemitone / 12) : null;
-    const etInfo = Number.isFinite(displayFreq) ? getNearestEtInfo(displayFreq, a4) : null;
-    const centsOff = nearestMarker ? nearestMarker.diff * 100 : 0;
-    const centsSigned = etInfo ? etInfo.cents : 0;
+    const nearestRatio = getNearestRatioAtSemitone(displaySemitone);
+    const centsOff = nearestRatio ? nearestRatio.centsAbs : 0;
+    const centsSigned = nearestRatio ? nearestRatio.cents : 0;
     const blobColor =
       centsOff <= 8 ? blobGood : centsOff <= 24 ? blobWarn : blobBad;
 
@@ -1898,7 +1945,9 @@ function drawViz() {
     ctx.arc(lineX, y, 10, 0, Math.PI * 2);
     ctx.fill();
 
-    if (etInfo && (!showCentsDeviationToggle || showCentsDeviationToggle.checked)) {
+    if (nearestRatio && (!showCentsDeviationToggle || showCentsDeviationToggle.checked)) {
+      ctx.font = `${Math.max(10, ratioLabelFontSize)}px 'IBM Plex Sans', sans-serif`;
+      ctx.textBaseline = "alphabetic";
       ctx.textAlign = "left";
       ctx.fillStyle = etColor;
       const centsRounded = Math.round(centsSigned);
@@ -2212,7 +2261,6 @@ function updateTrackedSemitone(candidateSemitone, correlation = 1) {
 }
 
 function updateReadout(freq, options = {}) {
-  const a4 = Number(a4Input.value) || 440;
   if (!freq || !Number.isFinite(freq)) {
     hzEl.textContent = "-- Hz";
     noteEl.textContent = "--";
@@ -2220,10 +2268,13 @@ function updateReadout(freq, options = {}) {
     statusEl.textContent = "Listening...";
     return;
   }
-  const nearest = getNearestEtInfo(freq, a4);
+  const fundamental = getFundamentalHz();
+  const semitone =
+    Number.isFinite(fundamental) && fundamental > 0 ? 12 * Math.log2(freq / fundamental) : null;
+  const nearestRatio = getNearestRatioAtSemitone(semitone);
   hzEl.textContent = `${freq.toFixed(2)} Hz`;
-  noteEl.textContent = nearest.name;
-  const cents = Math.round(nearest.cents);
+  noteEl.textContent = nearestRatio ? nearestRatio.label : "--";
+  const cents = nearestRatio ? Math.round(nearestRatio.cents) : 0;
   centsEl.textContent = cents === 0 ? "0" : `${cents > 0 ? "+" : ""}${cents}`;
   statusEl.textContent = "Tracking pitch";
 }

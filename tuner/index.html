@@ -10,9 +10,9 @@
       href="https://fonts.googleapis.com/css2?family=Lexend:wght@200..700&family=Noto+Serif:wght@400..700&family=IBM+Plex+Sans:wght@300..700&display=swap"
       rel="stylesheet"
     />
-    <script type="module" crossorigin src="../assets/tuner-4f9AvG2h.js"></script>
+    <script type="module" crossorigin src="../assets/tuner-CWoDsVxt.js"></script>
     <link rel="modulepreload" crossorigin href="../assets/modulepreload-polyfill-B5Qt9EMX.js">
-    <link rel="stylesheet" crossorigin href="../assets/tuner-DjLUFJNb.css">
+    <link rel="stylesheet" crossorigin href="../assets/tuner-K_eJ9XCo.css">
   </head>
   <body>
     <section class="viz-wrap">
@@ -73,9 +73,22 @@
             <label>Show</label>
             <div class="show-line">
               <label class="checkline compact">
-                <input id="show-note-names" type="checkbox" checked />
-                <span>Note names</span>
+                <span>Labels</span>
               </label>
+              <div class="radio-pill-group" role="radiogroup" aria-label="Label mode">
+                <label class="radio-pill">
+                  <input id="show-label-mode-note" name="show-label-mode" type="radio" value="note" checked />
+                  <span>Note Names</span>
+                </label>
+                <label class="radio-pill">
+                  <input id="show-label-mode-sargam" name="show-label-mode" type="radio" value="sargam" />
+                  <span>Sargam</span>
+                </label>
+                <label class="radio-pill">
+                  <input id="show-label-mode-none" name="show-label-mode" type="radio" value="none" />
+                  <span>None</span>
+                </label>
+              </div>
               <label class="checkline compact">
                 <input id="show-12et" type="checkbox" checked />
                 <span>12-ET Labels</span>

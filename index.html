@@ -23,9 +23,9 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/main-CGndegS-.js"></script>
+    <script type="module" crossorigin src="./assets/main-CoRIR_I3.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-B5Qt9EMX.js">
-    <link rel="stylesheet" crossorigin href="./assets/style-DTntN_em.css">
+    <link rel="stylesheet" crossorigin href="./assets/style-DxZLqwPx.css">
   </head>
   <body>
     <canvas id="lattice" tabindex="0" aria-label="Tuning lattice"></canvas>
@@ -242,6 +242,12 @@
           <div class="control-inline">
             <input id="layout-unify-size" type="checkbox" checked />
             <span>Unify Node Size</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <div class="control-inline">
+            <input id="layout-perspective-text-size" type="checkbox" />
+            <span>Perspective Text</span>
           </div>
         </div>
         <div class="control-group control-group-inline layout-space-group">
@@ -1365,9 +1371,25 @@
           Enter ratios (1485:1024 or 1485/1024)
           <textarea id="find-ratio-input" rows="6" required></textarea>
         </label>
+        <div id="find-ratio-axis-recommendation" class="dialog-help">
+          Best primes for axes: 3, 5, 7
+        </div>
         <menu class="dialog-actions">
           <button type="submit" value="cancel">Cancel</button>
           <button type="submit" value="find" autofocus>Find</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="find-ratio-axis-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form" id="find-ratio-axis-form">
+        <div class="dialog-title">Update Axes?</div>
+        <div id="find-ratio-axis-message" class="dialog-help">
+          Your three axes are (3 5 7). These ratios would be diagrammed best if they were
+          (3 7 11). Set these axes?
+        </div>
+        <menu class="dialog-actions">
+          <button type="submit" value="no">No</button>
+          <button type="submit" value="yes" autofocus>Yes</button>
         </menu>
       </form>
     </dialog>

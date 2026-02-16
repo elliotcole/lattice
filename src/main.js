@@ -20352,70 +20352,6 @@ let presetUpdateTimer = null;
 let fileShareTimer = null;
 let ratioWheelHoverIndex = null;
 let ratioWheelHoverNodeId = null;
-const uriDebugEnabled = true;
-let uriDebugHud = null;
-let uriDebugSeq = 0;
-
-function simpleHashString(value) {
-  const text = String(value || "");
-  let hash = 2166136261;
-  for (let i = 0; i < text.length; i += 1) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
-function ensureUriDebugHud() {
-  if (!uriDebugEnabled || uriDebugHud) {
-    return;
-  }
-  uriDebugHud = document.createElement("div");
-  uriDebugHud.id = "uri-debug-hud";
-  Object.assign(uriDebugHud.style, {
-    position: "fixed",
-    right: "12px",
-    bottom: "12px",
-    zIndex: "999999",
-    maxWidth: "420px",
-    font: "12px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-    color: "#f0f6ff",
-    background: "rgba(6, 12, 22, 0.92)",
-    border: "1px solid rgba(140, 180, 255, 0.35)",
-    borderRadius: "8px",
-    padding: "8px 10px",
-    whiteSpace: "pre-wrap",
-    pointerEvents: "none",
-    boxShadow: "0 10px 24px rgba(0,0,0,0.35)",
-  });
-  document.body.appendChild(uriDebugHud);
-}
-
-function updateUriDebugHud(details) {
-  if (!uriDebugEnabled) {
-    return;
-  }
-  ensureUriDebugHud();
-  if (!uriDebugHud) {
-    return;
-  }
-  uriDebugSeq += 1;
-  const lines = [
-    `URI debug #${uriDebugSeq}`,
-    `trigger=${details.trigger || "unknown"} enabled=${String(details.enabled)}`,
-    `result=${details.result || "n/a"} reason=${details.reason || "-"}`,
-    `hashLen=${details.hashLength ?? "-"} encodedLen=${details.encodedLength ?? "-"}`,
-    `sameAsCurrent=${details.sameAsCurrent === true ? "yes" : "no"}`,
-    `customPosSig=${details.customPosSig || "-"}`,
-    `layoutCustomPosSig=${details.layoutCustomPosSig || "-"}`,
-    `layoutCustomPosCount=${details.layoutCustomPosCount ?? 0}`,
-    `layoutNodePosSig=${details.layoutNodePosSig || "-"}`,
-    `layoutNodePosCount=${details.layoutNodePosCount ?? 0}`,
-    `linePosSig=${details.linePosSig || "-"}`,
-    `linePosCount=${details.linePosCount ?? 0}`,
-  ];
-  uriDebugHud.textContent = lines.join("\n");
-}
 
 function lzCompressToEncodedURIComponent(input) {
   if (input == null) {
@@ -21317,90 +21253,19 @@ function applyPresetCustomNodes(entries) {
 
 function updatePresetUrl(trigger = "direct") {
   if (!presetSyncEnabled) {
-    updateUriDebugHud({
-      trigger,
-      enabled: false,
-      result: "skipped",
-      reason: "preset-sync-disabled",
-    });
     return;
   }
   const presetState = getPresetState();
   const encoded = encodePresetState(presetState);
   const nextHash = `${PRESET_PARAM}=${encoded}`;
-  const customPosSig = simpleHashString(
-    JSON.stringify(
-      Array.isArray(presetState.customNodes)
-        ? presetState.customNodes.map((node) => [
-            node?.sourceExponents || null,
-            node?.customSlot ?? null,
-            Number(node?.position?.x) || 0,
-            Number(node?.position?.y) || 0,
-          ])
-        : []
-    )
-  );
-  const layoutCustomPos = Array.isArray(presetState?.layout?.customNodePositions)
-    ? presetState.layout.customNodePositions
-    : [];
-  const layoutCustomPosSig = simpleHashString(JSON.stringify(layoutCustomPos));
-  const layoutNodePosOffsets = Array.isArray(presetState?.layout?.positionOffsets)
-    ? presetState.layout.positionOffsets
-    : [];
-  const layoutNodePosSig = simpleHashString(JSON.stringify(layoutNodePosOffsets));
-  const linePosSig = simpleHashString(
-    JSON.stringify(Array.isArray(presetState.lineLabelPositions) ? presetState.lineLabelPositions : [])
-  );
   if (location.hash === `#${nextHash}`) {
-    updateUriDebugHud({
-      trigger,
-      enabled: true,
-      result: "skipped",
-      reason: "hash-unchanged",
-      sameAsCurrent: true,
-      hashLength: nextHash.length,
-      encodedLength: encoded.length,
-      customPosSig,
-      layoutCustomPosSig,
-      layoutCustomPosCount: layoutCustomPos.length,
-      layoutNodePosSig,
-      layoutNodePosCount: layoutNodePosOffsets.length,
-      linePosSig,
-      linePosCount: Array.isArray(presetState.lineLabelPositions)
-        ? presetState.lineLabelPositions.length
-        : 0,
-    });
     return;
   }
   history.replaceState(null, "", `${location.pathname}${location.search}#${nextHash}`);
-  updateUriDebugHud({
-    trigger,
-    enabled: true,
-    result: "updated",
-    reason: "hash-replaced",
-    sameAsCurrent: false,
-    hashLength: nextHash.length,
-    encodedLength: encoded.length,
-    customPosSig,
-    layoutCustomPosSig,
-    layoutCustomPosCount: layoutCustomPos.length,
-    layoutNodePosSig,
-    layoutNodePosCount: layoutNodePosOffsets.length,
-    linePosSig,
-    linePosCount: Array.isArray(presetState.lineLabelPositions)
-      ? presetState.lineLabelPositions.length
-      : 0,
-  });
 }
 
 function schedulePresetUrlUpdate(trigger = "scheduled") {
   if (!presetSyncEnabled) {
-    updateUriDebugHud({
-      trigger,
-      enabled: false,
-      result: "skipped",
-      reason: "preset-sync-disabled",
-    });
     return;
   }
   if (presetUpdateTimer) {

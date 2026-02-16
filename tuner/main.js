@@ -87,6 +87,7 @@ const fundamentalOctaveUp = document.getElementById("fundamental-octave-up");
 const a4Input = document.getElementById("a4");
 const ratiosInput = document.getElementById("ratios-input");
 const showNoteNamesToggle = document.getElementById("show-note-names");
+const showSargamToggle = document.getElementById("show-sargam");
 const decayModeToggle = document.getElementById("decay-mode");
 const colorFamiliesToggle = document.getElementById("color-families");
 const showCentsDeviationToggle = document.getElementById("show-cents-deviation");
@@ -332,6 +333,7 @@ function collectCurrentSettings() {
     rangeOffset: Number(rangeOffsetSemitones) || 0,
     show12Et: Boolean(show12EtToggle ? show12EtToggle.checked : true),
     showNoteNames: Boolean(showNoteNamesToggle ? showNoteNamesToggle.checked : true),
+    showSargam: Boolean(showSargamToggle ? showSargamToggle.checked : false),
     showCentsDeviation: Boolean(showCentsDeviationToggle ? showCentsDeviationToggle.checked : true),
     decayMode: Boolean(decayModeToggle ? decayModeToggle.checked : false),
     colorFamilies: Boolean(colorFamiliesToggle ? colorFamiliesToggle.checked : false),
@@ -957,11 +959,142 @@ function getRatioNoteLabelInfo(ratio) {
   const suffixText = (heji.suffixParts || [])
     .map((part) => `${part.text}${part.expLabel || ""}`)
     .join("");
+  const intervalInfo = getIntervalQualityInfo(
+    getFundamentalPitchClassForSpelling(),
+    spelling.pitchClass
+  );
   return {
     pitchClass: spelling.pitchClass,
     baseText: heji.baseText || spelling.pitchClass,
     suffixText,
+    sargamText: getSargamLabel(intervalInfo, ratio),
+    intervalText: intervalInfo ? intervalInfo.shortLabel : "",
   };
+}
+
+const INTERVAL_BASE_SEMITONES = {
+  1: 0,
+  2: 2,
+  3: 4,
+  4: 5,
+  5: 7,
+  6: 9,
+  7: 11,
+};
+
+function getPitchClassSemitoneValue(pitchClass) {
+  const parsed = parsePitchClass(pitchClass);
+  const letterIndex = Number.isFinite(parsed.letterIndex) ? mod(parsed.letterIndex, 7) : 0;
+  const accidental = Number.isFinite(parsed.accidental) ? parsed.accidental : 0;
+  const natural = LETTER_TO_SEMITONE[LETTERS[letterIndex]];
+  return natural + accidental;
+}
+
+function getIntervalQualityInfo(sourcePitchClass, targetPitchClass) {
+  const source = parsePitchClass(sourcePitchClass);
+  const target = parsePitchClass(targetPitchClass);
+  const sourceLetter = Number.isFinite(source.letterIndex) ? mod(source.letterIndex, 7) : 0;
+  const targetLetter = Number.isFinite(target.letterIndex) ? mod(target.letterIndex, 7) : 0;
+  const degree = mod(targetLetter - sourceLetter, 7) + 1;
+  const sourceSemitone = getPitchClassSemitoneValue(sourcePitchClass);
+  const targetSemitone = getPitchClassSemitoneValue(targetPitchClass);
+  const semitoneDiff = mod(targetSemitone - sourceSemitone, 12);
+  const expected = INTERVAL_BASE_SEMITONES[degree];
+  if (!Number.isFinite(expected)) {
+    return null;
+  }
+  let delta = semitoneDiff - expected;
+  while (delta > 6) delta -= 12;
+  while (delta < -6) delta += 12;
+  const perfectFamily = degree === 1 || degree === 4 || degree === 5;
+  let quality = "";
+  if (perfectFamily) {
+    if (delta === 0) {
+      quality = "P";
+    } else if (delta > 0) {
+      quality = "A".repeat(delta);
+    } else {
+      quality = "d".repeat(-delta);
+    }
+  } else if (delta === 0) {
+    quality = "M";
+  } else if (delta === -1) {
+    quality = "m";
+  } else if (delta > 0) {
+    quality = "A".repeat(delta);
+  } else {
+    quality = "d".repeat(Math.max(1, -delta - 1));
+  }
+  return {
+    degree,
+    semitoneDiff,
+    delta,
+    quality,
+    shortLabel: `${quality}${degree}`,
+  };
+}
+
+function getSargamLabel(intervalInfo, ratio) {
+  if (!intervalInfo) {
+    return "";
+  }
+  const numerator = Number(ratio && ratio.numerator);
+  const denominator = Number(ratio && ratio.denominator);
+  const hasFiniteRatio = Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0;
+  const reduced = hasFiniteRatio ? reduceFraction(numerator, denominator) : null;
+  const ratioValue = reduced ? reduced.numerator / reduced.denominator : null;
+  if (intervalInfo.degree === 1) {
+    if (reduced && (reduced.numerator === reduced.denominator || reduced.numerator === reduced.denominator * 2)) {
+      return "Sa";
+    }
+    if (Number.isFinite(ratioValue)) {
+      return ratioValue > 1 ? "re" : "Ni";
+    }
+    return "Sa";
+  }
+  if (intervalInfo.shortLabel === "P5") {
+    if (reduced) {
+      if (reduced.numerator === 3 && reduced.denominator === 2) {
+        return "Pa";
+      }
+      if (Number.isFinite(ratioValue)) {
+        if (ratioValue < 1.5) {
+          return "Ma";
+        }
+        if (ratioValue > 1.5) {
+          return "dha";
+        }
+      }
+    }
+    return "Pa";
+  }
+  const key = intervalInfo.shortLabel;
+  switch (key) {
+    case "P1":
+      return "Sa";
+    case "m2":
+      return "re";
+    case "M2":
+      return "Re";
+    case "m3":
+      return "ga";
+    case "M3":
+      return "Ga";
+    case "P4":
+      return "Ma";
+    case "A4":
+      return "Ma^";
+    case "m6":
+      return "dha";
+    case "M6":
+      return "Dha";
+    case "m7":
+      return "ni";
+    case "M7":
+      return "Ni";
+    default:
+      return key;
+  }
 }
 
 function getOctaveReducedDisplayRatioLabel(ratio) {
@@ -1206,6 +1339,9 @@ function applyStoredSettings(
   }
   if (showNoteNamesToggle && typeof settings.showNoteNames === "boolean") {
     showNoteNamesToggle.checked = settings.showNoteNames;
+  }
+  if (showSargamToggle && typeof settings.showSargam === "boolean") {
+    showSargamToggle.checked = settings.showSargam;
   }
   if (showCentsDeviationToggle && typeof settings.showCentsDeviation === "boolean") {
     showCentsDeviationToggle.checked = settings.showCentsDeviation;
@@ -1611,7 +1747,6 @@ function drawViz() {
   const gridRightX = Math.min(width - 6, lineX + 248);
   const etLabelX = gridRightX;
   const etLineEndX = etLabelX - 52;
-  const octaveGuideLeftX = Math.max(18, lineX - Math.max(24, etLineEndX - lineX));
   const padTop = 30;
   const padBottom = 30;
   const innerHeight = Math.max(40, height - padTop - padBottom);
@@ -1675,19 +1810,6 @@ function drawViz() {
     }
   }
 
-  for (let semi = Math.ceil(minSemi); semi <= Math.floor(maxSemi); semi += 1) {
-    if (semi % 12 !== 0) {
-      continue;
-    }
-    const y = yForSemitone(semi);
-    ctx.strokeStyle = grid;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(lineX, y);
-    ctx.lineTo(octaveGuideLeftX, y);
-    ctx.stroke();
-  }
-
   ctx.strokeStyle = lineColor;
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -1709,20 +1831,28 @@ function drawViz() {
   }
 
   function getRatioMarkerTextParts(marker) {
+    const useSargam = Boolean(showSargamToggle && showSargamToggle.checked);
     const parts = [
       { text: marker.ratioLabel || marker.label, font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif` },
     ];
     if (showNoteNames && marker.noteLabelInfo) {
       parts.push({ text: " \u00b7 ", font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif` });
-      parts.push({
-        text: marker.noteLabelInfo.baseText || marker.noteLabelInfo.pitchClass || "",
-        font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif`,
-      });
-      if (marker.noteLabelInfo.suffixText) {
+      if (useSargam) {
         parts.push({
-          text: marker.noteLabelInfo.suffixText,
-          font: `${ratioLabelFontSize}px 'HEJI2Text', 'IBM Plex Sans', sans-serif`,
+          text: marker.noteLabelInfo.sargamText || marker.noteLabelInfo.baseText || marker.noteLabelInfo.pitchClass || "",
+          font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif`,
         });
+      } else {
+        parts.push({
+          text: marker.noteLabelInfo.baseText || marker.noteLabelInfo.pitchClass || "",
+          font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif`,
+        });
+        if (marker.noteLabelInfo.suffixText) {
+          parts.push({
+            text: marker.noteLabelInfo.suffixText,
+            font: `${ratioLabelFontSize}px 'HEJI2Text', 'IBM Plex Sans', sans-serif`,
+          });
+        }
       }
     }
     return parts;
@@ -1808,29 +1938,55 @@ function drawViz() {
     return { side: primarySide, lane: fallbackLane, anchorX: fallbackAnchorX, rect: fallbackRect };
   }
 
+  function findPlacementForSideOnly(y, totalWidth, side = "right") {
+    const maxLaneSearch = 120;
+    for (let laneIndex = 0; laneIndex <= maxLaneSearch; laneIndex += 1) {
+      const offset = Math.max(18, ratioLabelFontSize * 1.25) + laneIndex * laneStep;
+      const anchorX = side === "right" ? lineX + offset : lineX - offset;
+      const rect = getLabelRect(side, anchorX, y, totalWidth);
+      const collision = labelRects.some((existing) =>
+        rectsOverlap(rect, existing, collisionProximityX, collisionProximityY)
+      );
+      if (!collision && isRectVisible(rect)) {
+        return { side, lane: laneIndex, anchorX, rect };
+      }
+    }
+    const fallbackLane = maxLaneSearch + 1;
+    const fallbackOffset = Math.max(18, ratioLabelFontSize * 1.25) + fallbackLane * laneStep;
+    const fallbackAnchorX = side === "right" ? lineX + fallbackOffset : lineX - fallbackOffset;
+    const fallbackRect = getLabelRect(side, fallbackAnchorX, y, totalWidth);
+    return { side, lane: fallbackLane, anchorX: fallbackAnchorX, rect: fallbackRect };
+  }
+
   for (let index = 0; index < ratioMarkers.length; index += 1) {
     const marker = ratioMarkers[index];
     const markerAlpha = 1;
     const markerColor = markerColorFor(marker);
     const y = yForSemitone(marker.semitone);
+    const isOctaveMarker = Math.abs(marker.semitone - Math.round(marker.semitone / 12) * 12) <= 0.02;
     const parts = getRatioMarkerTextParts(marker);
     const totalWidth = getPartsTotalWidth(parts);
     const baselineOffset = Math.max(18, ratioLabelFontSize * 1.25);
-    const baselineAnchorX = lineX - baselineOffset;
-    const baselineRect = getLabelRect("left", baselineAnchorX, y, totalWidth);
+    const baselineSide = isOctaveMarker ? "right" : "left";
+    const baselineAnchorX = baselineSide === "right" ? lineX + baselineOffset : lineX - baselineOffset;
+    const baselineRect = getLabelRect(baselineSide, baselineAnchorX, y, totalWidth);
     const baselineCollision =
       !isRectVisible(baselineRect) ||
       labelRects.some((existing) =>
         rectsOverlap(baselineRect, existing, collisionProximityX, collisionProximityY)
       );
 
-    let side = "left";
+    let side = baselineSide;
     let anchorX = baselineAnchorX;
     let labelRect = baselineRect;
     if (baselineCollision) {
-      alternateOnOverlap = !alternateOnOverlap;
-      const primarySide = alternateOnOverlap ? "right" : "left";
-      const placement = findPlacementForMarker(y, totalWidth, primarySide);
+      const placement = isOctaveMarker
+        ? findPlacementForSideOnly(y, totalWidth, "right")
+        : (() => {
+            alternateOnOverlap = !alternateOnOverlap;
+            const primarySide = alternateOnOverlap ? "right" : "left";
+            return findPlacementForMarker(y, totalWidth, primarySide);
+          })();
       side = placement.side;
       anchorX = placement.anchorX;
       labelRect = placement.rect;
@@ -3655,6 +3811,12 @@ show12EtToggle.addEventListener("change", () => {
 });
 if (showNoteNamesToggle) {
   showNoteNamesToggle.addEventListener("change", () => {
+    drawViz();
+    persistSettings();
+  });
+}
+if (showSargamToggle) {
+  showSargamToggle.addEventListener("change", () => {
     drawViz();
     persistSettings();
   });

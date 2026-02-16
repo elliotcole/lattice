@@ -294,6 +294,54 @@ input[type="range"] {
   white-space: nowrap;
 }
 
+.radio-pill-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel), transparent 20%);
+}
+
+.radio-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.radio-pill input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.radio-pill span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--muted-ink);
+  border: 1px solid transparent;
+  user-select: none;
+  cursor: pointer;
+}
+
+.radio-pill input:checked + span {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--panel-solid), transparent 8%);
+  border-color: var(--border);
+}
+
+.radio-pill input:focus-visible + span {
+  outline: 2px solid color-mix(in srgb, var(--accent), white 35%);
+  outline-offset: 1px;
+}
+
 .range-line {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

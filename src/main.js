@@ -106,6 +106,7 @@ const layoutKeyMappingFontSelect = document.getElementById("layout-key-mapping-f
 const layoutKeyMappingWeightSelect = document.getElementById("layout-key-mapping-weight");
 const layoutCustomFontGroup = document.getElementById("layout-custom-font-group");
 const layoutUnifySizeToggle = document.getElementById("layout-unify-size");
+const layoutPerspectiveTextSizeToggle = document.getElementById("layout-perspective-text-size");
 const layoutLineLabelsToggle = document.getElementById("layout-line-labels-toggle");
 const layoutResetButton = document.getElementById("layout-reset");
 const layoutFreezeFlattenToggle = document.getElementById("layout-freeze-flatten");
@@ -238,6 +239,9 @@ const distanceLabelInput = document.getElementById("distance-label-input");
 const findRatioDialog = document.getElementById("find-ratio-dialog");
 const findRatioForm = document.getElementById("find-ratio-form");
 const findRatioInput = document.getElementById("find-ratio-input");
+const findRatioAxisRecommendation = document.getElementById("find-ratio-axis-recommendation");
+const findRatioAxisDialog = document.getElementById("find-ratio-axis-dialog");
+const findRatioAxisMessage = document.getElementById("find-ratio-axis-message");
 const buildIntervalsDialog = document.getElementById("build-intervals-dialog");
 const buildIntervalsForm = document.getElementById("build-intervals-form");
 const buildIntervalsInput = document.getElementById("build-intervals-input");
@@ -354,6 +358,7 @@ const GUIDE_DEPTH_DENOM_MAX = 3.2;
 const distanceEdges = [];
 const distanceEdgeOverrides = new Map();
 let distanceLabelDrag = null;
+let lineLabelDrag = null;
 let distanceSelectDrag = null;
 let distanceCurveDrag = null;
 let pendingDistanceLabelClickTimer = null;
@@ -679,14 +684,13 @@ function serializeLayoutKeyMappingOffsets() {
 }
 
 function serializeLayoutPositionOffsets() {
-  const epsilon = 1e-3;
-  const roundOffset = (value) => Math.round(value * 100) / 100;
+  const epsilon = 1e-9;
   return Array.from(layoutPositionOffsets.entries())
     .map(([key, offset]) => {
       const [expX, expY, expZ] = key.split(",").map(Number);
-      const offsetX = roundOffset(Number(offset.x) || 0);
-      const offsetY = roundOffset(Number(offset.y) || 0);
-      const offsetZ = roundOffset(Number(offset.z) || 0);
+      const offsetX = Number(offset.x) || 0;
+      const offsetY = Number(offset.y) || 0;
+      const offsetZ = Number(offset.z) || 0;
       const hasOffset =
         Math.abs(offsetX) > epsilon ||
         Math.abs(offsetY) > epsilon ||
@@ -746,7 +750,7 @@ function applyLayoutCustomNodePositions(entries) {
     const x = Number(entry.x);
     const y = Number(entry.y);
     const z = Number.isFinite(entry.z) ? Number(entry.z) : 0;
-    if (!Number.isFinite(sourceNodeId) || !Number.isFinite(customSlot)) {
+    if (!Number.isFinite(customSlot)) {
       return;
     }
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
@@ -1290,6 +1294,7 @@ let nodes = [];
 let nodeById = new Map();
 let edges = [];
 let lineLabelOverrides = new Map();
+let lineLabelPositionOverrides = new Map();
 let voices = [];
 let pitchInstances = [];
 let nextVoiceId = 1;
@@ -1563,6 +1568,7 @@ let layoutTitleMargin = 32;
 let layoutTitlePosition = null;
 let layoutCreatorPosition = null;
 let layoutUnifyNodeSize = true;
+let layoutPerspectiveTextSize = false;
 let layoutFreezeFlatten = false;
 let layoutPageSize = "letter";
 let layoutOrientation = "landscape";
@@ -1684,6 +1690,7 @@ const LAYOUT_DEFAULTS = {
   titleMargin: 32,
   keyMappingsMode: "hide",
   unifyNodeSize: true,
+  perspectiveTextSize: false,
   freezeFlatten: false,
   pageSize: "letter",
   orientation: "landscape",
@@ -6354,6 +6361,25 @@ function getLayoutNodeRadius(pos) {
   return layoutNodeSize * getLayoutNodeScreenScale(pos);
 }
 
+function syncLayoutPerspectiveTextToggleState() {
+  if (layoutUnifyNodeSize) {
+    layoutPerspectiveTextSize = false;
+  }
+  if (layoutPerspectiveTextSizeToggle) {
+    layoutPerspectiveTextSizeToggle.checked = layoutPerspectiveTextSize;
+    layoutPerspectiveTextSizeToggle.disabled = layoutUnifyNodeSize;
+  }
+}
+
+function getLayoutInnerTextScale(radius) {
+  if (!layoutMode || !layoutPerspectiveTextSize) {
+    return 1;
+  }
+  const baseRadius = Math.max(1, Number(layoutNodeSize) || 1);
+  const ratio = radius / baseRadius;
+  return Math.min(1.8, Math.max(0.65, ratio));
+}
+
 function worldToCamera(point, disableScale = false) {
   const safePoint = {
     x: Number.isFinite(point.x) ? point.x : 0,
@@ -6917,27 +6943,42 @@ function shiftExponentMap(map, deltaX, deltaY, deltaZ) {
 }
 
 function shiftLineLabelOverrides(deltaX, deltaY, deltaZ) {
-  if (!lineLabelOverrides.size) {
+  if (!lineLabelOverrides.size && !lineLabelPositionOverrides.size) {
     return;
   }
-  const next = new Map();
-  lineLabelOverrides.forEach((value, key) => {
+  const remapKey = (key) => {
     if (typeof key !== "string") {
-      return;
+      return null;
     }
     const [aKey, bKey] = key.split("|");
     if (!aKey || !bKey) {
-      return;
+      return null;
     }
     const nextA = shiftExponentKey(aKey, deltaX, deltaY, deltaZ);
     const nextB = shiftExponentKey(bKey, deltaX, deltaY, deltaZ);
     if (!nextA || !nextB) {
+      return null;
+    }
+    return nextA < nextB ? `${nextA}|${nextB}` : `${nextB}|${nextA}`;
+  };
+  const nextVisibility = new Map();
+  lineLabelOverrides.forEach((value, key) => {
+    const nextKey = remapKey(key);
+    if (!nextKey) {
       return;
     }
-    const nextKey = nextA < nextB ? `${nextA}|${nextB}` : `${nextB}|${nextA}`;
-    next.set(nextKey, value);
+    nextVisibility.set(nextKey, value);
   });
-  lineLabelOverrides = next;
+  const nextPositions = new Map();
+  lineLabelPositionOverrides.forEach((value, key) => {
+    const nextKey = remapKey(key);
+    if (!nextKey || !Number.isFinite(value)) {
+      return;
+    }
+    nextPositions.set(nextKey, value);
+  });
+  lineLabelOverrides = nextVisibility;
+  lineLabelPositionOverrides = nextPositions;
 }
 
 function applyNodeOctaveOffsets() {
@@ -8621,6 +8662,18 @@ function distanceToSegment(point, a, b) {
   return Math.hypot(point.x - projX, point.y - projY);
 }
 
+function getSegmentClosestT(point, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (!lenSq) {
+    return 0.5;
+  }
+  let t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return t;
+}
+
 function getTriangleDiagonalHit(screenPoint, entry, gridMap, disableScale) {
   const { a, b, c, d } = getTriangleCellNodes(entry, gridMap);
   let best = null;
@@ -9150,6 +9203,7 @@ function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
     const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
     const labelText = getEdgeLabelText(a, b);
     const label = shouldShowEdgeLabel(a, b) ? labelText : null;
+    const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
     drawCanvasEdgeSegment({
       start,
       end,
@@ -9640,6 +9694,24 @@ function getLineLabelOverride(a, b) {
     return null;
   }
   return lineLabelOverrides.has(key) ? lineLabelOverrides.get(key) : null;
+}
+
+function getLineLabelPositionOverride(a, b) {
+  const key = getEdgeKey(a, b);
+  if (!key) {
+    return null;
+  }
+  const value = lineLabelPositionOverrides.get(key);
+  return Number.isFinite(value) ? value : null;
+}
+
+function setLineLabelPositionOverride(a, b, t) {
+  const key = getEdgeKey(a, b);
+  if (!key) {
+    return;
+  }
+  const clamped = Math.max(0, Math.min(1, Number(t) || 0.5));
+  lineLabelPositionOverrides.set(key, clamped);
 }
 
 function shouldShowEdgeLabel(a, b) {
@@ -10139,6 +10211,7 @@ function draw3DEdges(nodePosMap, axisEntry = null) {
       labelFont,
       labelWeight,
       labelSize,
+      labelT,
       alpha: edgeAlpha,
     });
   });
@@ -11061,6 +11134,7 @@ function drawCustomConnections(nodePosMap) {
       axisActive && !isEdgeOnAxisEntry(source, node, axisEntry) ? AXIS_DIM_FACTOR : 1;
     const labelText = getCustomConnectionLabelText(node);
     const label = shouldShowEdgeLabel(source, node) ? labelText : null;
+    const labelT = getLineLabelPositionOverride(source, node) ?? 0.5;
     drawCanvasEdgeSegment({
       start,
       end,
@@ -11071,6 +11145,7 @@ function drawCustomConnections(nodePosMap) {
       labelFont,
       labelWeight,
       labelSize,
+      labelT,
       alpha: connectionAlpha,
     });
   });
@@ -11393,6 +11468,7 @@ function draw() {
       const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
       const labelText = getEdgeLabelText(a, b);
       const label = shouldShowEdgeLabel(a, b) ? labelText : null;
+      const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
       drawCanvasEdgeSegment({
         start,
         end,
@@ -11403,6 +11479,7 @@ function draw() {
         labelFont,
         labelWeight,
         labelSize,
+        labelT,
       });
     });
   }
@@ -11650,7 +11727,8 @@ function draw() {
 
     ctx.globalAlpha = 1;
     ctx.fillStyle = textColorPrimary;
-    const baseLabelSize = layoutMode ? layoutRatioTextSize : 21;
+    const innerTextScale = layoutMode ? getLayoutInnerTextScale(radius) : 1;
+    const baseLabelSize = layoutMode ? layoutRatioTextSize * innerTextScale : 21;
     const labelSize = node.isCustom ? baseLabelSize * 0.85 : baseLabelSize;
     const labelFont = layoutMode ? layoutRatioFont : "Noto Serif";
     const labelWeight = layoutMode ? layoutRatioFontWeight : 400;
@@ -13163,6 +13241,14 @@ function onPointerDown(event) {
         draw();
         return;
       }
+      const edgeLabelHit = hitTestEdgeLabel(screenPoint);
+      if (edgeLabelHit && edgeLabelHit.key) {
+        pushLayoutUndoState();
+        lineLabelPositionOverrides.delete(edgeLabelHit.key);
+        schedulePresetUrlUpdate();
+        draw();
+        return;
+      }
       if (hit) {
         pushLayoutUndoState();
         layoutPositions.delete(hit.id);
@@ -13287,6 +13373,25 @@ function onPointerDown(event) {
         lockAxis: null,
         lockOriginX: event.offsetX,
         lockOriginY: event.offsetY,
+      };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+    const edgeLabelHit = hitTestEdgeLabel(screenPoint);
+    if (
+      edgeLabelHit &&
+      edgeLabelHit.a &&
+      edgeLabelHit.b &&
+      edgeLabelHit.key &&
+      shouldShowEdgeLabel(edgeLabelHit.a, edgeLabelHit.b)
+    ) {
+      pushLayoutUndoState();
+      lineLabelDrag = {
+        key: edgeLabelHit.key,
+        a: edgeLabelHit.a,
+        b: edgeLabelHit.b,
+        lineStart: edgeLabelHit.lineStart,
+        lineEnd: edgeLabelHit.lineEnd,
       };
       canvas.setPointerCapture(event.pointerId);
       return;
@@ -13530,6 +13635,17 @@ function onPointerMove(event) {
     scheduleDraw();
     return;
   }
+  if (lineLabelDrag) {
+    const t = getSegmentClosestT(
+      { x: event.offsetX, y: event.offsetY },
+      lineLabelDrag.lineStart,
+      lineLabelDrag.lineEnd
+    );
+    setLineLabelPositionOverride(lineLabelDrag.a, lineLabelDrag.b, t);
+    scheduleDraw();
+    updatePresetUrl("line-label-drag-move");
+    return;
+  }
   if (distanceCurveDrag) {
     const { key, startControlOffset, startPoint, defaultControl } = distanceCurveDrag;
     const controlOffset = {
@@ -13559,8 +13675,10 @@ function onPointerMove(event) {
       node.coordinate.y =
         customNodeDrag.startCoordinate.y + (worldPoint.y - customNodeDrag.startWorld.y);
       node.coordinate.z = 0;
+      layoutPositions.set(node.id, { ...node.coordinate });
     }
     scheduleDraw();
+    updatePresetUrl();
     return;
   }
   if (layoutMode && layoutAxisEditDrag) {
@@ -13571,6 +13689,7 @@ function onPointerMove(event) {
         event.offsetX - info.center.x
       );
       scheduleDraw();
+      schedulePresetUrlUpdate();
     }
     return;
   }
@@ -13591,6 +13710,7 @@ function onPointerMove(event) {
     }
     layoutTitlePosition = nextPos;
     scheduleDraw();
+    schedulePresetUrlUpdate();
     return;
   }
   if (layoutMode && layoutCreatorDrag) {
@@ -13610,6 +13730,7 @@ function onPointerMove(event) {
     }
     layoutCreatorPosition = nextPos;
     scheduleDraw();
+    schedulePresetUrlUpdate();
     return;
   }
   if (layoutMode && layoutCustomLabelDrag) {
@@ -13632,6 +13753,7 @@ function onPointerMove(event) {
       entry.position = nextPos;
     }
     scheduleDraw();
+    schedulePresetUrlUpdate();
     return;
   }
   if (layoutMode && layoutAxisDrag) {
@@ -13661,6 +13783,7 @@ function onPointerMove(event) {
     }
     layoutAxisOffsets[layoutAxisDrag.axis] = nextOffset;
     scheduleDraw();
+    schedulePresetUrlUpdate();
     return;
   }
   if (layoutMode && layoutKeyMappingDrag) {
@@ -13686,6 +13809,7 @@ function onPointerMove(event) {
         y: (labelY - pos.y) / (view.zoom * scale),
       });
       scheduleDraw();
+      schedulePresetUrlUpdate();
     }
     return;
   }
@@ -13712,6 +13836,7 @@ function onPointerMove(event) {
         y: (labelY - pos.y) / (view.zoom * scale),
       });
       scheduleDraw();
+      schedulePresetUrlUpdate();
     }
     return;
   }
@@ -13777,6 +13902,7 @@ function onPointerMove(event) {
         }
       }
       scheduleDraw();
+      updatePresetUrl(`layout-node-drag-move:${node.isCustom ? "custom" : "base"}:${node.id}`);
     }
     return;
   }
@@ -13862,7 +13988,7 @@ function onPointerUp(event) {
     const { moved } = customNodeDrag;
     customNodeDrag = null;
     if (moved) {
-      schedulePresetUrlUpdate();
+      updatePresetUrl("custom-node-drag-end");
       return;
     }
   }
@@ -13902,7 +14028,13 @@ function onPointerUp(event) {
     return;
   }
   if (layoutDrag) {
+    const dragNode = nodeById.get(layoutDrag.nodeId);
     layoutDrag = null;
+    updatePresetUrl(
+      `layout-node-drag-end:${dragNode && dragNode.isCustom ? "custom" : "base"}:${
+        dragNode ? dragNode.id : "na"
+      }`
+    );
     return;
   }
   if (distanceLabelDrag) {
@@ -13918,6 +14050,11 @@ function onPointerUp(event) {
   }
   if (distanceCurveDrag) {
     distanceCurveDrag = null;
+    return;
+  }
+  if (lineLabelDrag) {
+    lineLabelDrag = null;
+    updatePresetUrl("line-label-drag-end");
     return;
   }
   if (layoutMode) {
@@ -14335,6 +14472,7 @@ function onPointerLeave() {
   layoutCreatorDrag = null;
   layoutCustomLabelDrag = null;
   distanceLabelDrag = null;
+  lineLabelDrag = null;
   distanceCurveDrag = null;
   triangleHover = null;
   view.rotating = false;
@@ -14695,7 +14833,13 @@ function hitTestEdgeLabel(screenPoint) {
     }
     const distance = distanceToSegment(screenPoint, lineStart, lineEnd);
     if (distance <= hitThreshold && distance < bestDistance) {
-      best = { a, b };
+      best = {
+        a,
+        b,
+        key: getEdgeKey(a, b),
+        lineStart,
+        lineEnd,
+      };
       bestDistance = distance;
     }
   });
@@ -14745,7 +14889,13 @@ function hitTestEdgeLabel(screenPoint) {
       }
       const distance = distanceToSegment(screenPoint, lineStart, lineEnd);
       if (distance <= hitThreshold && distance < bestDistance) {
-        best = { a, b };
+        best = {
+          a,
+          b,
+          key: getEdgeKey(a, b),
+          lineStart,
+          lineEnd,
+        };
         bestDistance = distance;
       }
     });
@@ -14802,7 +14952,13 @@ function hitTestEdgeLabel(screenPoint) {
       }
       const distance = distanceToSegment(screenPoint, lineStart, lineEnd);
       if (distance <= hitThreshold && distance < bestDistance) {
-        best = { a: source, b: node };
+        best = {
+          a: source,
+          b: node,
+          key: getEdgeKey(source, node),
+          lineStart,
+          lineEnd,
+        };
         bestDistance = distance;
       }
     });
@@ -16123,6 +16279,24 @@ function findOrCreateRatiosFromInput(value) {
     alert("Please enter one or more ratios.");
     return;
   }
+  const axisPrimes = getAxisPrimeValues();
+  let requiresDepth = false;
+  lines.forEach((line) => {
+    const parsed = parseRatioInput(line);
+    if (!parsed) {
+      return;
+    }
+    const target = normalizeRatio(parsed.numerator, parsed.denominator);
+    const factors = factorizeRatio(target.numerator, target.denominator);
+    const desiredZ = axisPrimes.z ? factors.get(axisPrimes.z) || 0 : 0;
+    if (desiredZ !== 0) {
+      requiresDepth = true;
+    }
+  });
+  const startedInPure2D = !is3DMode && !isFlattened2D;
+  if (requiresDepth && startedInPure2D) {
+    set3DMode(true);
+  }
   let handled = 0;
   lines.forEach((line) => {
     const parsed = parseRatioInput(line);
@@ -16136,6 +16310,10 @@ function findOrCreateRatiosFromInput(value) {
   if (!handled) {
     alert("Please enter ratios like 1485:1024 or 1485/1024.");
   }
+  if (requiresDepth && startedInPure2D) {
+    applyBestView({ cycle: true });
+    set3DMode(false, { preserveDepth: true });
+  }
 }
 
 function parseRatioInputWithDivider(value) {
@@ -16148,6 +16326,225 @@ function parseRatioInputWithDivider(value) {
     return null;
   }
   return parseRatioInput(cleaned);
+}
+
+function parseRatioListInput(value) {
+  return String(value || "")
+    .split(/[\s,;]+/g)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => parseRatioInput(entry))
+    .filter(Boolean);
+}
+
+function getDefaultAxisPrimeRecommendation() {
+  const axisPrimes = getAxisPrimeValues();
+  const defaults = [];
+  [axisPrimes.x, axisPrimes.y, axisPrimes.z].forEach((prime) => {
+    if (Number.isFinite(prime) && prime > 1 && !defaults.includes(prime)) {
+      defaults.push(prime);
+    }
+  });
+  [3, 5, 7, 11, 13, 17].forEach((prime) => {
+    if (defaults.length < 3 && !defaults.includes(prime)) {
+      defaults.push(prime);
+    }
+  });
+  while (defaults.length < 3) {
+    defaults.push(3);
+  }
+  return defaults.slice(0, 3);
+}
+
+function getBestAxisPrimesForRatios(ratios) {
+  const normalizedFactors = [];
+  const usageByPrime = new Map();
+  ratios.forEach((ratio) => {
+    if (!ratio) {
+      return;
+    }
+    const normalized = normalizeRatio(ratio.numerator, ratio.denominator);
+    if (!normalized) {
+      return;
+    }
+    const factors = factorizeRatio(normalized.numerator, normalized.denominator);
+    const filtered = new Map();
+    factors.forEach((exp, prime) => {
+      const numericPrime = Number(prime);
+      if (!Number.isFinite(numericPrime) || numericPrime <= 1 || numericPrime === 2) {
+        return;
+      }
+      if (!exp) {
+        return;
+      }
+      filtered.set(numericPrime, exp);
+      usageByPrime.set(
+        numericPrime,
+        (usageByPrime.get(numericPrime) || 0) + Math.abs(exp)
+      );
+    });
+    normalizedFactors.push(filtered);
+  });
+
+  const fallback = getDefaultAxisPrimeRecommendation();
+  const candidatePrimes = Array.from(usageByPrime.entries())
+    .sort((a, b) => {
+      if (b[1] !== a[1]) {
+        return b[1] - a[1];
+      }
+      return a[0] - b[0];
+    })
+    .map(([prime]) => prime);
+
+  if (!candidatePrimes.length) {
+    return fallback;
+  }
+
+  const pool = candidatePrimes.slice(0, 15);
+  const poolWithFallback = [...pool];
+  fallback.forEach((prime) => {
+    if (!poolWithFallback.includes(prime)) {
+      poolWithFallback.push(prime);
+    }
+  });
+  const search = poolWithFallback.slice(0, 18);
+
+  let best = null;
+  for (let i = 0; i < search.length; i += 1) {
+    for (let j = i + 1; j < search.length; j += 1) {
+      for (let k = j + 1; k < search.length; k += 1) {
+        const choice = [search[i], search[j], search[k]];
+        const choiceSet = new Set(choice);
+        let coveredCount = 0;
+        let uncoveredPenalty = 0;
+        let coveredWeight = 0;
+        let capturedWeight = 0;
+        normalizedFactors.forEach((map) => {
+          let uncoveredInRatio = 0;
+          let weightInRatio = 0;
+          map.forEach((exp, prime) => {
+            const absExp = Math.abs(exp);
+            weightInRatio += absExp;
+            if (choiceSet.has(prime)) {
+              capturedWeight += absExp;
+            } else {
+              uncoveredInRatio += absExp;
+            }
+          });
+          if (uncoveredInRatio === 0) {
+            coveredCount += 1;
+            coveredWeight += weightInRatio;
+          } else {
+            uncoveredPenalty += uncoveredInRatio;
+          }
+        });
+
+        const score = {
+          choice,
+          coveredCount,
+          uncoveredPenalty,
+          coveredWeight,
+          capturedWeight,
+        };
+        const better =
+          !best ||
+          score.coveredCount > best.coveredCount ||
+          (score.coveredCount === best.coveredCount &&
+            score.uncoveredPenalty < best.uncoveredPenalty) ||
+          (score.coveredCount === best.coveredCount &&
+            score.uncoveredPenalty === best.uncoveredPenalty &&
+            score.coveredWeight > best.coveredWeight) ||
+          (score.coveredCount === best.coveredCount &&
+            score.uncoveredPenalty === best.uncoveredPenalty &&
+            score.coveredWeight === best.coveredWeight &&
+            score.capturedWeight > best.capturedWeight) ||
+          (score.coveredCount === best.coveredCount &&
+            score.uncoveredPenalty === best.uncoveredPenalty &&
+            score.coveredWeight === best.coveredWeight &&
+            score.capturedWeight === best.capturedWeight &&
+            score.choice.join(",") < best.choice.join(","));
+        if (better) {
+          best = score;
+        }
+      }
+    }
+  }
+
+  if (!best) {
+    return candidatePrimes.slice(0, 3).concat(fallback).filter((value, index, arr) => arr.indexOf(value) === index).slice(0, 3);
+  }
+  return best.choice.slice().sort((a, b) => a - b);
+}
+
+function updateFindRatioAxisRecommendation(value) {
+  if (!findRatioAxisRecommendation) {
+    return;
+  }
+  const ratios = parseRatioListInput(value);
+  const best = getBestAxisPrimesForRatios(ratios);
+  findRatioAxisRecommendation.textContent = `Best primes for axes: ${best.join(", ")}`;
+}
+
+function getCurrentAxisPrimes() {
+  return [
+    Number(ratioXSelect && ratioXSelect.value) || 3,
+    Number(ratioYSelect && ratioYSelect.value) || 5,
+    Number(ratioZSelect && ratioZSelect.value) || 7,
+  ];
+}
+
+function setAxisPrimes(primesToSet) {
+  const [x, y, z] = primesToSet;
+  if (ratioXSelect && Number.isFinite(x)) {
+    ratioXSelect.value = String(x);
+  }
+  if (ratioYSelect && Number.isFinite(y)) {
+    ratioYSelect.value = String(y);
+  }
+  if (ratioZSelect && Number.isFinite(z)) {
+    ratioZSelect.value = String(z);
+  }
+  updateNodeRatios();
+}
+
+function maybeConfirmFindRatioAxes(value) {
+  const ratios = parseRatioListInput(value);
+  if (!ratios.length) {
+    return Promise.resolve(false);
+  }
+  const recommended = getBestAxisPrimesForRatios(ratios).slice().sort((a, b) => a - b);
+  const current = getCurrentAxisPrimes();
+  const currentSet = new Set(current);
+  const hasAllRecommended = recommended.every((prime) => currentSet.has(prime));
+  if (hasAllRecommended) {
+    return Promise.resolve(false);
+  }
+  const currentText = current.join(" ");
+  const recommendedText = recommended.join(" ");
+  if (findRatioAxisMessage) {
+    findRatioAxisMessage.textContent = `Your three axes are (${currentText}). These ratios would be diagrammed best if they were (${recommendedText}). Set these axes?`;
+  }
+  if (!findRatioAxisDialog || typeof findRatioAxisDialog.showModal !== "function") {
+    const confirmed = window.confirm(
+      `Your three axes are (${currentText}). These ratios would be diagrammed best if they were (${recommendedText}). Set these axes?`
+    );
+    if (confirmed) {
+      setAxisPrimes(recommended);
+    }
+    return Promise.resolve(confirmed);
+  }
+  return new Promise((resolve) => {
+    const handleClose = () => {
+      findRatioAxisDialog.removeEventListener("close", handleClose);
+      const confirmed = findRatioAxisDialog.returnValue === "yes";
+      if (confirmed) {
+        setAxisPrimes(recommended);
+      }
+      resolve(confirmed);
+    };
+    findRatioAxisDialog.addEventListener("close", handleClose);
+    findRatioAxisDialog.showModal();
+  });
 }
 
 function buildFromIntervalsInput(value) {
@@ -17413,6 +17810,7 @@ function captureLayoutUndoState() {
     layoutAxisLegendFontWeight,
     layoutLineLabelFontWeight,
     layoutUnifyNodeSize,
+    layoutPerspectiveTextSize,
     layoutPageSize,
     layoutOrientation,
     layoutLockPosition,
@@ -17537,6 +17935,7 @@ function applyLayoutUndoState(state) {
       }
     : { ...layoutSpacing };
   layoutUnifyNodeSize = state.layoutUnifyNodeSize;
+  layoutPerspectiveTextSize = state.layoutPerspectiveTextSize ?? layoutPerspectiveTextSize;
   layoutPageSize = state.layoutPageSize;
   layoutOrientation = state.layoutOrientation;
   layoutLockPosition = state.layoutLockPosition;
@@ -17667,6 +18066,7 @@ function applyLayoutUndoState(state) {
   if (layoutUnifySizeToggle) {
     layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
   }
+  syncLayoutPerspectiveTextToggleState();
   syncLayoutKeyMappingControls();
   updateLayoutCustomLabelControls();
   syncLayoutFontVars();
@@ -17756,6 +18156,7 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     layoutTitleMargin = LAYOUT_DEFAULTS.titleMargin;
     layoutKeyMappingMode = LAYOUT_DEFAULTS.keyMappingsMode;
     layoutUnifyNodeSize = LAYOUT_DEFAULTS.unifyNodeSize;
+    layoutPerspectiveTextSize = LAYOUT_DEFAULTS.perspectiveTextSize;
     layoutFreezeFlatten = LAYOUT_DEFAULTS.freezeFlatten;
     layoutPageSize = LAYOUT_DEFAULTS.pageSize;
     layoutOrientation = LAYOUT_DEFAULTS.orientation;
@@ -17897,6 +18298,7 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     if (layoutUnifySizeToggle) {
       layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
     }
+    syncLayoutPerspectiveTextToggleState();
     if (layoutFreezeFlattenToggle) {
       layoutFreezeFlattenToggle.checked = layoutFreezeFlatten;
     }
@@ -18693,6 +19095,7 @@ function openFindRatioDialog() {
   if (!findRatioDialog || !findRatioInput) {
     return;
   }
+  updateFindRatioAxisRecommendation(findRatioInput.value);
   if (typeof findRatioDialog.showModal === "function") {
     findRatioDialog.showModal();
   }
@@ -18949,6 +19352,7 @@ function setDistanceSelectMode(enabled) {
   if (!distanceSelectMode) {
     distanceSelectDrag = null;
     distanceLabelDrag = null;
+    lineLabelDrag = null;
     distanceCurveDrag = null;
   }
   updateUiHint();
@@ -19000,6 +19404,7 @@ function setLayoutAlignMode(mode, { silent = false } = {}) {
       distanceSelectMode = false;
       distanceSelectDrag = null;
       distanceLabelDrag = null;
+      lineLabelDrag = null;
       distanceCurveDrag = null;
     }
     if (analysisLayers.microtonal) {
@@ -19947,6 +20352,70 @@ let presetUpdateTimer = null;
 let fileShareTimer = null;
 let ratioWheelHoverIndex = null;
 let ratioWheelHoverNodeId = null;
+const uriDebugEnabled = true;
+let uriDebugHud = null;
+let uriDebugSeq = 0;
+
+function simpleHashString(value) {
+  const text = String(value || "");
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function ensureUriDebugHud() {
+  if (!uriDebugEnabled || uriDebugHud) {
+    return;
+  }
+  uriDebugHud = document.createElement("div");
+  uriDebugHud.id = "uri-debug-hud";
+  Object.assign(uriDebugHud.style, {
+    position: "fixed",
+    right: "12px",
+    bottom: "12px",
+    zIndex: "999999",
+    maxWidth: "420px",
+    font: "12px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    color: "#f0f6ff",
+    background: "rgba(6, 12, 22, 0.92)",
+    border: "1px solid rgba(140, 180, 255, 0.35)",
+    borderRadius: "8px",
+    padding: "8px 10px",
+    whiteSpace: "pre-wrap",
+    pointerEvents: "none",
+    boxShadow: "0 10px 24px rgba(0,0,0,0.35)",
+  });
+  document.body.appendChild(uriDebugHud);
+}
+
+function updateUriDebugHud(details) {
+  if (!uriDebugEnabled) {
+    return;
+  }
+  ensureUriDebugHud();
+  if (!uriDebugHud) {
+    return;
+  }
+  uriDebugSeq += 1;
+  const lines = [
+    `URI debug #${uriDebugSeq}`,
+    `trigger=${details.trigger || "unknown"} enabled=${String(details.enabled)}`,
+    `result=${details.result || "n/a"} reason=${details.reason || "-"}`,
+    `hashLen=${details.hashLength ?? "-"} encodedLen=${details.encodedLength ?? "-"}`,
+    `sameAsCurrent=${details.sameAsCurrent === true ? "yes" : "no"}`,
+    `customPosSig=${details.customPosSig || "-"}`,
+    `layoutCustomPosSig=${details.layoutCustomPosSig || "-"}`,
+    `layoutCustomPosCount=${details.layoutCustomPosCount ?? 0}`,
+    `layoutNodePosSig=${details.layoutNodePosSig || "-"}`,
+    `layoutNodePosCount=${details.layoutNodePosCount ?? 0}`,
+    `linePosSig=${details.linePosSig || "-"}`,
+    `linePosCount=${details.linePosCount ?? 0}`,
+  ];
+  uriDebugHud.textContent = lines.join("\n");
+}
 
 function lzCompressToEncodedURIComponent(input) {
   if (input == null) {
@@ -20377,6 +20846,9 @@ function getPresetState() {
   const lineLabelOverridesState = Array.from(lineLabelOverrides.entries()).map(
     ([key, value]) => [key, Boolean(value)]
   );
+  const lineLabelPositionsState = Array.from(lineLabelPositionOverrides.entries())
+    .filter(([, value]) => Number.isFinite(value))
+    .map(([key, value]) => [key, Number(value)]);
   const distanceEdgesState = Array.from(distanceSelectedEdges.values());
   const distanceOverridesState = Array.from(distanceEdgeOverrides.entries()).map(
     ([key, value]) => {
@@ -20459,6 +20931,7 @@ function getPresetState() {
     spacing: { ...layoutSpacing },
     nodeShape: layoutNodeShape,
     unifyNodeSize: layoutUnifyNodeSize,
+    perspectiveTextSize: layoutPerspectiveTextSize,
     keyMappingsMode: layoutKeyMappingMode,
     pageSize: layoutPageSize,
     orientation: layoutOrientation,
@@ -20587,6 +21060,9 @@ function getPresetState() {
   if (layoutState.unifyNodeSize === LAYOUT_DEFAULTS.unifyNodeSize) {
     delete layoutState.unifyNodeSize;
   }
+  if (layoutState.perspectiveTextSize === LAYOUT_DEFAULTS.perspectiveTextSize) {
+    delete layoutState.perspectiveTextSize;
+  }
   if (layoutState.keyMappingsMode === LAYOUT_DEFAULTS.keyMappingsMode) {
     delete layoutState.keyMappingsMode;
   }
@@ -20652,6 +21128,7 @@ function getPresetState() {
     grid: showGrid,
     lineLabels: showLineLabels,
     lineLabelOverrides: lineLabelOverridesState,
+    lineLabelPositions: lineLabelPositionsState,
     distanceEdges: distanceEdgesState,
     distanceEdgeOverrides: distanceOverridesState,
     circles: showCircles,
@@ -20726,6 +21203,9 @@ function getPresetState() {
   }
   if (isEmptyArray(state.lineLabelOverrides)) {
     delete state.lineLabelOverrides;
+  }
+  if (isEmptyArray(state.lineLabelPositions)) {
+    delete state.lineLabelPositions;
   }
   if (isEmptyArray(state.distanceEdges)) {
     delete state.distanceEdges;
@@ -20835,26 +21315,98 @@ function applyPresetCustomNodes(entries) {
   refreshCustomNodes();
 }
 
-function updatePresetUrl() {
+function updatePresetUrl(trigger = "direct") {
   if (!presetSyncEnabled) {
+    updateUriDebugHud({
+      trigger,
+      enabled: false,
+      result: "skipped",
+      reason: "preset-sync-disabled",
+    });
     return;
   }
-  const encoded = encodePresetState(getPresetState());
+  const presetState = getPresetState();
+  const encoded = encodePresetState(presetState);
   const nextHash = `${PRESET_PARAM}=${encoded}`;
+  const customPosSig = simpleHashString(
+    JSON.stringify(
+      Array.isArray(presetState.customNodes)
+        ? presetState.customNodes.map((node) => [
+            node?.sourceExponents || null,
+            node?.customSlot ?? null,
+            Number(node?.position?.x) || 0,
+            Number(node?.position?.y) || 0,
+          ])
+        : []
+    )
+  );
+  const layoutCustomPos = Array.isArray(presetState?.layout?.customNodePositions)
+    ? presetState.layout.customNodePositions
+    : [];
+  const layoutCustomPosSig = simpleHashString(JSON.stringify(layoutCustomPos));
+  const layoutNodePosOffsets = Array.isArray(presetState?.layout?.positionOffsets)
+    ? presetState.layout.positionOffsets
+    : [];
+  const layoutNodePosSig = simpleHashString(JSON.stringify(layoutNodePosOffsets));
+  const linePosSig = simpleHashString(
+    JSON.stringify(Array.isArray(presetState.lineLabelPositions) ? presetState.lineLabelPositions : [])
+  );
   if (location.hash === `#${nextHash}`) {
+    updateUriDebugHud({
+      trigger,
+      enabled: true,
+      result: "skipped",
+      reason: "hash-unchanged",
+      sameAsCurrent: true,
+      hashLength: nextHash.length,
+      encodedLength: encoded.length,
+      customPosSig,
+      layoutCustomPosSig,
+      layoutCustomPosCount: layoutCustomPos.length,
+      layoutNodePosSig,
+      layoutNodePosCount: layoutNodePosOffsets.length,
+      linePosSig,
+      linePosCount: Array.isArray(presetState.lineLabelPositions)
+        ? presetState.lineLabelPositions.length
+        : 0,
+    });
     return;
   }
   history.replaceState(null, "", `${location.pathname}${location.search}#${nextHash}`);
+  updateUriDebugHud({
+    trigger,
+    enabled: true,
+    result: "updated",
+    reason: "hash-replaced",
+    sameAsCurrent: false,
+    hashLength: nextHash.length,
+    encodedLength: encoded.length,
+    customPosSig,
+    layoutCustomPosSig,
+    layoutCustomPosCount: layoutCustomPos.length,
+    layoutNodePosSig,
+    layoutNodePosCount: layoutNodePosOffsets.length,
+    linePosSig,
+    linePosCount: Array.isArray(presetState.lineLabelPositions)
+      ? presetState.lineLabelPositions.length
+      : 0,
+  });
 }
 
-function schedulePresetUrlUpdate() {
+function schedulePresetUrlUpdate(trigger = "scheduled") {
   if (!presetSyncEnabled) {
+    updateUriDebugHud({
+      trigger,
+      enabled: false,
+      result: "skipped",
+      reason: "preset-sync-disabled",
+    });
     return;
   }
   if (presetUpdateTimer) {
     clearTimeout(presetUpdateTimer);
   }
-  presetUpdateTimer = setTimeout(updatePresetUrl, 250);
+  presetUpdateTimer = setTimeout(() => updatePresetUrl(trigger), 250);
 }
 
 function getPresetShareUrl() {
@@ -21023,7 +21575,14 @@ function applyPresetState(state, options = {}) {
   pendingLayoutSpacing = null;
   pendingLayoutCustomPositions = null;
   pendingCustomPianoMap = null;
+  const pendingLineLabelOverridesState = Array.isArray(state.lineLabelOverrides)
+    ? state.lineLabelOverrides
+    : null;
+  const pendingLineLabelPositionsState = Array.isArray(state.lineLabelPositions)
+    ? state.lineLabelPositions
+    : null;
   lineLabelOverrides.clear();
+  lineLabelPositionOverrides.clear();
   if (typeof state.axes === "boolean") {
     showAxes = state.axes;
     if (navAxesToggle) {
@@ -21052,18 +21611,6 @@ function applyPresetState(state, options = {}) {
     if (layoutLineLabelsToggle) {
       layoutLineLabelsToggle.checked = showLineLabels;
     }
-  }
-  if (Array.isArray(state.lineLabelOverrides)) {
-    state.lineLabelOverrides.forEach((entry) => {
-      if (!Array.isArray(entry) || entry.length < 2) {
-        return;
-      }
-      const key = String(entry[0] || "");
-      if (!key) {
-        return;
-      }
-      lineLabelOverrides.set(key, Boolean(entry[1]));
-    });
   }
   if (Array.isArray(state.distanceEdges)) {
     state.distanceEdges.forEach((edgeKey) => {
@@ -21699,6 +22246,10 @@ function applyPresetState(state, options = {}) {
         layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
       }
     }
+    if (typeof layoutState.perspectiveTextSize === "boolean") {
+      layoutPerspectiveTextSize = layoutState.perspectiveTextSize;
+    }
+    syncLayoutPerspectiveTextToggleState();
     if (typeof layoutState.pageSize === "string") {
       layoutPageSize = layoutState.pageSize;
       if (layoutPageSizeSelect) {
@@ -21914,6 +22465,33 @@ function applyPresetState(state, options = {}) {
   triangleDiagonals.clear();
   triangleLabels.clear();
   lineLabelOverrides.clear();
+  lineLabelPositionOverrides.clear();
+  if (pendingLineLabelOverridesState) {
+    pendingLineLabelOverridesState.forEach((entry) => {
+      if (!Array.isArray(entry) || entry.length < 2) {
+        return;
+      }
+      const key = String(entry[0] || "");
+      if (!key) {
+        return;
+      }
+      lineLabelOverrides.set(key, Boolean(entry[1]));
+    });
+  }
+  if (pendingLineLabelPositionsState) {
+    pendingLineLabelPositionsState.forEach((entry) => {
+      if (!Array.isArray(entry) || entry.length < 2) {
+        return;
+      }
+      const key = String(entry[0] || "");
+      const value = Number(entry[1]);
+      if (!key || !Number.isFinite(value)) {
+        return;
+      }
+      const clamped = Math.max(0, Math.min(1, value));
+      lineLabelPositionOverrides.set(key, clamped);
+    });
+  }
   if (presetTriangles) {
     presetTriangles.forEach((entry) => {
       if (!entry || typeof entry !== "object") {
@@ -23142,10 +23720,11 @@ async function buildLayoutSvgString(
       });
       const size = layout.size;
       const gap = layout.gap;
+      const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
       if (gap > 0) {
         const gapHalf = gap / 2;
-        const midX = (edgeStart.x + edgeEnd.x) / 2;
-        const midY = (edgeStart.y + edgeEnd.y) / 2;
+        const midX = edgeStart.x + (edgeEnd.x - edgeStart.x) * labelT;
+        const midY = edgeStart.y + (edgeEnd.y - edgeStart.y) * labelT;
         const gapStart = {
           x: midX - ux * gapHalf,
           y: midY - uy * gapHalf,
@@ -23422,10 +24001,11 @@ async function buildLayoutSvgString(
       });
       const size = layout.size;
       const gap = layout.gap;
+      const labelT = getLineLabelPositionOverride(source, customNode) ?? 0.5;
       if (gap > 0) {
         const gapHalf = gap / 2;
-        const midX = (edgeStart.x + edgeEnd.x) / 2;
-        const midY = (edgeStart.y + edgeEnd.y) / 2;
+        const midX = edgeStart.x + (edgeEnd.x - edgeStart.x) * labelT;
+        const midY = edgeStart.y + (edgeEnd.y - edgeStart.y) * labelT;
         const gapStart = {
           x: midX - ux * gapHalf,
           y: midY - uy * gapHalf,
@@ -23624,6 +24204,11 @@ async function buildLayoutSvgString(
     const x = pos.x - left;
     const y = pos.y - top;
     const radius = entry.radius;
+    const innerTextScale =
+      layoutPerspectiveTextSize && layoutMode
+        ? Math.min(1.8, Math.max(0.65, radius / Math.max(1, Number(layoutNodeSize) || 1)))
+        : 1;
+    const nodeLabelSize = labelSize * innerTextScale;
     const shape = getLayoutNodeShape(node);
     const fill = "none";
     const stroke = isOrphanGuide && !node.active && !node.isCenter && !node.isCustom
@@ -23699,7 +24284,7 @@ async function buildLayoutSvgString(
             restText: "",
             font: layoutRatioFont,
             fontWeight: layoutRatioFontWeight,
-            size: labelSize,
+            size: nodeLabelSize,
             align: "center",
             baseline: "middle",
             hejiYOffset: svgLabelHejiYOffset,
@@ -23717,7 +24302,7 @@ async function buildLayoutSvgString(
             restText: "",
             font: layoutRatioFont,
             fontWeight: layoutRatioFontWeight,
-            size: labelSize,
+            size: nodeLabelSize,
             align: "center",
             baseline: "middle",
             hejiYOffset: svgLabelHejiYOffset,
@@ -23821,7 +24406,7 @@ async function buildLayoutSvgString(
         node.numerator,
         node.denominator,
         layoutRatioFont,
-        labelSize,
+        nodeLabelSize,
         maxWidth,
         layoutRatioFontWeight,
         maxHeight
@@ -24483,6 +25068,7 @@ if (layoutKeyMappingWeightSelect) {
 if (layoutUnifySizeToggle) {
   layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
 }
+syncLayoutPerspectiveTextToggleState();
 syncLayoutAlignButtons();
 if (layoutModeToggle) {
   layoutModeToggle.checked = layoutMode;
@@ -24605,9 +25191,9 @@ window.addEventListener("hashchange", () => {
   }
 });
 window.addEventListener("beforeunload", () => {
-  if (presetSyncEnabled) {
-    updatePresetUrl();
-  }
+  // Do not rewrite the URL hash during unload/refresh.
+  // The latest interactive updates already sync the hash, and mutating
+  // location during unload can overwrite a good URL with stale state.
 });
 if (mode3dCheckbox && !viewModeInputs.length && !viewModeButtons.length) {
   mode3dCheckbox.addEventListener("change", () => {
@@ -26313,7 +26899,21 @@ if (layoutUnifySizeToggle) {
   layoutUnifySizeToggle.addEventListener("change", () => {
     pushLayoutUndoState();
     layoutUnifyNodeSize = layoutUnifySizeToggle.checked;
+    syncLayoutPerspectiveTextToggleState();
     layoutAxisAngles = { x: null, y: null, z: null };
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+if (layoutPerspectiveTextSizeToggle) {
+  layoutPerspectiveTextSizeToggle.addEventListener("change", () => {
+    if (layoutUnifyNodeSize) {
+      syncLayoutPerspectiveTextToggleState();
+      return;
+    }
+    pushLayoutUndoState();
+    layoutPerspectiveTextSize = layoutPerspectiveTextSizeToggle.checked;
+    syncLayoutPerspectiveTextToggleState();
     draw();
     schedulePresetUrlUpdate();
   });
@@ -26426,14 +27026,21 @@ if (findRatioDialog) {
       event.preventDefault();
     }
   });
-  findRatioDialog.addEventListener("close", () => {
+  findRatioDialog.addEventListener("close", async () => {
     resetHeldModifiers();
     if (findRatioDialog.returnValue === "find") {
+      await maybeConfirmFindRatioAxes(findRatioInput ? findRatioInput.value : "");
       findOrCreateRatiosFromInput(findRatioInput ? findRatioInput.value : "");
     }
     if (findRatioInput) {
       findRatioInput.value = "";
+      updateFindRatioAxisRecommendation("");
     }
+  });
+}
+if (findRatioInput) {
+  findRatioInput.addEventListener("input", () => {
+    updateFindRatioAxisRecommendation(findRatioInput.value);
   });
 }
 if (buildIntervalsDialog) {

@@ -71,13 +71,22 @@
             <label>Show</label>
             <div class="show-line">
               <label class="checkline compact">
-                <input id="show-note-names" type="checkbox" checked />
-                <span>Note names</span>
+                <span>Labels</span>
               </label>
-              <label class="checkline compact">
-                <input id="show-sargam" type="checkbox" />
-                <span>Sargam</span>
-              </label>
+              <div class="radio-pill-group" role="radiogroup" aria-label="Label mode">
+                <label class="radio-pill">
+                  <input id="show-label-mode-note" name="show-label-mode" type="radio" value="note" checked />
+                  <span>Note Names</span>
+                </label>
+                <label class="radio-pill">
+                  <input id="show-label-mode-sargam" name="show-label-mode" type="radio" value="sargam" />
+                  <span>Sargam</span>
+                </label>
+                <label class="radio-pill">
+                  <input id="show-label-mode-none" name="show-label-mode" type="radio" value="none" />
+                  <span>None</span>
+                </label>
+              </div>
               <label class="checkline compact">
                 <input id="show-12et" type="checkbox" checked />
                 <span>12-ET Labels</span>

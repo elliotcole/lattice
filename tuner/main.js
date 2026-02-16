@@ -60,8 +60,19 @@ const PRIMES_UP_TO_97 = [
   2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83,
   89, 97,
 ];
+const PRIME_FAMILY_COLOR_OVERRIDES = new Map([
+  [3, "#1f3fbf"], // deep blue
+  [5, "#228b22"], // forest green
+  [7, "#7b2cbf"], // purple
+  [11, "#ff8c00"], // orange
+  [13, "#4fc3ff"], // light blue
+]);
 const PRIME_FAMILY_COLORS = new Map(
   PRIMES_UP_TO_97.map((prime, index) => {
+    const override = PRIME_FAMILY_COLOR_OVERRIDES.get(prime);
+    if (override) {
+      return [prime, override];
+    }
     const hue = Math.round((index * 137.508) % 360);
     const saturation = 68;
     const lightness = 58;
@@ -86,8 +97,9 @@ const fundamentalOctaveDown = document.getElementById("fundamental-octave-down")
 const fundamentalOctaveUp = document.getElementById("fundamental-octave-up");
 const a4Input = document.getElementById("a4");
 const ratiosInput = document.getElementById("ratios-input");
-const showNoteNamesToggle = document.getElementById("show-note-names");
-const showSargamToggle = document.getElementById("show-sargam");
+const showLabelModeNote = document.getElementById("show-label-mode-note");
+const showLabelModeSargam = document.getElementById("show-label-mode-sargam");
+const showLabelModeNone = document.getElementById("show-label-mode-none");
 const decayModeToggle = document.getElementById("decay-mode");
 const colorFamiliesToggle = document.getElementById("color-families");
 const showCentsDeviationToggle = document.getElementById("show-cents-deviation");
@@ -324,6 +336,29 @@ function writeStoredSettings(settings) {
   writeCookie(SETTINGS_STORAGE_KEY, serialized);
 }
 
+function getLabelMode() {
+  if (showLabelModeSargam && showLabelModeSargam.checked) {
+    return "sargam";
+  }
+  if (showLabelModeNone && showLabelModeNone.checked) {
+    return "none";
+  }
+  return "note";
+}
+
+function setLabelMode(mode) {
+  const normalized = mode === "sargam" || mode === "none" ? mode : "note";
+  if (showLabelModeNote) {
+    showLabelModeNote.checked = normalized === "note";
+  }
+  if (showLabelModeSargam) {
+    showLabelModeSargam.checked = normalized === "sargam";
+  }
+  if (showLabelModeNone) {
+    showLabelModeNone.checked = normalized === "none";
+  }
+}
+
 function collectCurrentSettings() {
   return {
     fundamental: Number(fundamentalInput ? fundamentalInput.value : 261.63) || 261.63,
@@ -332,8 +367,7 @@ function collectCurrentSettings() {
     range: Number(rangeSizeInput ? rangeSizeInput.value : 12) || 12,
     rangeOffset: Number(rangeOffsetSemitones) || 0,
     show12Et: Boolean(show12EtToggle ? show12EtToggle.checked : true),
-    showNoteNames: Boolean(showNoteNamesToggle ? showNoteNamesToggle.checked : true),
-    showSargam: Boolean(showSargamToggle ? showSargamToggle.checked : false),
+    labelMode: getLabelMode(),
     showCentsDeviation: Boolean(showCentsDeviationToggle ? showCentsDeviationToggle.checked : true),
     decayMode: Boolean(decayModeToggle ? decayModeToggle.checked : false),
     colorFamilies: Boolean(colorFamiliesToggle ? colorFamiliesToggle.checked : false),
@@ -381,6 +415,8 @@ function syncStateToQueryString() {
     const a4 = Number(a4Input ? a4Input.value : NaN);
     const refDb = Number(referenceLevel ? referenceLevel.value : NaN);
     const ratios = normalizeRatiosForQuery(ratiosInput ? ratiosInput.value : "");
+    const range = Number(getRangeSemitoneValue());
+    const rangeOffset = Number(getBottomSemitoneValue());
 
     if (Number.isFinite(fundamental) && fundamental > 0) {
       params.set("fundamental", formatQueryNumber(fundamental));
@@ -397,6 +433,26 @@ function syncStateToQueryString() {
     } else {
       params.delete("ratios");
     }
+    if (Number.isFinite(range)) {
+      params.set("range", formatQueryNumber(range, 3));
+    } else {
+      params.delete("range");
+    }
+    if (Number.isFinite(rangeOffset)) {
+      params.set("rangeOffset", formatQueryNumber(rangeOffset, 3));
+    } else {
+      params.delete("rangeOffset");
+    }
+    params.set("show12Et", show12EtToggle && show12EtToggle.checked ? "1" : "0");
+    params.set("labelMode", getLabelMode());
+    params.delete("showNoteNames");
+    params.delete("showSargam");
+    params.set(
+      "showCentsDeviation",
+      showCentsDeviationToggle && showCentsDeviationToggle.checked ? "1" : "0"
+    );
+    params.set("decayMode", decayModeToggle && decayModeToggle.checked ? "1" : "0");
+    params.set("colorFamilies", colorFamiliesToggle && colorFamiliesToggle.checked ? "1" : "0");
     if (Number.isFinite(refDb)) {
       params.set("referenceLevel", formatQueryNumber(refDb, 2));
     } else {
@@ -753,6 +809,16 @@ function getPitchClassFromRatio(ratio) {
   const freq = fundamental * ratio.ratio;
   const nearest = getNearestEtInfo(freq, a4);
   const nearestPitchClass = noteNames[mod(nearest.midi, 12)];
+  const normalized = normalizeRatioToOctave(ratio.numerator, ratio.denominator);
+  if (normalized) {
+    const reducedNormalized = reduceFraction(normalized.numerator, normalized.denominator);
+    if (reducedNormalized.numerator === reducedNormalized.denominator) {
+      return {
+        pitchClass: getFundamentalPitchClassForSpelling(),
+        axisRatios: [],
+      };
+    }
+  }
   const analysis = analyzeRatioForTrueSpelling(ratio.numerator, ratio.denominator);
   if (!analysis || !analysis.axisRatios.length) {
     return { pitchClass: nearestPitchClass, axisRatios: [] };
@@ -1242,6 +1308,8 @@ function applyFundamentalSpelling(nextSpelling) {
   } else {
     syncFundamentalNoteSelect();
   }
+  refreshMarkers();
+  drawViz();
   hideFundamentalSpellingDialog();
   persistSettings();
   syncStateToQueryString();
@@ -1267,12 +1335,33 @@ function parseIncomingQuery() {
     fundamental: false,
     a4: false,
     ratios: false,
+    range: false,
+    rangeOffset: false,
+    show12Et: false,
+    labelMode: false,
+    showCentsDeviation: false,
+    decayMode: false,
+    colorFamilies: false,
     referenceLevel: false,
     referenceOn: false,
+  };
+  const parseBoolParam = (value) => {
+    if (value === "1" || value === "true") return true;
+    if (value === "0" || value === "false") return false;
+    return null;
   };
   const queryFundamental = Number(params.get("fundamental"));
   const queryA4 = Number(params.get("a4"));
   const queryRatios = params.get("ratios");
+  const queryRange = Number(params.get("range"));
+  const queryRangeOffset = Number(params.get("rangeOffset"));
+  const queryLabelMode = params.get("labelMode");
+  const queryShow12Et = parseBoolParam(params.get("show12Et"));
+  const queryShowNoteNames = parseBoolParam(params.get("showNoteNames"));
+  const queryShowSargam = parseBoolParam(params.get("showSargam"));
+  const queryShowCentsDeviation = parseBoolParam(params.get("showCentsDeviation"));
+  const queryDecayMode = parseBoolParam(params.get("decayMode"));
+  const queryColorFamilies = parseBoolParam(params.get("colorFamilies"));
   const queryReferenceLevel = Number(params.get("referenceLevel"));
   const queryReferenceOn = params.get("referenceOn");
 
@@ -1289,6 +1378,43 @@ function parseIncomingQuery() {
     ratiosInput.value = normalized;
     overrides.ratios = true;
   }
+  if (rangeSizeInput && Number.isFinite(queryRange)) {
+    rangeSizeInput.value = String(clampNumber(queryRange, 12, 36, 12));
+    overrides.range = true;
+  }
+  if (Number.isFinite(queryRangeOffset)) {
+    rangeOffsetSemitones = clampNumber(queryRangeOffset, -12, 24, 0);
+    overrides.rangeOffset = true;
+  }
+  if (queryLabelMode === "note" || queryLabelMode === "sargam" || queryLabelMode === "none") {
+    setLabelMode(queryLabelMode);
+    overrides.labelMode = true;
+  } else if (typeof queryShowNoteNames === "boolean" || typeof queryShowSargam === "boolean") {
+    if (queryShowSargam === true) {
+      setLabelMode("sargam");
+    } else if (queryShowNoteNames === false) {
+      setLabelMode("none");
+    } else {
+      setLabelMode("note");
+    }
+    overrides.labelMode = true;
+  }
+  if (show12EtToggle && typeof queryShow12Et === "boolean") {
+    show12EtToggle.checked = queryShow12Et;
+    overrides.show12Et = true;
+  }
+  if (showCentsDeviationToggle && typeof queryShowCentsDeviation === "boolean") {
+    showCentsDeviationToggle.checked = queryShowCentsDeviation;
+    overrides.showCentsDeviation = true;
+  }
+  if (decayModeToggle && typeof queryDecayMode === "boolean") {
+    decayModeToggle.checked = queryDecayMode;
+    overrides.decayMode = true;
+  }
+  if (colorFamiliesToggle && typeof queryColorFamilies === "boolean") {
+    colorFamiliesToggle.checked = queryColorFamilies;
+    overrides.colorFamilies = true;
+  }
   if (referenceLevel && Number.isFinite(queryReferenceLevel)) {
     referenceLevel.value = String(clampNumber(queryReferenceLevel, -30, 0, -14));
     overrides.referenceLevel = true;
@@ -1300,7 +1426,20 @@ function parseIncomingQuery() {
 }
 
 function applyStoredSettings(
-  queryOverrides = { fundamental: false, a4: false, ratios: false, referenceLevel: false, referenceOn: false }
+  queryOverrides = {
+    fundamental: false,
+    a4: false,
+    ratios: false,
+    range: false,
+    rangeOffset: false,
+    show12Et: false,
+    labelMode: false,
+    showCentsDeviation: false,
+    decayMode: false,
+    colorFamilies: false,
+    referenceLevel: false,
+    referenceOn: false,
+  }
 ) {
   const settings = readStoredSettings();
   if (!settings) {
@@ -1320,36 +1459,51 @@ function applyStoredSettings(
   if (!queryOverrides.ratios && typeof settings.ratios === "string" && settings.ratios.trim()) {
     ratiosInput.value = normalizeRatiosForQuery(settings.ratios);
   }
-  const storedRange = Number(settings.range);
-  if (rangeSizeInput && Number.isFinite(storedRange)) {
-    rangeSizeInput.value = String(clampNumber(storedRange, 12, 36, 12));
-  } else if (rangeSizeInput && Number.isFinite(Number(settings.rangeTop))) {
-    rangeSizeInput.value = String(clampNumber(Number(settings.rangeTop), 12, 36, 12));
+  if (!queryOverrides.range) {
+    const storedRange = Number(settings.range);
+    if (rangeSizeInput && Number.isFinite(storedRange)) {
+      rangeSizeInput.value = String(clampNumber(storedRange, 12, 36, 12));
+    } else if (rangeSizeInput && Number.isFinite(Number(settings.rangeTop))) {
+      rangeSizeInput.value = String(clampNumber(Number(settings.rangeTop), 12, 36, 12));
+    }
   }
-  const storedOffset = Number(settings.rangeOffset);
-  if (Number.isFinite(storedOffset)) {
-    rangeOffsetSemitones = clampNumber(storedOffset, -12, 24, 0);
-  } else if (Number.isFinite(Number(settings.rangeBottom))) {
-    rangeOffsetSemitones = -clampNumber(Number(settings.rangeBottom), 0, 12, 0);
+  if (!queryOverrides.rangeOffset) {
+    const storedOffset = Number(settings.rangeOffset);
+    if (Number.isFinite(storedOffset)) {
+      rangeOffsetSemitones = clampNumber(storedOffset, -12, 24, 0);
+    } else if (Number.isFinite(Number(settings.rangeBottom))) {
+      rangeOffsetSemitones = -clampNumber(Number(settings.rangeBottom), 0, 12, 0);
+    }
   }
   const currentRange = getRangeSemitoneValue();
   rangeOffsetSemitones = clampNumber(rangeOffsetSemitones, -12, 36 - currentRange, 0);
-  if (typeof settings.show12Et === "boolean") {
+  if (!queryOverrides.show12Et && typeof settings.show12Et === "boolean") {
     show12EtToggle.checked = settings.show12Et;
   }
-  if (showNoteNamesToggle && typeof settings.showNoteNames === "boolean") {
-    showNoteNamesToggle.checked = settings.showNoteNames;
+  if (!queryOverrides.labelMode) {
+    if (settings.labelMode === "note" || settings.labelMode === "sargam" || settings.labelMode === "none") {
+      setLabelMode(settings.labelMode);
+    } else if (typeof settings.showSargam === "boolean" || typeof settings.showNoteNames === "boolean") {
+      if (settings.showSargam) {
+        setLabelMode("sargam");
+      } else if (settings.showNoteNames === false) {
+        setLabelMode("none");
+      } else {
+        setLabelMode("note");
+      }
+    }
   }
-  if (showSargamToggle && typeof settings.showSargam === "boolean") {
-    showSargamToggle.checked = settings.showSargam;
-  }
-  if (showCentsDeviationToggle && typeof settings.showCentsDeviation === "boolean") {
+  if (
+    !queryOverrides.showCentsDeviation &&
+    showCentsDeviationToggle &&
+    typeof settings.showCentsDeviation === "boolean"
+  ) {
     showCentsDeviationToggle.checked = settings.showCentsDeviation;
   }
-  if (decayModeToggle && typeof settings.decayMode === "boolean") {
+  if (!queryOverrides.decayMode && decayModeToggle && typeof settings.decayMode === "boolean") {
     decayModeToggle.checked = settings.decayMode;
   }
-  if (colorFamiliesToggle && typeof settings.colorFamilies === "boolean") {
+  if (!queryOverrides.colorFamilies && colorFamiliesToggle && typeof settings.colorFamilies === "boolean") {
     colorFamiliesToggle.checked = settings.colorFamilies;
   }
   if (settings.anomalyCapture && typeof settings.anomalyCapture === "object") {
@@ -1751,7 +1905,8 @@ function drawViz() {
   const padBottom = 30;
   const innerHeight = Math.max(40, height - padTop - padBottom);
   const visibleSpan = Math.max(12, maxSemi - minSemi);
-  const showNoteNames = Boolean(showNoteNamesToggle && showNoteNamesToggle.checked);
+  const labelMode = getLabelMode();
+  const showNoteNames = labelMode !== "none";
   const minSpan = 12;
   const maxSpan = 60;
   const spanMix = Math.min(1, Math.max(0, (visibleSpan - minSpan) / (maxSpan - minSpan)));
@@ -1831,7 +1986,7 @@ function drawViz() {
   }
 
   function getRatioMarkerTextParts(marker) {
-    const useSargam = Boolean(showSargamToggle && showSargamToggle.checked);
+    const useSargam = labelMode === "sargam";
     const parts = [
       { text: marker.ratioLabel || marker.label, font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif` },
     ];
@@ -3802,29 +3957,28 @@ if (rangeSizeInput) {
     const value = clampNumber(Number(rangeSizeInput.value), 12, 36, 12);
     setRangeSemitoneValue(value);
     persistSettings();
+    syncStateToQueryString();
   });
 }
 
 show12EtToggle.addEventListener("change", () => {
   drawViz();
   persistSettings();
+  syncStateToQueryString();
 });
-if (showNoteNamesToggle) {
-  showNoteNamesToggle.addEventListener("change", () => {
+const labelModeRadios = [showLabelModeNote, showLabelModeSargam, showLabelModeNone].filter(Boolean);
+labelModeRadios.forEach((radio) => {
+  radio.addEventListener("change", () => {
     drawViz();
     persistSettings();
+    syncStateToQueryString();
   });
-}
-if (showSargamToggle) {
-  showSargamToggle.addEventListener("change", () => {
-    drawViz();
-    persistSettings();
-  });
-}
+});
 if (showCentsDeviationToggle) {
   showCentsDeviationToggle.addEventListener("change", () => {
     drawViz();
     persistSettings();
+    syncStateToQueryString();
   });
 }
 if (decayModeToggle) {
@@ -3835,12 +3989,14 @@ if (decayModeToggle) {
     }
     drawViz();
     persistSettings();
+    syncStateToQueryString();
   });
 }
 if (colorFamiliesToggle) {
   colorFamiliesToggle.addEventListener("change", () => {
     drawViz();
     persistSettings();
+    syncStateToQueryString();
   });
 }
 
@@ -4073,6 +4229,7 @@ canvas.addEventListener(
     const nextRange = getRangeSemitoneValue() + direction;
     setRangeSemitoneValue(nextRange);
     persistSettings();
+    syncStateToQueryString();
   },
   { passive: false }
 );
@@ -4093,6 +4250,7 @@ canvas.addEventListener("pointermove", (event) => {
   const nextOffset = rangeOffsetStartValue + semitoneOffset;
   setRangeOffsetSemitoneValue(nextOffset);
   persistSettings();
+  syncStateToQueryString();
 });
 
 function stopBottomDrag(event) {

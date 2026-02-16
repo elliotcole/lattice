@@ -242,6 +242,12 @@
             <span>Unify Node Size</span>
           </div>
         </div>
+        <div class="control-group">
+          <div class="control-inline">
+            <input id="layout-perspective-text-size" type="checkbox" />
+            <span>Perspective Text</span>
+          </div>
+        </div>
         <div class="control-group control-group-inline layout-space-group">
           <label id="layout-space-trigger" class="layout-space-trigger" for="layout-scale">Spacing</label>
           <input id="layout-scale" type="range" min="0.5" max="3" step="0.01" value="1" aria-label="Spacing" />
@@ -1363,9 +1369,25 @@
           Enter ratios (1485:1024 or 1485/1024)
           <textarea id="find-ratio-input" rows="6" required></textarea>
         </label>
+        <div id="find-ratio-axis-recommendation" class="dialog-help">
+          Best primes for axes: 3, 5, 7
+        </div>
         <menu class="dialog-actions">
           <button type="submit" value="cancel">Cancel</button>
           <button type="submit" value="find" autofocus>Find</button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="find-ratio-axis-dialog" class="custom-ratio-dialog">
+      <form method="dialog" class="custom-ratio-form" id="find-ratio-axis-form">
+        <div class="dialog-title">Update Axes?</div>
+        <div id="find-ratio-axis-message" class="dialog-help">
+          Your three axes are (3 5 7). These ratios would be diagrammed best if they were
+          (3 7 11). Set these axes?
+        </div>
+        <menu class="dialog-actions">
+          <button type="submit" value="no">No</button>
+          <button type="submit" value="yes" autofocus>Yes</button>
         </menu>
       </form>
     </dialog>

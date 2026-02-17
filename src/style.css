@@ -1510,6 +1510,10 @@ button:active {
   position: relative;
 }
 
+.synth-group:has(#keyboard-map-popover) {
+  position: relative;
+}
+
 .synth-panel .synth-group {
   display: flex;
   gap: 8px;

@@ -360,7 +360,7 @@
     "source": "Gann"
   },
   {
-    "name": "ET half-step approximation",
+    "name": "12-EDO half-step approximation",
     "type": "half-step",
     "numerator": 89,
     "denominator": 84,

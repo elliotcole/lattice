@@ -4504,7 +4504,7 @@ function openCustomRatioDialog(action) {
     customRatioDenominator.value = String(denominator);
   }
   if (customRatioReduceToggle) {
-    customRatioReduceToggle.checked = lastCustomOctaveReduce;
+    setControlChecked(customRatioReduceToggle, lastCustomOctaveReduce);
   }
   if (customRatioDialog && typeof customRatioDialog.showModal === "function") {
     customRatioDialog.showModal();
@@ -6187,12 +6187,12 @@ function syncOneShotForWaveform(type) {
     if (oneShotPrevValue == null) {
       oneShotPrevValue = oneShotCheckbox.checked;
     }
-    oneShotCheckbox.checked = true;
+    setControlChecked(oneShotCheckbox, true);
     oneShotCheckbox.disabled = true;
   } else {
     oneShotCheckbox.disabled = false;
     if (oneShotPrevValue != null) {
-      oneShotCheckbox.checked = oneShotPrevValue;
+      setControlChecked(oneShotCheckbox, oneShotPrevValue);
       oneShotPrevValue = null;
     }
   }
@@ -10816,49 +10816,6 @@ function buildCommaConnections(nodePosMap) {
   if (!commaEntries.length) {
     return;
   }
-  const isDiagonalPair = (a, b) => {
-    const ax = Number(a.exponentX);
-    const ay = Number(a.exponentY);
-    const az = Number(a.exponentZ);
-    const bx = Number(b.exponentX);
-    const by = Number(b.exponentY);
-    const bz = Number(b.exponentZ);
-    if (
-      Number.isFinite(ax) &&
-      Number.isFinite(ay) &&
-      Number.isFinite(az) &&
-      Number.isFinite(bx) &&
-      Number.isFinite(by) &&
-      Number.isFinite(bz)
-    ) {
-      let changed = 0;
-      if (ax !== bx) changed += 1;
-      if (ay !== by) changed += 1;
-      if (az !== bz) changed += 1;
-      return changed >= 2;
-    }
-    const gx = Number(a.gridX);
-    const gy = Number(a.gridY);
-    const gz = Number(a.gridZ);
-    const hx = Number(b.gridX);
-    const hy = Number(b.gridY);
-    const hz = Number(b.gridZ);
-    if (
-      Number.isFinite(gx) &&
-      Number.isFinite(gy) &&
-      Number.isFinite(gz) &&
-      Number.isFinite(hx) &&
-      Number.isFinite(hy) &&
-      Number.isFinite(hz)
-    ) {
-      let changed = 0;
-      if (gx !== hx) changed += 1;
-      if (gy !== hy) changed += 1;
-      if (gz !== hz) changed += 1;
-      return changed >= 2;
-    }
-    return true;
-  };
   const seenConnections = new Set();
   const activeNodes = nodes.filter((node) => node.active);
   for (let i = 0; i < activeNodes.length; i += 1) {
@@ -10870,9 +10827,6 @@ function buildCommaConnections(nodePosMap) {
     }
     for (let j = i + 1; j < activeNodes.length; j += 1) {
       const b = activeNodes[j];
-      if (!isDiagonalPair(a, b)) {
-        continue;
-      }
       const bNum = Number(b.numerator);
       const bDen = Number(b.denominator);
       if (!Number.isFinite(bNum) || !Number.isFinite(bDen) || bDen === 0) {
@@ -11093,7 +11047,8 @@ function drawCustomConnections(nodePosMap) {
       getNodeEdgeRadius(node, ux, uy, endEntry.radius) + edgeOutset - customEdgeInset
     );
     const connectionAlpha =
-      axisActive && !isEdgeOnAxisEntry(source, node, axisEntry) ? AXIS_DIM_FACTOR : 1;
+      (axisActive && !isEdgeOnAxisEntry(source, node, axisEntry) ? AXIS_DIM_FACTOR : 1) *
+      (analysisLayers.microtonal ? 0.18 : 1);
     const labelText = getCustomConnectionLabelText(node);
     const label = shouldShowEdgeLabel(source, node) ? labelText : null;
     const labelT = getLineLabelPositionOverride(source, node) ?? 0.5;
@@ -14008,11 +13963,14 @@ function onPointerUp(event) {
       start ? Math.hypot(event.offsetX - start.x, event.offsetY - start.y) : 0;
     if (movedLabel < 4) {
       queueDistanceLabelSingleClick(dragInfo);
+    } else {
+      schedulePresetUrlUpdate();
     }
     return;
   }
   if (distanceCurveDrag) {
     distanceCurveDrag = null;
+    schedulePresetUrlUpdate();
     return;
   }
   if (lineLabelDrag) {
@@ -19257,6 +19215,7 @@ function addDistanceEdgeBetweenNodes(a, b, options = {}) {
       customText,
     });
   }
+  schedulePresetUrlUpdate();
   return true;
 }
 
@@ -19268,6 +19227,7 @@ function resetDistanceEdges() {
   distanceSelectedEdges.clear();
   distanceSelectedNodeKeys.clear();
   distanceEdgeOverrides.clear();
+  schedulePresetUrlUpdate();
   draw();
 }
 
@@ -19873,7 +19833,10 @@ function openIntervalChart() {
     intervalChartSearchInput.value = intervalChartSearch;
   }
   if (intervalChartSuperparticularToggle) {
-    intervalChartSuperparticularToggle.checked = intervalChartSuperparticularOnly;
+    setControlChecked(
+      intervalChartSuperparticularToggle,
+      intervalChartSuperparticularOnly
+    );
   }
   syncIntervalChartCustomState();
   if (intervalChartDirectionSelect) {
@@ -20758,6 +20721,7 @@ function getPresetState() {
     connectOrphans: connectOrphansEnabled,
     tiltDeg: latticeTiltDeg,
     distances: analysisLayers.distances,
+    microtonal: analysisLayers.microtonal,
     view: {
       zoom: view.zoom,
       offsetX: view.offsetX,
@@ -21178,6 +21142,11 @@ function applyPresetDisplayToggleState(state) {
   );
   if (typeof state.distances === "boolean") {
     analysisLayers.distances = state.distances;
+  }
+  if (typeof state.microtonal === "boolean") {
+    analysisLayers.microtonal = state.microtonal;
+  }
+  if (typeof state.distances === "boolean" || typeof state.microtonal === "boolean") {
     syncAnalysisLayerToggles();
   }
 }
@@ -21968,7 +21937,7 @@ function applyPresetSynthState(synthState) {
     setEnvelopeSliderFromValue(releaseSlider, Number(synthState.release));
   }
   if (oneShotCheckbox && typeof synthState.oneShot === "boolean") {
-    oneShotCheckbox.checked = synthState.oneShot;
+    setControlChecked(oneShotCheckbox, synthState.oneShot);
   }
   if (typeof synthState.envelopeTimeMode === "string") {
     envelopeTimeMode = synthState.envelopeTimeMode === "tempo" ? "tempo" : "absolute";
@@ -24651,60 +24620,29 @@ if (navGridToggle) {
     schedulePresetUrlUpdate();
   });
 }
-if (navCirclesToggle) {
-  navCirclesToggle.addEventListener("change", () => {
-    showCircles = navCirclesToggle.checked;
-    setControlChecked(layoutCirclesToggle, showCircles);
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutCirclesToggle) {
-  layoutCirclesToggle.addEventListener("change", () => {
-    showCircles = layoutCirclesToggle.checked;
-    if (navCirclesToggle) {
-      setControlChecked(navCirclesToggle, showCircles);
-    }
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (lineLabelsToggle) {
-  lineLabelsToggle.addEventListener("change", () => {
-    showLineLabels = lineLabelsToggle.checked;
-    setControlChecked(layoutLineLabelsToggle, showLineLabels);
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutLineLabelsToggle) {
-  layoutLineLabelsToggle.addEventListener("change", () => {
-    showLineLabels = layoutLineLabelsToggle.checked;
-    if (lineLabelsToggle) {
-      setControlChecked(lineLabelsToggle, showLineLabels);
-    }
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (navKeyMappingsToggle) {
-  setControlChecked(navKeyMappingsToggle, showKeyMappings);
-  navKeyMappingsToggle.addEventListener("change", () => {
-    showKeyMappings = navKeyMappingsToggle.checked;
-    setControlChecked(layoutKeyMappingsToggle, showKeyMappings);
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutKeyMappingsToggle) {
-  setControlChecked(layoutKeyMappingsToggle, showKeyMappings);
-  layoutKeyMappingsToggle.addEventListener("change", () => {
-    showKeyMappings = layoutKeyMappingsToggle.checked;
-    setControlChecked(navKeyMappingsToggle, showKeyMappings);
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
+bindMirroredDrawToggles(
+  navCirclesToggle,
+  layoutCirclesToggle,
+  (checked) => {
+    showCircles = checked;
+  }
+);
+bindMirroredDrawToggles(
+  lineLabelsToggle,
+  layoutLineLabelsToggle,
+  (checked) => {
+    showLineLabels = checked;
+  }
+);
+setControlChecked(navKeyMappingsToggle, showKeyMappings);
+setControlChecked(layoutKeyMappingsToggle, showKeyMappings);
+bindMirroredDrawToggles(
+  navKeyMappingsToggle,
+  layoutKeyMappingsToggle,
+  (checked) => {
+    showKeyMappings = checked;
+  }
+);
 if (viewPanelToggle) {
   viewPanelToggle.addEventListener("click", () => {
     const isCollapsed = viewsPanel && viewsPanel.classList.contains("is-collapsed");
@@ -25176,59 +25114,32 @@ if (distanceSelectTriggers.length) {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       if (!analysisLayers.distances) {
-        analysisLayers.distances = true;
-        syncAnalysisLayerToggles();
+        applyDistancesLayerToggle(true);
       }
       setDistanceSelectMode(true);
     });
   });
 }
-if (analysisShowDistancesToggle) {
-  analysisShowDistancesToggle.addEventListener("change", () => {
-    analysisLayers.distances = analysisShowDistancesToggle.checked;
-    if (!analysisLayers.distances) {
-      setDistanceSelectMode(false);
-    }
-    syncAnalysisLayerToggles();
-    updateBannerMessage();
-    draw();
-  });
-}
-if (analysisShowMicrotonalToggle) {
-  analysisShowMicrotonalToggle.addEventListener("change", () => {
-    setMicrotonalIntervalsMode(analysisShowMicrotonalToggle.checked);
-  });
-}
-if (directionalRatioLabelsToggle) {
-  directionalRatioLabelsToggle.addEventListener("change", () => {
-    directionalRatioLabels = directionalRatioLabelsToggle.checked;
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (connectOrphansToggle) {
-  connectOrphansToggle.addEventListener("change", () => {
-    connectOrphansEnabled = connectOrphansToggle.checked;
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutShowDistancesToggle) {
-  layoutShowDistancesToggle.addEventListener("change", () => {
-    analysisLayers.distances = layoutShowDistancesToggle.checked;
-    if (!analysisLayers.distances) {
-      setDistanceSelectMode(false);
-    }
-    syncAnalysisLayerToggles();
-    updateBannerMessage();
-    draw();
-  });
-}
-if (layoutShowMicrotonalToggle) {
-  layoutShowMicrotonalToggle.addEventListener("change", () => {
-    setMicrotonalIntervalsMode(layoutShowMicrotonalToggle.checked);
-  });
-}
+bindAnalysisLayerTogglePair(
+  analysisShowDistancesToggle,
+  layoutShowDistancesToggle,
+  (checked) => applyDistancesLayerToggle(checked)
+);
+bindAnalysisLayerTogglePair(
+  analysisShowMicrotonalToggle,
+  layoutShowMicrotonalToggle,
+  (checked) => setMicrotonalIntervalsMode(checked)
+);
+bindSingleBooleanToggle(directionalRatioLabelsToggle, (checked) => {
+  directionalRatioLabels = checked;
+  draw();
+  schedulePresetUrlUpdate();
+});
+bindSingleBooleanToggle(connectOrphansToggle, (checked) => {
+  connectOrphansEnabled = checked;
+  draw();
+  schedulePresetUrlUpdate();
+});
 if (layoutFreezeButton) {
   layoutFreezeButton.addEventListener("click", () => {
     if (!layoutLockPosition) {
@@ -25274,51 +25185,41 @@ if (layoutModeToggle && !viewModeInputs.length && !viewModeButtons.length) {
     schedulePresetUrlUpdate();
   });
 }
+
+function applyViewModeSelection(nextMode) {
+  if (!nextMode) {
+    return;
+  }
+  uiHintKey = "";
+  uiHintDismissed = false;
+  if (distanceSelectMode) {
+    setDistanceSelectMode(false);
+  }
+  if (nextMode === "layout") {
+    setLayoutMode(true);
+  } else {
+    if (layoutMode) {
+      setLayoutMode(false);
+    }
+    set3DMode(nextMode === "3d");
+  }
+  schedulePresetUrlUpdate();
+}
+
 if (viewModeInputs.length) {
   viewModeInputs.forEach((input) => {
     input.addEventListener("change", () => {
       if (!input.checked) {
         return;
       }
-      const nextMode = input.value;
-      uiHintKey = "";
-      uiHintDismissed = false;
-      if (distanceSelectMode) {
-        setDistanceSelectMode(false);
-      }
-      if (nextMode === "layout") {
-        setLayoutMode(true);
-      } else {
-        if (layoutMode) {
-          setLayoutMode(false);
-        }
-        set3DMode(nextMode === "3d");
-      }
-      schedulePresetUrlUpdate();
+      applyViewModeSelection(input.value);
     });
   });
 }
 if (viewModeButtons.length) {
   viewModeButtons.forEach((button) => {
     button.addEventListener("click", () => {
-      const nextMode = button.dataset.viewMode;
-      if (!nextMode) {
-        return;
-      }
-      uiHintKey = "";
-      uiHintDismissed = false;
-      if (distanceSelectMode) {
-        setDistanceSelectMode(false);
-      }
-      if (nextMode === "layout") {
-        setLayoutMode(true);
-      } else {
-        if (layoutMode) {
-          setLayoutMode(false);
-        }
-        set3DMode(nextMode === "3d");
-      }
-      schedulePresetUrlUpdate();
+      applyViewModeSelection(button.dataset.viewMode);
     });
   });
 }
@@ -25331,9 +25232,7 @@ if (featureModeButtons.length) {
       }
       featureMode = nextMode === "note" ? "note" : "ratio";
       syncFeatureModeControls();
-      invalidateLabelCache();
-      draw();
-      schedulePresetUrlUpdate();
+      applyLabelDisplayToggleChange();
     });
   });
 }
@@ -25348,15 +25247,8 @@ if (spellingModeButtons.length) {
       spellingHintActive = true;
       syncSpellingModeControls();
       updateUiHint();
-      if (spellingMode !== "true") {
-        hideFundamentalSpellingDialog();
-      } else {
-        hideFundamentalSpellingDialog();
-      }
-      refreshCustomNodes();
-      invalidateLabelCache();
-      draw();
-      schedulePresetUrlUpdate();
+      hideFundamentalSpellingDialog();
+      applyLabelDisplayToggleChange({ refreshCustom: true });
     });
   });
 }
@@ -25371,122 +25263,151 @@ function applyFundamentalSpelling(nextSpelling) {
   schedulePresetUrlUpdate();
   hideFundamentalSpellingDialog();
 }
-if (showHzToggle) {
-  showHzToggle.addEventListener("change", () => {
-    showHz = showHzToggle.checked;
-    setControlChecked(layoutShowHzToggle, showHz);
-    invalidateLabelCache();
-    draw();
-    schedulePresetUrlUpdate();
+
+function applyLabelDisplayToggleChange({ refreshCustom = false } = {}) {
+  if (refreshCustom) {
+    refreshCustomNodes();
+  }
+  invalidateLabelCache();
+  draw();
+  schedulePresetUrlUpdate();
+}
+
+function bindMirroredBooleanToggles(primaryToggle, secondaryToggle, applyValue, options = {}) {
+  const { refreshCustom = false } = options;
+  const applyFromChecked = (checked) => {
+    applyValue(Boolean(checked));
+    setControlChecked(primaryToggle, checked);
+    setControlChecked(secondaryToggle, checked);
+    applyLabelDisplayToggleChange({ refreshCustom });
+  };
+  if (primaryToggle) {
+    primaryToggle.addEventListener("change", () => {
+      applyFromChecked(primaryToggle.checked);
+    });
+  }
+  if (secondaryToggle) {
+    secondaryToggle.addEventListener("change", () => {
+      applyFromChecked(secondaryToggle.checked);
+    });
+  }
+}
+
+function applyDistancesLayerToggle(checked) {
+  analysisLayers.distances = Boolean(checked);
+  if (!analysisLayers.distances) {
+    setDistanceSelectMode(false);
+  }
+  syncAnalysisLayerToggles();
+  updateBannerMessage();
+  draw();
+}
+
+function bindAnalysisLayerTogglePair(primaryToggle, secondaryToggle, applyValue) {
+  const applyFromChecked = (checked) => {
+    applyValue(checked);
+  };
+  if (primaryToggle) {
+    primaryToggle.addEventListener("change", () => {
+      applyFromChecked(primaryToggle.checked);
+    });
+  }
+  if (secondaryToggle) {
+    secondaryToggle.addEventListener("change", () => {
+      applyFromChecked(secondaryToggle.checked);
+    });
+  }
+}
+
+function bindSingleBooleanToggle(toggle, applyValue) {
+  if (!toggle) {
+    return;
+  }
+  toggle.addEventListener("change", () => {
+    applyValue(Boolean(toggle.checked));
   });
 }
-if (layoutShowHzToggle) {
-  layoutShowHzToggle.addEventListener("change", () => {
-    showHz = layoutShowHzToggle.checked;
-    setControlChecked(showHzToggle, showHz);
-    invalidateLabelCache();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (showRatioCentsToggle) {
-  showRatioCentsToggle.addEventListener("change", () => {
-    showRatioCents = showRatioCentsToggle.checked;
+
+function applyCentsModeToggle(kind, checked) {
+  if (kind === "ratio") {
+    showRatioCents = Boolean(checked);
     if (showRatioCents) {
       showCentsDeviation = false;
     }
-    enforceCentsDisplayMode();
-    invalidateLabelCache();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutShowRatioCentsToggle) {
-  layoutShowRatioCentsToggle.addEventListener("change", () => {
-    showRatioCents = layoutShowRatioCentsToggle.checked;
-    if (showRatioCents) {
-      showCentsDeviation = false;
-    }
-    enforceCentsDisplayMode();
-    invalidateLabelCache();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (showCentsDeviationToggle) {
-  showCentsDeviationToggle.addEventListener("change", () => {
-    showCentsDeviation = showCentsDeviationToggle.checked;
+  } else {
+    showCentsDeviation = Boolean(checked);
     if (showCentsDeviation) {
       showRatioCents = false;
     }
-    enforceCentsDisplayMode();
-    invalidateLabelCache();
+  }
+  enforceCentsDisplayMode();
+  applyLabelDisplayToggleChange();
+}
+
+function bindCentsModeTogglePair(primaryToggle, secondaryToggle, kind) {
+  if (primaryToggle) {
+    primaryToggle.addEventListener("change", () => {
+      applyCentsModeToggle(kind, primaryToggle.checked);
+    });
+  }
+  if (secondaryToggle) {
+    secondaryToggle.addEventListener("change", () => {
+      applyCentsModeToggle(kind, secondaryToggle.checked);
+    });
+  }
+}
+
+function bindMirroredDrawToggles(primaryToggle, secondaryToggle, applyValue) {
+  const applyFromChecked = (checked) => {
+    applyValue(Boolean(checked));
+    setControlChecked(primaryToggle, checked);
+    setControlChecked(secondaryToggle, checked);
     draw();
     schedulePresetUrlUpdate();
-  });
+  };
+  if (primaryToggle) {
+    primaryToggle.addEventListener("change", () => {
+      applyFromChecked(primaryToggle.checked);
+    });
+  }
+  if (secondaryToggle) {
+    secondaryToggle.addEventListener("change", () => {
+      applyFromChecked(secondaryToggle.checked);
+    });
+  }
 }
-if (layoutShowCentsDeviationToggle) {
-  layoutShowCentsDeviationToggle.addEventListener("change", () => {
-    showCentsDeviation = layoutShowCentsDeviationToggle.checked;
-    if (showCentsDeviation) {
-      showRatioCents = false;
-    }
-    enforceCentsDisplayMode();
-    invalidateLabelCache();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (showCentsSignToggle) {
-  showCentsSignToggle.addEventListener("change", () => {
-    showCentsSign = showCentsSignToggle.checked;
-    invalidateLabelCache();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (hejiEnabledToggle) {
-  hejiEnabledToggle.addEventListener("change", () => {
-    hejiEnabled = hejiEnabledToggle.checked;
-    setControlChecked(layoutHejiEnabledToggle, hejiEnabled);
-    refreshCustomNodes();
-    invalidateLabelCache();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutHejiEnabledToggle) {
-  layoutHejiEnabledToggle.addEventListener("change", () => {
-    hejiEnabled = layoutHejiEnabledToggle.checked;
-    setControlChecked(hejiEnabledToggle, hejiEnabled);
-    refreshCustomNodes();
-    invalidateLabelCache();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (enharmonicsEnabledToggle) {
-  enharmonicsEnabledToggle.addEventListener("change", () => {
-    enharmonicsEnabled = enharmonicsEnabledToggle.checked;
-    setControlChecked(layoutEnharmonicsEnabledToggle, enharmonicsEnabled);
-    refreshCustomNodes();
-    invalidateLabelCache();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutEnharmonicsEnabledToggle) {
-  layoutEnharmonicsEnabledToggle.addEventListener("change", () => {
-    enharmonicsEnabled = layoutEnharmonicsEnabledToggle.checked;
-    setControlChecked(enharmonicsEnabledToggle, enharmonicsEnabled);
-    refreshCustomNodes();
-    invalidateLabelCache();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
+
+bindMirroredBooleanToggles(
+  showHzToggle,
+  layoutShowHzToggle,
+  (checked) => {
+    showHz = checked;
+  }
+);
+bindCentsModeTogglePair(showRatioCentsToggle, layoutShowRatioCentsToggle, "ratio");
+bindCentsModeTogglePair(showCentsDeviationToggle, layoutShowCentsDeviationToggle, "deviation");
+bindSingleBooleanToggle(showCentsSignToggle, (checked) => {
+  showCentsSign = checked;
+  applyLabelDisplayToggleChange();
+});
+bindMirroredBooleanToggles(
+  hejiEnabledToggle,
+  layoutHejiEnabledToggle,
+  (checked) => {
+    hejiEnabled = checked;
+  },
+  { refreshCustom: true }
+);
+bindMirroredBooleanToggles(
+  enharmonicsEnabledToggle,
+  layoutEnharmonicsEnabledToggle,
+  (checked) => {
+    enharmonicsEnabled = checked;
+  },
+  { refreshCustom: true }
+);
 if (showHelpToggle) {
-  showHelpToggle.checked = showHelpEnabled;
+  setControlChecked(showHelpToggle, showHelpEnabled);
   showHelpToggle.addEventListener("change", () => {
     showHelpEnabled = showHelpToggle.checked;
     if (!showHelpEnabled) {
@@ -26538,7 +26459,7 @@ if (uiHint) {
     uiHintDismissed = true;
     showHelpEnabled = false;
     if (showHelpToggle) {
-      showHelpToggle.checked = false;
+      setControlChecked(showHelpToggle, false);
     }
     setUiHintVisibility(false);
   });

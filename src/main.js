@@ -10199,6 +10199,7 @@ function draw3DEdges(nodePosMap, axisEntry = null) {
     }
     const labelText = getEdgeLabelText(a, b);
     const label = shouldShowEdgeLabel(a, b) ? labelText : null;
+    const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
     const edgeAlpha =
       axisActive && !isEdgeOnAxisEntry(a, b, axisEntry) ? AXIS_DIM_FACTOR : 1;
     drawCanvasEdgeSegment({
@@ -13545,6 +13546,7 @@ function onCanvasDoubleClick(event) {
   const edgeHit = hitTestEdgeLabel(screenPoint);
   if (edgeHit) {
     toggleEdgeLabelOverride(edgeHit.a, edgeHit.b);
+    schedulePresetUrlUpdate();
     draw();
     return;
   }
@@ -18373,6 +18375,16 @@ function setLayoutMode(enabled, { force = false } = {}) {
   }
   updateNavPanelVisibility();
   if (enabled) {
+    setCustomPianoMapMode(false);
+    closeKeyboardMapPopover();
+    showAxes = false;
+    showGrid = false;
+    if (navAxesToggle) {
+      navAxesToggle.checked = false;
+    }
+    if (navGridToggle) {
+      navGridToggle.checked = false;
+    }
     if (mode3dCheckbox) {
       mode3dCheckbox.checked = false;
     }
@@ -20710,84 +20722,51 @@ async function downloadLatticeState() {
   closeFilePanel();
 }
 
-function getPresetState() {
-  const isEmptyArray = (value) => !Array.isArray(value) || value.length === 0;
-  const isEmptyObject = (value) =>
-    !value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length;
-  const isDefaultLayoutView = (value) =>
-    value &&
-    Number(value.zoom) === Number(LAYOUT_DEFAULTS.view.zoom) &&
-    Number(value.offsetX) === Number(LAYOUT_DEFAULTS.view.offsetX) &&
-    Number(value.offsetY) === Number(LAYOUT_DEFAULTS.view.offsetY) &&
-    Number(value.rotX) === Number(LAYOUT_DEFAULTS.view.rotX) &&
-    Number(value.rotY) === Number(LAYOUT_DEFAULTS.view.rotY);
-  const isDefaultAxisOffsets = (value) =>
-    value &&
-    ["x", "y", "z"].every((axis) => {
-      const entry = value[axis];
-      return entry && Number(entry.x) === 0 && Number(entry.y) === 0;
-    });
-  const isDefaultAxisHidden = (value) =>
-    value &&
-    ["x", "y", "z"].every(
-      (axis) => Boolean(value[axis]) === Boolean(LAYOUT_DEFAULTS.axisHidden[axis])
-    );
-  const isDefaultAxisAngles = (value) =>
-    value && ["x", "y", "z"].every((axis) => value[axis] == null);
-  const active = nodes
-    .filter((node) => node.active && !node.isCustom)
-    .map((node) => [node.exponentX, node.exponentY, node.exponentZ || 0]);
-  const customState = customNodes.map((node) => ({
-    sourceExponents: Array.isArray(node.sourceExponents)
-      ? node.sourceExponents
-      : (() => {
-          const source = nodeById.get(node.sourceNodeId);
-          return source
-            ? [source.exponentX, source.exponentY, source.exponentZ || 0]
-            : null;
-        })(),
-    customSlot: node.customSlot,
-    factorNumerator: node.factorNumerator,
-    factorDenominator: node.factorDenominator,
-    octaveReduce: node.octaveReduce !== false,
-    octaveShift: Number.isFinite(node.octaveShift) ? node.octaveShift : 0,
-    position: { x: node.coordinate.x, y: node.coordinate.y },
-    active: Boolean(node.active),
-  }));
-  const layoutViewState =
-    layoutLockPosition && !layoutMode
-      ? layoutView
-      : {
-          zoom: view.zoom,
-          offsetX: view.offsetX,
-          offsetY: view.offsetY,
-          rotX: view.rotX,
-          rotY: view.rotY,
-        };
-  const layoutSourceViewState =
-    layoutSourceView &&
-    Number.isFinite(layoutSourceView.zoom) &&
-    Number.isFinite(layoutSourceView.offsetX) &&
-    Number.isFinite(layoutSourceView.offsetY) &&
-    Number.isFinite(layoutSourceView.rotX) &&
-    Number.isFinite(layoutSourceView.rotY)
-      ? {
-          zoom: layoutSourceView.zoom,
-          offsetX: layoutSourceView.offsetX,
-          offsetY: layoutSourceView.offsetY,
-          rotX: layoutSourceView.rotX,
-          rotY: layoutSourceView.rotY,
-        }
-      : null;
+function serializePresetLineLabelState() {
   const lineLabelOverridesState = Array.from(lineLabelOverrides.entries()).map(
     ([key, value]) => [key, Boolean(value)]
   );
   const lineLabelPositionsState = Array.from(lineLabelPositionOverrides.entries())
     .filter(([, value]) => Number.isFinite(value))
     .map(([key, value]) => [key, Number(value)]);
+  return { lineLabelOverridesState, lineLabelPositionsState };
+}
+
+function applyPresetLineLabelState(overridesState, positionsState) {
+  lineLabelOverrides.clear();
+  lineLabelPositionOverrides.clear();
+  if (Array.isArray(overridesState)) {
+    overridesState.forEach((entry) => {
+      if (!Array.isArray(entry) || entry.length < 2) {
+        return;
+      }
+      const key = String(entry[0] || "");
+      if (!key) {
+        return;
+      }
+      lineLabelOverrides.set(key, Boolean(entry[1]));
+    });
+  }
+  if (Array.isArray(positionsState)) {
+    positionsState.forEach((entry) => {
+      if (!Array.isArray(entry) || entry.length < 2) {
+        return;
+      }
+      const key = String(entry[0] || "");
+      const value = Number(entry[1]);
+      if (!key || !Number.isFinite(value)) {
+        return;
+      }
+      const clamped = Math.max(0, Math.min(1, value));
+      lineLabelPositionOverrides.set(key, clamped);
+    });
+  }
+}
+
+function serializePresetDistanceState() {
   const distanceEdgesState = Array.from(distanceSelectedEdges.values());
-  const distanceOverridesState = Array.from(distanceEdgeOverrides.entries()).map(
-    ([key, value]) => {
+  const distanceOverridesState = Array.from(distanceEdgeOverrides.entries())
+    .map(([key, value]) => {
       if (!value || typeof value !== "object") {
         return null;
       }
@@ -20808,8 +20787,62 @@ function getPresetState() {
         entry.customText = value.customText.trim();
       }
       return entry;
-    }
-  ).filter(Boolean);
+    })
+    .filter(Boolean);
+  return { distanceEdgesState, distanceOverridesState };
+}
+
+function getPresetLayoutViewState() {
+  return layoutLockPosition && !layoutMode
+    ? layoutView
+    : {
+        zoom: view.zoom,
+        offsetX: view.offsetX,
+        offsetY: view.offsetY,
+        rotX: view.rotX,
+        rotY: view.rotY,
+      };
+}
+
+function getPresetLayoutSourceViewState() {
+  return layoutSourceView &&
+    Number.isFinite(layoutSourceView.zoom) &&
+    Number.isFinite(layoutSourceView.offsetX) &&
+    Number.isFinite(layoutSourceView.offsetY) &&
+    Number.isFinite(layoutSourceView.rotX) &&
+    Number.isFinite(layoutSourceView.rotY)
+    ? {
+        zoom: layoutSourceView.zoom,
+        offsetX: layoutSourceView.offsetX,
+        offsetY: layoutSourceView.offsetY,
+        rotX: layoutSourceView.rotX,
+        rotY: layoutSourceView.rotY,
+      }
+    : null;
+}
+
+function buildPresetLayoutState(layoutViewState, layoutSourceViewState) {
+  const isEmptyArray = (value) => !Array.isArray(value) || value.length === 0;
+  const isDefaultLayoutView = (value) =>
+    value &&
+    Number(value.zoom) === Number(LAYOUT_DEFAULTS.view.zoom) &&
+    Number(value.offsetX) === Number(LAYOUT_DEFAULTS.view.offsetX) &&
+    Number(value.offsetY) === Number(LAYOUT_DEFAULTS.view.offsetY) &&
+    Number(value.rotX) === Number(LAYOUT_DEFAULTS.view.rotX) &&
+    Number(value.rotY) === Number(LAYOUT_DEFAULTS.view.rotY);
+  const isDefaultAxisOffsets = (value) =>
+    value &&
+    ["x", "y", "z"].every((axis) => {
+      const entry = value[axis];
+      return entry && Number(entry.x) === 0 && Number(entry.y) === 0;
+    });
+  const isDefaultAxisHidden = (value) =>
+    value &&
+    ["x", "y", "z"].every(
+      (axis) => Boolean(value[axis]) === Boolean(LAYOUT_DEFAULTS.axisHidden[axis])
+    );
+  const isDefaultAxisAngles = (value) =>
+    value && ["x", "y", "z"].every((axis) => value[axis] == null);
   const layoutState = {
     mode: layoutMode,
     title: layoutTitle,
@@ -20874,114 +20907,42 @@ function getPresetState() {
     zoom: layoutViewState.zoom,
   };
 
-  if (!layoutState.mode) {
-    delete layoutState.mode;
-  }
-  if (!layoutState.title) {
-    delete layoutState.title;
-  }
-  if (!layoutState.creator) {
-    delete layoutState.creator;
-  }
-  if (layoutState.titleSize === LAYOUT_DEFAULTS.titleSize) {
-    delete layoutState.titleSize;
-  }
-  if (layoutState.creatorSize === LAYOUT_DEFAULTS.creatorSize) {
-    delete layoutState.creatorSize;
-  }
-  if (layoutState.nodeSize === LAYOUT_DEFAULTS.nodeSize) {
-    delete layoutState.nodeSize;
-  }
-  if (layoutState.ratioTextSize === LAYOUT_DEFAULTS.ratioTextSize) {
-    delete layoutState.ratioTextSize;
-  }
-  if (layoutState.noteTextSize === LAYOUT_DEFAULTS.noteTextSize) {
-    delete layoutState.noteTextSize;
-  }
-  if (layoutState.triangleLabelTextSize === LAYOUT_DEFAULTS.triangleLabelTextSize) {
-    delete layoutState.triangleLabelTextSize;
-  }
-  if (layoutState.customLabelTextSize === LAYOUT_DEFAULTS.customLabelTextSize) {
-    delete layoutState.customLabelTextSize;
-  }
-  if (layoutState.keyMappingTextSize === LAYOUT_DEFAULTS.keyMappingTextSize) {
-    delete layoutState.keyMappingTextSize;
-  }
-  if (layoutState.keyMappingOffset === LAYOUT_DEFAULTS.keyMappingOffset) {
-    delete layoutState.keyMappingOffset;
-  }
-  if (layoutState.keyMappingDark === LAYOUT_DEFAULTS.keyMappingDark) {
-    delete layoutState.keyMappingDark;
-  }
-  if (layoutState.keyMappingPrefix === LAYOUT_DEFAULTS.keyMappingPrefix) {
-    delete layoutState.keyMappingPrefix;
-  }
-  if (layoutState.keyMappingSuffix === LAYOUT_DEFAULTS.keyMappingSuffix) {
-    delete layoutState.keyMappingSuffix;
-  }
-  if (layoutState.axisLegendTextSize === LAYOUT_DEFAULTS.axisLegendTextSize) {
-    delete layoutState.axisLegendTextSize;
-  }
-  if (layoutState.lineLabelTextSize === LAYOUT_DEFAULTS.lineLabelTextSize) {
-    delete layoutState.lineLabelTextSize;
-  }
-  if (layoutState.titleMargin === LAYOUT_DEFAULTS.titleMargin) {
-    delete layoutState.titleMargin;
-  }
-  if (layoutState.titleFont === LAYOUT_DEFAULTS.titleFont) {
-    delete layoutState.titleFont;
-  }
-  if (layoutState.creatorFont === LAYOUT_DEFAULTS.creatorFont) {
-    delete layoutState.creatorFont;
-  }
-  if (layoutState.ratioFont === LAYOUT_DEFAULTS.ratioFont) {
-    delete layoutState.ratioFont;
-  }
-  if (layoutState.noteFont === LAYOUT_DEFAULTS.noteFont) {
-    delete layoutState.noteFont;
-  }
-  if (layoutState.triangleLabelFont === LAYOUT_DEFAULTS.triangleLabelFont) {
-    delete layoutState.triangleLabelFont;
-  }
-  if (layoutState.customLabelFont === LAYOUT_DEFAULTS.customLabelFont) {
-    delete layoutState.customLabelFont;
-  }
-  if (layoutState.keyMappingFont === LAYOUT_DEFAULTS.keyMappingFont) {
-    delete layoutState.keyMappingFont;
-  }
-  if (layoutState.axisLegendFont === LAYOUT_DEFAULTS.axisLegendFont) {
-    delete layoutState.axisLegendFont;
-  }
-  if (layoutState.lineLabelFont === LAYOUT_DEFAULTS.lineLabelFont) {
-    delete layoutState.lineLabelFont;
-  }
-  if (layoutState.titleFontWeight === LAYOUT_DEFAULTS.titleFontWeight) {
-    delete layoutState.titleFontWeight;
-  }
-  if (layoutState.creatorFontWeight === LAYOUT_DEFAULTS.creatorFontWeight) {
-    delete layoutState.creatorFontWeight;
-  }
-  if (layoutState.ratioFontWeight === LAYOUT_DEFAULTS.ratioFontWeight) {
-    delete layoutState.ratioFontWeight;
-  }
-  if (layoutState.noteFontWeight === LAYOUT_DEFAULTS.noteFontWeight) {
-    delete layoutState.noteFontWeight;
-  }
-  if (layoutState.triangleLabelFontWeight === LAYOUT_DEFAULTS.triangleLabelFontWeight) {
-    delete layoutState.triangleLabelFontWeight;
-  }
-  if (layoutState.customLabelFontWeight === LAYOUT_DEFAULTS.customLabelFontWeight) {
-    delete layoutState.customLabelFontWeight;
-  }
-  if (layoutState.keyMappingFontWeight === LAYOUT_DEFAULTS.keyMappingFontWeight) {
-    delete layoutState.keyMappingFontWeight;
-  }
-  if (layoutState.axisLegendFontWeight === LAYOUT_DEFAULTS.axisLegendFontWeight) {
-    delete layoutState.axisLegendFontWeight;
-  }
-  if (layoutState.lineLabelFontWeight === LAYOUT_DEFAULTS.lineLabelFontWeight) {
-    delete layoutState.lineLabelFontWeight;
-  }
+  if (!layoutState.mode) delete layoutState.mode;
+  if (!layoutState.title) delete layoutState.title;
+  if (!layoutState.creator) delete layoutState.creator;
+  if (layoutState.titleSize === LAYOUT_DEFAULTS.titleSize) delete layoutState.titleSize;
+  if (layoutState.creatorSize === LAYOUT_DEFAULTS.creatorSize) delete layoutState.creatorSize;
+  if (layoutState.nodeSize === LAYOUT_DEFAULTS.nodeSize) delete layoutState.nodeSize;
+  if (layoutState.ratioTextSize === LAYOUT_DEFAULTS.ratioTextSize) delete layoutState.ratioTextSize;
+  if (layoutState.noteTextSize === LAYOUT_DEFAULTS.noteTextSize) delete layoutState.noteTextSize;
+  if (layoutState.triangleLabelTextSize === LAYOUT_DEFAULTS.triangleLabelTextSize) delete layoutState.triangleLabelTextSize;
+  if (layoutState.customLabelTextSize === LAYOUT_DEFAULTS.customLabelTextSize) delete layoutState.customLabelTextSize;
+  if (layoutState.keyMappingTextSize === LAYOUT_DEFAULTS.keyMappingTextSize) delete layoutState.keyMappingTextSize;
+  if (layoutState.keyMappingOffset === LAYOUT_DEFAULTS.keyMappingOffset) delete layoutState.keyMappingOffset;
+  if (layoutState.keyMappingDark === LAYOUT_DEFAULTS.keyMappingDark) delete layoutState.keyMappingDark;
+  if (layoutState.keyMappingPrefix === LAYOUT_DEFAULTS.keyMappingPrefix) delete layoutState.keyMappingPrefix;
+  if (layoutState.keyMappingSuffix === LAYOUT_DEFAULTS.keyMappingSuffix) delete layoutState.keyMappingSuffix;
+  if (layoutState.axisLegendTextSize === LAYOUT_DEFAULTS.axisLegendTextSize) delete layoutState.axisLegendTextSize;
+  if (layoutState.lineLabelTextSize === LAYOUT_DEFAULTS.lineLabelTextSize) delete layoutState.lineLabelTextSize;
+  if (layoutState.titleMargin === LAYOUT_DEFAULTS.titleMargin) delete layoutState.titleMargin;
+  if (layoutState.titleFont === LAYOUT_DEFAULTS.titleFont) delete layoutState.titleFont;
+  if (layoutState.creatorFont === LAYOUT_DEFAULTS.creatorFont) delete layoutState.creatorFont;
+  if (layoutState.ratioFont === LAYOUT_DEFAULTS.ratioFont) delete layoutState.ratioFont;
+  if (layoutState.noteFont === LAYOUT_DEFAULTS.noteFont) delete layoutState.noteFont;
+  if (layoutState.triangleLabelFont === LAYOUT_DEFAULTS.triangleLabelFont) delete layoutState.triangleLabelFont;
+  if (layoutState.customLabelFont === LAYOUT_DEFAULTS.customLabelFont) delete layoutState.customLabelFont;
+  if (layoutState.keyMappingFont === LAYOUT_DEFAULTS.keyMappingFont) delete layoutState.keyMappingFont;
+  if (layoutState.axisLegendFont === LAYOUT_DEFAULTS.axisLegendFont) delete layoutState.axisLegendFont;
+  if (layoutState.lineLabelFont === LAYOUT_DEFAULTS.lineLabelFont) delete layoutState.lineLabelFont;
+  if (layoutState.titleFontWeight === LAYOUT_DEFAULTS.titleFontWeight) delete layoutState.titleFontWeight;
+  if (layoutState.creatorFontWeight === LAYOUT_DEFAULTS.creatorFontWeight) delete layoutState.creatorFontWeight;
+  if (layoutState.ratioFontWeight === LAYOUT_DEFAULTS.ratioFontWeight) delete layoutState.ratioFontWeight;
+  if (layoutState.noteFontWeight === LAYOUT_DEFAULTS.noteFontWeight) delete layoutState.noteFontWeight;
+  if (layoutState.triangleLabelFontWeight === LAYOUT_DEFAULTS.triangleLabelFontWeight) delete layoutState.triangleLabelFontWeight;
+  if (layoutState.customLabelFontWeight === LAYOUT_DEFAULTS.customLabelFontWeight) delete layoutState.customLabelFontWeight;
+  if (layoutState.keyMappingFontWeight === LAYOUT_DEFAULTS.keyMappingFontWeight) delete layoutState.keyMappingFontWeight;
+  if (layoutState.axisLegendFontWeight === LAYOUT_DEFAULTS.axisLegendFontWeight) delete layoutState.axisLegendFontWeight;
+  if (layoutState.lineLabelFontWeight === LAYOUT_DEFAULTS.lineLabelFontWeight) delete layoutState.lineLabelFontWeight;
   if (
     layoutState.spacing &&
     layoutState.spacing.x === LAYOUT_DEFAULTS.spacing.x &&
@@ -20990,60 +20951,57 @@ function getPresetState() {
   ) {
     delete layoutState.spacing;
   }
-  if (layoutState.nodeShape === LAYOUT_DEFAULTS.nodeShape) {
-    delete layoutState.nodeShape;
-  }
-  if (layoutState.unifyNodeSize === LAYOUT_DEFAULTS.unifyNodeSize) {
-    delete layoutState.unifyNodeSize;
-  }
-  if (layoutState.perspectiveTextSize === LAYOUT_DEFAULTS.perspectiveTextSize) {
-    delete layoutState.perspectiveTextSize;
-  }
-  if (layoutState.keyMappingsMode === LAYOUT_DEFAULTS.keyMappingsMode) {
-    delete layoutState.keyMappingsMode;
-  }
-  if (layoutState.pageSize === LAYOUT_DEFAULTS.pageSize) {
-    delete layoutState.pageSize;
-  }
-  if (layoutState.orientation === LAYOUT_DEFAULTS.orientation) {
-    delete layoutState.orientation;
-  }
-  if (layoutState.lockPosition === LAYOUT_DEFAULTS.lockPosition) {
-    delete layoutState.lockPosition;
-  }
-  if (isDefaultLayoutView(layoutState.view)) {
-    delete layoutState.view;
-  }
-  if (layoutState.zoom === LAYOUT_DEFAULTS.zoom) {
-    delete layoutState.zoom;
-  }
-  if (!layoutState.sourceView) {
-    delete layoutState.sourceView;
-  }
-  if (isEmptyArray(layoutState.customLabels)) {
-    delete layoutState.customLabels;
-  }
-  if (isEmptyArray(layoutState.positionOffsets)) {
-    delete layoutState.positionOffsets;
-  }
-  if (isEmptyArray(layoutState.customNodePositions)) {
-    delete layoutState.customNodePositions;
-  }
-  if (isEmptyArray(layoutState.labelOffsets)) {
-    delete layoutState.labelOffsets;
-  }
-  if (isEmptyArray(layoutState.keyMappingOffsets)) {
-    delete layoutState.keyMappingOffsets;
-  }
-  if (isDefaultAxisOffsets(layoutState.axisOffsets)) {
-    delete layoutState.axisOffsets;
-  }
-  if (isDefaultAxisHidden(layoutState.axisHidden)) {
-    delete layoutState.axisHidden;
-  }
-  if (isDefaultAxisAngles(layoutState.axisAngles)) {
-    delete layoutState.axisAngles;
-  }
+  if (layoutState.nodeShape === LAYOUT_DEFAULTS.nodeShape) delete layoutState.nodeShape;
+  if (layoutState.unifyNodeSize === LAYOUT_DEFAULTS.unifyNodeSize) delete layoutState.unifyNodeSize;
+  if (layoutState.perspectiveTextSize === LAYOUT_DEFAULTS.perspectiveTextSize) delete layoutState.perspectiveTextSize;
+  if (layoutState.keyMappingsMode === LAYOUT_DEFAULTS.keyMappingsMode) delete layoutState.keyMappingsMode;
+  if (layoutState.pageSize === LAYOUT_DEFAULTS.pageSize) delete layoutState.pageSize;
+  if (layoutState.orientation === LAYOUT_DEFAULTS.orientation) delete layoutState.orientation;
+  if (layoutState.lockPosition === LAYOUT_DEFAULTS.lockPosition) delete layoutState.lockPosition;
+  if (isDefaultLayoutView(layoutState.view)) delete layoutState.view;
+  if (layoutState.zoom === LAYOUT_DEFAULTS.zoom) delete layoutState.zoom;
+  if (!layoutState.sourceView) delete layoutState.sourceView;
+  if (isEmptyArray(layoutState.customLabels)) delete layoutState.customLabels;
+  if (isEmptyArray(layoutState.positionOffsets)) delete layoutState.positionOffsets;
+  if (isEmptyArray(layoutState.customNodePositions)) delete layoutState.customNodePositions;
+  if (isEmptyArray(layoutState.labelOffsets)) delete layoutState.labelOffsets;
+  if (isEmptyArray(layoutState.keyMappingOffsets)) delete layoutState.keyMappingOffsets;
+  if (isDefaultAxisOffsets(layoutState.axisOffsets)) delete layoutState.axisOffsets;
+  if (isDefaultAxisHidden(layoutState.axisHidden)) delete layoutState.axisHidden;
+  if (isDefaultAxisAngles(layoutState.axisAngles)) delete layoutState.axisAngles;
+
+  return layoutState;
+}
+
+function getPresetState() {
+  const isEmptyArray = (value) => !Array.isArray(value) || value.length === 0;
+  const isEmptyObject = (value) =>
+    !value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length;
+  const active = nodes
+    .filter((node) => node.active && !node.isCustom)
+    .map((node) => [node.exponentX, node.exponentY, node.exponentZ || 0]);
+  const customState = customNodes.map((node) => ({
+    sourceExponents: Array.isArray(node.sourceExponents)
+      ? node.sourceExponents
+      : (() => {
+          const source = nodeById.get(node.sourceNodeId);
+          return source
+            ? [source.exponentX, source.exponentY, source.exponentZ || 0]
+            : null;
+        })(),
+    customSlot: node.customSlot,
+    factorNumerator: node.factorNumerator,
+    factorDenominator: node.factorDenominator,
+    octaveReduce: node.octaveReduce !== false,
+    octaveShift: Number.isFinite(node.octaveShift) ? node.octaveShift : 0,
+    position: { x: node.coordinate.x, y: node.coordinate.y },
+    active: Boolean(node.active),
+  }));
+  const layoutViewState = getPresetLayoutViewState();
+  const layoutSourceViewState = getPresetLayoutSourceViewState();
+  const { lineLabelOverridesState, lineLabelPositionsState } = serializePresetLineLabelState();
+  const { distanceEdgesState, distanceOverridesState } = serializePresetDistanceState();
+  const layoutState = buildPresetLayoutState(layoutViewState, layoutSourceViewState);
 
   const state = {
     v: 1,
@@ -21319,115 +21277,72 @@ function readPresetFromUrl() {
   }
 }
 
-function applyPresetState(state, options = {}) {
-  if (!state || typeof state !== "object") {
+function applyPresetSnapshotSettings(settings) {
+  if (!settings || typeof settings !== "object") {
     return;
   }
-  const preserveViewMode = Boolean(options.preserveViewMode);
-  snapshotBaseState = state.snapshotBase || null;
-  if (Array.isArray(state.snapshots)) {
-    applySnapshotsFromPreset(state.snapshots);
-    snapshotActiveIndex = Number.isFinite(state.snapshotActive)
-      ? Math.trunc(state.snapshotActive)
-      : snapshotActiveIndex;
-    updateSnapshotUi();
+  if (typeof settings.deferToCycleEnd === "boolean") {
+    snapshotDeferToCycleEnd = settings.deferToCycleEnd;
   }
-  if (Array.isArray(state.snapshotsLetters)) {
-    applyLetterSnapshotsFromPreset(state.snapshotsLetters);
-    snapshotActiveLetterKey = typeof state.snapshotActiveLetter === "string"
-      ? state.snapshotActiveLetter
-      : snapshotActiveLetterKey;
-    updateSnapshotUi();
+  if (typeof settings.restorePlayNodes === "boolean") {
+    snapshotRestorePlayNodes = settings.restorePlayNodes;
   }
-  if (state.snapshotSettings && typeof state.snapshotSettings === "object") {
-    const settings = state.snapshotSettings;
-    if (typeof settings.deferToCycleEnd === "boolean") {
-      snapshotDeferToCycleEnd = settings.deferToCycleEnd;
-    }
-    if (typeof settings.restorePlayNodes === "boolean") {
-      snapshotRestorePlayNodes = settings.restorePlayNodes;
-    }
-    if (typeof settings.connectCommonTones === "boolean") {
-      snapshotConnectCommonTones = settings.connectCommonTones;
-    }
-    if (typeof settings.restoreView === "boolean") {
-      snapshotRestoreView = settings.restoreView;
-    }
-    if (typeof settings.restoreSequence === "boolean") {
-      snapshotRestoreSequence = settings.restoreSequence;
-    }
-    if (typeof settings.restoreLfos === "boolean") {
-      snapshotRestoreLfos = settings.restoreLfos;
-    }
-    if (typeof settings.restoreLfoPhase === "boolean") {
-      snapshotRestoreLfoPhase = settings.restoreLfoPhase;
-    }
-    if (typeof settings.useLetterKeys === "boolean") {
-      snapshotKeyboardMode = settings.useLetterKeys;
-    }
-    if (typeof settings.lettersActive === "boolean") {
-      snapshotKeyboardActive = settings.lettersActive;
-    }
-    if (snapshotDeferToggle) {
-      snapshotDeferToggle.checked = snapshotDeferToCycleEnd;
-    }
-    if (snapshotRestoreToggle) {
-      snapshotRestoreToggle.checked = snapshotRestorePlayNodes;
-    }
-    if (snapshotConnectToggle) {
-      snapshotConnectToggle.checked = snapshotConnectCommonTones;
-      snapshotConnectToggle.disabled = !snapshotRestorePlayNodes;
-    }
-    if (snapshotRestoreViewToggle) {
-      snapshotRestoreViewToggle.checked = snapshotRestoreView;
-    }
-    if (snapshotRestoreSequenceToggle) {
-      snapshotRestoreSequenceToggle.checked = snapshotRestoreSequence;
-    }
-    if (snapshotRestoreLfosToggle) {
-      snapshotRestoreLfosToggle.checked = snapshotRestoreLfos;
-    }
-    if (snapshotRestoreLfoPhaseToggle) {
-      snapshotRestoreLfoPhaseToggle.checked = snapshotRestoreLfoPhase;
-      snapshotRestoreLfoPhaseToggle.disabled = !snapshotRestoreLfos;
-    }
-    if (snapshotKeyboardModeToggle) {
-      snapshotKeyboardModeToggle.checked = snapshotKeyboardMode;
-    }
-    if (snapshotKeyboardActiveToggle) {
-      snapshotKeyboardActiveToggle.checked = snapshotKeyboardActive;
-      snapshotKeyboardActiveToggle.disabled = !snapshotKeyboardMode;
-    }
-    setKeyboardModeDisabled(snapshotKeyboardMode);
-    updateSnapshotUi();
+  if (typeof settings.connectCommonTones === "boolean") {
+    snapshotConnectCommonTones = settings.connectCommonTones;
   }
-  const layoutState = state.layout && typeof state.layout === "object" ? state.layout : null;
-  const presetLayoutMode = Boolean(layoutState && layoutState.mode);
-  const presetWants3D = Boolean(state.mode3d);
-  if (!options.skipLayoutModeSwitch) {
-    if (presetLayoutMode !== layoutMode) {
-      setLayoutMode(presetLayoutMode, { force: true });
-    }
-    if (!presetLayoutMode) {
-      if (!preserveViewMode) {
-        is3DMode = presetWants3D;
-        if (mode3dCheckbox) {
-          mode3dCheckbox.checked = presetWants3D;
-        }
-        updateNavPanelVisibility();
-        syncViewModeControls();
-      }
-    }
-  } else if (!layoutMode) {
-    if (!preserveViewMode) {
-      is3DMode = presetWants3D;
-      if (mode3dCheckbox) {
-        mode3dCheckbox.checked = presetWants3D;
-      }
-      updateNavPanelVisibility();
-      syncViewModeControls();
-    }
+  if (typeof settings.restoreView === "boolean") {
+    snapshotRestoreView = settings.restoreView;
   }
+  if (typeof settings.restoreSequence === "boolean") {
+    snapshotRestoreSequence = settings.restoreSequence;
+  }
+  if (typeof settings.restoreLfos === "boolean") {
+    snapshotRestoreLfos = settings.restoreLfos;
+  }
+  if (typeof settings.restoreLfoPhase === "boolean") {
+    snapshotRestoreLfoPhase = settings.restoreLfoPhase;
+  }
+  if (typeof settings.useLetterKeys === "boolean") {
+    snapshotKeyboardMode = settings.useLetterKeys;
+  }
+  if (typeof settings.lettersActive === "boolean") {
+    snapshotKeyboardActive = settings.lettersActive;
+  }
+  if (snapshotDeferToggle) {
+    snapshotDeferToggle.checked = snapshotDeferToCycleEnd;
+  }
+  if (snapshotRestoreToggle) {
+    snapshotRestoreToggle.checked = snapshotRestorePlayNodes;
+  }
+  if (snapshotConnectToggle) {
+    snapshotConnectToggle.checked = snapshotConnectCommonTones;
+    snapshotConnectToggle.disabled = !snapshotRestorePlayNodes;
+  }
+  if (snapshotRestoreViewToggle) {
+    snapshotRestoreViewToggle.checked = snapshotRestoreView;
+  }
+  if (snapshotRestoreSequenceToggle) {
+    snapshotRestoreSequenceToggle.checked = snapshotRestoreSequence;
+  }
+  if (snapshotRestoreLfosToggle) {
+    snapshotRestoreLfosToggle.checked = snapshotRestoreLfos;
+  }
+  if (snapshotRestoreLfoPhaseToggle) {
+    snapshotRestoreLfoPhaseToggle.checked = snapshotRestoreLfoPhase;
+    snapshotRestoreLfoPhaseToggle.disabled = !snapshotRestoreLfos;
+  }
+  if (snapshotKeyboardModeToggle) {
+    snapshotKeyboardModeToggle.checked = snapshotKeyboardMode;
+  }
+  if (snapshotKeyboardActiveToggle) {
+    snapshotKeyboardActiveToggle.checked = snapshotKeyboardActive;
+    snapshotKeyboardActiveToggle.disabled = !snapshotKeyboardMode;
+  }
+  setKeyboardModeDisabled(snapshotKeyboardMode);
+  updateSnapshotUi();
+}
+
+function resetPresetAnalysisState() {
   analysisLayers.distances = false;
   analysisLayers.microtonal = false;
   microtonalSelectedNodeIds.clear();
@@ -21437,17 +21352,51 @@ function applyPresetState(state, options = {}) {
   distanceSelectedEdges.clear();
   distanceEdgeOverrides.clear();
   syncAnalysisLayerToggles();
-  pendingLayoutSpacing = null;
-  pendingLayoutCustomPositions = null;
-  pendingCustomPianoMap = null;
-  const pendingLineLabelOverridesState = Array.isArray(state.lineLabelOverrides)
-    ? state.lineLabelOverrides
-    : null;
-  const pendingLineLabelPositionsState = Array.isArray(state.lineLabelPositions)
-    ? state.lineLabelPositions
-    : null;
-  lineLabelOverrides.clear();
-  lineLabelPositionOverrides.clear();
+}
+
+function getPendingPresetLineLabelState(state) {
+  return {
+    pendingLineLabelOverridesState: Array.isArray(state.lineLabelOverrides)
+      ? state.lineLabelOverrides
+      : null,
+    pendingLineLabelPositionsState: Array.isArray(state.lineLabelPositions)
+      ? state.lineLabelPositions
+      : null,
+  };
+}
+
+function applyPresetLayoutModeSelection(
+  layoutState,
+  presetWants3D,
+  preserveViewMode,
+  skipLayoutModeSwitch
+) {
+  const presetLayoutMode = Boolean(layoutState && layoutState.mode);
+  if (!skipLayoutModeSwitch) {
+    if (presetLayoutMode !== layoutMode) {
+      setLayoutMode(presetLayoutMode, { force: true });
+    }
+    if (!presetLayoutMode && !preserveViewMode) {
+      is3DMode = presetWants3D;
+      if (mode3dCheckbox) {
+        mode3dCheckbox.checked = presetWants3D;
+      }
+      updateNavPanelVisibility();
+      syncViewModeControls();
+    }
+    return;
+  }
+  if (!layoutMode && !preserveViewMode) {
+    is3DMode = presetWants3D;
+    if (mode3dCheckbox) {
+      mode3dCheckbox.checked = presetWants3D;
+    }
+    updateNavPanelVisibility();
+    syncViewModeControls();
+  }
+}
+
+function applyPresetDisplayToggleState(state) {
   if (typeof state.axes === "boolean") {
     showAxes = state.axes;
     if (navAxesToggle) {
@@ -21477,6 +21426,31 @@ function applyPresetState(state, options = {}) {
       layoutLineLabelsToggle.checked = showLineLabels;
     }
   }
+  if (typeof state.circles === "boolean") {
+    showCircles = state.circles;
+    if (navCirclesToggle) {
+      navCirclesToggle.checked = showCircles;
+    }
+    if (layoutCirclesToggle) {
+      layoutCirclesToggle.checked = showCircles;
+    }
+  }
+  if (typeof state.keyMappings === "boolean") {
+    showKeyMappings = state.keyMappings;
+    if (navKeyMappingsToggle) {
+      navKeyMappingsToggle.checked = showKeyMappings;
+    }
+    if (layoutKeyMappingsToggle) {
+      layoutKeyMappingsToggle.checked = showKeyMappings;
+    }
+  }
+  if (typeof state.distances === "boolean") {
+    analysisLayers.distances = state.distances;
+    syncAnalysisLayerToggles();
+  }
+}
+
+function applyPresetDistanceState(state) {
   if (Array.isArray(state.distanceEdges)) {
     state.distanceEdges.forEach((edgeKey) => {
       if (typeof edgeKey === "string" && edgeKey) {
@@ -21512,99 +21486,9 @@ function applyPresetState(state, options = {}) {
       distanceEdgeOverrides.set(key, next);
     });
   }
-  if (typeof state.circles === "boolean") {
-    showCircles = state.circles;
-    if (navCirclesToggle) {
-      navCirclesToggle.checked = showCircles;
-    }
-    if (layoutCirclesToggle) {
-      layoutCirclesToggle.checked = showCircles;
-    }
-  }
-  if (typeof state.keyMappings === "boolean") {
-    showKeyMappings = state.keyMappings;
-    if (navKeyMappingsToggle) {
-      navKeyMappingsToggle.checked = showKeyMappings;
-    }
-    if (layoutKeyMappingsToggle) {
-      layoutKeyMappingsToggle.checked = showKeyMappings;
-    }
-  }
-  if (typeof state.distances === "boolean") {
-    analysisLayers.distances = state.distances;
-    syncAnalysisLayerToggles();
-  }
-  const viewState = state.view && typeof state.view === "object" ? state.view : null;
-  layoutSourceView = null;
-  const activeHasZ = Array.isArray(state.active)
-    ? state.active.some((entry) => Array.isArray(entry) && Number(entry[2]) !== 0)
-    : false;
-  const wants3D = Boolean(state.mode3d) || activeHasZ;
-  const layoutHasTilt =
-    Boolean(layoutState && layoutState.view && typeof layoutState.view === "object") &&
-    (Math.abs(Number(layoutState.view.rotX) || 0) > 1e-6 ||
-      Math.abs(Number(layoutState.view.rotY) || 0) > 1e-6);
-  const layoutNeedsProjectedDepth =
-    Boolean(layoutState && layoutState.mode) && layoutHasTilt;
-  const targetDepth = wants3D || layoutNeedsProjectedDepth ? GRID_DEPTH : 1;
-  const targetCenterZ = Math.floor(targetDepth / 2);
-  gridDepth = targetDepth;
-  gridCenterZ = targetCenterZ;
-  const presetTriangles = Array.isArray(state.triangles) ? state.triangles : null;
-  const presetTriangleLabels = Array.isArray(state.triangleLabels)
-    ? state.triangleLabels
-    : null;
-  if (mode3dCheckbox) {
-    if (!preserveViewMode) {
-      mode3dCheckbox.checked = wants3D;
-    }
-  }
-  if (!preserveViewMode) {
-    is3DMode = wants3D;
-  }
-  isFlattened2D = preserveViewMode ? (!is3DMode && wants3D) : false;
-  if (!preserveViewMode) {
-    updateNavPanelVisibility();
-    syncViewModeControls();
-  }
-  if (ratioZSelect) {
-    ratioZSelect.hidden = false;
-  }
-  if (!wants3D) {
-    clearAxisStack();
-  }
-  updateAddModeFromShift();
-  updateUiHint();
-  if (Number.isFinite(state.fundamental)) {
-    fundamentalInput.value = String(state.fundamental);
-  }
-  if (Number.isFinite(state.a4)) {
-    a4Input.value = String(state.a4);
-  }
-  if (typeof state.fundamentalSpelling === "string") {
-    fundamentalSpelling = state.fundamentalSpelling === "flat" ? "flat" : "sharp";
-  }
-  if (Array.isArray(state.ratios)) {
-    const [x, y, z] = state.ratios;
-    if (Number.isFinite(x)) {
-      ratioXSelect.value = String(x);
-    }
-    if (Number.isFinite(y)) {
-      ratioYSelect.value = String(y);
-    }
-    if (Number.isFinite(z) && ratioZSelect) {
-      ratioZSelect.value = String(z);
-    }
-  }
-  if (state.exponentOffset && typeof state.exponentOffset === "object") {
-    latticeExponentOffset = {
-      x: Number(state.exponentOffset.x) || 0,
-      y: Number(state.exponentOffset.y) || 0,
-      z: Number(state.exponentOffset.z) || 0,
-    };
-  } else {
-    latticeExponentOffset = { x: 0, y: 0, z: 0 };
-  }
+}
+
+function applyPresetSpellingAndOctaveState(state) {
   if (Array.isArray(state.noteSpellings)) {
     nodeSpellingOverrides = new Map();
     state.noteSpellings.forEach((entry) => {
@@ -21612,11 +21496,11 @@ function applyPresetState(state, options = {}) {
         return;
       }
       const [nodeId, spelling] = entry;
-    if (spelling === "flat") {
-      nodeSpellingOverrides.set(nodeId, "upper");
-    } else if (spelling === "lower" || spelling === "upper") {
-      nodeSpellingOverrides.set(nodeId, spelling);
-    }
+      if (spelling === "flat") {
+        nodeSpellingOverrides.set(nodeId, "upper");
+      } else if (spelling === "lower" || spelling === "upper") {
+        nodeSpellingOverrides.set(nodeId, spelling);
+      }
     });
   }
   nodeOctaveOffsets = new Map();
@@ -21633,589 +21517,9 @@ function applyPresetState(state, options = {}) {
       nodeOctaveOffsets.set(key, Math.trunc(shift));
     });
   }
+}
 
-  if (state.synth && typeof state.synth === "object") {
-    if (Number.isFinite(state.synth.volume)) {
-      volumeSlider.value = String(state.synth.volume);
-      updateVolume();
-    }
-    if (Number.isFinite(state.synth.lfoDepth) && lfoDepthSlider) {
-      lfoDepthSlider.value = String(state.synth.lfoDepth);
-      updateLfoDepth();
-    }
-    if (Number.isFinite(state.synth.lfoRate) && lfoRateSlider) {
-      setLfoRateSlider(state.synth.lfoRate);
-      updateLfoRate();
-    }
-    if (keyboardModeSelect && typeof state.synth.keyboardMode === "string") {
-      keyboardModeSelect.value = state.synth.keyboardMode;
-      if (keyboardModeSelect.value === "piano-custom") {
-        if (keyboardMapToggle) {
-          keyboardMapToggle.hidden = false;
-        }
-        if (keyboardMapClear) {
-          keyboardMapClear.hidden = false;
-        }
-        updateCustomPianoKeyStyles();
-        closeKeyboardMapPopover();
-      } else {
-        if (keyboardMapToggle) {
-          keyboardMapToggle.hidden = true;
-        }
-        if (keyboardMapClear) {
-          keyboardMapClear.hidden = true;
-        }
-        setCustomPianoMapMode(false);
-        closeKeyboardMapPopover();
-      }
-      updateUiHint();
-      updateKeyMappingToggleVisibility();
-      markIsomorphicDirty();
-    }
-    if (Array.isArray(state.synth.customPianoMap)) {
-      pendingCustomPianoMap = state.synth.customPianoMap;
-    } else {
-      pendingCustomPianoMap = [];
-    }
-    if (typeof state.synth.mode === "string") {
-      synthMode = state.synth.mode;
-    }
-    if (waveformSelect && typeof state.synth.waveform === "string") {
-      waveformSelect.value = state.synth.waveform;
-    }
-    if (physicalModelSelect && typeof state.synth.physicalModel === "string") {
-      physicalModelSelect.value = state.synth.physicalModel;
-    }
-    if (Number.isFinite(state.synth.soundfontPreset)) {
-      soundfontPresetIndex = Math.trunc(state.synth.soundfontPreset);
-    }
-    syncSynthModeUI();
-    handleSynthTypeChange();
-    if (Number.isFinite(state.synth.attack)) {
-      setEnvelopeSliderFromValue(attackSlider, Number(state.synth.attack));
-    }
-    if (Number.isFinite(state.synth.decay)) {
-      setEnvelopeSliderFromValue(decaySlider, Number(state.synth.decay));
-    }
-    if (Number.isFinite(state.synth.sustain)) {
-      sustainSlider.value = String(state.synth.sustain);
-    }
-    if (Number.isFinite(state.synth.release)) {
-      setEnvelopeSliderFromValue(releaseSlider, Number(state.synth.release));
-    }
-    if (oneShotCheckbox && typeof state.synth.oneShot === "boolean") {
-      oneShotCheckbox.checked = state.synth.oneShot;
-    }
-    if (typeof state.synth.envelopeTimeMode === "string") {
-      envelopeTimeMode = state.synth.envelopeTimeMode === "tempo" ? "tempo" : "absolute";
-      envelopeTimeModeInputs.forEach((input) => {
-        input.checked = input.value === envelopeTimeMode;
-      });
-    }
-    updateEnvelopeReadouts();
-    updatePatternLengthAvailability();
-  }
-
-  if (viewState) {
-    if (Number.isFinite(viewState.zoom)) {
-      view.zoom = Math.min(2.2, Math.max(0.5, viewState.zoom));
-    }
-    if (Number.isFinite(viewState.offsetX)) {
-      view.offsetX = viewState.offsetX;
-    }
-    if (Number.isFinite(viewState.offsetY)) {
-      view.offsetY = viewState.offsetY;
-    }
-    if (Number.isFinite(viewState.rotX)) {
-      view.rotX = Math.max(-1.2, Math.min(1.2, viewState.rotX));
-    }
-    if (Number.isFinite(viewState.rotY)) {
-      view.rotY = viewState.rotY;
-    }
-  }
-
-  if (layoutState) {
-    pendingLayoutLabelOffsets = Array.isArray(layoutState.labelOffsets)
-      ? layoutState.labelOffsets
-      : null;
-    pendingLayoutKeyMappingOffsets = Array.isArray(layoutState.keyMappingOffsets)
-      ? layoutState.keyMappingOffsets
-      : null;
-    pendingLayoutPositionOffsets = Array.isArray(layoutState.positionOffsets)
-      ? layoutState.positionOffsets
-      : null;
-    pendingLayoutCustomPositions = Array.isArray(layoutState.customNodePositions)
-      ? layoutState.customNodePositions
-      : null;
-    if (typeof layoutState.title === "string") {
-      layoutTitle = layoutState.title;
-      if (layoutTitleInput) {
-        layoutTitleInput.value = layoutTitle;
-      }
-    }
-    if (typeof layoutState.creator === "string") {
-      layoutCreator = layoutState.creator;
-      if (layoutCreatorInput) {
-        layoutCreatorInput.value = layoutCreator;
-      }
-    }
-    if (Number.isFinite(layoutState.titleSize)) {
-      layoutTitleSize = layoutState.titleSize;
-      if (layoutTitleSizeInput) {
-        layoutTitleSizeInput.value = String(layoutTitleSize);
-      }
-    }
-    if (Number.isFinite(layoutState.creatorSize)) {
-      layoutCreatorSize = layoutState.creatorSize;
-      if (layoutCreatorSizeInput) {
-        layoutCreatorSizeInput.value = String(layoutCreatorSize);
-      }
-    }
-    if (
-      Number.isFinite(layoutState.textScale) &&
-      !Number.isFinite(layoutState.ratioTextSize) &&
-      !Number.isFinite(layoutState.noteTextSize)
-    ) {
-      layoutRatioTextSize = Math.max(10, Math.round(21 * layoutState.textScale));
-      layoutNoteTextSize = Math.max(8, Math.round(11 * layoutState.textScale));
-      layoutTriangleLabelTextSize = Math.max(
-        10,
-        Math.round(LAYOUT_DEFAULTS.triangleLabelTextSize * layoutState.textScale)
-      );
-      if (layoutRatioTextSizeInput) {
-        layoutRatioTextSizeInput.value = String(layoutRatioTextSize);
-      }
-      if (layoutNoteTextSizeInput) {
-        layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
-      }
-      if (layoutTriangleLabelSizeInput) {
-        layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
-      }
-      updateLayoutRatioTextReadout();
-      updateLayoutNoteTextReadout();
-      updateLayoutTriangleLabelReadout();
-    }
-    if (Number.isFinite(layoutState.nodeSize)) {
-      layoutNodeSize = layoutState.nodeSize;
-      if (layoutNodeSizeInput) {
-        layoutNodeSizeInput.value = String(layoutNodeSize);
-      }
-      updateLayoutNodeSizeReadout();
-    }
-    if (Number.isFinite(layoutState.ratioTextSize)) {
-      layoutRatioTextSize = layoutState.ratioTextSize;
-      if (layoutRatioTextSizeInput) {
-        layoutRatioTextSizeInput.value = String(layoutRatioTextSize);
-      }
-      updateLayoutRatioTextReadout();
-    }
-    if (Number.isFinite(layoutState.noteTextSize)) {
-      layoutNoteTextSize = layoutState.noteTextSize;
-      if (layoutNoteTextSizeInput) {
-        layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
-      }
-      updateLayoutNoteTextReadout();
-    }
-    if (Number.isFinite(layoutState.triangleLabelTextSize)) {
-      layoutTriangleLabelTextSize = layoutState.triangleLabelTextSize;
-      if (layoutTriangleLabelSizeInput) {
-        layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
-      }
-      updateLayoutTriangleLabelReadout();
-    } else {
-      layoutTriangleLabelTextSize = Math.max(10, Math.round(layoutNoteTextSize + 6));
-      if (layoutTriangleLabelSizeInput) {
-        layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
-      }
-      updateLayoutTriangleLabelReadout();
-    }
-    if (Number.isFinite(layoutState.customLabelTextSize)) {
-      layoutCustomLabelTextSize = Math.min(
-        36,
-        Math.max(8, Math.round(layoutState.customLabelTextSize))
-      );
-      if (layoutCustomLabelSizeInput) {
-        layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
-      }
-    }
-    if (Number.isFinite(layoutState.keyMappingTextSize)) {
-      layoutKeyMappingTextSize = Math.min(
-        20,
-        Math.max(8, Math.round(layoutState.keyMappingTextSize))
-      );
-      if (layoutKeyMappingSizeInput) {
-        layoutKeyMappingSizeInput.value = String(layoutKeyMappingTextSize);
-      }
-    }
-    if (Number.isFinite(layoutState.keyMappingOffset)) {
-      layoutKeyMappingOffset = Math.min(40, Math.max(0, Math.round(layoutState.keyMappingOffset)));
-      if (layoutKeyMappingOffsetInput) {
-        layoutKeyMappingOffsetInput.value = String(layoutKeyMappingOffset);
-      }
-    }
-    if (typeof layoutState.keyMappingDark === "boolean") {
-      layoutKeyMappingDark = layoutState.keyMappingDark;
-      if (layoutKeyMappingDarkToggle) {
-        layoutKeyMappingDarkToggle.checked = layoutKeyMappingDark;
-      }
-    }
-    if (Number.isFinite(layoutState.axisLegendTextSize)) {
-      layoutAxisLegendTextSize = Math.min(
-        36,
-        Math.max(10, Math.round(layoutState.axisLegendTextSize))
-      );
-      if (layoutAxisSizeInput) {
-        layoutAxisSizeInput.value = String(layoutAxisLegendTextSize);
-      }
-    }
-    if (Number.isFinite(layoutState.lineLabelTextSize)) {
-      layoutLineLabelTextSize = Math.min(
-        28,
-        Math.max(8, Math.round(layoutState.lineLabelTextSize))
-      );
-      if (layoutLineLabelSizeInput) {
-        layoutLineLabelSizeInput.value = String(layoutLineLabelTextSize);
-      }
-    } else {
-      layoutLineLabelTextSize = Math.max(8, Math.round(layoutRatioTextSize * 0.6));
-      if (layoutLineLabelSizeInput) {
-        layoutLineLabelSizeInput.value = String(layoutLineLabelTextSize);
-      }
-    }
-    if (typeof layoutState.keyMappingPrefix === "string") {
-      layoutKeyMappingPrefix = layoutState.keyMappingPrefix;
-      if (layoutKeyMappingPrefixInput) {
-        layoutKeyMappingPrefixInput.value = layoutKeyMappingPrefix;
-      }
-    }
-    if (typeof layoutState.keyMappingSuffix === "string") {
-      layoutKeyMappingSuffix = layoutState.keyMappingSuffix;
-      if (layoutKeyMappingSuffixInput) {
-        layoutKeyMappingSuffixInput.value = layoutKeyMappingSuffix;
-      }
-    }
-    if (layoutState.spacing && typeof layoutState.spacing === "object") {
-      pendingLayoutSpacing = {
-        x: Number(layoutState.spacing.x) || 1,
-        y: Number(layoutState.spacing.y) || 1,
-        z: Number(layoutState.spacing.z) || 1,
-      };
-    }
-    if (Number.isFinite(layoutState.titleMargin)) {
-      layoutTitleMargin = layoutState.titleMargin;
-      if (layoutTitleMarginInput) {
-        layoutTitleMarginInput.value = String(layoutTitleMargin);
-      }
-      updateLayoutTitleMarginReadout();
-    }
-    if (
-      layoutState.titlePosition &&
-      Number.isFinite(layoutState.titlePosition.x) &&
-      Number.isFinite(layoutState.titlePosition.y)
-    ) {
-      layoutTitlePosition = {
-        x: layoutState.titlePosition.x,
-        y: layoutState.titlePosition.y,
-      };
-    } else {
-      layoutTitlePosition = null;
-    }
-    if (
-      layoutState.creatorPosition &&
-      Number.isFinite(layoutState.creatorPosition.x) &&
-      Number.isFinite(layoutState.creatorPosition.y)
-    ) {
-      layoutCreatorPosition = {
-        x: layoutState.creatorPosition.x,
-        y: layoutState.creatorPosition.y,
-      };
-    } else {
-      layoutCreatorPosition = null;
-    }
-    if (layoutState.axisOffsets && typeof layoutState.axisOffsets === "object") {
-      ["x", "y", "z"].forEach((axis) => {
-        const offset = layoutState.axisOffsets[axis];
-        if (offset && Number.isFinite(offset.x) && Number.isFinite(offset.y)) {
-          layoutAxisOffsets[axis] = { x: offset.x, y: offset.y };
-        }
-      });
-    }
-    if (layoutState.axisHidden && typeof layoutState.axisHidden === "object") {
-      ["x", "y", "z"].forEach((axis) => {
-        layoutAxisHidden[axis] = Boolean(layoutState.axisHidden[axis]);
-      });
-    } else {
-      layoutAxisHidden = { ...LAYOUT_DEFAULTS.axisHidden };
-    }
-    if (layoutState.axisAngles && typeof layoutState.axisAngles === "object") {
-      ["x", "y", "z"].forEach((axis) => {
-        const angle = layoutState.axisAngles[axis];
-        layoutAxisAngles[axis] = Number.isFinite(angle) ? angle : null;
-      });
-    }
-    if (typeof layoutState.titleFont === "string") {
-      layoutTitleFont = layoutState.titleFont;
-      if (layoutTitleFontSelect) {
-        layoutTitleFontSelect.value = layoutTitleFont;
-      }
-    }
-    if (typeof layoutState.creatorFont === "string") {
-      layoutCreatorFont = layoutState.creatorFont;
-      if (layoutCreatorFontSelect) {
-        layoutCreatorFontSelect.value = layoutCreatorFont;
-      }
-    }
-    if (typeof layoutState.ratioFont === "string") {
-      layoutRatioFont = layoutState.ratioFont;
-      if (layoutRatioFontSelect) {
-        layoutRatioFontSelect.value = layoutRatioFont;
-      }
-    }
-    if (typeof layoutState.noteFont === "string") {
-      layoutNoteFont = layoutState.noteFont;
-      if (layoutNoteFontSelect) {
-        layoutNoteFontSelect.value = layoutNoteFont;
-      }
-    }
-    if (typeof layoutState.triangleLabelFont === "string") {
-      layoutTriangleLabelFont = layoutState.triangleLabelFont;
-      if (layoutTriangleLabelFontSelect) {
-        layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
-      }
-    }
-    if (typeof layoutState.customLabelFont === "string") {
-      layoutCustomLabelFont = layoutState.customLabelFont;
-      if (layoutCustomFontSelect) {
-        layoutCustomFontSelect.value = layoutCustomLabelFont;
-      }
-    }
-    if (typeof layoutState.keyMappingFont === "string") {
-      layoutKeyMappingFont = layoutState.keyMappingFont;
-      if (layoutKeyMappingFontSelect) {
-        layoutKeyMappingFontSelect.value = layoutKeyMappingFont;
-      }
-    }
-    if (typeof layoutState.axisLegendFont === "string") {
-      layoutAxisLegendFont = layoutState.axisLegendFont;
-      if (layoutAxisFontSelect) {
-        layoutAxisFontSelect.value = layoutAxisLegendFont;
-      }
-    }
-    if (typeof layoutState.lineLabelFont === "string") {
-      layoutLineLabelFont = layoutState.lineLabelFont;
-      if (layoutLineLabelFontSelect) {
-        layoutLineLabelFontSelect.value = layoutLineLabelFont;
-      }
-    } else {
-      layoutLineLabelFont = layoutAxisLegendFont;
-      if (layoutLineLabelFontSelect) {
-        layoutLineLabelFontSelect.value = layoutLineLabelFont;
-      }
-    }
-    if (Number.isFinite(layoutState.axisLegendFontWeight)) {
-      layoutAxisLegendFontWeight = layoutState.axisLegendFontWeight;
-      if (layoutAxisWeightSelect) {
-        layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
-      }
-    }
-    if (Number.isFinite(layoutState.lineLabelFontWeight)) {
-      layoutLineLabelFontWeight = layoutState.lineLabelFontWeight;
-      if (layoutLineLabelWeightSelect) {
-        layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
-      }
-    } else {
-      layoutLineLabelFontWeight = layoutAxisLegendFontWeight;
-      if (layoutLineLabelWeightSelect) {
-        layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
-      }
-    }
-    if (Number.isFinite(layoutState.titleFontWeight)) {
-      layoutTitleFontWeight = layoutState.titleFontWeight;
-      if (layoutTitleWeightSelect) {
-        layoutTitleWeightSelect.value = String(layoutTitleFontWeight);
-      }
-    }
-    if (Number.isFinite(layoutState.creatorFontWeight)) {
-      layoutCreatorFontWeight = layoutState.creatorFontWeight;
-      if (layoutCreatorWeightSelect) {
-        layoutCreatorWeightSelect.value = String(layoutCreatorFontWeight);
-      }
-    }
-    if (Number.isFinite(layoutState.ratioFontWeight)) {
-      layoutRatioFontWeight = layoutState.ratioFontWeight;
-      if (layoutRatioWeightSelect) {
-        layoutRatioWeightSelect.value = String(layoutRatioFontWeight);
-      }
-    }
-    if (Number.isFinite(layoutState.noteFontWeight)) {
-      layoutNoteFontWeight = layoutState.noteFontWeight;
-      if (layoutNoteWeightSelect) {
-        layoutNoteWeightSelect.value = String(layoutNoteFontWeight);
-      }
-    }
-    if (Number.isFinite(layoutState.triangleLabelFontWeight)) {
-      layoutTriangleLabelFontWeight = layoutState.triangleLabelFontWeight;
-      if (layoutTriangleLabelWeightSelect) {
-        layoutTriangleLabelWeightSelect.value = String(layoutTriangleLabelFontWeight);
-      }
-    }
-    if (Number.isFinite(layoutState.customLabelFontWeight)) {
-      layoutCustomLabelFontWeight = layoutState.customLabelFontWeight;
-      if (layoutCustomWeightSelect) {
-        layoutCustomWeightSelect.value = String(layoutCustomLabelFontWeight);
-      }
-    }
-    if (Number.isFinite(layoutState.keyMappingFontWeight)) {
-      layoutKeyMappingFontWeight = layoutState.keyMappingFontWeight;
-      if (layoutKeyMappingWeightSelect) {
-        layoutKeyMappingWeightSelect.value = String(layoutKeyMappingFontWeight);
-      }
-    }
-    if (Array.isArray(layoutState.customLabels)) {
-      layoutCustomLabels = layoutState.customLabels
-        .map((entry) => ({
-          id: Number(entry.id),
-          text: entry.text ? String(entry.text) : "",
-          position: entry.position && Number.isFinite(entry.position.x) && Number.isFinite(entry.position.y)
-            ? { x: entry.position.x, y: entry.position.y }
-            : null,
-        }))
-        .filter((entry) => entry.text && entry.position);
-      const maxId = layoutCustomLabels.reduce(
-        (max, entry) => (Number.isFinite(entry.id) ? Math.max(max, entry.id) : max),
-        0
-      );
-      layoutCustomLabelId = maxId + 1;
-    } else {
-      layoutCustomLabels = [];
-      layoutCustomLabelId = 1;
-    }
-    updateLayoutCustomLabelControls();
-    syncLayoutFontVars();
-    if (typeof layoutState.nodeShape === "string") {
-      layoutNodeShape = layoutState.nodeShape;
-      if (layoutNodeShapeSelect) {
-        layoutNodeShapeSelect.value = layoutNodeShape;
-      }
-    }
-    if (typeof layoutState.keyMappingsMode === "string") {
-      const allowed = new Set(["hide", "unique", "all"]);
-      layoutKeyMappingMode = allowed.has(layoutState.keyMappingsMode)
-        ? layoutState.keyMappingsMode
-        : layoutKeyMappingMode;
-      syncLayoutKeyMappingControls();
-    }
-    if (typeof layoutState.unifyNodeSize === "boolean") {
-      layoutUnifyNodeSize = layoutState.unifyNodeSize;
-      if (layoutUnifySizeToggle) {
-        layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
-      }
-    }
-    if (typeof layoutState.perspectiveTextSize === "boolean") {
-      layoutPerspectiveTextSize = layoutState.perspectiveTextSize;
-    }
-    syncLayoutPerspectiveTextToggleState();
-    if (typeof layoutState.pageSize === "string") {
-      layoutPageSize = layoutState.pageSize;
-      if (layoutPageSizeSelect) {
-        layoutPageSizeSelect.value = layoutPageSize;
-      }
-    }
-    if (typeof layoutState.orientation === "string") {
-      layoutOrientation = layoutState.orientation;
-      if (layoutOrientationSelect) {
-        layoutOrientationSelect.value = layoutOrientation;
-      }
-    }
-    if (typeof layoutState.lockPosition === "boolean") {
-      layoutLockPosition = layoutState.lockPosition;
-    }
-    if (layoutState.view && typeof layoutState.view === "object") {
-      const nextZoom = Number(layoutState.view.zoom);
-      const nextOffsetX = Number(layoutState.view.offsetX);
-      const nextOffsetY = Number(layoutState.view.offsetY);
-      const nextRotX = Number(layoutState.view.rotX);
-      const nextRotY = Number(layoutState.view.rotY);
-      layoutView = {
-        zoom: Number.isFinite(nextZoom) ? nextZoom : layoutView.zoom,
-        offsetX: Number.isFinite(nextOffsetX) ? nextOffsetX : layoutView.offsetX,
-        offsetY: Number.isFinite(nextOffsetY) ? nextOffsetY : layoutView.offsetY,
-        rotX: Number.isFinite(nextRotX) ? nextRotX : layoutView.rotX,
-        rotY: Number.isFinite(nextRotY) ? nextRotY : layoutView.rotY,
-      };
-      if (layoutState.mode && !layoutLockPosition) {
-        view.zoom = layoutView.zoom;
-        view.offsetX = layoutView.offsetX;
-        view.offsetY = layoutView.offsetY;
-        view.rotX = layoutView.rotX;
-        view.rotY = layoutView.rotY;
-      }
-    } else if (Number.isFinite(layoutState.zoom)) {
-      layoutView = {
-        ...layoutView,
-        zoom: Math.min(2.2, Math.max(0.5, layoutState.zoom)),
-      };
-    }
-    if (layoutState.sourceView && typeof layoutState.sourceView === "object") {
-      const srcZoom = Number(layoutState.sourceView.zoom);
-      const srcOffsetX = Number(layoutState.sourceView.offsetX);
-      const srcOffsetY = Number(layoutState.sourceView.offsetY);
-      const srcRotX = Number(layoutState.sourceView.rotX);
-      const srcRotY = Number(layoutState.sourceView.rotY);
-      if (
-        Number.isFinite(srcZoom) &&
-        Number.isFinite(srcOffsetX) &&
-        Number.isFinite(srcOffsetY) &&
-        Number.isFinite(srcRotX) &&
-        Number.isFinite(srcRotY)
-      ) {
-        layoutSourceView = {
-          zoom: srcZoom,
-          offsetX: srcOffsetX,
-          offsetY: srcOffsetY,
-          rotX: srcRotX,
-          rotY: srcRotY,
-        };
-      }
-    }
-    if (Number.isFinite(layoutState.zoom)) {
-      if (layoutMode && layoutLockPosition) {
-        view.zoom = Math.min(2.2, Math.max(0.5, layoutState.zoom));
-        syncLayoutScaleInput();
-      }
-    }
-    if (typeof layoutState.mode === "boolean") {
-      if (layoutMode) {
-        layoutPrevState = {
-          is3DMode,
-          showAxes,
-          showGrid,
-          zoom: view.zoom,
-          offsetX: view.offsetX,
-          offsetY: view.offsetY,
-          rotX: view.rotX,
-          rotY: view.rotY,
-        };
-      }
-      setLayoutMode(layoutState.mode, { force: layoutState.mode && layoutMode });
-      if (layoutState.mode) {
-        layoutLockPosition = true;
-        if (layoutFreezeButton) {
-          layoutFreezeButton.textContent = "Unfreeze";
-        }
-        if (layoutMode) {
-          view.zoom = layoutView.zoom;
-          view.offsetX = layoutView.offsetX;
-          view.offsetY = layoutView.offsetY;
-          view.rotX = layoutView.rotX;
-          view.rotY = layoutView.rotY;
-          syncLayoutScaleInput();
-        }
-      }
-    }
-  }
-  updateLayoutLinkControls();
-
+function applyPresetReadoutAndTuningSettings(state) {
   if (typeof state.featureMode === "string") {
     featureMode = state.featureMode === "note" ? "note" : "ratio";
     syncFeatureModeControls();
@@ -22301,26 +21605,935 @@ function applyPresetState(state, options = {}) {
   invalidateLabelCache();
   updateFundamentalNotes();
   syncFundamentalNoteSelect();
+}
 
+function collectPresetActiveKeys(state) {
   const activeKeys = new Set();
-  if (Array.isArray(state.active)) {
-    state.active.forEach((entry) => {
-      if (!Array.isArray(entry) || entry.length < 2) {
-        return;
+  if (!Array.isArray(state.active)) {
+    return activeKeys;
+  }
+  state.active.forEach((entry) => {
+    if (!Array.isArray(entry) || entry.length < 2) {
+      return;
+    }
+    const [x, y, z = 0] = entry;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return;
+    }
+    activeKeys.add(`${x},${y},${z}`);
+  });
+  return activeKeys;
+}
+
+function applyPresetLayoutMetadataAndSizing(layoutState) {
+  pendingLayoutLabelOffsets = Array.isArray(layoutState.labelOffsets)
+    ? layoutState.labelOffsets
+    : null;
+  pendingLayoutKeyMappingOffsets = Array.isArray(layoutState.keyMappingOffsets)
+    ? layoutState.keyMappingOffsets
+    : null;
+  pendingLayoutPositionOffsets = Array.isArray(layoutState.positionOffsets)
+    ? layoutState.positionOffsets
+    : null;
+  pendingLayoutCustomPositions = Array.isArray(layoutState.customNodePositions)
+    ? layoutState.customNodePositions
+    : null;
+  if (typeof layoutState.title === "string") {
+    layoutTitle = layoutState.title;
+    if (layoutTitleInput) {
+      layoutTitleInput.value = layoutTitle;
+    }
+  }
+  if (typeof layoutState.creator === "string") {
+    layoutCreator = layoutState.creator;
+    if (layoutCreatorInput) {
+      layoutCreatorInput.value = layoutCreator;
+    }
+  }
+  if (Number.isFinite(layoutState.titleSize)) {
+    layoutTitleSize = layoutState.titleSize;
+    if (layoutTitleSizeInput) {
+      layoutTitleSizeInput.value = String(layoutTitleSize);
+    }
+  }
+  if (Number.isFinite(layoutState.creatorSize)) {
+    layoutCreatorSize = layoutState.creatorSize;
+    if (layoutCreatorSizeInput) {
+      layoutCreatorSizeInput.value = String(layoutCreatorSize);
+    }
+  }
+  if (
+    Number.isFinite(layoutState.textScale) &&
+    !Number.isFinite(layoutState.ratioTextSize) &&
+    !Number.isFinite(layoutState.noteTextSize)
+  ) {
+    layoutRatioTextSize = Math.max(10, Math.round(21 * layoutState.textScale));
+    layoutNoteTextSize = Math.max(8, Math.round(11 * layoutState.textScale));
+    layoutTriangleLabelTextSize = Math.max(
+      10,
+      Math.round(LAYOUT_DEFAULTS.triangleLabelTextSize * layoutState.textScale)
+    );
+    if (layoutRatioTextSizeInput) {
+      layoutRatioTextSizeInput.value = String(layoutRatioTextSize);
+    }
+    if (layoutNoteTextSizeInput) {
+      layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
+    }
+    if (layoutTriangleLabelSizeInput) {
+      layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
+    }
+    updateLayoutRatioTextReadout();
+    updateLayoutNoteTextReadout();
+    updateLayoutTriangleLabelReadout();
+  }
+  if (Number.isFinite(layoutState.nodeSize)) {
+    layoutNodeSize = layoutState.nodeSize;
+    if (layoutNodeSizeInput) {
+      layoutNodeSizeInput.value = String(layoutNodeSize);
+    }
+    updateLayoutNodeSizeReadout();
+  }
+  if (Number.isFinite(layoutState.ratioTextSize)) {
+    layoutRatioTextSize = layoutState.ratioTextSize;
+    if (layoutRatioTextSizeInput) {
+      layoutRatioTextSizeInput.value = String(layoutRatioTextSize);
+    }
+    updateLayoutRatioTextReadout();
+  }
+  if (Number.isFinite(layoutState.noteTextSize)) {
+    layoutNoteTextSize = layoutState.noteTextSize;
+    if (layoutNoteTextSizeInput) {
+      layoutNoteTextSizeInput.value = String(layoutNoteTextSize);
+    }
+    updateLayoutNoteTextReadout();
+  }
+  if (Number.isFinite(layoutState.triangleLabelTextSize)) {
+    layoutTriangleLabelTextSize = layoutState.triangleLabelTextSize;
+    if (layoutTriangleLabelSizeInput) {
+      layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
+    }
+    updateLayoutTriangleLabelReadout();
+  } else {
+    layoutTriangleLabelTextSize = Math.max(10, Math.round(layoutNoteTextSize + 6));
+    if (layoutTriangleLabelSizeInput) {
+      layoutTriangleLabelSizeInput.value = String(layoutTriangleLabelTextSize);
+    }
+    updateLayoutTriangleLabelReadout();
+  }
+  if (Number.isFinite(layoutState.customLabelTextSize)) {
+    layoutCustomLabelTextSize = Math.min(
+      36,
+      Math.max(8, Math.round(layoutState.customLabelTextSize))
+    );
+    if (layoutCustomLabelSizeInput) {
+      layoutCustomLabelSizeInput.value = String(layoutCustomLabelTextSize);
+    }
+  }
+  if (Number.isFinite(layoutState.keyMappingTextSize)) {
+    layoutKeyMappingTextSize = Math.min(
+      20,
+      Math.max(8, Math.round(layoutState.keyMappingTextSize))
+    );
+    if (layoutKeyMappingSizeInput) {
+      layoutKeyMappingSizeInput.value = String(layoutKeyMappingTextSize);
+    }
+  }
+  if (Number.isFinite(layoutState.keyMappingOffset)) {
+    layoutKeyMappingOffset = Math.min(40, Math.max(0, Math.round(layoutState.keyMappingOffset)));
+    if (layoutKeyMappingOffsetInput) {
+      layoutKeyMappingOffsetInput.value = String(layoutKeyMappingOffset);
+    }
+  }
+  if (typeof layoutState.keyMappingDark === "boolean") {
+    layoutKeyMappingDark = layoutState.keyMappingDark;
+    if (layoutKeyMappingDarkToggle) {
+      layoutKeyMappingDarkToggle.checked = layoutKeyMappingDark;
+    }
+  }
+  if (Number.isFinite(layoutState.axisLegendTextSize)) {
+    layoutAxisLegendTextSize = Math.min(
+      36,
+      Math.max(10, Math.round(layoutState.axisLegendTextSize))
+    );
+    if (layoutAxisSizeInput) {
+      layoutAxisSizeInput.value = String(layoutAxisLegendTextSize);
+    }
+  }
+  if (Number.isFinite(layoutState.lineLabelTextSize)) {
+    layoutLineLabelTextSize = Math.min(
+      28,
+      Math.max(8, Math.round(layoutState.lineLabelTextSize))
+    );
+    if (layoutLineLabelSizeInput) {
+      layoutLineLabelSizeInput.value = String(layoutLineLabelTextSize);
+    }
+  } else {
+    layoutLineLabelTextSize = Math.max(8, Math.round(layoutRatioTextSize * 0.6));
+    if (layoutLineLabelSizeInput) {
+      layoutLineLabelSizeInput.value = String(layoutLineLabelTextSize);
+    }
+  }
+  if (typeof layoutState.keyMappingPrefix === "string") {
+    layoutKeyMappingPrefix = layoutState.keyMappingPrefix;
+    if (layoutKeyMappingPrefixInput) {
+      layoutKeyMappingPrefixInput.value = layoutKeyMappingPrefix;
+    }
+  }
+  if (typeof layoutState.keyMappingSuffix === "string") {
+    layoutKeyMappingSuffix = layoutState.keyMappingSuffix;
+    if (layoutKeyMappingSuffixInput) {
+      layoutKeyMappingSuffixInput.value = layoutKeyMappingSuffix;
+    }
+  }
+}
+
+function applyPresetLayoutPositioningState(layoutState) {
+  if (layoutState.spacing && typeof layoutState.spacing === "object") {
+    pendingLayoutSpacing = {
+      x: Number(layoutState.spacing.x) || 1,
+      y: Number(layoutState.spacing.y) || 1,
+      z: Number(layoutState.spacing.z) || 1,
+    };
+  }
+  if (Number.isFinite(layoutState.titleMargin)) {
+    layoutTitleMargin = layoutState.titleMargin;
+    if (layoutTitleMarginInput) {
+      layoutTitleMarginInput.value = String(layoutTitleMargin);
+    }
+    updateLayoutTitleMarginReadout();
+  }
+  if (
+    layoutState.titlePosition &&
+    Number.isFinite(layoutState.titlePosition.x) &&
+    Number.isFinite(layoutState.titlePosition.y)
+  ) {
+    layoutTitlePosition = {
+      x: layoutState.titlePosition.x,
+      y: layoutState.titlePosition.y,
+    };
+  } else {
+    layoutTitlePosition = null;
+  }
+  if (
+    layoutState.creatorPosition &&
+    Number.isFinite(layoutState.creatorPosition.x) &&
+    Number.isFinite(layoutState.creatorPosition.y)
+  ) {
+    layoutCreatorPosition = {
+      x: layoutState.creatorPosition.x,
+      y: layoutState.creatorPosition.y,
+    };
+  } else {
+    layoutCreatorPosition = null;
+  }
+  if (layoutState.axisOffsets && typeof layoutState.axisOffsets === "object") {
+    ["x", "y", "z"].forEach((axis) => {
+      const offset = layoutState.axisOffsets[axis];
+      if (offset && Number.isFinite(offset.x) && Number.isFinite(offset.y)) {
+        layoutAxisOffsets[axis] = { x: offset.x, y: offset.y };
       }
-      const [x, y, z = 0] = entry;
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-        return;
-      }
-      activeKeys.add(`${x},${y},${z}`);
     });
   }
-  customNodes = [];
-  rebuildLattice(activeKeys, {
-    remapTriangles: false,
-    remapLayoutOffsets: false,
-    stopVoices: !options.skipStopVoices,
+  if (layoutState.axisHidden && typeof layoutState.axisHidden === "object") {
+    ["x", "y", "z"].forEach((axis) => {
+      layoutAxisHidden[axis] = Boolean(layoutState.axisHidden[axis]);
+    });
+  } else {
+    layoutAxisHidden = { ...LAYOUT_DEFAULTS.axisHidden };
+  }
+  if (layoutState.axisAngles && typeof layoutState.axisAngles === "object") {
+    ["x", "y", "z"].forEach((axis) => {
+      const angle = layoutState.axisAngles[axis];
+      layoutAxisAngles[axis] = Number.isFinite(angle) ? angle : null;
+    });
+  }
+}
+
+function applyPresetLayoutTypographyAndOptions(layoutState) {
+  applyPresetLayoutFontFamilies(layoutState);
+  applyPresetLayoutFontWeights(layoutState);
+  applyPresetLayoutCustomLabels(layoutState);
+  applyPresetLayoutMiscOptions(layoutState);
+}
+
+function applyPresetLayoutFontFamilies(layoutState) {
+  if (typeof layoutState.titleFont === "string") {
+    layoutTitleFont = layoutState.titleFont;
+    if (layoutTitleFontSelect) {
+      layoutTitleFontSelect.value = layoutTitleFont;
+    }
+  }
+  if (typeof layoutState.creatorFont === "string") {
+    layoutCreatorFont = layoutState.creatorFont;
+    if (layoutCreatorFontSelect) {
+      layoutCreatorFontSelect.value = layoutCreatorFont;
+    }
+  }
+  if (typeof layoutState.ratioFont === "string") {
+    layoutRatioFont = layoutState.ratioFont;
+    if (layoutRatioFontSelect) {
+      layoutRatioFontSelect.value = layoutRatioFont;
+    }
+  }
+  if (typeof layoutState.noteFont === "string") {
+    layoutNoteFont = layoutState.noteFont;
+    if (layoutNoteFontSelect) {
+      layoutNoteFontSelect.value = layoutNoteFont;
+    }
+  }
+  if (typeof layoutState.triangleLabelFont === "string") {
+    layoutTriangleLabelFont = layoutState.triangleLabelFont;
+    if (layoutTriangleLabelFontSelect) {
+      layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
+    }
+  }
+  if (typeof layoutState.customLabelFont === "string") {
+    layoutCustomLabelFont = layoutState.customLabelFont;
+    if (layoutCustomFontSelect) {
+      layoutCustomFontSelect.value = layoutCustomLabelFont;
+    }
+  }
+  if (typeof layoutState.keyMappingFont === "string") {
+    layoutKeyMappingFont = layoutState.keyMappingFont;
+    if (layoutKeyMappingFontSelect) {
+      layoutKeyMappingFontSelect.value = layoutKeyMappingFont;
+    }
+  }
+  if (typeof layoutState.axisLegendFont === "string") {
+    layoutAxisLegendFont = layoutState.axisLegendFont;
+    if (layoutAxisFontSelect) {
+      layoutAxisFontSelect.value = layoutAxisLegendFont;
+    }
+  }
+  if (typeof layoutState.lineLabelFont === "string") {
+    layoutLineLabelFont = layoutState.lineLabelFont;
+    if (layoutLineLabelFontSelect) {
+      layoutLineLabelFontSelect.value = layoutLineLabelFont;
+    }
+  } else {
+    layoutLineLabelFont = layoutAxisLegendFont;
+    if (layoutLineLabelFontSelect) {
+      layoutLineLabelFontSelect.value = layoutLineLabelFont;
+    }
+  }
+}
+
+function applyPresetLayoutFontWeights(layoutState) {
+  if (Number.isFinite(layoutState.axisLegendFontWeight)) {
+    layoutAxisLegendFontWeight = layoutState.axisLegendFontWeight;
+    if (layoutAxisWeightSelect) {
+      layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
+    }
+  }
+  if (Number.isFinite(layoutState.lineLabelFontWeight)) {
+    layoutLineLabelFontWeight = layoutState.lineLabelFontWeight;
+    if (layoutLineLabelWeightSelect) {
+      layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
+    }
+  } else {
+    layoutLineLabelFontWeight = layoutAxisLegendFontWeight;
+    if (layoutLineLabelWeightSelect) {
+      layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
+    }
+  }
+  if (Number.isFinite(layoutState.titleFontWeight)) {
+    layoutTitleFontWeight = layoutState.titleFontWeight;
+    if (layoutTitleWeightSelect) {
+      layoutTitleWeightSelect.value = String(layoutTitleFontWeight);
+    }
+  }
+  if (Number.isFinite(layoutState.creatorFontWeight)) {
+    layoutCreatorFontWeight = layoutState.creatorFontWeight;
+    if (layoutCreatorWeightSelect) {
+      layoutCreatorWeightSelect.value = String(layoutCreatorFontWeight);
+    }
+  }
+  if (Number.isFinite(layoutState.ratioFontWeight)) {
+    layoutRatioFontWeight = layoutState.ratioFontWeight;
+    if (layoutRatioWeightSelect) {
+      layoutRatioWeightSelect.value = String(layoutRatioFontWeight);
+    }
+  }
+  if (Number.isFinite(layoutState.noteFontWeight)) {
+    layoutNoteFontWeight = layoutState.noteFontWeight;
+    if (layoutNoteWeightSelect) {
+      layoutNoteWeightSelect.value = String(layoutNoteFontWeight);
+    }
+  }
+  if (Number.isFinite(layoutState.triangleLabelFontWeight)) {
+    layoutTriangleLabelFontWeight = layoutState.triangleLabelFontWeight;
+    if (layoutTriangleLabelWeightSelect) {
+      layoutTriangleLabelWeightSelect.value = String(layoutTriangleLabelFontWeight);
+    }
+  }
+  if (Number.isFinite(layoutState.customLabelFontWeight)) {
+    layoutCustomLabelFontWeight = layoutState.customLabelFontWeight;
+    if (layoutCustomWeightSelect) {
+      layoutCustomWeightSelect.value = String(layoutCustomLabelFontWeight);
+    }
+  }
+  if (Number.isFinite(layoutState.keyMappingFontWeight)) {
+    layoutKeyMappingFontWeight = layoutState.keyMappingFontWeight;
+    if (layoutKeyMappingWeightSelect) {
+      layoutKeyMappingWeightSelect.value = String(layoutKeyMappingFontWeight);
+    }
+  }
+}
+
+function applyPresetLayoutCustomLabels(layoutState) {
+  if (Array.isArray(layoutState.customLabels)) {
+    layoutCustomLabels = layoutState.customLabels
+      .map((entry) => ({
+        id: Number(entry.id),
+        text: entry.text ? String(entry.text) : "",
+        position:
+          entry.position &&
+          Number.isFinite(entry.position.x) &&
+          Number.isFinite(entry.position.y)
+            ? { x: entry.position.x, y: entry.position.y }
+            : null,
+      }))
+      .filter((entry) => entry.text && entry.position);
+    const maxId = layoutCustomLabels.reduce(
+      (max, entry) => (Number.isFinite(entry.id) ? Math.max(max, entry.id) : max),
+      0
+    );
+    layoutCustomLabelId = maxId + 1;
+  } else {
+    layoutCustomLabels = [];
+    layoutCustomLabelId = 1;
+  }
+  updateLayoutCustomLabelControls();
+  syncLayoutFontVars();
+}
+
+function applyPresetLayoutMiscOptions(layoutState) {
+  if (typeof layoutState.nodeShape === "string") {
+    layoutNodeShape = layoutState.nodeShape;
+    if (layoutNodeShapeSelect) {
+      layoutNodeShapeSelect.value = layoutNodeShape;
+    }
+  }
+  if (typeof layoutState.keyMappingsMode === "string") {
+    const allowed = new Set(["hide", "unique", "all"]);
+    layoutKeyMappingMode = allowed.has(layoutState.keyMappingsMode)
+      ? layoutState.keyMappingsMode
+      : layoutKeyMappingMode;
+    syncLayoutKeyMappingControls();
+  }
+  if (typeof layoutState.unifyNodeSize === "boolean") {
+    layoutUnifyNodeSize = layoutState.unifyNodeSize;
+    if (layoutUnifySizeToggle) {
+      layoutUnifySizeToggle.checked = layoutUnifyNodeSize;
+    }
+  }
+  if (typeof layoutState.perspectiveTextSize === "boolean") {
+    layoutPerspectiveTextSize = layoutState.perspectiveTextSize;
+  }
+  syncLayoutPerspectiveTextToggleState();
+  if (typeof layoutState.pageSize === "string") {
+    layoutPageSize = layoutState.pageSize;
+    if (layoutPageSizeSelect) {
+      layoutPageSizeSelect.value = layoutPageSize;
+    }
+  }
+  if (typeof layoutState.orientation === "string") {
+    layoutOrientation = layoutState.orientation;
+    if (layoutOrientationSelect) {
+      layoutOrientationSelect.value = layoutOrientation;
+    }
+  }
+  if (typeof layoutState.lockPosition === "boolean") {
+    layoutLockPosition = layoutState.lockPosition;
+  }
+}
+
+function applyPresetLayoutViewAndModeState(layoutState) {
+  if (layoutState.view && typeof layoutState.view === "object") {
+    const nextZoom = Number(layoutState.view.zoom);
+    const nextOffsetX = Number(layoutState.view.offsetX);
+    const nextOffsetY = Number(layoutState.view.offsetY);
+    const nextRotX = Number(layoutState.view.rotX);
+    const nextRotY = Number(layoutState.view.rotY);
+    layoutView = {
+      zoom: Number.isFinite(nextZoom) ? nextZoom : layoutView.zoom,
+      offsetX: Number.isFinite(nextOffsetX) ? nextOffsetX : layoutView.offsetX,
+      offsetY: Number.isFinite(nextOffsetY) ? nextOffsetY : layoutView.offsetY,
+      rotX: Number.isFinite(nextRotX) ? nextRotX : layoutView.rotX,
+      rotY: Number.isFinite(nextRotY) ? nextRotY : layoutView.rotY,
+    };
+    if (layoutState.mode && !layoutLockPosition) {
+      view.zoom = layoutView.zoom;
+      view.offsetX = layoutView.offsetX;
+      view.offsetY = layoutView.offsetY;
+      view.rotX = layoutView.rotX;
+      view.rotY = layoutView.rotY;
+    }
+  } else if (Number.isFinite(layoutState.zoom)) {
+    layoutView = {
+      ...layoutView,
+      zoom: Math.min(2.2, Math.max(0.5, layoutState.zoom)),
+    };
+  }
+  if (layoutState.sourceView && typeof layoutState.sourceView === "object") {
+    const srcZoom = Number(layoutState.sourceView.zoom);
+    const srcOffsetX = Number(layoutState.sourceView.offsetX);
+    const srcOffsetY = Number(layoutState.sourceView.offsetY);
+    const srcRotX = Number(layoutState.sourceView.rotX);
+    const srcRotY = Number(layoutState.sourceView.rotY);
+    if (
+      Number.isFinite(srcZoom) &&
+      Number.isFinite(srcOffsetX) &&
+      Number.isFinite(srcOffsetY) &&
+      Number.isFinite(srcRotX) &&
+      Number.isFinite(srcRotY)
+    ) {
+      layoutSourceView = {
+        zoom: srcZoom,
+        offsetX: srcOffsetX,
+        offsetY: srcOffsetY,
+        rotX: srcRotX,
+        rotY: srcRotY,
+      };
+    }
+  }
+  if (Number.isFinite(layoutState.zoom)) {
+    if (layoutMode && layoutLockPosition) {
+      view.zoom = Math.min(2.2, Math.max(0.5, layoutState.zoom));
+      syncLayoutScaleInput();
+    }
+  }
+  if (typeof layoutState.mode === "boolean") {
+    if (layoutMode) {
+      layoutPrevState = {
+        is3DMode,
+        showAxes,
+        showGrid,
+        zoom: view.zoom,
+        offsetX: view.offsetX,
+        offsetY: view.offsetY,
+        rotX: view.rotX,
+        rotY: view.rotY,
+      };
+    }
+    setLayoutMode(layoutState.mode, { force: layoutState.mode && layoutMode });
+    if (layoutState.mode) {
+      layoutLockPosition = true;
+      if (layoutFreezeButton) {
+        layoutFreezeButton.textContent = "Unfreeze";
+      }
+      if (layoutMode) {
+        view.zoom = layoutView.zoom;
+        view.offsetX = layoutView.offsetX;
+        view.offsetY = layoutView.offsetY;
+        view.rotX = layoutView.rotX;
+        view.rotY = layoutView.rotY;
+        syncLayoutScaleInput();
+      }
+    }
+  }
+}
+
+function applyPresetLayoutState(layoutState) {
+  if (!layoutState) {
+    return;
+  }
+  applyPresetLayoutMetadataAndSizing(layoutState);
+  applyPresetLayoutPositioningState(layoutState);
+  applyPresetLayoutTypographyAndOptions(layoutState);
+  applyPresetLayoutViewAndModeState(layoutState);
+}
+
+function applyPresetTrianglesState(presetTriangles, targetCenterZ, targetDepth) {
+  if (!presetTriangles) {
+    return;
+  }
+  presetTriangles.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const plane = entry.plane;
+    const diag = entry.diag;
+    if (plane !== "xy" && plane !== "xz" && plane !== "yz") {
+      return;
+    }
+    if (diag !== "backslash" && diag !== "slash") {
+      return;
+    }
+    const x = Number(entry.x);
+    const y = Number(entry.y);
+    const expZ = Number(entry.expZ);
+    const z = Number.isFinite(expZ)
+      ? targetCenterZ - expZ
+      : Number(entry.z);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return;
+    }
+    if (z < 0 || z >= targetDepth) {
+      return;
+    }
+    const tri = typeof entry.tri === "string" ? entry.tri : "";
+    const label = typeof entry.label === "string" ? entry.label : "";
+    const normalized = { plane, x, y, z, diag, tri };
+    triangleDiagonals.set(triangleKey(normalized), normalized);
+    if (label) {
+      const labelTri = TRIANGLE_TRI_IDS.has(tri)
+        ? tri
+        : diag === "backslash"
+        ? "abd"
+        : "abc";
+      const labelEntry = normalizeTriangleLabelEntry({
+        plane,
+        x,
+        y,
+        z,
+        tri: labelTri,
+        label,
+      });
+      triangleLabels.set(triangleLabelKey(labelEntry), labelEntry);
+    }
   });
+}
+
+function applyPresetTriangleLabelsState(
+  presetTriangleLabels,
+  targetCenterZ,
+  targetDepth
+) {
+  if (!presetTriangleLabels) {
+    return;
+  }
+  presetTriangleLabels.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const plane = entry.plane;
+    if (plane !== "xy" && plane !== "xz" && plane !== "yz") {
+      return;
+    }
+    const tri = typeof entry.tri === "string" ? entry.tri : "";
+    if (!TRIANGLE_TRI_IDS.has(tri)) {
+      return;
+    }
+    const x = Number(entry.x);
+    const y = Number(entry.y);
+    const expZ = Number(entry.expZ);
+    const z = Number.isFinite(expZ)
+      ? targetCenterZ - expZ
+      : Number(entry.z);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return;
+    }
+    if (z < 0 || z >= targetDepth) {
+      return;
+    }
+    const label = typeof entry.label === "string" ? entry.label : "";
+    if (!label) {
+      return;
+    }
+    const normalized = normalizeTriangleLabelEntry({ plane, x, y, z, tri, label });
+    triangleLabels.set(triangleLabelKey(normalized), normalized);
+  });
+}
+
+function applyPendingPresetLayoutState() {
+  const applyAndClearWithDraw = (value, applyFn, clearFn = null) => {
+    if (!value) {
+      return false;
+    }
+    applyFn(value);
+    if (clearFn) {
+      clearFn();
+    }
+    draw();
+    return true;
+  };
+
+  applyAndClearWithDraw(
+    pendingLayoutLabelOffsets,
+    applyLayoutLabelOffsets,
+    () => {
+      pendingLayoutLabelOffsets = null;
+    }
+  );
+  applyAndClearWithDraw(
+    pendingLayoutKeyMappingOffsets,
+    applyLayoutKeyMappingOffsets,
+    () => {
+      pendingLayoutKeyMappingOffsets = null;
+    }
+  );
+  if (pendingLayoutSpacing) {
+    layoutPositions.clear();
+    applyLayoutSpacing(pendingLayoutSpacing);
+    pendingLayoutSpacing = null;
+    updateLayoutSpacingControls();
+    draw();
+  }
+  applyAndClearWithDraw(
+    pendingLayoutPositionOffsets,
+    applyLayoutPositionOffsets,
+    () => {
+      pendingLayoutPositionOffsets = null;
+    }
+  );
+  applyAndClearWithDraw(
+    pendingLayoutCustomPositions,
+    applyLayoutCustomNodePositions,
+    () => {
+      pendingLayoutCustomPositions = null;
+    }
+  );
+}
+
+function applyPresetSynthState(synthState) {
+  if (!synthState || typeof synthState !== "object") {
+    return;
+  }
+  if (Number.isFinite(synthState.volume)) {
+    volumeSlider.value = String(synthState.volume);
+    updateVolume();
+  }
+  if (Number.isFinite(synthState.lfoDepth) && lfoDepthSlider) {
+    lfoDepthSlider.value = String(synthState.lfoDepth);
+    updateLfoDepth();
+  }
+  if (Number.isFinite(synthState.lfoRate) && lfoRateSlider) {
+    setLfoRateSlider(synthState.lfoRate);
+    updateLfoRate();
+  }
+  if (keyboardModeSelect && typeof synthState.keyboardMode === "string") {
+    keyboardModeSelect.value = synthState.keyboardMode;
+    if (keyboardModeSelect.value === "piano-custom") {
+      if (keyboardMapToggle) {
+        keyboardMapToggle.hidden = false;
+      }
+      if (keyboardMapClear) {
+        keyboardMapClear.hidden = false;
+      }
+      updateCustomPianoKeyStyles();
+      closeKeyboardMapPopover();
+    } else {
+      if (keyboardMapToggle) {
+        keyboardMapToggle.hidden = true;
+      }
+      if (keyboardMapClear) {
+        keyboardMapClear.hidden = true;
+      }
+      setCustomPianoMapMode(false);
+      closeKeyboardMapPopover();
+    }
+    updateUiHint();
+    updateKeyMappingToggleVisibility();
+    markIsomorphicDirty();
+  }
+  if (Array.isArray(synthState.customPianoMap)) {
+    pendingCustomPianoMap = synthState.customPianoMap;
+  } else {
+    pendingCustomPianoMap = [];
+  }
+  if (typeof synthState.mode === "string") {
+    synthMode = synthState.mode;
+  }
+  if (waveformSelect && typeof synthState.waveform === "string") {
+    waveformSelect.value = synthState.waveform;
+  }
+  if (physicalModelSelect && typeof synthState.physicalModel === "string") {
+    physicalModelSelect.value = synthState.physicalModel;
+  }
+  if (Number.isFinite(synthState.soundfontPreset)) {
+    soundfontPresetIndex = Math.trunc(synthState.soundfontPreset);
+  }
+  syncSynthModeUI();
+  handleSynthTypeChange();
+  if (Number.isFinite(synthState.attack)) {
+    setEnvelopeSliderFromValue(attackSlider, Number(synthState.attack));
+  }
+  if (Number.isFinite(synthState.decay)) {
+    setEnvelopeSliderFromValue(decaySlider, Number(synthState.decay));
+  }
+  if (Number.isFinite(synthState.sustain)) {
+    sustainSlider.value = String(synthState.sustain);
+  }
+  if (Number.isFinite(synthState.release)) {
+    setEnvelopeSliderFromValue(releaseSlider, Number(synthState.release));
+  }
+  if (oneShotCheckbox && typeof synthState.oneShot === "boolean") {
+    oneShotCheckbox.checked = synthState.oneShot;
+  }
+  if (typeof synthState.envelopeTimeMode === "string") {
+    envelopeTimeMode = synthState.envelopeTimeMode === "tempo" ? "tempo" : "absolute";
+    envelopeTimeModeInputs.forEach((input) => {
+      input.checked = input.value === envelopeTimeMode;
+    });
+  }
+  updateEnvelopeReadouts();
+  updatePatternLengthAvailability();
+}
+
+function applyPresetViewState(viewState) {
+  if (!viewState) {
+    return;
+  }
+  if (Number.isFinite(viewState.zoom)) {
+    view.zoom = Math.min(2.2, Math.max(0.5, viewState.zoom));
+  }
+  if (Number.isFinite(viewState.offsetX)) {
+    view.offsetX = viewState.offsetX;
+  }
+  if (Number.isFinite(viewState.offsetY)) {
+    view.offsetY = viewState.offsetY;
+  }
+  if (Number.isFinite(viewState.rotX)) {
+    view.rotX = Math.max(-1.2, Math.min(1.2, viewState.rotX));
+  }
+  if (Number.isFinite(viewState.rotY)) {
+    view.rotY = viewState.rotY;
+  }
+}
+
+function getPresetDepthContext(state, layoutState) {
+  const activeHasZ = Array.isArray(state.active)
+    ? state.active.some((entry) => Array.isArray(entry) && Number(entry[2]) !== 0)
+    : false;
+  const wants3D = Boolean(state.mode3d) || activeHasZ;
+  const layoutHasTilt =
+    Boolean(layoutState && layoutState.view && typeof layoutState.view === "object") &&
+    (Math.abs(Number(layoutState.view.rotX) || 0) > 1e-6 ||
+      Math.abs(Number(layoutState.view.rotY) || 0) > 1e-6);
+  const layoutNeedsProjectedDepth =
+    Boolean(layoutState && layoutState.mode) && layoutHasTilt;
+  const targetDepth = wants3D || layoutNeedsProjectedDepth ? GRID_DEPTH : 1;
+  const targetCenterZ = Math.floor(targetDepth / 2);
+  return {
+    wants3D,
+    targetDepth,
+    targetCenterZ,
+  };
+}
+
+function applyPresetModeUiState(wants3D, preserveViewMode) {
+  if (mode3dCheckbox) {
+    if (!preserveViewMode) {
+      mode3dCheckbox.checked = wants3D;
+    }
+  }
+  if (!preserveViewMode) {
+    is3DMode = wants3D;
+  }
+  isFlattened2D = preserveViewMode ? (!is3DMode && wants3D) : false;
+  if (!preserveViewMode) {
+    updateNavPanelVisibility();
+    syncViewModeControls();
+  }
+  if (ratioZSelect) {
+    ratioZSelect.hidden = false;
+  }
+  if (!wants3D) {
+    clearAxisStack();
+  }
+  updateAddModeFromShift();
+  updateUiHint();
+}
+
+function initializePresetApplyContext(state, options = {}) {
+  const preserveViewMode = Boolean(options.preserveViewMode);
+  snapshotBaseState = state.snapshotBase || null;
+  if (Array.isArray(state.snapshots)) {
+    applySnapshotsFromPreset(state.snapshots);
+    snapshotActiveIndex = Number.isFinite(state.snapshotActive)
+      ? Math.trunc(state.snapshotActive)
+      : snapshotActiveIndex;
+    updateSnapshotUi();
+  }
+  if (Array.isArray(state.snapshotsLetters)) {
+    applyLetterSnapshotsFromPreset(state.snapshotsLetters);
+    snapshotActiveLetterKey = typeof state.snapshotActiveLetter === "string"
+      ? state.snapshotActiveLetter
+      : snapshotActiveLetterKey;
+    updateSnapshotUi();
+  }
+  applyPresetSnapshotSettings(state.snapshotSettings);
+  const layoutState = state.layout && typeof state.layout === "object" ? state.layout : null;
+  const presetWants3D = Boolean(state.mode3d);
+  applyPresetLayoutModeSelection(
+    layoutState,
+    presetWants3D,
+    preserveViewMode,
+    Boolean(options.skipLayoutModeSwitch)
+  );
+  resetPresetAnalysisState();
+  pendingLayoutSpacing = null;
+  pendingLayoutCustomPositions = null;
+  pendingCustomPianoMap = null;
+  const { pendingLineLabelOverridesState, pendingLineLabelPositionsState } =
+    getPendingPresetLineLabelState(state);
+  lineLabelOverrides.clear();
+  lineLabelPositionOverrides.clear();
+  applyPresetDisplayToggleState(state);
+  applyPresetDistanceState(state);
+  const viewState = state.view && typeof state.view === "object" ? state.view : null;
+  layoutSourceView = null;
+  const { wants3D, targetDepth, targetCenterZ } = getPresetDepthContext(
+    state,
+    layoutState
+  );
+  gridDepth = targetDepth;
+  gridCenterZ = targetCenterZ;
+  const presetTriangles = Array.isArray(state.triangles) ? state.triangles : null;
+  const presetTriangleLabels = Array.isArray(state.triangleLabels)
+    ? state.triangleLabels
+    : null;
+  applyPresetModeUiState(wants3D, preserveViewMode);
+  return {
+    layoutState,
+    pendingLineLabelOverridesState,
+    pendingLineLabelPositionsState,
+    viewState,
+    targetDepth,
+    targetCenterZ,
+    presetTriangles,
+    presetTriangleLabels,
+  };
+}
+
+function applyPresetCoreTuningState(state) {
+  if (Number.isFinite(state.fundamental)) {
+    fundamentalInput.value = String(state.fundamental);
+  }
+  if (Number.isFinite(state.a4)) {
+    a4Input.value = String(state.a4);
+  }
+  if (typeof state.fundamentalSpelling === "string") {
+    fundamentalSpelling = state.fundamentalSpelling === "flat" ? "flat" : "sharp";
+  }
+  if (Array.isArray(state.ratios)) {
+    const [x, y, z] = state.ratios;
+    if (Number.isFinite(x)) {
+      ratioXSelect.value = String(x);
+    }
+    if (Number.isFinite(y)) {
+      ratioYSelect.value = String(y);
+    }
+    if (Number.isFinite(z) && ratioZSelect) {
+      ratioZSelect.value = String(z);
+    }
+  }
+  if (state.exponentOffset && typeof state.exponentOffset === "object") {
+    latticeExponentOffset = {
+      x: Number(state.exponentOffset.x) || 0,
+      y: Number(state.exponentOffset.y) || 0,
+      z: Number(state.exponentOffset.z) || 0,
+    };
+  } else {
+    latticeExponentOffset = { x: 0, y: 0, z: 0 };
+  }
+}
+
+function applyPresetPostRebuildState(
+  state,
+  presetContext
+) {
   applyPresetCustomNodes(state.customNodes);
   if (pendingCustomPianoMap) {
     applyCustomPianoMap(pendingCustomPianoMap);
@@ -22329,146 +22542,56 @@ function applyPresetState(state, options = {}) {
   refreshPatternFromActiveNodes();
   triangleDiagonals.clear();
   triangleLabels.clear();
-  lineLabelOverrides.clear();
-  lineLabelPositionOverrides.clear();
-  if (pendingLineLabelOverridesState) {
-    pendingLineLabelOverridesState.forEach((entry) => {
-      if (!Array.isArray(entry) || entry.length < 2) {
-        return;
-      }
-      const key = String(entry[0] || "");
-      if (!key) {
-        return;
-      }
-      lineLabelOverrides.set(key, Boolean(entry[1]));
-    });
-  }
-  if (pendingLineLabelPositionsState) {
-    pendingLineLabelPositionsState.forEach((entry) => {
-      if (!Array.isArray(entry) || entry.length < 2) {
-        return;
-      }
-      const key = String(entry[0] || "");
-      const value = Number(entry[1]);
-      if (!key || !Number.isFinite(value)) {
-        return;
-      }
-      const clamped = Math.max(0, Math.min(1, value));
-      lineLabelPositionOverrides.set(key, clamped);
-    });
-  }
-  if (presetTriangles) {
-    presetTriangles.forEach((entry) => {
-      if (!entry || typeof entry !== "object") {
-        return;
-      }
-      const plane = entry.plane;
-      const diag = entry.diag;
-      if (plane !== "xy" && plane !== "xz" && plane !== "yz") {
-        return;
-      }
-      if (diag !== "backslash" && diag !== "slash") {
-        return;
-      }
-      const x = Number(entry.x);
-      const y = Number(entry.y);
-      const expZ = Number(entry.expZ);
-      const z = Number.isFinite(expZ)
-        ? targetCenterZ - expZ
-        : Number(entry.z);
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-        return;
-      }
-      if (z < 0 || z >= targetDepth) {
-        return;
-      }
-      const tri = typeof entry.tri === "string" ? entry.tri : "";
-      const label = typeof entry.label === "string" ? entry.label : "";
-      const normalized = { plane, x, y, z, diag, tri };
-      triangleDiagonals.set(triangleKey(normalized), normalized);
-      if (label) {
-        const labelTri = TRIANGLE_TRI_IDS.has(tri)
-          ? tri
-          : diag === "backslash"
-          ? "abd"
-          : "abc";
-        const labelEntry = normalizeTriangleLabelEntry({
-          plane,
-          x,
-          y,
-          z,
-          tri: labelTri,
-          label,
-        });
-        triangleLabels.set(triangleLabelKey(labelEntry), labelEntry);
-      }
-    });
-  }
-  if (presetTriangleLabels) {
-    presetTriangleLabels.forEach((entry) => {
-      if (!entry || typeof entry !== "object") {
-        return;
-      }
-      const plane = entry.plane;
-      if (plane !== "xy" && plane !== "xz" && plane !== "yz") {
-        return;
-      }
-      const tri = typeof entry.tri === "string" ? entry.tri : "";
-      if (!TRIANGLE_TRI_IDS.has(tri)) {
-        return;
-      }
-      const x = Number(entry.x);
-      const y = Number(entry.y);
-      const expZ = Number(entry.expZ);
-      const z = Number.isFinite(expZ)
-        ? targetCenterZ - expZ
-        : Number(entry.z);
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-        return;
-      }
-      if (z < 0 || z >= targetDepth) {
-        return;
-      }
-      const label = typeof entry.label === "string" ? entry.label : "";
-      if (!label) {
-        return;
-      }
-      const normalized = normalizeTriangleLabelEntry({ plane, x, y, z, tri, label });
-      triangleLabels.set(triangleLabelKey(normalized), normalized);
-    });
-  }
-  if (pendingLayoutLabelOffsets) {
-    applyLayoutLabelOffsets(pendingLayoutLabelOffsets);
-    pendingLayoutLabelOffsets = null;
-    draw();
-  }
-  if (pendingLayoutKeyMappingOffsets) {
-    applyLayoutKeyMappingOffsets(pendingLayoutKeyMappingOffsets);
-    pendingLayoutKeyMappingOffsets = null;
-    draw();
-  }
-  if (pendingLayoutSpacing) {
-    layoutPositions.clear();
-    applyLayoutSpacing(pendingLayoutSpacing);
-    pendingLayoutSpacing = null;
-    updateLayoutSpacingControls();
-    draw();
-  }
-  if (pendingLayoutPositionOffsets) {
-    applyLayoutPositionOffsets(pendingLayoutPositionOffsets);
-    pendingLayoutPositionOffsets = null;
-    draw();
-  }
-  if (pendingLayoutCustomPositions) {
-    applyLayoutCustomNodePositions(pendingLayoutCustomPositions);
-    pendingLayoutCustomPositions = null;
-    draw();
-  }
+  applyPresetLineLabelState(
+    presetContext.pendingLineLabelOverridesState,
+    presetContext.pendingLineLabelPositionsState
+  );
+  applyPresetTrianglesState(
+    presetContext.presetTriangles,
+    presetContext.targetCenterZ,
+    presetContext.targetDepth
+  );
+  applyPresetTriangleLabelsState(
+    presetContext.presetTriangleLabels,
+    presetContext.targetCenterZ,
+    presetContext.targetDepth
+  );
+  applyPendingPresetLayoutState();
   if (state.play && !layoutMode) {
     applyPlayState(state.play);
   }
   draw();
   queuePresetFontRecalc();
+}
+
+function applyPresetPreRebuildState(state, presetContext) {
+  applyPresetLayoutState(presetContext.layoutState);
+  updateLayoutLinkControls();
+  applyPresetReadoutAndTuningSettings(state);
+  return collectPresetActiveKeys(state);
+}
+
+function runPresetApplyPipeline(state, options, presetContext) {
+  applyPresetCoreTuningState(state);
+  applyPresetSpellingAndOctaveState(state);
+  applyPresetSynthState(state.synth);
+  applyPresetViewState(presetContext.viewState);
+  const activeKeys = applyPresetPreRebuildState(state, presetContext);
+  customNodes = [];
+  rebuildLattice(activeKeys, {
+    remapTriangles: false,
+    remapLayoutOffsets: false,
+    stopVoices: !options.skipStopVoices,
+  });
+  applyPresetPostRebuildState(state, presetContext);
+}
+
+function applyPresetState(state, options = {}) {
+  if (!state || typeof state !== "object") {
+    return;
+  }
+  const presetContext = initializePresetApplyContext(state, options);
+  runPresetApplyPipeline(state, options, presetContext);
 }
 
 function formatActiveRatiosForScaleWorkshop() {
@@ -26786,7 +26909,16 @@ if (layoutPerspectiveTextSizeToggle) {
 if (layoutResetButton) {
   layoutResetButton.addEventListener("click", () => {
     pushLayoutUndoState();
+    if (layoutMode) {
+      setLayoutMode(false);
+    }
+    if (mode3dCheckbox) {
+      mode3dCheckbox.checked = false;
+    }
+    set3DMode(false, { preserveDepth: false });
+    isFlattened2D = false;
     resetLayoutState({ resetView: false });
+    draw();
     schedulePresetUrlUpdate();
   });
 }
@@ -27115,7 +27247,7 @@ keyboardModeSelect.addEventListener("change", () => {
 });
 if (keyboardMapToggle) {
   keyboardMapToggle.addEventListener("click", () => {
-    if (!isCustomPianoMode()) {
+    if (!isCustomPianoMode() || layoutMode) {
       return;
     }
     const next = !customPianoMapMode;

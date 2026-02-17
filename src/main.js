@@ -735,6 +735,39 @@ function serializeLayoutCustomNodePositions() {
     .filter(Boolean);
 }
 
+function serializeLayoutNodeShapes() {
+  return Array.from(layoutNodeShapes.entries())
+    .map(([id, shape]) => {
+      const node = nodeById.get(id);
+      if (!node || typeof shape !== "string" || !shape) {
+        return null;
+      }
+      if (node.isCustom) {
+        const source = nodeById.get(node.sourceNodeId);
+        const sourceExponents = Array.isArray(node.sourceExponents)
+          ? node.sourceExponents
+          : source
+          ? [source.exponentX, source.exponentY, source.exponentZ || 0]
+          : null;
+        if (!sourceExponents) {
+          return null;
+        }
+        return {
+          sourceExponents,
+          customSlot: node.customSlot,
+          factorNumerator: node.factorNumerator,
+          factorDenominator: node.factorDenominator,
+          shape,
+        };
+      }
+      return {
+        exponents: [node.exponentX, node.exponentY, node.exponentZ || 0],
+        shape,
+      };
+    })
+    .filter(Boolean);
+}
+
 function applyLayoutCustomNodePositions(entries) {
   if (!Array.isArray(entries)) {
     return;
@@ -792,6 +825,52 @@ function applyLayoutCustomNodePositions(entries) {
       return;
     }
     layoutPositions.delete(node.id);
+  });
+}
+
+function applyLayoutNodeShapes(entries) {
+  layoutNodeShapes.clear();
+  customNodes.forEach((node) => {
+    layoutNodeShapes.set(node.id, "diamond");
+  });
+  if (!Array.isArray(entries)) {
+    return;
+  }
+  const exponentMap = new Map();
+  const customMap = new Map();
+  nodes.forEach((node) => {
+    if (!node.isCustom) {
+      exponentMap.set(`${node.exponentX},${node.exponentY},${node.exponentZ || 0}`, node);
+    } else if (Array.isArray(node.sourceExponents)) {
+      const [expX, expY, expZ = 0] = node.sourceExponents;
+      customMap.set(`${expX},${expY},${expZ}|${node.customSlot}`, node);
+    }
+  });
+  entries.forEach((entry) => {
+    if (!entry || typeof entry !== "object" || typeof entry.shape !== "string" || !entry.shape) {
+      return;
+    }
+    if (Array.isArray(entry.exponents) && entry.exponents.length >= 2) {
+      const [expX, expY, expZ = 0] = entry.exponents.map(Number);
+      const node = exponentMap.get(`${expX},${expY},${expZ}`);
+      if (node) {
+        layoutNodeShapes.set(node.id, entry.shape);
+      }
+      return;
+    }
+    const customSlot = Number(entry.customSlot);
+    if (Number.isFinite(customSlot)) {
+      const sourceExponents = Array.isArray(entry.sourceExponents)
+        ? entry.sourceExponents
+        : null;
+      if (sourceExponents && sourceExponents.length >= 2) {
+        const [expX, expY, expZ = 0] = sourceExponents.map(Number);
+        const node = customMap.get(`${expX},${expY},${expZ}|${customSlot}`);
+        if (node) {
+          layoutNodeShapes.set(node.id, entry.shape);
+        }
+      }
+    }
   });
 }
 
@@ -1116,6 +1195,7 @@ function refreshLayoutFromView({ flatten = false } = {}) {
   const preservedCreator = layoutCreator;
   const preservedTitlePos = layoutTitlePosition ? { ...layoutTitlePosition } : null;
   const preservedCreatorPos = layoutCreatorPosition ? { ...layoutCreatorPosition } : null;
+  const preservedNodeShapes = new Map(layoutNodeShapes);
 
   layoutPositions.clear();
   layoutPositionOffsets.clear();
@@ -1131,6 +1211,7 @@ function refreshLayoutFromView({ flatten = false } = {}) {
   layoutCreator = preservedCreator;
   layoutTitlePosition = preservedTitlePos;
   layoutCreatorPosition = preservedCreatorPos;
+  layoutNodeShapes = preservedNodeShapes;
 
   if (flatten) {
     const sourceView = {
@@ -1542,6 +1623,7 @@ let pendingLayoutLabelOffsets = null;
 let pendingLayoutPositionOffsets = null;
 let pendingLayoutKeyMappingOffsets = null;
 let pendingLayoutCustomPositions = null;
+let pendingLayoutNodeShapes = null;
 let pendingLayoutSpacing = null;
 let customNodeDrag = null;
 let layoutNodeShapes = new Map();
@@ -17325,8 +17407,13 @@ function serializeCustomPianoMap() {
     key,
     Array.from(nodes).map((nodeId) => {
       const node = nodeById.get(nodeId);
-      if (!node || !node.isCustom) {
+      if (!node) {
         return nodeId;
+      }
+      if (!node.isCustom) {
+        return {
+          exponents: [node.exponentX, node.exponentY, node.exponentZ || 0],
+        };
       }
       const source = nodeById.get(node.sourceNodeId);
       const sourceExponents = Array.isArray(node.sourceExponents)
@@ -17347,6 +17434,15 @@ function serializeCustomPianoMap() {
 function applyCustomPianoMap(serialized) {
   customPianoMap = new Map();
   if (Array.isArray(serialized)) {
+    const baseByExponents = new Map();
+    nodes.forEach((node) => {
+      if (node && !node.isCustom) {
+        baseByExponents.set(
+          `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`,
+          node
+        );
+      }
+    });
     const customByKey = new Map();
     customNodes.forEach((node) => {
       if (!Array.isArray(node.sourceExponents)) {
@@ -17368,10 +17464,22 @@ function applyCustomPianoMap(serialized) {
       const set = new Set();
       nodes.forEach((nodeRef) => {
         if (Number.isFinite(nodeRef)) {
+          // Legacy format fallback.
           set.add(nodeRef);
           return;
         }
         if (!nodeRef || typeof nodeRef !== "object") {
+          return;
+        }
+        if (Array.isArray(nodeRef.exponents) && nodeRef.exponents.length >= 2) {
+          const [expX, expY, expZ = 0] = nodeRef.exponents.map(Number);
+          if (!Number.isFinite(expX) || !Number.isFinite(expY) || !Number.isFinite(expZ)) {
+            return;
+          }
+          const resolvedBase = baseByExponents.get(`${expX},${expY},${expZ}`);
+          if (resolvedBase) {
+            set.add(resolvedBase.id);
+          }
           return;
         }
         const slot = Number(nodeRef.customSlot);
@@ -20545,6 +20653,7 @@ function buildPresetLayoutState(layoutViewState, layoutSourceViewState) {
     })),
     positionOffsets: serializeLayoutPositionOffsets(),
     customNodePositions: serializeLayoutCustomNodePositions(),
+    nodeShapes: serializeLayoutNodeShapes(),
     labelOffsets: serializeLayoutLabelOffsets(),
     keyMappingOffsets: serializeLayoutKeyMappingOffsets(),
     axisOffsets: layoutAxisOffsets,
@@ -20646,6 +20755,7 @@ function buildPresetLayoutState(layoutViewState, layoutSourceViewState) {
   if (isEmptyArray(layoutState.customLabels)) delete layoutState.customLabels;
   if (isEmptyArray(layoutState.positionOffsets)) delete layoutState.positionOffsets;
   if (isEmptyArray(layoutState.customNodePositions)) delete layoutState.customNodePositions;
+  if (isEmptyArray(layoutState.nodeShapes)) delete layoutState.nodeShapes;
   if (isEmptyArray(layoutState.labelOffsets)) delete layoutState.labelOffsets;
   if (isEmptyArray(layoutState.keyMappingOffsets)) delete layoutState.keyMappingOffsets;
   if (isDefaultAxisOffsets(layoutState.axisOffsets)) delete layoutState.axisOffsets;
@@ -21037,6 +21147,7 @@ function applyPresetTransientState(state) {
   resetPresetAnalysisState();
   pendingLayoutSpacing = null;
   pendingLayoutCustomPositions = null;
+  pendingLayoutNodeShapes = null;
   pendingCustomPianoMap = null;
   const { pendingLineLabelOverridesState, pendingLineLabelPositionsState } =
     getPendingPresetLineLabelState(state);
@@ -21344,6 +21455,9 @@ function applyPresetLayoutMetadataAndSizing(layoutState) {
     : null;
   pendingLayoutCustomPositions = Array.isArray(layoutState.customNodePositions)
     ? layoutState.customNodePositions
+    : null;
+  pendingLayoutNodeShapes = Array.isArray(layoutState.nodeShapes)
+    ? layoutState.nodeShapes
     : null;
   applyLayoutStringStateValue(layoutState, "title", (value) => {
     layoutTitle = value;
@@ -21880,6 +21994,13 @@ function applyPendingPresetLayoutState() {
       pendingLayoutCustomPositions = null;
     }
   );
+  applyPendingPresetStateWithDraw(
+    pendingLayoutNodeShapes,
+    applyLayoutNodeShapes,
+    () => {
+      pendingLayoutNodeShapes = null;
+    }
+  );
 }
 
 function applyPresetSynthState(synthState) {
@@ -22099,6 +22220,10 @@ function applyPresetPostRebuildState(
     applyCustomPianoMap(pendingCustomPianoMap);
     pendingCustomPianoMap = null;
   }
+  // Ensure layout key-mapping labels reflect restored keyboard/custom-map state immediately.
+  updateKeyMappingToggleVisibility();
+  syncLayoutKeyMappingControls();
+  markCustomPianoMapDirty();
   refreshPatternFromActiveNodes();
   triangleDiagonals.clear();
   triangleLabels.clear();
@@ -24345,6 +24470,8 @@ function rebuildLattice(
   });
   const labelOffsets = remapLayoutOffsets ? serializeLayoutLabelOffsets() : null;
   const keyMappingOffsets = remapLayoutOffsets ? serializeLayoutKeyMappingOffsets() : null;
+  const nodeShapes = remapLayoutOffsets ? serializeLayoutNodeShapes() : null;
+  const customPianoMapState = remapLayoutOffsets ? serializeCustomPianoMap() : null;
   const positionOffsets = remapLayoutOffsets ? serializeLayoutPositionOffsets() : null;
   const prevCenterZ = gridCenterZ;
   const latticeNodes = buildLattice();
@@ -24389,8 +24516,14 @@ function rebuildLattice(
     if (keyMappingOffsets && keyMappingOffsets.length) {
       applyLayoutKeyMappingOffsets(keyMappingOffsets);
     }
+    if (nodeShapes && nodeShapes.length) {
+      applyLayoutNodeShapes(nodeShapes);
+    }
     if (positionOffsets && positionOffsets.length) {
       applyLayoutPositionOffsets(positionOffsets);
+    }
+    if (customPianoMapState && customPianoMapState.length) {
+      applyCustomPianoMap(customPianoMapState);
     }
   }
   updatePitchInstances();
@@ -24606,20 +24739,12 @@ if (mode3dCheckbox && !viewModeInputs.length && !viewModeButtons.length) {
     schedulePresetUrlUpdate();
   });
 }
-if (navAxesToggle) {
-  navAxesToggle.addEventListener("change", () => {
-    showAxes = navAxesToggle.checked;
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (navGridToggle) {
-  navGridToggle.addEventListener("change", () => {
-    showGrid = navGridToggle.checked;
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
+bindSingleBooleanDrawToggle(navAxesToggle, (checked) => {
+  showAxes = checked;
+});
+bindSingleBooleanDrawToggle(navGridToggle, (checked) => {
+  showGrid = checked;
+});
 bindMirroredDrawToggles(
   navCirclesToggle,
   layoutCirclesToggle,
@@ -24840,55 +24965,37 @@ snapshotButtons.forEach((button) => {
   });
 });
 const snapshotDeferToggle = document.getElementById("snapshot-defer");
-if (snapshotDeferToggle) {
-  snapshotDeferToggle.addEventListener("change", () => {
-    snapshotDeferToCycleEnd = snapshotDeferToggle.checked;
-  });
-}
+bindSingleBooleanToggle(snapshotDeferToggle, (checked) => {
+  snapshotDeferToCycleEnd = checked;
+});
 const snapshotRestoreToggle = document.getElementById("snapshot-restore-play");
-if (snapshotRestoreToggle) {
-  snapshotRestoreToggle.addEventListener("change", () => {
-    snapshotRestorePlayNodes = snapshotRestoreToggle.checked;
-    if (snapshotConnectToggle) {
-      snapshotConnectToggle.disabled = !snapshotRestorePlayNodes;
-    }
-  });
-}
+bindSingleBooleanToggle(snapshotRestoreToggle, (checked) => {
+  snapshotRestorePlayNodes = checked;
+  setControlDisabled(snapshotConnectToggle, !snapshotRestorePlayNodes);
+});
 const snapshotConnectToggle = document.getElementById("snapshot-connect-tones");
-if (snapshotConnectToggle) {
-  snapshotConnectToggle.addEventListener("change", () => {
-    snapshotConnectCommonTones = snapshotConnectToggle.checked;
-  });
-  snapshotConnectToggle.disabled = !snapshotRestorePlayNodes;
-}
+bindSingleBooleanToggle(snapshotConnectToggle, (checked) => {
+  snapshotConnectCommonTones = checked;
+});
+setControlDisabled(snapshotConnectToggle, !snapshotRestorePlayNodes);
 const snapshotRestoreViewToggle = document.getElementById("snapshot-restore-view");
-if (snapshotRestoreViewToggle) {
-  snapshotRestoreViewToggle.addEventListener("change", () => {
-    snapshotRestoreView = snapshotRestoreViewToggle.checked;
-  });
-}
+bindSingleBooleanToggle(snapshotRestoreViewToggle, (checked) => {
+  snapshotRestoreView = checked;
+});
 const snapshotRestoreSequenceToggle = document.getElementById("snapshot-restore-sequence");
-if (snapshotRestoreSequenceToggle) {
-  snapshotRestoreSequenceToggle.addEventListener("change", () => {
-    snapshotRestoreSequence = snapshotRestoreSequenceToggle.checked;
-  });
-}
+bindSingleBooleanToggle(snapshotRestoreSequenceToggle, (checked) => {
+  snapshotRestoreSequence = checked;
+});
 const snapshotRestoreLfosToggle = document.getElementById("snapshot-restore-lfos");
 const snapshotRestoreLfoPhaseToggle = document.getElementById("snapshot-restore-lfo-phase");
-if (snapshotRestoreLfosToggle) {
-  snapshotRestoreLfosToggle.addEventListener("change", () => {
-    snapshotRestoreLfos = snapshotRestoreLfosToggle.checked;
-    if (snapshotRestoreLfoPhaseToggle) {
-      snapshotRestoreLfoPhaseToggle.disabled = !snapshotRestoreLfos;
-    }
-  });
-}
-if (snapshotRestoreLfoPhaseToggle) {
-  snapshotRestoreLfoPhaseToggle.addEventListener("change", () => {
-    snapshotRestoreLfoPhase = snapshotRestoreLfoPhaseToggle.checked;
-  });
-  snapshotRestoreLfoPhaseToggle.disabled = !snapshotRestoreLfos;
-}
+bindSingleBooleanToggle(snapshotRestoreLfosToggle, (checked) => {
+  snapshotRestoreLfos = checked;
+  setControlDisabled(snapshotRestoreLfoPhaseToggle, !snapshotRestoreLfos);
+});
+bindSingleBooleanToggle(snapshotRestoreLfoPhaseToggle, (checked) => {
+  snapshotRestoreLfoPhase = checked;
+});
+setControlDisabled(snapshotRestoreLfoPhaseToggle, !snapshotRestoreLfos);
 const snapshotKeyboardModeToggle = document.getElementById("snapshot-keyboard-mode");
 const snapshotKeyboardActiveToggle = document.getElementById("snapshot-keyboard-active");
 if (snapshotKeyboardModeToggle) {
@@ -24907,13 +25014,11 @@ if (snapshotKeyboardModeToggle) {
     updateSnapshotUi();
   });
 }
-if (snapshotKeyboardActiveToggle) {
-  snapshotKeyboardActiveToggle.addEventListener("change", () => {
-    snapshotKeyboardActive = snapshotKeyboardActiveToggle.checked;
-    updateSnapshotUi();
-  });
-  snapshotKeyboardActiveToggle.disabled = !snapshotKeyboardMode;
-}
+bindSingleBooleanToggle(snapshotKeyboardActiveToggle, (checked) => {
+  snapshotKeyboardActive = checked;
+  updateSnapshotUi();
+});
+setControlDisabled(snapshotKeyboardActiveToggle, !snapshotKeyboardMode);
 const snapshotCopyButton = document.getElementById("snapshot-copy");
 const snapshotExportButton = document.getElementById("snapshot-export");
 const snapshotImportButton = document.getElementById("snapshot-import");
@@ -25130,15 +25235,11 @@ bindAnalysisLayerTogglePair(
   layoutShowMicrotonalToggle,
   (checked) => setMicrotonalIntervalsMode(checked)
 );
-bindSingleBooleanToggle(directionalRatioLabelsToggle, (checked) => {
+bindSingleBooleanDrawToggle(directionalRatioLabelsToggle, (checked) => {
   directionalRatioLabels = checked;
-  draw();
-  schedulePresetUrlUpdate();
 });
-bindSingleBooleanToggle(connectOrphansToggle, (checked) => {
+bindSingleBooleanDrawToggle(connectOrphansToggle, (checked) => {
   connectOrphansEnabled = checked;
-  draw();
-  schedulePresetUrlUpdate();
 });
 if (layoutFreezeButton) {
   layoutFreezeButton.addEventListener("click", () => {
@@ -25328,6 +25429,14 @@ function bindSingleBooleanToggle(toggle, applyValue) {
   });
 }
 
+function bindSingleBooleanDrawToggle(toggle, applyValue) {
+  bindSingleBooleanToggle(toggle, (checked) => {
+    applyValue(checked);
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+
 function applyCentsModeToggle(kind, checked) {
   if (kind === "ratio") {
     showRatioCents = Boolean(checked);
@@ -25473,22 +25582,12 @@ if (layoutExitButton) {
     schedulePresetUrlUpdate();
   });
 }
-if (layoutTitleInput) {
-  layoutTitleInput.addEventListener("input", () => {
-    pushLayoutUndoState();
-    layoutTitle = layoutTitleInput.value.trim();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutCreatorInput) {
-  layoutCreatorInput.addEventListener("input", () => {
-    pushLayoutUndoState();
-    layoutCreator = layoutCreatorInput.value.trim();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
+bindLayoutTextInput(layoutTitleInput, (value) => {
+  layoutTitle = value;
+});
+bindLayoutTextInput(layoutCreatorInput, (value) => {
+  layoutCreator = value;
+});
 if (layoutTitleSizeInput) {
   layoutTitleSizeInput.addEventListener("input", () => {
     pushLayoutUndoState();
@@ -25505,22 +25604,12 @@ if (layoutCreatorSizeInput) {
     schedulePresetUrlUpdate();
   });
 }
-if (layoutPageSizeSelect) {
-  layoutPageSizeSelect.addEventListener("change", () => {
-    pushLayoutUndoState();
-    layoutPageSize = layoutPageSizeSelect.value || "letter";
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutOrientationSelect) {
-  layoutOrientationSelect.addEventListener("change", () => {
-    pushLayoutUndoState();
-    layoutOrientation = layoutOrientationSelect.value || "portrait";
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
+bindLayoutSelectControl(layoutPageSizeSelect, (value) => {
+  layoutPageSize = value || "letter";
+});
+bindLayoutSelectControl(layoutOrientationSelect, (value) => {
+  layoutOrientation = value || "portrait";
+});
 if (layoutScaleInput) {
   layoutScaleInput.addEventListener("input", () => {
     pushLayoutUndoState();
@@ -25609,6 +25698,42 @@ function bindLayoutNumericInput(inputElement, { applyValue, afterChange = null }
   });
 }
 
+function bindLayoutBooleanToggle(toggle, applyValue) {
+  if (!toggle) {
+    return;
+  }
+  toggle.addEventListener("change", () => {
+    pushLayoutUndoState();
+    applyValue(Boolean(toggle.checked));
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+
+function bindLayoutTextInput(inputElement, applyValue) {
+  if (!inputElement) {
+    return;
+  }
+  inputElement.addEventListener("input", () => {
+    pushLayoutUndoState();
+    applyValue(String(inputElement.value || "").trim());
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+
+function bindLayoutSelectControl(selectElement, applyValue) {
+  if (!selectElement) {
+    return;
+  }
+  selectElement.addEventListener("change", () => {
+    pushLayoutUndoState();
+    applyValue(selectElement.value);
+    draw();
+    schedulePresetUrlUpdate();
+  });
+}
+
 bindLayoutNumericInput(layoutKeyMappingSizeInput, {
   applyValue: (value) => {
     layoutKeyMappingTextSize = value || layoutKeyMappingTextSize;
@@ -25619,14 +25744,9 @@ bindLayoutNumericInput(layoutKeyMappingOffsetInput, {
     layoutKeyMappingOffset = value || layoutKeyMappingOffset;
   },
 });
-if (layoutKeyMappingDarkToggle) {
-  layoutKeyMappingDarkToggle.addEventListener("change", () => {
-    pushLayoutUndoState();
-    layoutKeyMappingDark = layoutKeyMappingDarkToggle.checked;
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
+bindLayoutBooleanToggle(layoutKeyMappingDarkToggle, (checked) => {
+  layoutKeyMappingDark = checked;
+});
 bindLayoutNumericInput(layoutNodeSizeInput, {
   applyValue: (value) => {
     layoutNodeSize = value || layoutNodeSize;
@@ -25667,15 +25787,9 @@ bindLayoutNumericInput(layoutTitleMarginInput, {
   },
   afterChange: updateLayoutTitleMarginReadout,
 });
-if (layoutNodeShapeSelect) {
-  layoutNodeShapeSelect.addEventListener("change", () => {
-    pushLayoutUndoState();
-    const nextShape = layoutNodeShapeSelect.value;
-    layoutNodeShape = nextShape || "circle";
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
+bindLayoutSelectControl(layoutNodeShapeSelect, (value) => {
+  layoutNodeShape = value || "circle";
+});
 let layoutFontSnapshot = null;
 
 function resolveLayoutFontChoice(selectElement, preferred, fallback) {
@@ -26250,16 +26364,11 @@ bindLayoutNumericInput(layoutLineLabelSizeInput, {
     invalidateLabelCache({ clearTextWidths: true });
   },
 });
-if (layoutUnifySizeToggle) {
-  layoutUnifySizeToggle.addEventListener("change", () => {
-    pushLayoutUndoState();
-    layoutUnifyNodeSize = layoutUnifySizeToggle.checked;
-    syncLayoutPerspectiveTextToggleState();
-    layoutAxisAngles = { x: null, y: null, z: null };
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
+bindLayoutBooleanToggle(layoutUnifySizeToggle, (checked) => {
+  layoutUnifyNodeSize = checked;
+  syncLayoutPerspectiveTextToggleState();
+  layoutAxisAngles = { x: null, y: null, z: null };
+});
 if (layoutPerspectiveTextSizeToggle) {
   layoutPerspectiveTextSizeToggle.addEventListener("change", () => {
     if (layoutUnifyNodeSize) {

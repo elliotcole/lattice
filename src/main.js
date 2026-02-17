@@ -14350,7 +14350,7 @@ function onPointerUp(event) {
       if (requestedAxis) {
         if (requestedAxis === "z" && !is3DMode) {
           if (mode3dCheckbox) {
-            mode3dCheckbox.checked = true;
+            setControlChecked(mode3dCheckbox, true);
           }
           set3DMode(true);
         }
@@ -16678,7 +16678,7 @@ function applyAddIntervalFromSource(
     Math.abs(Number(targetNode.exponentZ) || 0) > 0
   ) {
     if (mode3dCheckbox) {
-      mode3dCheckbox.checked = true;
+      setControlChecked(mode3dCheckbox, true);
     }
     set3DMode(true);
   }
@@ -17579,7 +17579,7 @@ function updateAddModeFromShift() {
     isAddMode = shiftHeld || capsLockOn || axisModeActive();
   }
   if (navAddModeToggle) {
-    navAddModeToggle.checked = isAddMode;
+    setControlChecked(navAddModeToggle, isAddMode);
   }
   if (tHeld) {
     updateUiHint();
@@ -17852,6 +17852,40 @@ function updateLayoutReadouts() {
   updateLayoutTitleMarginReadout();
 }
 
+function syncLayoutEditorControls({ includeFreezeToggle = false } = {}) {
+  setControlValue(layoutTitleInput, layoutTitle);
+  setControlValue(layoutCreatorInput, layoutCreator);
+  setControlValue(layoutTitleSizeInput, layoutTitleSize);
+  setControlValue(layoutCreatorSizeInput, layoutCreatorSize);
+  updateLayoutSpacingControls();
+  setControlValue(layoutTitleMarginInput, layoutTitleMargin);
+  setControlValue(layoutNodeSizeInput, layoutNodeSize);
+  setControlValue(layoutRatioTextSizeInput, layoutRatioTextSize);
+  setControlValue(layoutNoteTextSizeInput, layoutNoteTextSize);
+  setControlValue(layoutTriangleLabelSizeInput, layoutTriangleLabelTextSize);
+  setControlValue(layoutCustomLabelSizeInput, layoutCustomLabelTextSize);
+  setControlValue(layoutKeyMappingSizeInput, layoutKeyMappingTextSize);
+  setControlValue(layoutKeyMappingOffsetInput, layoutKeyMappingOffset);
+  setControlChecked(layoutKeyMappingDarkToggle, layoutKeyMappingDark);
+  setControlValue(layoutAxisSizeInput, layoutAxisLegendTextSize);
+  setControlValue(layoutLineLabelSizeInput, layoutLineLabelTextSize);
+  setControlValue(layoutNodeShapeSelect, layoutNodeShape);
+  setControlValue(layoutPageSizeSelect, layoutPageSize);
+  setControlValue(layoutOrientationSelect, layoutOrientation);
+  setControlValue(layoutKeyMappingPrefixInput, layoutKeyMappingPrefix);
+  setControlValue(layoutKeyMappingSuffixInput, layoutKeyMappingSuffix);
+  syncLayoutFontPopoverInputs();
+  setControlChecked(layoutUnifySizeToggle, layoutUnifyNodeSize);
+  syncLayoutPerspectiveTextToggleState();
+  if (includeFreezeToggle) {
+    setControlChecked(layoutFreezeFlattenToggle, layoutFreezeFlatten);
+  }
+  updateLayoutReadouts();
+  syncLayoutKeyMappingControls();
+  updateLayoutCustomLabelControls();
+  updateLayoutLinkControls();
+}
+
 function applyLayoutUndoState(state) {
   if (!state) {
     return;
@@ -17959,33 +17993,9 @@ function applyLayoutUndoState(state) {
   view.offsetY = state.view.offsetY;
   view.rotX = state.view.rotX;
   view.rotY = state.view.rotY;
-  setControlValue(layoutTitleInput, layoutTitle);
-  setControlValue(layoutCreatorInput, layoutCreator);
-  setControlValue(layoutTitleSizeInput, layoutTitleSize);
-  setControlValue(layoutCreatorSizeInput, layoutCreatorSize);
-  updateLayoutSpacingControls();
-  setControlValue(layoutTitleMarginInput, layoutTitleMargin);
-  setControlValue(layoutNodeSizeInput, layoutNodeSize);
-  setControlValue(layoutRatioTextSizeInput, layoutRatioTextSize);
-  setControlValue(layoutNoteTextSizeInput, layoutNoteTextSize);
-  setControlValue(layoutTriangleLabelSizeInput, layoutTriangleLabelTextSize);
-  setControlValue(layoutAxisSizeInput, layoutAxisLegendTextSize);
-  setControlValue(layoutLineLabelSizeInput, layoutLineLabelTextSize);
-  setControlValue(layoutCustomLabelSizeInput, layoutCustomLabelTextSize);
-  setControlValue(layoutNodeShapeSelect, layoutNodeShape);
-  setControlValue(layoutPageSizeSelect, layoutPageSize);
-  setControlValue(layoutOrientationSelect, layoutOrientation);
-  syncLayoutFontPopoverInputs();
-  setControlValue(layoutKeyMappingPrefixInput, layoutKeyMappingPrefix);
-  setControlValue(layoutKeyMappingSuffixInput, layoutKeyMappingSuffix);
-  setControlChecked(layoutUnifySizeToggle, layoutUnifyNodeSize);
-  syncLayoutPerspectiveTextToggleState();
-  syncLayoutKeyMappingControls();
-  updateLayoutCustomLabelControls();
+  syncLayoutEditorControls();
   syncLayoutFontVars();
   syncLayoutScaleInput();
-  updateLayoutReadouts();
-  updateLayoutLinkControls();
   invalidateLabelCache({ clearTextWidths: true });
   draw();
   markIsomorphicDirty();
@@ -18022,6 +18032,8 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
   layoutKeyMappingOffsets.clear();
   layoutNodeShapes.clear();
   layoutPositionOffsets.clear();
+  lineLabelPositionOverrides.clear();
+  distanceEdgeOverrides.clear();
   layoutCustomLabels = [];
   layoutCustomLabelId = 1;
   pendingLayoutPositionOffsets = null;
@@ -18089,36 +18101,8 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
     layoutAxisLegendFontWeight = LAYOUT_DEFAULTS.axisLegendFontWeight;
     layoutLineLabelFontWeight = LAYOUT_DEFAULTS.lineLabelFontWeight;
     layoutCreatorFontWeight = LAYOUT_DEFAULTS.creatorFontWeight;
-    setControlValue(layoutTitleInput, layoutTitle);
-    setControlValue(layoutCreatorInput, layoutCreator);
-    setControlValue(layoutTitleSizeInput, layoutTitleSize);
-    setControlValue(layoutCreatorSizeInput, layoutCreatorSize);
-    updateLayoutSpacingControls();
-    setControlValue(layoutTitleMarginInput, layoutTitleMargin);
-    setControlValue(layoutPageSizeSelect, layoutPageSize);
-    setControlValue(layoutOrientationSelect, layoutOrientation);
-    setControlValue(layoutNodeSizeInput, layoutNodeSize);
-    setControlValue(layoutRatioTextSizeInput, layoutRatioTextSize);
-    setControlValue(layoutNoteTextSizeInput, layoutNoteTextSize);
-    setControlValue(layoutTriangleLabelSizeInput, layoutTriangleLabelTextSize);
-    setControlValue(layoutCustomLabelSizeInput, layoutCustomLabelTextSize);
-    setControlValue(layoutKeyMappingSizeInput, layoutKeyMappingTextSize);
-    setControlValue(layoutKeyMappingOffsetInput, layoutKeyMappingOffset);
-    setControlChecked(layoutKeyMappingDarkToggle, layoutKeyMappingDark);
-    setControlValue(layoutAxisSizeInput, layoutAxisLegendTextSize);
-    setControlValue(layoutLineLabelSizeInput, layoutLineLabelTextSize);
-    setControlValue(layoutKeyMappingPrefixInput, layoutKeyMappingPrefix);
-    setControlValue(layoutKeyMappingSuffixInput, layoutKeyMappingSuffix);
-    syncLayoutFontPopoverInputs();
-    setControlValue(layoutNodeShapeSelect, layoutNodeShape);
-    setControlChecked(layoutUnifySizeToggle, layoutUnifyNodeSize);
-    syncLayoutPerspectiveTextToggleState();
-    setControlChecked(layoutFreezeFlattenToggle, layoutFreezeFlatten);
-    updateLayoutReadouts();
-    syncLayoutKeyMappingControls();
+    syncLayoutEditorControls({ includeFreezeToggle: true });
     syncLayoutFontVars();
-    updateLayoutCustomLabelControls();
-    updateLayoutLinkControls();
   }
   if (resetView) {
     view.zoom = LAYOUT_DEFAULTS.zoom;
@@ -18183,15 +18167,9 @@ function setLayoutMode(enabled, { force = false } = {}) {
     closeKeyboardMapPopover();
     showAxes = false;
     showGrid = false;
-    if (navAxesToggle) {
-      navAxesToggle.checked = false;
-    }
-    if (navGridToggle) {
-      navGridToggle.checked = false;
-    }
-    if (mode3dCheckbox) {
-      mode3dCheckbox.checked = false;
-    }
+    setControlChecked(navAxesToggle, false);
+    setControlChecked(navGridToggle, false);
+    setControlChecked(mode3dCheckbox, false);
     const preserveDepth = is3DMode || isFlattened2D;
     set3DMode(false, { preserveDepth });
     if (layoutLockPosition) {
@@ -18227,12 +18205,8 @@ function setLayoutMode(enabled, { force = false } = {}) {
     layoutAxisEditDrag = null;
     showAxes = layoutPrevState.showAxes;
     showGrid = layoutPrevState.showGrid;
-    if (navAxesToggle) {
-      navAxesToggle.checked = showAxes;
-    }
-    if (navGridToggle) {
-      navGridToggle.checked = showGrid;
-    }
+    setControlChecked(navAxesToggle, showAxes);
+    setControlChecked(navGridToggle, showGrid);
     if (layoutLockPosition) {
       syncLayoutViewFromCurrent();
       view.zoom = layoutPrevState.zoom;
@@ -18241,9 +18215,7 @@ function setLayoutMode(enabled, { force = false } = {}) {
       view.rotX = layoutPrevState.rotX;
       view.rotY = layoutPrevState.rotY;
     }
-    if (mode3dCheckbox) {
-      mode3dCheckbox.checked = layoutPrevState.is3DMode;
-    }
+    setControlChecked(mode3dCheckbox, layoutPrevState.is3DMode);
     set3DMode(layoutPrevState.is3DMode);
     layoutPrevState = null;
     updateLayoutLinkControls();
@@ -21146,7 +21118,7 @@ function applyPresetLayoutModeSelection(
   const syncPreset3DModeSelection = () => {
     is3DMode = presetWants3D;
     if (mode3dCheckbox) {
-      mode3dCheckbox.checked = presetWants3D;
+      setControlChecked(mode3dCheckbox, presetWants3D);
     }
     updateNavPanelVisibility();
     syncViewModeControls();
@@ -22052,7 +22024,7 @@ function getPresetDepthContext(state, layoutState) {
 function applyPresetModeUiState(wants3D, preserveViewMode) {
   if (mode3dCheckbox) {
     if (!preserveViewMode) {
-      mode3dCheckbox.checked = wants3D;
+      setControlChecked(mode3dCheckbox, wants3D);
     }
   }
   if (!preserveViewMode) {
@@ -24507,7 +24479,7 @@ function resetLattice() {
   updateUiHint();
   schedulePresetUrlUpdate();
   if (midiEnable) {
-    midiEnable.checked = preservedMidiChecked;
+    setControlChecked(midiEnable, preservedMidiChecked);
   }
   midiEnabled = preservedMidiEnabled;
   if (preservedMidiPort && midiPortSelect) {
@@ -24560,29 +24532,7 @@ initLayoutFonts();
 setLayoutPanelCollapsed(false);
 setViewsCollapsed(false);
 setLayoutShowCollapsed(true);
-setControlValue(layoutNodeSizeInput, layoutNodeSize);
-setControlValue(layoutRatioTextSizeInput, layoutRatioTextSize);
-setControlValue(layoutNoteTextSizeInput, layoutNoteTextSize);
-setControlValue(layoutTriangleLabelSizeInput, layoutTriangleLabelTextSize);
-setControlValue(layoutCustomLabelSizeInput, layoutCustomLabelTextSize);
-setControlValue(layoutKeyMappingSizeInput, layoutKeyMappingTextSize);
-setControlValue(layoutKeyMappingOffsetInput, layoutKeyMappingOffset);
-setControlChecked(layoutKeyMappingDarkToggle, layoutKeyMappingDark);
-setControlValue(layoutNodeShapeSelect, layoutNodeShape);
-setControlValue(layoutPageSizeSelect, layoutPageSize);
-setControlValue(layoutOrientationSelect, layoutOrientation);
-setControlValue(layoutTitleInput, layoutTitle);
-setControlValue(layoutCreatorInput, layoutCreator);
-updateLayoutLinkControls();
-setControlValue(layoutTitleSizeInput, layoutTitleSize);
-setControlValue(layoutCreatorSizeInput, layoutCreatorSize);
-updateLayoutCustomLabelControls();
-updateLayoutSpacingControls();
-setControlValue(layoutTitleMarginInput, layoutTitleMargin);
-updateLayoutReadouts();
-syncLayoutFontPopoverInputs();
-setControlChecked(layoutUnifySizeToggle, layoutUnifyNodeSize);
-syncLayoutPerspectiveTextToggleState();
+syncLayoutEditorControls();
 syncLayoutAlignButtons();
 setControlChecked(layoutModeToggle, layoutMode);
 syncViewModeControls();
@@ -24680,7 +24630,7 @@ window.addEventListener("beforeunload", () => {
 if (mode3dCheckbox && !viewModeInputs.length && !viewModeButtons.length) {
   mode3dCheckbox.addEventListener("change", () => {
     if (layoutMode) {
-      mode3dCheckbox.checked = false;
+      setControlChecked(mode3dCheckbox, false);
       return;
     }
     set3DMode(mode3dCheckbox.checked);
@@ -24713,7 +24663,7 @@ if (layoutCirclesToggle) {
   layoutCirclesToggle.addEventListener("change", () => {
     showCircles = layoutCirclesToggle.checked;
     if (navCirclesToggle) {
-      navCirclesToggle.checked = showCircles;
+      setControlChecked(navCirclesToggle, showCircles);
     }
     draw();
     schedulePresetUrlUpdate();
@@ -24731,7 +24681,7 @@ if (layoutLineLabelsToggle) {
   layoutLineLabelsToggle.addEventListener("change", () => {
     showLineLabels = layoutLineLabelsToggle.checked;
     if (lineLabelsToggle) {
-      lineLabelsToggle.checked = showLineLabels;
+      setControlChecked(lineLabelsToggle, showLineLabels);
     }
     draw();
     schedulePresetUrlUpdate();
@@ -25008,20 +24958,14 @@ if (snapshotKeyboardModeToggle) {
     snapshotKeyboardMode = snapshotKeyboardModeToggle.checked;
     if (snapshotKeyboardMode) {
       snapshotKeyboardActive = true;
-      if (snapshotKeyboardActiveToggle) {
-        snapshotKeyboardActiveToggle.checked = true;
-      }
+      setControlChecked(snapshotKeyboardActiveToggle, true);
       setKeyboardModeDisabled(true);
     } else {
       snapshotKeyboardActive = false;
-      if (snapshotKeyboardActiveToggle) {
-        snapshotKeyboardActiveToggle.checked = false;
-      }
+      setControlChecked(snapshotKeyboardActiveToggle, false);
       setKeyboardModeDisabled(false);
     }
-    if (snapshotKeyboardActiveToggle) {
-      snapshotKeyboardActiveToggle.disabled = !snapshotKeyboardMode;
-    }
+    setControlDisabled(snapshotKeyboardActiveToggle, !snapshotKeyboardMode);
     updateSnapshotUi();
   });
 }
@@ -25117,23 +25061,7 @@ if (snapshotOptionsToggle && snapshotOptionsMenu) {
   });
 }
 updateSnapshotUi();
-if (snapshotKeyboardModeToggle) {
-  snapshotKeyboardModeToggle.checked = snapshotKeyboardMode;
-}
-if (snapshotKeyboardActiveToggle) {
-  snapshotKeyboardActiveToggle.checked = snapshotKeyboardActive;
-  snapshotKeyboardActiveToggle.disabled = !snapshotKeyboardMode;
-}
-if (snapshotRestoreSequenceToggle) {
-  snapshotRestoreSequenceToggle.checked = snapshotRestoreSequence;
-}
-if (snapshotRestoreLfosToggle) {
-  snapshotRestoreLfosToggle.checked = snapshotRestoreLfos;
-}
-if (snapshotRestoreLfoPhaseToggle) {
-  snapshotRestoreLfoPhaseToggle.checked = snapshotRestoreLfoPhase;
-  snapshotRestoreLfoPhaseToggle.disabled = !snapshotRestoreLfos;
-}
+syncSnapshotSettingsControls();
 if (intervalChartButton) {
   intervalChartButton.addEventListener("click", () => {
     openIntervalChart();
@@ -26427,15 +26355,16 @@ if (layoutPerspectiveTextSizeToggle) {
 if (layoutResetButton) {
   layoutResetButton.addEventListener("click", () => {
     pushLayoutUndoState();
-    if (layoutMode) {
-      setLayoutMode(false);
-    }
-    if (mode3dCheckbox) {
-      mode3dCheckbox.checked = false;
-    }
-    set3DMode(false, { preserveDepth: false });
-    isFlattened2D = false;
+    const preserveLockPosition = layoutLockPosition;
+    const preservedLayoutView = preserveLockPosition ? { ...layoutView } : null;
     resetLayoutState({ resetView: false });
+    if (preserveLockPosition) {
+      layoutLockPosition = true;
+      if (preservedLayoutView) {
+        layoutView = { ...preservedLayoutView };
+      }
+      updateLayoutLinkControls();
+    }
     draw();
     schedulePresetUrlUpdate();
   });

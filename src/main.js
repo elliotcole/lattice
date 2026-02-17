@@ -17256,6 +17256,23 @@ function updateCustomPianoKeyStyles() {
   });
 }
 
+function syncCustomPianoModeUi(modeValue) {
+  const isCustomMode = modeValue === "piano-custom";
+  if (keyboardMapToggle) {
+    keyboardMapToggle.hidden = !isCustomMode;
+  }
+  if (keyboardMapClear) {
+    keyboardMapClear.hidden = !isCustomMode;
+  }
+  if (isCustomMode) {
+    updateCustomPianoKeyStyles();
+    closeKeyboardMapPopover();
+    return;
+  }
+  setCustomPianoMapMode(false);
+  closeKeyboardMapPopover();
+}
+
 function openKeyboardMapPopover() {
   if (!keyboardMapPopover) {
     return;
@@ -20953,7 +20970,6 @@ function buildPresetLayoutState(layoutViewState, layoutSourceViewState) {
   }
   if (layoutState.nodeShape === LAYOUT_DEFAULTS.nodeShape) delete layoutState.nodeShape;
   if (layoutState.unifyNodeSize === LAYOUT_DEFAULTS.unifyNodeSize) delete layoutState.unifyNodeSize;
-  if (layoutState.perspectiveTextSize === LAYOUT_DEFAULTS.perspectiveTextSize) delete layoutState.perspectiveTextSize;
   if (layoutState.keyMappingsMode === LAYOUT_DEFAULTS.keyMappingsMode) delete layoutState.keyMappingsMode;
   if (layoutState.pageSize === LAYOUT_DEFAULTS.pageSize) delete layoutState.pageSize;
   if (layoutState.orientation === LAYOUT_DEFAULTS.orientation) delete layoutState.orientation;
@@ -20973,14 +20989,14 @@ function buildPresetLayoutState(layoutViewState, layoutSourceViewState) {
   return layoutState;
 }
 
-function getPresetState() {
-  const isEmptyArray = (value) => !Array.isArray(value) || value.length === 0;
-  const isEmptyObject = (value) =>
-    !value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length;
-  const active = nodes
+function serializePresetActiveNodes() {
+  return nodes
     .filter((node) => node.active && !node.isCustom)
     .map((node) => [node.exponentX, node.exponentY, node.exponentZ || 0]);
-  const customState = customNodes.map((node) => ({
+}
+
+function serializePresetCustomNodes() {
+  return customNodes.map((node) => ({
     sourceExponents: Array.isArray(node.sourceExponents)
       ? node.sourceExponents
       : (() => {
@@ -20997,6 +21013,34 @@ function getPresetState() {
     position: { x: node.coordinate.x, y: node.coordinate.y },
     active: Boolean(node.active),
   }));
+}
+
+function pruneEmptyPresetCollections(state) {
+  const isEmptyArray = (value) => !Array.isArray(value) || value.length === 0;
+  const collectionKeys = [
+    "active",
+    "customNodes",
+    "lineLabelOverrides",
+    "lineLabelPositions",
+    "distanceEdges",
+    "distanceEdgeOverrides",
+    "noteSpellings",
+    "octaveOffsets",
+    "triangles",
+    "triangleLabels",
+  ];
+  collectionKeys.forEach((key) => {
+    if (isEmptyArray(state[key])) {
+      delete state[key];
+    }
+  });
+}
+
+function getPresetState() {
+  const isEmptyObject = (value) =>
+    !value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length;
+  const active = serializePresetActiveNodes();
+  const customState = serializePresetCustomNodes();
   const layoutViewState = getPresetLayoutViewState();
   const layoutSourceViewState = getPresetLayoutSourceViewState();
   const { lineLabelOverridesState, lineLabelPositionsState } = serializePresetLineLabelState();
@@ -21089,36 +21133,7 @@ function getPresetState() {
     },
   };
 
-  if (isEmptyArray(state.active)) {
-    delete state.active;
-  }
-  if (isEmptyArray(state.customNodes)) {
-    delete state.customNodes;
-  }
-  if (isEmptyArray(state.lineLabelOverrides)) {
-    delete state.lineLabelOverrides;
-  }
-  if (isEmptyArray(state.lineLabelPositions)) {
-    delete state.lineLabelPositions;
-  }
-  if (isEmptyArray(state.distanceEdges)) {
-    delete state.distanceEdges;
-  }
-  if (isEmptyArray(state.distanceEdgeOverrides)) {
-    delete state.distanceEdgeOverrides;
-  }
-  if (isEmptyArray(state.noteSpellings)) {
-    delete state.noteSpellings;
-  }
-  if (isEmptyArray(state.octaveOffsets)) {
-    delete state.octaveOffsets;
-  }
-  if (isEmptyArray(state.triangles)) {
-    delete state.triangles;
-  }
-  if (isEmptyArray(state.triangleLabels)) {
-    delete state.triangleLabels;
-  }
+  pruneEmptyPresetCollections(state);
   if (isEmptyObject(layoutState)) {
     delete state.layout;
   } else {
@@ -21365,6 +21380,46 @@ function getPendingPresetLineLabelState(state) {
   };
 }
 
+function applyPresetTransientState(state) {
+  resetPresetAnalysisState();
+  pendingLayoutSpacing = null;
+  pendingLayoutCustomPositions = null;
+  pendingCustomPianoMap = null;
+  const { pendingLineLabelOverridesState, pendingLineLabelPositionsState } =
+    getPendingPresetLineLabelState(state);
+  lineLabelOverrides.clear();
+  lineLabelPositionOverrides.clear();
+  applyPresetDisplayToggleState(state);
+  applyPresetDistanceState(state);
+  return {
+    pendingLineLabelOverridesState,
+    pendingLineLabelPositionsState,
+  };
+}
+
+function applyPresetGeometryState(state, layoutState) {
+  const viewState = state.view && typeof state.view === "object" ? state.view : null;
+  layoutSourceView = null;
+  const { wants3D, targetDepth, targetCenterZ } = getPresetDepthContext(
+    state,
+    layoutState
+  );
+  gridDepth = targetDepth;
+  gridCenterZ = targetCenterZ;
+  const presetTriangles = Array.isArray(state.triangles) ? state.triangles : null;
+  const presetTriangleLabels = Array.isArray(state.triangleLabels)
+    ? state.triangleLabels
+    : null;
+  return {
+    viewState,
+    wants3D,
+    targetDepth,
+    targetCenterZ,
+    presetTriangles,
+    presetTriangleLabels,
+  };
+}
+
 function applyPresetLayoutModeSelection(
   layoutState,
   presetWants3D,
@@ -21396,28 +21451,34 @@ function applyPresetLayoutModeSelection(
   }
 }
 
+function applyPresetBooleanCheckboxState(value, checkboxes, onApply) {
+  if (typeof value !== "boolean") {
+    return false;
+  }
+  onApply(value);
+  checkboxes.forEach((checkbox) => {
+    if (checkbox) {
+      checkbox.checked = value;
+    }
+  });
+  return true;
+}
+
 function applyPresetDisplayToggleState(state) {
-  if (typeof state.axes === "boolean") {
-    showAxes = state.axes;
-    if (navAxesToggle) {
-      navAxesToggle.checked = showAxes;
+  applyPresetBooleanCheckboxState(state.axes, [navAxesToggle], (value) => {
+    showAxes = value;
+  });
+  applyPresetBooleanCheckboxState(state.grid, [navGridToggle], (value) => {
+    showGrid = value;
+  });
+  const hasLineLabels = applyPresetBooleanCheckboxState(
+    state.lineLabels,
+    [lineLabelsToggle, layoutLineLabelsToggle],
+    (value) => {
+      showLineLabels = value;
     }
-  }
-  if (typeof state.grid === "boolean") {
-    showGrid = state.grid;
-    if (navGridToggle) {
-      navGridToggle.checked = showGrid;
-    }
-  }
-  if (typeof state.lineLabels === "boolean") {
-    showLineLabels = state.lineLabels;
-    if (lineLabelsToggle) {
-      lineLabelsToggle.checked = showLineLabels;
-    }
-    if (layoutLineLabelsToggle) {
-      layoutLineLabelsToggle.checked = showLineLabels;
-    }
-  } else {
+  );
+  if (!hasLineLabels) {
     showLineLabels = false;
     if (lineLabelsToggle) {
       lineLabelsToggle.checked = showLineLabels;
@@ -21426,24 +21487,16 @@ function applyPresetDisplayToggleState(state) {
       layoutLineLabelsToggle.checked = showLineLabels;
     }
   }
-  if (typeof state.circles === "boolean") {
-    showCircles = state.circles;
-    if (navCirclesToggle) {
-      navCirclesToggle.checked = showCircles;
+  applyPresetBooleanCheckboxState(state.circles, [navCirclesToggle, layoutCirclesToggle], (value) => {
+    showCircles = value;
+  });
+  applyPresetBooleanCheckboxState(
+    state.keyMappings,
+    [navKeyMappingsToggle, layoutKeyMappingsToggle],
+    (value) => {
+      showKeyMappings = value;
     }
-    if (layoutCirclesToggle) {
-      layoutCirclesToggle.checked = showCircles;
-    }
-  }
-  if (typeof state.keyMappings === "boolean") {
-    showKeyMappings = state.keyMappings;
-    if (navKeyMappingsToggle) {
-      navKeyMappingsToggle.checked = showKeyMappings;
-    }
-    if (layoutKeyMappingsToggle) {
-      layoutKeyMappingsToggle.checked = showKeyMappings;
-    }
-  }
+  );
   if (typeof state.distances === "boolean") {
     analysisLayers.distances = state.distances;
     syncAnalysisLayerToggles();
@@ -21856,61 +21909,46 @@ function applyPresetLayoutTypographyAndOptions(layoutState) {
   applyPresetLayoutMiscOptions(layoutState);
 }
 
+function applyPresetFontFamily(layoutState, key, applyValue, selectElement) {
+  if (typeof layoutState[key] !== "string") {
+    return false;
+  }
+  const value = layoutState[key];
+  applyValue(value);
+  if (selectElement) {
+    selectElement.value = value;
+  }
+  return true;
+}
+
 function applyPresetLayoutFontFamilies(layoutState) {
-  if (typeof layoutState.titleFont === "string") {
-    layoutTitleFont = layoutState.titleFont;
-    if (layoutTitleFontSelect) {
-      layoutTitleFontSelect.value = layoutTitleFont;
-    }
-  }
-  if (typeof layoutState.creatorFont === "string") {
-    layoutCreatorFont = layoutState.creatorFont;
-    if (layoutCreatorFontSelect) {
-      layoutCreatorFontSelect.value = layoutCreatorFont;
-    }
-  }
-  if (typeof layoutState.ratioFont === "string") {
-    layoutRatioFont = layoutState.ratioFont;
-    if (layoutRatioFontSelect) {
-      layoutRatioFontSelect.value = layoutRatioFont;
-    }
-  }
-  if (typeof layoutState.noteFont === "string") {
-    layoutNoteFont = layoutState.noteFont;
-    if (layoutNoteFontSelect) {
-      layoutNoteFontSelect.value = layoutNoteFont;
-    }
-  }
-  if (typeof layoutState.triangleLabelFont === "string") {
-    layoutTriangleLabelFont = layoutState.triangleLabelFont;
-    if (layoutTriangleLabelFontSelect) {
-      layoutTriangleLabelFontSelect.value = layoutTriangleLabelFont;
-    }
-  }
-  if (typeof layoutState.customLabelFont === "string") {
-    layoutCustomLabelFont = layoutState.customLabelFont;
-    if (layoutCustomFontSelect) {
-      layoutCustomFontSelect.value = layoutCustomLabelFont;
-    }
-  }
-  if (typeof layoutState.keyMappingFont === "string") {
-    layoutKeyMappingFont = layoutState.keyMappingFont;
-    if (layoutKeyMappingFontSelect) {
-      layoutKeyMappingFontSelect.value = layoutKeyMappingFont;
-    }
-  }
-  if (typeof layoutState.axisLegendFont === "string") {
-    layoutAxisLegendFont = layoutState.axisLegendFont;
-    if (layoutAxisFontSelect) {
-      layoutAxisFontSelect.value = layoutAxisLegendFont;
-    }
-  }
-  if (typeof layoutState.lineLabelFont === "string") {
-    layoutLineLabelFont = layoutState.lineLabelFont;
-    if (layoutLineLabelFontSelect) {
-      layoutLineLabelFontSelect.value = layoutLineLabelFont;
-    }
-  } else {
+  applyPresetFontFamily(layoutState, "titleFont", (value) => {
+    layoutTitleFont = value;
+  }, layoutTitleFontSelect);
+  applyPresetFontFamily(layoutState, "creatorFont", (value) => {
+    layoutCreatorFont = value;
+  }, layoutCreatorFontSelect);
+  applyPresetFontFamily(layoutState, "ratioFont", (value) => {
+    layoutRatioFont = value;
+  }, layoutRatioFontSelect);
+  applyPresetFontFamily(layoutState, "noteFont", (value) => {
+    layoutNoteFont = value;
+  }, layoutNoteFontSelect);
+  applyPresetFontFamily(layoutState, "triangleLabelFont", (value) => {
+    layoutTriangleLabelFont = value;
+  }, layoutTriangleLabelFontSelect);
+  applyPresetFontFamily(layoutState, "customLabelFont", (value) => {
+    layoutCustomLabelFont = value;
+  }, layoutCustomFontSelect);
+  applyPresetFontFamily(layoutState, "keyMappingFont", (value) => {
+    layoutKeyMappingFont = value;
+  }, layoutKeyMappingFontSelect);
+  applyPresetFontFamily(layoutState, "axisLegendFont", (value) => {
+    layoutAxisLegendFont = value;
+  }, layoutAxisFontSelect);
+  if (!applyPresetFontFamily(layoutState, "lineLabelFont", (value) => {
+    layoutLineLabelFont = value;
+  }, layoutLineLabelFontSelect)) {
     layoutLineLabelFont = layoutAxisLegendFont;
     if (layoutLineLabelFontSelect) {
       layoutLineLabelFontSelect.value = layoutLineLabelFont;
@@ -21918,66 +21956,51 @@ function applyPresetLayoutFontFamilies(layoutState) {
   }
 }
 
-function applyPresetLayoutFontWeights(layoutState) {
-  if (Number.isFinite(layoutState.axisLegendFontWeight)) {
-    layoutAxisLegendFontWeight = layoutState.axisLegendFontWeight;
-    if (layoutAxisWeightSelect) {
-      layoutAxisWeightSelect.value = String(layoutAxisLegendFontWeight);
-    }
+function applyPresetFontWeight(layoutState, key, applyValue, selectElement) {
+  if (!Number.isFinite(layoutState[key])) {
+    return false;
   }
-  if (Number.isFinite(layoutState.lineLabelFontWeight)) {
-    layoutLineLabelFontWeight = layoutState.lineLabelFontWeight;
-    if (layoutLineLabelWeightSelect) {
-      layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
-    }
-  } else {
+  const value = layoutState[key];
+  applyValue(value);
+  if (selectElement) {
+    selectElement.value = String(value);
+  }
+  return true;
+}
+
+function applyPresetLayoutFontWeights(layoutState) {
+  applyPresetFontWeight(layoutState, "axisLegendFontWeight", (value) => {
+    layoutAxisLegendFontWeight = value;
+  }, layoutAxisWeightSelect);
+  if (!applyPresetFontWeight(layoutState, "lineLabelFontWeight", (value) => {
+    layoutLineLabelFontWeight = value;
+  }, layoutLineLabelWeightSelect)) {
     layoutLineLabelFontWeight = layoutAxisLegendFontWeight;
     if (layoutLineLabelWeightSelect) {
       layoutLineLabelWeightSelect.value = String(layoutLineLabelFontWeight);
     }
   }
-  if (Number.isFinite(layoutState.titleFontWeight)) {
-    layoutTitleFontWeight = layoutState.titleFontWeight;
-    if (layoutTitleWeightSelect) {
-      layoutTitleWeightSelect.value = String(layoutTitleFontWeight);
-    }
-  }
-  if (Number.isFinite(layoutState.creatorFontWeight)) {
-    layoutCreatorFontWeight = layoutState.creatorFontWeight;
-    if (layoutCreatorWeightSelect) {
-      layoutCreatorWeightSelect.value = String(layoutCreatorFontWeight);
-    }
-  }
-  if (Number.isFinite(layoutState.ratioFontWeight)) {
-    layoutRatioFontWeight = layoutState.ratioFontWeight;
-    if (layoutRatioWeightSelect) {
-      layoutRatioWeightSelect.value = String(layoutRatioFontWeight);
-    }
-  }
-  if (Number.isFinite(layoutState.noteFontWeight)) {
-    layoutNoteFontWeight = layoutState.noteFontWeight;
-    if (layoutNoteWeightSelect) {
-      layoutNoteWeightSelect.value = String(layoutNoteFontWeight);
-    }
-  }
-  if (Number.isFinite(layoutState.triangleLabelFontWeight)) {
-    layoutTriangleLabelFontWeight = layoutState.triangleLabelFontWeight;
-    if (layoutTriangleLabelWeightSelect) {
-      layoutTriangleLabelWeightSelect.value = String(layoutTriangleLabelFontWeight);
-    }
-  }
-  if (Number.isFinite(layoutState.customLabelFontWeight)) {
-    layoutCustomLabelFontWeight = layoutState.customLabelFontWeight;
-    if (layoutCustomWeightSelect) {
-      layoutCustomWeightSelect.value = String(layoutCustomLabelFontWeight);
-    }
-  }
-  if (Number.isFinite(layoutState.keyMappingFontWeight)) {
-    layoutKeyMappingFontWeight = layoutState.keyMappingFontWeight;
-    if (layoutKeyMappingWeightSelect) {
-      layoutKeyMappingWeightSelect.value = String(layoutKeyMappingFontWeight);
-    }
-  }
+  applyPresetFontWeight(layoutState, "titleFontWeight", (value) => {
+    layoutTitleFontWeight = value;
+  }, layoutTitleWeightSelect);
+  applyPresetFontWeight(layoutState, "creatorFontWeight", (value) => {
+    layoutCreatorFontWeight = value;
+  }, layoutCreatorWeightSelect);
+  applyPresetFontWeight(layoutState, "ratioFontWeight", (value) => {
+    layoutRatioFontWeight = value;
+  }, layoutRatioWeightSelect);
+  applyPresetFontWeight(layoutState, "noteFontWeight", (value) => {
+    layoutNoteFontWeight = value;
+  }, layoutNoteWeightSelect);
+  applyPresetFontWeight(layoutState, "triangleLabelFontWeight", (value) => {
+    layoutTriangleLabelFontWeight = value;
+  }, layoutTriangleLabelWeightSelect);
+  applyPresetFontWeight(layoutState, "customLabelFontWeight", (value) => {
+    layoutCustomLabelFontWeight = value;
+  }, layoutCustomWeightSelect);
+  applyPresetFontWeight(layoutState, "keyMappingFontWeight", (value) => {
+    layoutKeyMappingFontWeight = value;
+  }, layoutKeyMappingWeightSelect);
 }
 
 function applyPresetLayoutCustomLabels(layoutState) {
@@ -22029,6 +22052,8 @@ function applyPresetLayoutMiscOptions(layoutState) {
   }
   if (typeof layoutState.perspectiveTextSize === "boolean") {
     layoutPerspectiveTextSize = layoutState.perspectiveTextSize;
+  } else {
+    layoutPerspectiveTextSize = LAYOUT_DEFAULTS.perspectiveTextSize;
   }
   syncLayoutPerspectiveTextToggleState();
   if (typeof layoutState.pageSize === "string") {
@@ -22236,27 +22261,27 @@ function applyPresetTriangleLabelsState(
   });
 }
 
-function applyPendingPresetLayoutState() {
-  const applyAndClearWithDraw = (value, applyFn, clearFn = null) => {
-    if (!value) {
-      return false;
-    }
-    applyFn(value);
-    if (clearFn) {
-      clearFn();
-    }
-    draw();
-    return true;
-  };
+function applyPendingPresetStateWithDraw(value, applyFn, clearFn = null) {
+  if (!value) {
+    return false;
+  }
+  applyFn(value);
+  if (clearFn) {
+    clearFn();
+  }
+  draw();
+  return true;
+}
 
-  applyAndClearWithDraw(
+function applyPendingPresetLayoutState() {
+  applyPendingPresetStateWithDraw(
     pendingLayoutLabelOffsets,
     applyLayoutLabelOffsets,
     () => {
       pendingLayoutLabelOffsets = null;
     }
   );
-  applyAndClearWithDraw(
+  applyPendingPresetStateWithDraw(
     pendingLayoutKeyMappingOffsets,
     applyLayoutKeyMappingOffsets,
     () => {
@@ -22270,14 +22295,14 @@ function applyPendingPresetLayoutState() {
     updateLayoutSpacingControls();
     draw();
   }
-  applyAndClearWithDraw(
+  applyPendingPresetStateWithDraw(
     pendingLayoutPositionOffsets,
     applyLayoutPositionOffsets,
     () => {
       pendingLayoutPositionOffsets = null;
     }
   );
-  applyAndClearWithDraw(
+  applyPendingPresetStateWithDraw(
     pendingLayoutCustomPositions,
     applyLayoutCustomNodePositions,
     () => {
@@ -22304,25 +22329,7 @@ function applyPresetSynthState(synthState) {
   }
   if (keyboardModeSelect && typeof synthState.keyboardMode === "string") {
     keyboardModeSelect.value = synthState.keyboardMode;
-    if (keyboardModeSelect.value === "piano-custom") {
-      if (keyboardMapToggle) {
-        keyboardMapToggle.hidden = false;
-      }
-      if (keyboardMapClear) {
-        keyboardMapClear.hidden = false;
-      }
-      updateCustomPianoKeyStyles();
-      closeKeyboardMapPopover();
-    } else {
-      if (keyboardMapToggle) {
-        keyboardMapToggle.hidden = true;
-      }
-      if (keyboardMapClear) {
-        keyboardMapClear.hidden = true;
-      }
-      setCustomPianoMapMode(false);
-      closeKeyboardMapPopover();
-    }
+    syncCustomPianoModeUi(keyboardModeSelect.value);
     updateUiHint();
     updateKeyMappingToggleVisibility();
     markIsomorphicDirty();
@@ -22462,28 +22469,10 @@ function initializePresetApplyContext(state, options = {}) {
     preserveViewMode,
     Boolean(options.skipLayoutModeSwitch)
   );
-  resetPresetAnalysisState();
-  pendingLayoutSpacing = null;
-  pendingLayoutCustomPositions = null;
-  pendingCustomPianoMap = null;
   const { pendingLineLabelOverridesState, pendingLineLabelPositionsState } =
-    getPendingPresetLineLabelState(state);
-  lineLabelOverrides.clear();
-  lineLabelPositionOverrides.clear();
-  applyPresetDisplayToggleState(state);
-  applyPresetDistanceState(state);
-  const viewState = state.view && typeof state.view === "object" ? state.view : null;
-  layoutSourceView = null;
-  const { wants3D, targetDepth, targetCenterZ } = getPresetDepthContext(
-    state,
-    layoutState
-  );
-  gridDepth = targetDepth;
-  gridCenterZ = targetCenterZ;
-  const presetTriangles = Array.isArray(state.triangles) ? state.triangles : null;
-  const presetTriangleLabels = Array.isArray(state.triangleLabels)
-    ? state.triangleLabels
-    : null;
+    applyPresetTransientState(state);
+  const { viewState, wants3D, targetDepth, targetCenterZ, presetTriangles, presetTriangleLabels } =
+    applyPresetGeometryState(state, layoutState);
   applyPresetModeUiState(wants3D, preserveViewMode);
   return {
     layoutState,
@@ -27218,29 +27207,9 @@ keyboardModeSelect.addEventListener("change", () => {
   if (keyboardModeSelect.value === "piano") {
     showKeyboardModeHelp("2 octave layout with C mapped to Z and Y");
   }
-  if (keyboardModeSelect.value === "piano-custom") {
-    if (keyboardMapToggle) {
-      keyboardMapToggle.hidden = false;
-    }
-    if (keyboardMapClear) {
-      keyboardMapClear.hidden = false;
-    }
-    updateCustomPianoKeyStyles();
-    closeKeyboardMapPopover();
-  } else {
-    if (keyboardMapToggle) {
-      keyboardMapToggle.hidden = true;
-    }
-    if (keyboardMapClear) {
-      keyboardMapClear.hidden = true;
-    }
-    setCustomPianoMapMode(false);
-    closeKeyboardMapPopover();
-  }
+  syncCustomPianoModeUi(keyboardModeSelect.value);
   updateKeyMappingToggleVisibility();
   updateUiHint();
-});
-keyboardModeSelect.addEventListener("change", () => {
   markIsomorphicDirty();
   draw();
   schedulePresetUrlUpdate();

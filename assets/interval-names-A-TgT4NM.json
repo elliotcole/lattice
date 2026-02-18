@@ -162,17 +162,17 @@
     "source": ""
   },
   {
-    "name": "diminished second",
-    "type": "second",
+    "name": "lesser diesis",
+    "type": "comma",
     "numerator": 128,
     "denominator": 125,
     "color": "#DA773E",
-    "description": "16/15 x 24/25",
-    "source": "Gann"
+    "description": "3 major thirds",
+    "source": "Mathieu"
   },
   {
     "name": "enharmonic diesis",
-    "type": "diesis",
+    "type": "comma",
     "numerator": 525,
     "denominator": 512,
     "color": "#DA7D3E",
@@ -253,7 +253,7 @@
   },
   {
     "name": "greater diesis",
-    "type": "diesis",
+    "type": "comma",
     "numerator": 648,
     "denominator": 625,
     "color": "#DA3E5D",
@@ -360,7 +360,7 @@
     "source": "Gann"
   },
   {
-    "name": "ET half-step approximation",
+    "name": "12-EDO half-step approximation",
     "type": "half-step",
     "numerator": 89,
     "denominator": 84,

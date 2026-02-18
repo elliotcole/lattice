@@ -23,9 +23,9 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/main-ijGduNrq.js"></script>
+    <script type="module" crossorigin src="./assets/main-BXQ8qHHI.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-B5Qt9EMX.js">
-    <link rel="stylesheet" crossorigin href="./assets/style-DxZLqwPx.css">
+    <link rel="stylesheet" crossorigin href="./assets/style-B_G9LZEh.css">
   </head>
   <body>
     <canvas id="lattice" tabindex="0" aria-label="Tuning lattice"></canvas>
@@ -347,7 +347,7 @@
             <div class="control-group">
               <div class="control-inline">
                 <input id="layout-show-cents-deviation" type="checkbox" checked />
-                <label for="layout-show-cents-deviation">Cents from ET</label>
+                <label for="layout-show-cents-deviation">Cents from 12-EDO</label>
               </div>
             </div>
             <div class="control-group">
@@ -770,7 +770,6 @@
         <div class="snapshot-header">
           <span>Snapshots</span>
           <button id="snapshot-options-toggle" type="button" aria-expanded="false" aria-controls="snapshot-options">Options</button>
-          <button id="snapshot-copy" type="button">Save &amp; Copy</button>
           <button id="snapshot-export" type="button">Export</button>
           <button id="snapshot-import" type="button">Import</button>
           <button id="snapshot-reset" type="button">Reset</button>
@@ -796,6 +795,10 @@
           <label class="snapshot-toggle">
             <input id="snapshot-restore-sequence" type="checkbox" checked />
             Restore sequence
+          </label>
+          <label class="snapshot-toggle">
+            <input id="snapshot-restore-synth" type="checkbox" checked />
+            Restore synth settings
           </label>
           <label class="snapshot-toggle">
             <input id="snapshot-restore-lfos" type="checkbox" checked />
@@ -1066,9 +1069,33 @@
           Looper
           <button id="looper-clear" type="button" class="looper-clear">clear</button>
         </div>
+        <div class="synth-group" hidden>
+          <div class="control-inline looper-quantize-row">
+            <input id="looper-quantize-enabled" type="checkbox" />
+            <!-- <label for="looper-quantize-enabled">Quantize [</label> -->
+            <button id="looper-quantize-menu-toggle" type="button" class="looper-clear">options</button>
+          </div>
+          <div id="looper-quantize-menu" class="panel looper-quantize-menu" hidden>
+            <div class="control-group">
+              <label for="looper-quantize-grid">Grid</label>
+              <select id="looper-quantize-grid">
+                <option value="8">1/8</option>
+                <option value="16" selected>1/16</option>
+                <option value="32">1/32</option>
+                <option value="8t">1/8T</option>
+                <option value="16t">1/16T</option>
+              </select>
+            </div>
+            <div class="control-group">
+              <label for="looper-quantize-strength">Strength</label>
+              <input id="looper-quantize-strength" type="range" min="0" max="100" step="1" value="100" />
+              <span id="looper-quantize-strength-readout">100%</span>
+            </div>
+          </div>
+        </div>
         <div class="synth-group">
           <label class="visually-hidden" for="looper-toggle">Looper</label>
-          <button id="looper-toggle" type="button">Record</button>
+          <button id="looper-toggle" type="button">Record \</button>
         </div>
       </div>
       <div class="synth-group">
@@ -1188,7 +1215,7 @@
             <div class="control-group">
               <div class="control-inline">
                 <input id="show-cents-deviation" type="checkbox" checked />
-                <label for="show-cents-deviation">Cents from ET</label>
+                <label for="show-cents-deviation">Cents from 12-EDO</label>
               </div>
             </div>
             <div class="control-group">

@@ -195,6 +195,12 @@ const releaseSlider = document.getElementById("release");
 const oneShotCheckbox = document.getElementById("one-shot");
 const looperToggle = document.getElementById("looper-toggle");
 const looperClear = document.getElementById("looper-clear");
+const looperQuantizeEnabledToggle = document.getElementById("looper-quantize-enabled");
+const looperQuantizeMenuToggle = document.getElementById("looper-quantize-menu-toggle");
+const looperQuantizeMenu = document.getElementById("looper-quantize-menu");
+const looperQuantizeGridSelect = document.getElementById("looper-quantize-grid");
+const looperQuantizeStrengthSlider = document.getElementById("looper-quantize-strength");
+const looperQuantizeStrengthReadout = document.getElementById("looper-quantize-strength-readout");
 const tempoSlider = document.getElementById("tempo");
 const tempoReadout = document.getElementById("tempo-readout");
 const patternLengthSlider = document.getElementById("pattern-length");
@@ -1557,9 +1563,13 @@ let looperState = "idle";
 let looperEvents = [];
 let looperStartMs = 0;
 let looperLoopDurationMs = 0;
+let looperCycleStartMs = 0;
 let looperCycleTimer = null;
 let looperTimeouts = [];
 let looperVoicesByNode = new Map();
+let looperQuantizeEnabled = false;
+let looperQuantizeGrid = "16";
+let looperQuantizeStrength = 1;
 let patternPlayerState = "idle";
 let patternNextTimer = null;
 let patternOffTimers = [];
@@ -1596,6 +1606,7 @@ let snapshotRestorePlayNodes = true;
 let snapshotConnectCommonTones = false;
 let snapshotRestoreView = true;
 let snapshotRestoreSequence = true;
+let snapshotRestoreSynthSettings = true;
 let snapshotRestoreLfos = true;
 let snapshotRestoreLfoPhase = false;
 let snapshotKeyboardMode = false;
@@ -1976,8 +1987,11 @@ function updateLooperButton() {
   if (looperState === "recording") {
     looperToggle.textContent = "Play";
     looperToggle.classList.add("button-on");
+  } else if (looperState === "overdubbing") {
+    looperToggle.textContent = "Play";
+    looperToggle.classList.add("button-on");
   } else if (looperState === "playing") {
-    looperToggle.textContent = "Stop";
+    looperToggle.textContent = "Overdub";
     looperToggle.classList.add("button-on");
   } else if (looperState === "ready") {
     looperToggle.textContent = "Play";
@@ -1986,6 +2000,7 @@ function updateLooperButton() {
     looperToggle.textContent = "Record";
     looperToggle.classList.remove("button-on");
   }
+  updateBannerMessage();
 }
 
 function updateScoreButton() {
@@ -2007,6 +2022,13 @@ function updateTempoReadout() {
   }
   tempoBpm = Number(tempoSlider.value) || 120;
   tempoReadout.textContent = `${tempoBpm} BPM`;
+}
+
+function updateLooperQuantizeStrengthReadout() {
+  if (!looperQuantizeStrengthReadout) {
+    return;
+  }
+  looperQuantizeStrengthReadout.textContent = `${Math.round(looperQuantizeStrength * 100)}%`;
 }
 
 function updatePatternLengthAvailability() {
@@ -2048,6 +2070,74 @@ function getSnapshotPatternState() {
     rhythm: patternRhythmState.type,
     octave: patternOctaveState.type,
   };
+}
+
+function getSnapshotLooperState() {
+  const looperActive = looperState === "playing" || looperState === "overdubbing";
+  if (!looperActive || !Array.isArray(looperEvents) || !looperEvents.length) {
+    return null;
+  }
+  const events = looperEvents
+    .filter(
+      (event) =>
+        event &&
+        (event.type === "on" || event.type === "off") &&
+        Number.isFinite(event.nodeId) &&
+        Number.isFinite(event.t)
+    )
+    .map((event) => ({
+      type: event.type,
+      nodeId: Math.trunc(event.nodeId),
+      t: Math.max(0, Math.round(event.t)),
+      octave: Number.isFinite(event.octave) ? Math.trunc(event.octave) : 0,
+      oneShot: event.oneShot === true,
+    }))
+    .sort((a, b) => a.t - b.t);
+  if (!events.length) {
+    return null;
+  }
+  const maxEventT = events.reduce((max, event) => Math.max(max, event.t), 0);
+  const requestedLoopDuration = Number(looperLoopDurationMs) || 0;
+  const loopDurationMs = Math.max(250, Math.round(requestedLoopDuration), maxEventT);
+  return {
+    loopDurationMs,
+    events,
+  };
+}
+
+function restoreSnapshotLooper(snapshot) {
+  const looper = snapshot && snapshot.looper;
+  if (!looper || !Array.isArray(looper.events) || !looper.events.length) {
+    clearLooper();
+    return;
+  }
+  const events = looper.events
+    .filter(
+      (event) =>
+        event &&
+        (event.type === "on" || event.type === "off") &&
+        Number.isFinite(event.nodeId) &&
+        Number.isFinite(event.t)
+    )
+    .map((event) => ({
+      type: event.type,
+      nodeId: Math.trunc(event.nodeId),
+      t: Math.max(0, Math.round(event.t)),
+      octave: Number.isFinite(event.octave) ? Math.trunc(event.octave) : 0,
+      oneShot: event.oneShot === true,
+    }))
+    .sort((a, b) => a.t - b.t);
+  if (!events.length) {
+    clearLooper();
+    return;
+  }
+  clearLooperTimers();
+  stopLooperVoices();
+  looperEvents = events;
+  const maxEventT = events.reduce((max, event) => Math.max(max, event.t), 0);
+  const requestedLoopDuration = Number(looper.loopDurationMs) || 0;
+  looperLoopDurationMs = Math.max(250, Math.round(requestedLoopDuration), maxEventT);
+  startLooperPlayback();
 }
 
 function applySnapshotPatternState(snapshotPattern) {
@@ -2705,10 +2795,12 @@ function applyPendingSnapshotForPattern(nextSnapshot, nextIndex, nextLetter) {
       applySnapshotPatternState(nextSnapshot.pattern);
     } else {
       stopPatternPlayback();
+      restoreSnapshotLooper(nextSnapshot);
       restoreSnapshotPlayState(nextSnapshot);
       restoreSnapshotLfos(nextSnapshot);
       return false;
     }
+    restoreSnapshotLooper(nextSnapshot);
   }
   restoreSnapshotPlayState(nextSnapshot);
   restoreSnapshotLfos(nextSnapshot);
@@ -2999,9 +3091,14 @@ function buildSnapshotState() {
   if (!state) {
     return null;
   }
+  const synthState = quantizeSnapshotSynthState(state.synth);
   delete state.layout;
   delete state.play;
-  delete state.synth;
+  if (synthState) {
+    state.synth = synthState;
+  } else {
+    delete state.synth;
+  }
   if (layoutMode && layoutPrevState) {
     state.mode3d = Boolean(layoutPrevState.is3DMode);
     if (snapshotRestoreView) {
@@ -3035,6 +3132,54 @@ function buildSnapshotState() {
     };
   }
   return JSON.parse(JSON.stringify(state));
+}
+
+function roundSnapshotValue(value, decimals) {
+  if (!Number.isFinite(value)) {
+    return value;
+  }
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+function quantizeSnapshotSynthState(synthState) {
+  if (!synthState || typeof synthState !== "object") {
+    return null;
+  }
+  const next = JSON.parse(JSON.stringify(synthState));
+  if (Number.isFinite(next.volume)) {
+    next.volume = Math.round(next.volume);
+  }
+  if (Number.isFinite(next.lfoDepth)) {
+    next.lfoDepth = roundSnapshotValue(next.lfoDepth, 3);
+  }
+  if (Number.isFinite(next.lfoRate)) {
+    next.lfoRate = roundSnapshotValue(next.lfoRate, 3);
+  }
+  if (Number.isFinite(next.attack)) {
+    next.attack = roundSnapshotValue(next.attack, 3);
+  }
+  if (Number.isFinite(next.decay)) {
+    next.decay = roundSnapshotValue(next.decay, 3);
+  }
+  if (Number.isFinite(next.sustain)) {
+    next.sustain = roundSnapshotValue(next.sustain, 3);
+  }
+  if (Number.isFinite(next.release)) {
+    next.release = roundSnapshotValue(next.release, 3);
+  }
+  return next;
+}
+
+function prepareSnapshotStateForRecall(snapshotState) {
+  const nextState = JSON.parse(JSON.stringify(snapshotState));
+  if (!snapshotRestoreView && nextState.view) {
+    delete nextState.view;
+  }
+  if (!snapshotRestoreSynthSettings && nextState.synth) {
+    delete nextState.synth;
+  }
+  return nextState;
 }
 
 function getNodeRatioKey(node) {
@@ -3350,6 +3495,7 @@ function buildSnapshotSetPayload({ compact = true } = {}) {
           diff: diff && Object.keys(diff).length ? diff : null,
           playKeys: snapshot.playKeys,
           pattern: snapshot.pattern,
+          looper: snapshot.looper,
           lfos: snapshot.lfos,
         };
         if (!entry.diff) {
@@ -3365,6 +3511,7 @@ function buildSnapshotSetPayload({ compact = true } = {}) {
           diff: diff && Object.keys(diff).length ? diff : null,
           playKeys: snapshot.playKeys,
           pattern: snapshot.pattern,
+          looper: snapshot.looper,
           lfos: snapshot.lfos,
         };
         if (!entry.diff) {
@@ -3386,6 +3533,7 @@ function buildSnapshotSetPayload({ compact = true } = {}) {
       connectCommonTones: snapshotConnectCommonTones,
       restoreView: snapshotRestoreView,
       restoreSequence: snapshotRestoreSequence,
+      restoreSynthSettings: snapshotRestoreSynthSettings,
       restoreLfos: snapshotRestoreLfos,
       restoreLfoPhase: snapshotRestoreLfoPhase,
       useLetterKeys: snapshotKeyboardMode,
@@ -3418,6 +3566,9 @@ function applySnapshotSetPayload(payload) {
     snapshotConnectCommonTones = Boolean(settings.connectCommonTones);
     snapshotRestoreView = Boolean(settings.restoreView);
     snapshotRestoreSequence = Boolean(settings.restoreSequence);
+    if (typeof settings.restoreSynthSettings === "boolean") {
+      snapshotRestoreSynthSettings = settings.restoreSynthSettings;
+    }
     snapshotRestoreLfos = Boolean(settings.restoreLfos);
     snapshotRestoreLfoPhase = Boolean(settings.restoreLfoPhase);
     snapshotKeyboardMode = Boolean(settings.useLetterKeys);
@@ -3427,32 +3578,6 @@ function applySnapshotSetPayload(payload) {
   setKeyboardModeDisabled(snapshotKeyboardMode);
   updateSnapshotUi();
   return true;
-}
-
-function buildSnapshotPresetUrl() {
-  const state = getPresetState();
-  if (!state) {
-    return null;
-  }
-  const snapshotPayload = buildSnapshotSetPayload({ compact: true });
-  if (snapshotPayload.snapshots.length) {
-    state.snapshots = snapshotPayload.snapshots;
-  }
-  if (snapshotPayload.snapshotsLetters.length) {
-    state.snapshotsLetters = snapshotPayload.snapshotsLetters;
-  }
-  if (snapshotPayload.base) {
-    state.snapshotBase = snapshotPayload.base;
-  }
-  if (snapshotPayload.snapshotActive != null) {
-    state.snapshotActive = snapshotPayload.snapshotActive;
-  }
-  if (snapshotPayload.snapshotActiveLetter) {
-    state.snapshotActiveLetter = snapshotPayload.snapshotActiveLetter;
-  }
-  state.snapshotSettings = snapshotPayload.snapshotSettings;
-  const encoded = encodePresetState(state);
-  return `${window.location.origin}/#${PRESET_PARAM}=${encoded}`;
 }
 
 function exportSnapshotSetToFile() {
@@ -3596,6 +3721,7 @@ function saveSnapshot(index) {
     state,
     playKeys: getPlayingSnapshotKeys({ excludePattern: patternPlayerState === "playing" }),
     pattern: getSnapshotPatternState(),
+    looper: getSnapshotLooperState(),
     lfos: getSnapshotLfoState(),
   };
   if (snapshotDebugEnabled) {
@@ -3633,6 +3759,7 @@ function saveSnapshotLetter(letter, index) {
     state,
     playKeys: getPlayingSnapshotKeys({ excludePattern: patternPlayerState === "playing" }),
     pattern: getSnapshotPatternState(),
+    looper: getSnapshotLooperState(),
     lfos: getSnapshotLfoState(),
   };
   if (snapshotDebugEnabled) {
@@ -3654,10 +3781,7 @@ function recallSnapshotLetter(letter, index) {
   if (!snapshot || !snapshot.state) {
     return;
   }
-  const snapshotState = JSON.parse(JSON.stringify(snapshot.state));
-  if (!snapshotRestoreView && snapshotState.view) {
-    delete snapshotState.view;
-  }
+  const snapshotState = prepareSnapshotStateForRecall(snapshot.state);
   if (snapshotDeferToCycleEnd && patternPlayerState === "playing") {
     pendingSnapshotIndex = -1;
     pendingSnapshotState = { ...snapshot, state: snapshotState };
@@ -3691,6 +3815,7 @@ function recallSnapshotLetter(letter, index) {
       stopPatternPlayback();
       buildPatternStates(true);
     }
+    restoreSnapshotLooper(snapshot);
   } else {
     buildPatternStates(true);
   }
@@ -3707,10 +3832,7 @@ function recallSnapshot(index) {
   if (!snapshot || !snapshot.state) {
     return;
   }
-  const snapshotState = JSON.parse(JSON.stringify(snapshot.state));
-  if (!snapshotRestoreView && snapshotState.view) {
-    delete snapshotState.view;
-  }
+  const snapshotState = prepareSnapshotStateForRecall(snapshot.state);
   if (snapshotDeferToCycleEnd && patternPlayerState === "playing") {
     pendingSnapshotIndex = index;
     pendingSnapshotState = { ...snapshot, state: snapshotState };
@@ -3740,6 +3862,7 @@ function recallSnapshot(index) {
       stopPatternPlayback();
       buildPatternStates(true);
     }
+    restoreSnapshotLooper(snapshot);
   } else {
     buildPatternStates(true);
   }
@@ -4664,7 +4787,7 @@ function setupDialogKeyDefaults(dialog) {
   if (!dialog) {
     return;
   }
-  dialog.addEventListener("keydown", (event) => {
+  bindOptionalEvent(dialog, "keydown", (event) => {
     if (event.defaultPrevented) {
       return;
     }
@@ -4789,16 +4912,136 @@ function stopLooperVoices() {
 
 function startLooperRecording() {
   looperEvents = [];
-  looperStartMs = performance.now();
+  looperStartMs = 0;
   looperLoopDurationMs = 0;
+  looperCycleStartMs = 0;
   looperState = "recording";
   updateLooperButton();
 }
 
+function stopLooperRecordingAndStartPlayback() {
+  if (looperState !== "recording") {
+    return;
+  }
+  if (looperEvents.length && looperStartMs > 0) {
+    const elapsed = performance.now() - looperStartMs;
+    looperLoopDurationMs = Math.max(looperLoopDurationMs, elapsed);
+  }
+  startLooperPlayback();
+}
+
+function startLooperOverdub() {
+  if (looperState !== "playing" || !looperEvents.length || looperLoopDurationMs <= 0) {
+    return;
+  }
+  looperState = "overdubbing";
+  updateLooperButton();
+}
+
+function stopLooperOverdub() {
+  if (looperState !== "overdubbing") {
+    return;
+  }
+  looperState = "playing";
+  updateLooperButton();
+}
+
+function shouldCaptureLooperInput(voice) {
+  return (
+    voice &&
+    voice.source !== "looper" &&
+    (looperState === "recording" || looperState === "overdubbing")
+  );
+}
+
+function normalizeLoopEventTime(timeMs) {
+  if (!Number.isFinite(timeMs)) {
+    return 0;
+  }
+  if (!(looperLoopDurationMs > 0)) {
+    return Math.max(0, timeMs);
+  }
+  const wrapped = ((timeMs % looperLoopDurationMs) + looperLoopDurationMs) % looperLoopDurationMs;
+  return wrapped;
+}
+
+function getLooperEventTimestamp(nowMs = performance.now()) {
+  if (looperState === "overdubbing" && looperLoopDurationMs > 0 && looperCycleStartMs > 0) {
+    return normalizeLoopEventTime(nowMs - looperCycleStartMs);
+  }
+  if (!(looperStartMs > 0)) {
+    looperStartMs = nowMs;
+  }
+  return Math.max(0, nowMs - looperStartMs);
+}
+
+function appendLooperEvent(type, nodeId, timeMs, octave, { wrap = false, oneShot = false } = {}) {
+  const normalizedTime = wrap ? normalizeLoopEventTime(timeMs) : Math.max(0, timeMs);
+  const nextEvent = {
+    type,
+    nodeId,
+    t: normalizedTime,
+    octave: Number.isFinite(octave) ? octave : 0,
+  };
+  if (oneShot) {
+    nextEvent.oneShot = true;
+  }
+  looperEvents.push(nextEvent);
+  looperEvents.sort((a, b) => a.t - b.t);
+}
+
+function getLooperQuantizeStepMs() {
+  const bpm = Number(tempoSlider ? tempoSlider.value : tempoBpm) || tempoBpm || 120;
+  const beatMs = 60000 / Math.max(1, bpm);
+  switch (looperQuantizeGrid) {
+    case "8":
+      return beatMs / 2;
+    case "16":
+      return beatMs / 4;
+    case "32":
+      return beatMs / 8;
+    case "8t":
+      return beatMs / 3;
+    case "16t":
+      return beatMs / 6;
+    default:
+      return beatMs / 4;
+  }
+}
+
+function getLooperQuantizeAnchorMs() {
+  const firstOn = looperEvents.find((event) => event && event.type === "on");
+  return firstOn && Number.isFinite(firstOn.t) ? Number(firstOn.t) : 0;
+}
+
+function getLooperPlaybackEventTime(event) {
+  const baseTime = Math.max(0, Number(event && event.t) || 0);
+  if (
+    !looperQuantizeEnabled ||
+    !event ||
+    event.type !== "on" ||
+    !(looperLoopDurationMs > 0)
+  ) {
+    return baseTime;
+  }
+  const stepMs = getLooperQuantizeStepMs();
+  if (!(stepMs > 0)) {
+    return baseTime;
+  }
+  const anchorMs = getLooperQuantizeAnchorMs();
+  const relative = baseTime - anchorMs;
+  const snapped = anchorMs + Math.round(relative / stepMs) * stepMs;
+  const strength = Math.max(0, Math.min(1, looperQuantizeStrength));
+  const blended = baseTime + (snapped - baseTime) * strength;
+  return normalizeLoopEventTime(blended);
+}
+
 function scheduleLooperCycle() {
+  looperCycleStartMs = performance.now();
   looperEvents.forEach((event) => {
+    const eventTimeMs = getLooperPlaybackEventTime(event);
     const timer = setTimeout(() => {
-      if (looperState !== "playing") {
+      if (looperState !== "playing" && looperState !== "overdubbing") {
         return;
       }
       const node = nodeById.get(event.nodeId);
@@ -4811,6 +5054,7 @@ function scheduleLooperCycle() {
           nodeId: node.id,
           octave,
           freq: node.freq * Math.pow(2, octave),
+          forceOneShot: event.oneShot === true,
           source: "looper",
         });
         if (voice) {
@@ -4831,7 +5075,7 @@ function scheduleLooperCycle() {
           }
         }
       }
-    }, event.t);
+    }, eventTimeMs);
     looperTimeouts.push(timer);
   });
 }
@@ -4847,6 +5091,7 @@ function startLooperPlayback() {
   updateLooperButton();
   clearLooperTimers();
   stopLooperVoices();
+  looperCycleStartMs = performance.now();
   scheduleLooperCycle();
   looperCycleTimer = setInterval(scheduleLooperCycle, looperLoopDurationMs);
 }
@@ -4854,6 +5099,7 @@ function startLooperPlayback() {
 function stopLooperPlayback() {
   clearLooperTimers();
   stopLooperVoices();
+  looperCycleStartMs = 0;
   looperState = looperEvents.length ? "ready" : "idle";
   updateLooperButton();
   draw();
@@ -4864,6 +5110,7 @@ function clearLooper() {
   stopLooperVoices();
   looperEvents = [];
   looperLoopDurationMs = 0;
+  looperCycleStartMs = 0;
   looperState = "idle";
   updateLooperButton();
   draw();
@@ -5820,6 +6067,28 @@ function handleKeyDown(event) {
   }
   if (layoutMode) {
     return;
+  }
+  if (!event.metaKey && !event.ctrlKey && !event.altKey) {
+    if (event.code === "Backslash") {
+      event.preventDefault();
+      if (looperState === "recording") {
+        stopLooperRecordingAndStartPlayback();
+      } else if (looperState === "playing") {
+        startLooperOverdub();
+      } else if (looperState === "overdubbing") {
+        stopLooperOverdub();
+      } else if (looperState === "ready") {
+        startLooperPlayback();
+      } else if (looperState === "idle") {
+        startLooperRecording();
+      }
+      return;
+    }
+    if (event.code === "BracketRight") {
+      event.preventDefault();
+      clearLooper();
+      return;
+    }
   }
 
   const mode = getKeyboardMode();
@@ -12297,8 +12566,10 @@ function startVoice(options) {
   if (oscillator && "frequency" in oscillator && Number.isFinite(effectiveFreq)) {
     oscillator.frequency.value = effectiveFreq;
   }
+  const forcedOneShot = options.forceOneShot === true;
   const isOneShot =
-    Boolean(oneShotCheckbox && oneShotCheckbox.checked) && !options.ignoreOneShot;
+    (Boolean(oneShotCheckbox && oneShotCheckbox.checked) && !options.ignoreOneShot) ||
+    forcedOneShot;
   envGain.gain.setValueAtTime(0.0001, now);
   const attack = getEnvelopeAttackSeconds() || 0.02;
   const decay = getEnvelopeDecaySeconds() || 0.2;
@@ -12336,6 +12607,7 @@ function startVoice(options) {
     lfoCurve: Number.isFinite(options.lfoCurve) ? options.lfoCurve : 1,
     source: options.source || "keyboard",
     loopOffRecorded: false,
+    oneShot: isOneShot,
     usesWorklet: waveformType === KARPLUS_WAVEFORM || waveformType === RESONANT_WAVEFORM,
     usesSoundfont: waveformType === SOUNDFONT_WAVEFORM,
     sfStop: oscillator && oscillator.sfStop ? oscillator.sfStop : null,
@@ -12383,20 +12655,16 @@ function startVoice(options) {
 
   sendMidiOutNoteOn(voice);
 
-  if (looperState === "recording" && voice.source !== "looper") {
-    const t = performance.now() - looperStartMs;
-    looperEvents.push({ type: "on", nodeId: voice.nodeId, t, octave: voice.octave });
-    looperLoopDurationMs = Math.max(looperLoopDurationMs, t);
-    if (isOneShot) {
-      const offAt = t + (attack + decay + release) * 1000;
-      looperEvents.push({
-        type: "off",
-        nodeId: voice.nodeId,
-        t: offAt,
-        octave: voice.octave,
-      });
-      looperLoopDurationMs = Math.max(looperLoopDurationMs, offAt);
-      voice.loopOffRecorded = true;
+  if (shouldCaptureLooperInput(voice)) {
+    const nowMs = performance.now();
+    const wrap = looperState === "overdubbing";
+    const t = getLooperEventTimestamp(nowMs);
+    appendLooperEvent("on", voice.nodeId, t, voice.octave, {
+      wrap,
+      oneShot: isOneShot,
+    });
+    if (looperState === "recording") {
+      looperLoopDurationMs = Math.max(looperLoopDurationMs, t);
     }
   }
 
@@ -12489,10 +12757,14 @@ function stopVoice(voice, immediate = false) {
     }
   }
 
-  if (looperState === "recording" && voice.source !== "looper" && !voice.loopOffRecorded) {
-    const t = performance.now() - looperStartMs;
-    looperEvents.push({ type: "off", nodeId: voice.nodeId, t, octave: voice.octave });
-    looperLoopDurationMs = Math.max(looperLoopDurationMs, t);
+  if (shouldCaptureLooperInput(voice) && !voice.loopOffRecorded && !voice.oneShot) {
+    const nowMs = performance.now();
+    const wrap = looperState === "overdubbing";
+    const t = getLooperEventTimestamp(nowMs);
+    appendLooperEvent("off", voice.nodeId, t, voice.octave, { wrap });
+    if (looperState === "recording") {
+      looperLoopDurationMs = Math.max(looperLoopDurationMs, t);
+    }
     voice.loopOffRecorded = true;
   }
   if (!layoutMode) {
@@ -16538,14 +16810,13 @@ function maybeConfirmFindRatioAxes(value) {
   }
   return new Promise((resolve) => {
     const handleClose = () => {
-      findRatioAxisDialog.removeEventListener("close", handleClose);
       const confirmed = findRatioAxisDialog.returnValue === "yes";
       if (confirmed) {
         setAxisPrimes(recommended);
       }
       resolve(confirmed);
     };
-    findRatioAxisDialog.addEventListener("close", handleClose);
+    bindOptionalEvent(findRatioAxisDialog, "close", handleClose, { once: true });
     findRatioAxisDialog.showModal();
   });
 }
@@ -17169,11 +17440,11 @@ function updateUiHint() {
 
   if (!is3DMode) {
     uiHint.textContent =
-      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO.\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\nDrag to pan. Scroll to zoom.";
+      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO.\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\n\\ cycles looper record/play/overdub. ] clears loop.\nDrag to pan. Scroll to zoom.";
     return;
   }
   uiHint.textContent =
-    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
+    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\n\\ cycles looper record/play/overdub. ] clears loop.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
 }
 
 function resetUiHintToDefault() {
@@ -17538,7 +17809,13 @@ function updateBannerMessage() {
   let nextHtml = "";
   let nextInteractive = false;
   let nextHidden = false;
-  if (layoutMode && !layoutLockPosition && !interactionMode) {
+  if (!layoutMode && looperState === "recording") {
+    nextKey = "looper-recording";
+    nextText = "Looper recording. Press \\ to play, ] to clear.";
+  } else if (!layoutMode && looperState === "overdubbing") {
+    nextKey = "looper-overdub";
+    nextText = "Looper overdubbing. Press \\ to return to play, ] to clear.";
+  } else if (layoutMode && !layoutLockPosition && !interactionMode) {
     nextKey = "layout-freeze";
     nextHtml = 'Drag, scroll, and use arrow keys to adjust view. <button type="button" data-layout-banner="freeze">Freeze</button> this view to edit.';
     nextInteractive = true;
@@ -19433,7 +19710,7 @@ function renderPresetList() {
       link.href = buildPresetHref(entry.uri);
       link.target = "_self";
       link.rel = "noopener";
-      link.addEventListener("click", () => {
+      bindOptionalClick(link, () => {
         closePresetOverlay();
       });
       const title = document.createElement("div");
@@ -19490,7 +19767,7 @@ function renderPresetList() {
     link.href = buildPresetHref(entry.uri);
     link.target = "_self";
     link.rel = "noopener";
-    link.addEventListener("click", () => {
+    bindOptionalClick(link, () => {
       closePresetOverlay();
     });
     const title = document.createElement("div");
@@ -19785,7 +20062,7 @@ function renderIntervalChartTypes() {
     input.type = "checkbox";
     input.id = id;
     input.checked = intervalChartSelectedTypes.has(type);
-    input.addEventListener("change", () => {
+    bindOptionalChange(input, () => {
       if (input.checked) {
         intervalChartSelectedTypes.add(type);
       } else {
@@ -19811,7 +20088,7 @@ function renderIntervalChartTypes() {
       .length;
     input.checked = selectedCount === types.length && types.length > 0;
     input.indeterminate = selectedCount > 0 && selectedCount < types.length;
-    input.addEventListener("change", () => {
+    bindOptionalChange(input, () => {
       if (input.checked) {
         types.forEach((type) => intervalChartSelectedTypes.add(type));
       } else {
@@ -19858,7 +20135,7 @@ function renderIntervalChartTable() {
     if (intervalChartSelectedKey === key) {
       tr.classList.add("interval-chart-row-selected");
     }
-    tr.addEventListener("click", () => {
+    bindOptionalClick(tr, () => {
       intervalChartSelectedKey = key;
       if (intervalChartListenEnabled) {
         const active = intervalChartActive.get(key);
@@ -20144,6 +20421,7 @@ const PRESET_PARAM = "s";
 let presetSyncEnabled = false;
 let presetUpdateTimer = null;
 let fileShareTimer = null;
+let presetStateDefaults = null;
 let ratioWheelHoverIndex = null;
 let ratioWheelHoverNodeId = null;
 
@@ -20603,7 +20881,7 @@ function getPresetLayoutSourceViewState() {
     : null;
 }
 
-function buildPresetLayoutState(layoutViewState, layoutSourceViewState) {
+function buildPresetLayoutState(layoutViewState, layoutSourceViewState, includeDefaults = false) {
   const isEmptyArray = (value) => !Array.isArray(value) || value.length === 0;
   const isDefaultLayoutView = (value) =>
     value &&
@@ -20695,6 +20973,10 @@ function buildPresetLayoutState(layoutViewState, layoutSourceViewState) {
       delete layoutState[key];
     }
   };
+
+  if (includeDefaults) {
+    return layoutState;
+  }
 
   if (!layoutState.mode) delete layoutState.mode;
   if (!layoutState.title) delete layoutState.title;
@@ -20812,7 +21094,8 @@ function pruneEmptyPresetCollections(state) {
   });
 }
 
-function getPresetState() {
+function getPresetState(options = {}) {
+  const includeDefaults = Boolean(options && options.includeDefaults);
   const isEmptyObject = (value) =>
     !value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length;
   const active = serializePresetActiveNodes();
@@ -20821,7 +21104,11 @@ function getPresetState() {
   const layoutSourceViewState = getPresetLayoutSourceViewState();
   const { lineLabelOverridesState, lineLabelPositionsState } = serializePresetLineLabelState();
   const { distanceEdgesState, distanceOverridesState } = serializePresetDistanceState();
-  const layoutState = buildPresetLayoutState(layoutViewState, layoutSourceViewState);
+  const layoutState = buildPresetLayoutState(
+    layoutViewState,
+    layoutSourceViewState,
+    includeDefaults
+  );
 
   const state = {
     v: 1,
@@ -20911,7 +21198,7 @@ function getPresetState() {
   };
 
   pruneEmptyPresetCollections(state);
-  if (isEmptyObject(layoutState)) {
+  if (!includeDefaults && isEmptyObject(layoutState)) {
     delete state.layout;
   } else {
     state.layout = layoutState;
@@ -20925,6 +21212,55 @@ function getPresetState() {
   }
 
   return state;
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function deepClonePresetValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => deepClonePresetValue(item));
+  }
+  if (isPlainObject(value)) {
+    const next = {};
+    Object.entries(value).forEach(([key, child]) => {
+      next[key] = deepClonePresetValue(child);
+    });
+    return next;
+  }
+  return value;
+}
+
+function deepMergePresetState(defaultValue, incomingValue) {
+  if (incomingValue === undefined) {
+    return deepClonePresetValue(defaultValue);
+  }
+  if (Array.isArray(incomingValue)) {
+    return deepClonePresetValue(incomingValue);
+  }
+  if (isPlainObject(defaultValue) && isPlainObject(incomingValue)) {
+    const merged = {};
+    const keys = new Set([
+      ...Object.keys(defaultValue || {}),
+      ...Object.keys(incomingValue || {}),
+    ]);
+    keys.forEach((key) => {
+      merged[key] = deepMergePresetState(defaultValue[key], incomingValue[key]);
+    });
+    return merged;
+  }
+  if (isPlainObject(incomingValue)) {
+    return deepClonePresetValue(incomingValue);
+  }
+  return incomingValue;
+}
+
+function normalizePresetStateWithDefaults(state) {
+  if (!presetStateDefaults || !isPlainObject(state)) {
+    return state;
+  }
+  return deepMergePresetState(presetStateDefaults, state);
 }
 
 function applyPresetCustomNodes(entries) {
@@ -21074,6 +21410,7 @@ function syncSnapshotSettingsControls() {
   setControlChecked(snapshotRestoreToggle, snapshotRestorePlayNodes);
   setControlChecked(snapshotRestoreViewToggle, snapshotRestoreView);
   setControlChecked(snapshotRestoreSequenceToggle, snapshotRestoreSequence);
+  setControlChecked(snapshotRestoreSynthToggle, snapshotRestoreSynthSettings);
   setControlChecked(snapshotRestoreLfosToggle, snapshotRestoreLfos);
   setControlChecked(snapshotKeyboardModeToggle, snapshotKeyboardMode);
   setControlChecked(snapshotConnectToggle, snapshotConnectCommonTones);
@@ -21102,6 +21439,9 @@ function applyPresetSnapshotSettings(settings) {
   }
   if (typeof settings.restoreSequence === "boolean") {
     snapshotRestoreSequence = settings.restoreSequence;
+  }
+  if (typeof settings.restoreSynthSettings === "boolean") {
+    snapshotRestoreSynthSettings = settings.restoreSynthSettings;
   }
   if (typeof settings.restoreLfos === "boolean") {
     snapshotRestoreLfos = settings.restoreLfos;
@@ -21573,6 +21913,8 @@ function applyPresetLayoutPositioningState(layoutState) {
       y: Number(layoutState.spacing.y) || 1,
       z: Number(layoutState.spacing.z) || 1,
     };
+  } else {
+    pendingLayoutSpacing = { ...LAYOUT_DEFAULTS.spacing };
   }
   if (Number.isFinite(layoutState.titleMargin)) {
     layoutTitleMargin = layoutState.titleMargin;
@@ -21846,6 +22188,7 @@ function applyPresetLayoutViewAndModeState(layoutState) {
 
 function applyPresetLayoutState(layoutState) {
   if (!layoutState) {
+    pendingLayoutSpacing = { ...LAYOUT_DEFAULTS.spacing };
     return;
   }
   applyPresetLayoutMetadataAndSizing(layoutState);
@@ -22275,8 +22618,9 @@ function applyPresetState(state, options = {}) {
   if (!state || typeof state !== "object") {
     return;
   }
-  const presetContext = initializePresetApplyContext(state, options);
-  runPresetApplyPipeline(state, options, presetContext);
+  const normalizedState = normalizePresetStateWithDefaults(state);
+  const presetContext = initializePresetApplyContext(normalizedState, options);
+  runPresetApplyPipeline(normalizedState, options, presetContext);
 }
 
 function formatActiveRatiosForScaleWorkshop() {
@@ -24665,6 +25009,8 @@ syncCentsPrecisionControls();
 syncLayoutKeyMappingControls();
 syncLayoutScaleInput();
 updateKeyMappingToggleVisibility();
+initEnvelopeSliders();
+presetStateDefaults = deepClonePresetValue(getPresetState({ includeDefaults: true }));
 const presetState = readPresetFromUrl();
 if (presetState) {
   applyPresetState(presetState);
@@ -24674,63 +25020,61 @@ if (presetState) {
 presetSyncEnabled = true;
 updatePresetUrl();
 
-audioToggle.addEventListener("click", toggleAudio);
-resetButton.addEventListener("click", resetLattice);
-if (saveLatticeButton) {
-  saveLatticeButton.addEventListener("click", downloadLatticeState);
-}
-if (loadLatticeButton && loadLatticeInput) {
-  loadLatticeButton.addEventListener("click", () => {
-    loadLatticeInput.value = "";
-    loadLatticeInput.click();
-  });
-  loadLatticeInput.addEventListener("change", async () => {
-    const file = loadLatticeInput.files && loadLatticeInput.files[0];
-    if (!file) {
-      return;
-    }
-    try {
-      const text = await file.text();
-      const state = JSON.parse(text);
-      applyPresetState(state);
-      schedulePresetUrlUpdate();
-      closeFilePanel();
-    } catch (error) {
-      console.warn("Failed to load lattice file", error);
-      alert("Could not load lattice file.");
-    }
-  });
-}
-if (sharePresetButton) {
-  sharePresetButton.addEventListener("click", async () => {
-    const shareUrl = getPresetShareUrl();
-    try {
-      await copyTextToClipboard(shareUrl);
-      showFileSharePopover("Preset URL copied. Paste it in a new tab to reopen this preset.");
-    } catch (error) {
-      showFileSharePopover("Couldn't copy the preset URL. Try again.");
-    }
-  });
-}
-if (openTunerButton) {
-  openTunerButton.addEventListener("click", () => {
-    openTunerFromFileMenu();
+bindOptionalClick(audioToggle, toggleAudio);
+bindOptionalClick(resetButton, resetLattice);
+bindOptionalClick(saveLatticeButton, downloadLatticeState);
+bindOptionalClick(loadLatticeButton, () => {
+  if (!loadLatticeInput) {
+    return;
+  }
+  loadLatticeInput.value = "";
+  loadLatticeInput.click();
+});
+bindOptionalChange(loadLatticeInput, async () => {
+  if (!loadLatticeInput) {
+    return;
+  }
+  const file = loadLatticeInput.files && loadLatticeInput.files[0];
+  if (!file) {
+    return;
+  }
+  try {
+    const text = await file.text();
+    const state = JSON.parse(text);
+    applyPresetState(state);
+    schedulePresetUrlUpdate();
     closeFilePanel();
-  });
-}
-window.addEventListener("hashchange", () => {
+  } catch (error) {
+    console.warn("Failed to load lattice file", error);
+    alert("Could not load lattice file.");
+  }
+});
+bindOptionalClick(sharePresetButton, async () => {
+  const shareUrl = getPresetShareUrl();
+  try {
+    await copyTextToClipboard(shareUrl);
+    showFileSharePopover("Preset URL copied. Paste it in a new tab to reopen this preset.");
+  } catch (error) {
+    showFileSharePopover("Couldn't copy the preset URL. Try again.");
+  }
+});
+bindOptionalClick(openTunerButton, () => {
+  openTunerFromFileMenu();
+  closeFilePanel();
+});
+bindOptionalEvent(window, "hashchange", () => {
   const presetState = readPresetFromUrl();
   if (presetState) {
     applyPresetState(presetState);
   }
 });
-window.addEventListener("beforeunload", () => {
+bindOptionalEvent(window, "beforeunload", () => {
   // Do not rewrite the URL hash during unload/refresh.
   // The latest interactive updates already sync the hash, and mutating
   // location during unload can overwrite a good URL with stale state.
 });
-if (mode3dCheckbox && !viewModeInputs.length && !viewModeButtons.length) {
-  mode3dCheckbox.addEventListener("change", () => {
+if (!viewModeInputs.length && !viewModeButtons.length) {
+  bindOptionalChange(mode3dCheckbox, () => {
     if (layoutMode) {
       setControlChecked(mode3dCheckbox, false);
       return;
@@ -24768,27 +25112,21 @@ bindMirroredDrawToggles(
     showKeyMappings = checked;
   }
 );
-if (viewPanelToggle) {
-  viewPanelToggle.addEventListener("click", () => {
-    const isCollapsed = viewsPanel && viewsPanel.classList.contains("is-collapsed");
-    setViewsCollapsed(!isCollapsed);
-  });
-}
-if (nav3dNavigationToggle) {
-  nav3dNavigationToggle.addEventListener("click", () => {
-    const isCollapsed = nav3dNavigationToggle.classList.contains("is-collapsed");
-    setNavigationCollapsed(!isCollapsed);
-  });
-}
-if (layoutShowToggle) {
-  layoutShowToggle.addEventListener("click", () => {
-    const isCollapsed = layoutShowToggle.classList.contains("is-collapsed");
-    setLayoutShowCollapsed(!isCollapsed);
-  });
-}
+bindOptionalClick(viewPanelToggle, () => {
+  const isCollapsed = viewsPanel && viewsPanel.classList.contains("is-collapsed");
+  setViewsCollapsed(!isCollapsed);
+});
+bindOptionalClick(nav3dNavigationToggle, () => {
+  const isCollapsed = nav3dNavigationToggle.classList.contains("is-collapsed");
+  setNavigationCollapsed(!isCollapsed);
+});
+bindOptionalClick(layoutShowToggle, () => {
+  const isCollapsed = layoutShowToggle.classList.contains("is-collapsed");
+  setLayoutShowCollapsed(!isCollapsed);
+});
 if (nav3dButtons && nav3dButtons.length) {
   nav3dButtons.forEach((button) => {
-    button.addEventListener("click", () => {
+    bindOptionalClick(button, () => {
       const viewPreset = button.getAttribute("data-view");
       const action = button.getAttribute("data-action");
       if (viewPreset) {
@@ -24799,66 +25137,46 @@ if (nav3dButtons && nav3dButtons.length) {
     });
   });
 }
-if (navZoomInput) {
-  navZoomInput.addEventListener("input", () => {
-    view.zoom = clampZoom(Number(navZoomInput.value) || 1);
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (navDistanceInput) {
-  navDistanceInput.addEventListener("input", () => {
-    cameraDistance = clampCameraDistance(Number(navDistanceInput.value) || 0);
-    draw();
-  });
-}
-if (tiltInput) {
-  tiltInput.addEventListener("input", () => {
-    setLatticeTilt(tiltInput.value, { syncControl: false });
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-exportScaleButton.addEventListener("click", exportToScaleWorkshop);
-if (themeSelect) {
-  themeSelect.addEventListener("change", onThemeSelectChange);
-}
-if (optionsToggle) {
-  optionsToggle.addEventListener("click", toggleOptionsPanel);
-}
-if (calculateToggle) {
-  calculateToggle.addEventListener("click", toggleCalculatePanel);
-}
-if (presetCloseButton) {
-  presetCloseButton.addEventListener("click", () => {
+bindOptionalInput(navZoomInput, () => {
+  view.zoom = clampZoom(Number(navZoomInput.value) || 1);
+  draw();
+  schedulePresetUrlUpdate();
+});
+bindOptionalInput(navDistanceInput, () => {
+  cameraDistance = clampCameraDistance(Number(navDistanceInput.value) || 0);
+  draw();
+});
+bindOptionalInput(tiltInput, () => {
+  setLatticeTilt(tiltInput.value, { syncControl: false });
+  draw();
+  schedulePresetUrlUpdate();
+});
+bindOptionalClick(exportScaleButton, exportToScaleWorkshop);
+bindOptionalChange(themeSelect, onThemeSelectChange);
+bindOptionalClick(optionsToggle, toggleOptionsPanel);
+bindOptionalClick(calculateToggle, toggleCalculatePanel);
+bindOptionalClick(presetCloseButton, () => {
+  closePresetOverlay();
+});
+bindOptionalClick(presetOverlay, (event) => {
+  if (event.target === presetOverlay) {
     closePresetOverlay();
-  });
-}
-if (presetOverlay) {
-  presetOverlay.addEventListener("click", (event) => {
-    if (event.target === presetOverlay) {
-      closePresetOverlay();
-    }
-  });
-}
-if (presetSearchInput) {
-  presetSearchInput.addEventListener("input", () => {
-    renderPresetList();
-  });
-}
-if (presetSortSelect) {
-  presetSortSelect.addEventListener("change", () => {
-    const nextMode = presetSortSelect.value;
-    presetSortMode = nextMode === "creator" ? "creator" : nextMode === "title" ? "title" : "default";
-    renderPresetList();
-  });
-}
+  }
+});
+bindOptionalInput(presetSearchInput, () => {
+  renderPresetList();
+});
+bindOptionalChange(presetSortSelect, () => {
+  const nextMode = presetSortSelect.value;
+  presetSortMode = nextMode === "creator" ? "creator" : nextMode === "title" ? "title" : "default";
+  renderPresetList();
+});
 snapshotKeyboardContainer = document.getElementById("snapshot-keyboard");
 snapshotKeyboardKeys = document.getElementById("snapshot-keyboard-keys");
 if (snapshotKeyboardContainer) {
   buildSnapshotKeyboard();
 }
-window.addEventListener("keydown", (event) => {
+bindOptionalEvent(window, "keydown", (event) => {
   if (event.defaultPrevented) {
     return;
   }
@@ -24945,14 +25263,12 @@ window.addEventListener("keydown", (event) => {
   }
 });
 const snapshotResetButton = document.getElementById("snapshot-reset");
-if (snapshotResetButton) {
-  snapshotResetButton.addEventListener("click", () => {
-    clearSnapshots();
-  });
-}
+bindOptionalClick(snapshotResetButton, () => {
+  clearSnapshots();
+});
 const snapshotButtons = document.querySelectorAll(".snapshot-slot");
 snapshotButtons.forEach((button) => {
-  button.addEventListener("click", (event) => {
+  bindOptionalClick(button, (event) => {
     const index = Number(button.dataset.slot);
     if (!Number.isFinite(index)) {
       return;
@@ -24986,6 +25302,10 @@ const snapshotRestoreSequenceToggle = document.getElementById("snapshot-restore-
 bindSingleBooleanToggle(snapshotRestoreSequenceToggle, (checked) => {
   snapshotRestoreSequence = checked;
 });
+const snapshotRestoreSynthToggle = document.getElementById("snapshot-restore-synth");
+bindSingleBooleanToggle(snapshotRestoreSynthToggle, (checked) => {
+  snapshotRestoreSynthSettings = checked;
+});
 const snapshotRestoreLfosToggle = document.getElementById("snapshot-restore-lfos");
 const snapshotRestoreLfoPhaseToggle = document.getElementById("snapshot-restore-lfo-phase");
 bindSingleBooleanToggle(snapshotRestoreLfosToggle, (checked) => {
@@ -24998,69 +25318,37 @@ bindSingleBooleanToggle(snapshotRestoreLfoPhaseToggle, (checked) => {
 setControlDisabled(snapshotRestoreLfoPhaseToggle, !snapshotRestoreLfos);
 const snapshotKeyboardModeToggle = document.getElementById("snapshot-keyboard-mode");
 const snapshotKeyboardActiveToggle = document.getElementById("snapshot-keyboard-active");
-if (snapshotKeyboardModeToggle) {
-  snapshotKeyboardModeToggle.addEventListener("change", () => {
-    snapshotKeyboardMode = snapshotKeyboardModeToggle.checked;
-    if (snapshotKeyboardMode) {
-      snapshotKeyboardActive = true;
-      setControlChecked(snapshotKeyboardActiveToggle, true);
-      setKeyboardModeDisabled(true);
-    } else {
-      snapshotKeyboardActive = false;
-      setControlChecked(snapshotKeyboardActiveToggle, false);
-      setKeyboardModeDisabled(false);
-    }
-    setControlDisabled(snapshotKeyboardActiveToggle, !snapshotKeyboardMode);
-    updateSnapshotUi();
-  });
-}
+bindOptionalChange(snapshotKeyboardModeToggle, () => {
+  snapshotKeyboardMode = snapshotKeyboardModeToggle.checked;
+  if (snapshotKeyboardMode) {
+    snapshotKeyboardActive = true;
+    setControlChecked(snapshotKeyboardActiveToggle, true);
+    setKeyboardModeDisabled(true);
+  } else {
+    snapshotKeyboardActive = false;
+    setControlChecked(snapshotKeyboardActiveToggle, false);
+    setKeyboardModeDisabled(false);
+  }
+  setControlDisabled(snapshotKeyboardActiveToggle, !snapshotKeyboardMode);
+  updateSnapshotUi();
+});
 bindSingleBooleanToggle(snapshotKeyboardActiveToggle, (checked) => {
   snapshotKeyboardActive = checked;
   updateSnapshotUi();
 });
 setControlDisabled(snapshotKeyboardActiveToggle, !snapshotKeyboardMode);
-const snapshotCopyButton = document.getElementById("snapshot-copy");
 const snapshotExportButton = document.getElementById("snapshot-export");
 const snapshotImportButton = document.getElementById("snapshot-import");
 const snapshotImportInput = document.getElementById("snapshot-import-input");
-const SNAPSHOT_URL_MAX_LENGTH = 12000;
-if (snapshotCopyButton) {
-  snapshotCopyButton.addEventListener("click", async () => {
-    const url = buildSnapshotPresetUrl();
-    if (!url) {
-      showFileSharePopover("Nothing to copy yet.");
-      return;
-    }
-    if (url.length > SNAPSHOT_URL_MAX_LENGTH) {
-      const shouldExport = window.confirm(
-        "Snapshot URL is very large and may not work. Export a snapshot file instead?"
-      );
-      if (shouldExport) {
-        exportSnapshotSetToFile();
-      } else {
-        showFileSharePopover("Snapshot URL too large to copy safely.");
-      }
-      return;
-    }
-    try {
-      await copyTextToClipboard(url);
-      showFileSharePopover("Snapshot URL copied.");
-    } catch (error) {
-      showFileSharePopover("Couldn't copy snapshot URL. Try again.");
-    }
-  });
-}
-if (snapshotExportButton) {
-  snapshotExportButton.addEventListener("click", () => {
-    exportSnapshotSetToFile();
-  });
-}
+bindOptionalClick(snapshotExportButton, () => {
+  exportSnapshotSetToFile();
+});
 if (snapshotImportButton && snapshotImportInput) {
-  snapshotImportButton.addEventListener("click", () => {
+  bindOptionalClick(snapshotImportButton, () => {
     snapshotImportInput.value = "";
     snapshotImportInput.click();
   });
-  snapshotImportInput.addEventListener("change", async () => {
+  bindOptionalChange(snapshotImportInput, async () => {
     const file = snapshotImportInput.files && snapshotImportInput.files[0];
     if (!file) {
       return;
@@ -25082,13 +25370,13 @@ if (snapshotImportButton && snapshotImportInput) {
 const snapshotOptionsToggle = document.getElementById("snapshot-options-toggle");
 const snapshotOptionsMenu = document.getElementById("snapshot-options");
 if (snapshotOptionsToggle && snapshotOptionsMenu) {
-  snapshotOptionsToggle.addEventListener("click", (event) => {
+  bindOptionalClick(snapshotOptionsToggle, (event) => {
     event.stopPropagation();
     const shouldShow = snapshotOptionsMenu.hidden;
     snapshotOptionsMenu.hidden = !shouldShow;
     snapshotOptionsToggle.setAttribute("aria-expanded", shouldShow ? "true" : "false");
   });
-  document.addEventListener("click", (event) => {
+  bindOptionalEvent(document, "click", (event) => {
     if (snapshotOptionsMenu.hidden) {
       return;
     }
@@ -25105,23 +25393,19 @@ if (snapshotOptionsToggle && snapshotOptionsMenu) {
 }
 updateSnapshotUi();
 syncSnapshotSettingsControls();
-if (intervalChartButton) {
-  intervalChartButton.addEventListener("click", () => {
-    openIntervalChart();
-  });
-}
-if (intervalChartCloseButton) {
-  intervalChartCloseButton.addEventListener("click", () => {
-    closeIntervalChart();
-  });
-}
+bindOptionalClick(intervalChartButton, () => {
+  openIntervalChart();
+});
+bindOptionalClick(intervalChartCloseButton, () => {
+  closeIntervalChart();
+});
 if (intervalChartOverlay) {
-  intervalChartOverlay.addEventListener("click", (event) => {
+  bindOptionalClick(intervalChartOverlay, (event) => {
     if (event.target === intervalChartOverlay) {
       closeIntervalChart();
     }
   });
-  intervalChartOverlay.addEventListener("keydown", (event) => {
+  bindOptionalEvent(intervalChartOverlay, "keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
       applyIntervalChartSelection();
@@ -25131,92 +25415,63 @@ if (intervalChartOverlay) {
     }
   });
 }
-if (intervalChartSearchInput) {
-  intervalChartSearchInput.addEventListener("input", () => {
-    intervalChartSearch = intervalChartSearchInput.value.trim();
-    renderIntervalChartTable();
-  });
-}
-if (intervalChartListenToggle) {
-  intervalChartListenToggle.addEventListener("change", () => {
-    intervalChartListenEnabled = intervalChartListenToggle.checked;
-    if (!intervalChartListenEnabled) {
-      intervalChartActive.forEach((entry) => {
-        entry.voices.forEach((voice) => stopVoice(voice));
-      });
-    }
-  });
-}
-if (intervalChartSuperparticularToggle) {
-  intervalChartSuperparticularToggle.addEventListener("change", () => {
-    intervalChartSuperparticularOnly = intervalChartSuperparticularToggle.checked;
-    renderIntervalChartTable();
-  });
-}
-if (intervalChartDirectionSelect) {
-  intervalChartDirectionSelect.addEventListener("change", () => {
-    intervalChartDirection = intervalChartDirectionSelect.value || "above";
-    renderIntervalChartTable();
-  });
-}
-if (intervalChartCustomInput) {
-  intervalChartCustomInput.addEventListener("input", () => {
-    syncIntervalChartCustomState();
-  });
-}
-if (intervalChartCustomInput) {
-  intervalChartCustomInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      applyIntervalChartSelection();
-    }
-  });
-}
-if (intervalChartCalcButton) {
-  intervalChartCalcButton.addEventListener("click", () => {
-    applyIntervalChartSelection();
-  });
-}
-if (intervalChartSelectAllButton) {
-  intervalChartSelectAllButton.addEventListener("click", () => {
-    intervalChartSelectedTypes = new Set(intervalChartTypes);
-    renderIntervalChartTypes();
-    renderIntervalChartTable();
-  });
-}
-if (intervalChartSelectNoneButton) {
-  intervalChartSelectNoneButton.addEventListener("click", () => {
-    intervalChartSelectedTypes.clear();
-    renderIntervalChartTypes();
-    renderIntervalChartTable();
-  });
-}
-if (findRatioButton) {
-  findRatioButton.addEventListener("click", () => {
-    closeTopMenus("calculate");
-    openFindRatioDialog();
-  });
-}
-if (buildIntervalsButton) {
-  buildIntervalsButton.addEventListener("click", () => {
-    closeTopMenus("calculate");
-    openBuildIntervalsDialog();
-  });
-}
-if (buildIntervalsInput) {
-  buildIntervalsInput.addEventListener("input", () => {
-    updateBuildIntervalsPreview();
-  });
-}
-if (addIntervalButton) {
-  addIntervalButton.addEventListener("click", () => {
-    closeTopMenus();
-    setAddIntervalMode(true);
-  });
-}
+bindOptionalInput(intervalChartSearchInput, () => {
+  intervalChartSearch = intervalChartSearchInput.value.trim();
+  renderIntervalChartTable();
+});
+bindOptionalChange(intervalChartListenToggle, () => {
+  intervalChartListenEnabled = intervalChartListenToggle.checked;
+  if (!intervalChartListenEnabled) {
+    intervalChartActive.forEach((entry) => {
+      entry.voices.forEach((voice) => stopVoice(voice));
+    });
+  }
+});
+bindOptionalChange(intervalChartSuperparticularToggle, () => {
+  intervalChartSuperparticularOnly = intervalChartSuperparticularToggle.checked;
+  renderIntervalChartTable();
+});
+bindOptionalChange(intervalChartDirectionSelect, () => {
+  intervalChartDirection = intervalChartDirectionSelect.value || "above";
+  renderIntervalChartTable();
+});
+bindOptionalInput(intervalChartCustomInput, () => {
+  syncIntervalChartCustomState();
+});
+bindOptionalEnterKey(intervalChartCustomInput, () => {
+  applyIntervalChartSelection();
+});
+bindOptionalClick(intervalChartCalcButton, () => {
+  applyIntervalChartSelection();
+});
+bindOptionalClick(intervalChartSelectAllButton, () => {
+  intervalChartSelectedTypes = new Set(intervalChartTypes);
+  renderIntervalChartTypes();
+  renderIntervalChartTable();
+});
+bindOptionalClick(intervalChartSelectNoneButton, () => {
+  intervalChartSelectedTypes.clear();
+  renderIntervalChartTypes();
+  renderIntervalChartTable();
+});
+bindOptionalClick(findRatioButton, () => {
+  closeTopMenus("calculate");
+  openFindRatioDialog();
+});
+bindOptionalClick(buildIntervalsButton, () => {
+  closeTopMenus("calculate");
+  openBuildIntervalsDialog();
+});
+bindOptionalInput(buildIntervalsInput, () => {
+  updateBuildIntervalsPreview();
+});
+bindOptionalClick(addIntervalButton, () => {
+  closeTopMenus();
+  setAddIntervalMode(true);
+});
 if (distanceSelectTriggers.length) {
   distanceSelectTriggers.forEach((button) => {
-    button.addEventListener("click", (event) => {
+    bindOptionalClick(button, (event) => {
       event.preventDefault();
       if (!analysisLayers.distances) {
         applyDistancesLayerToggle(true);
@@ -25241,8 +25496,7 @@ bindSingleBooleanDrawToggle(directionalRatioLabelsToggle, (checked) => {
 bindSingleBooleanDrawToggle(connectOrphansToggle, (checked) => {
   connectOrphansEnabled = checked;
 });
-if (layoutFreezeButton) {
-  layoutFreezeButton.addEventListener("click", () => {
+bindOptionalClick(layoutFreezeButton, () => {
     if (!layoutLockPosition) {
       layoutLockPosition = true;
       refreshLayoutFromView({ flatten: layoutFreezeFlatten });
@@ -25278,10 +25532,9 @@ if (layoutFreezeButton) {
       updateLayoutLinkControls();
       updateBannerMessage();
     }
-  });
-}
-if (layoutModeToggle && !viewModeInputs.length && !viewModeButtons.length) {
-  layoutModeToggle.addEventListener("change", () => {
+});
+if (!viewModeInputs.length && !viewModeButtons.length) {
+  bindOptionalChange(layoutModeToggle, () => {
     setLayoutMode(layoutModeToggle.checked);
     schedulePresetUrlUpdate();
   });
@@ -25309,7 +25562,7 @@ function applyViewModeSelection(nextMode) {
 
 if (viewModeInputs.length) {
   viewModeInputs.forEach((input) => {
-    input.addEventListener("change", () => {
+    bindOptionalChange(input, () => {
       if (!input.checked) {
         return;
       }
@@ -25319,14 +25572,14 @@ if (viewModeInputs.length) {
 }
 if (viewModeButtons.length) {
   viewModeButtons.forEach((button) => {
-    button.addEventListener("click", () => {
+    bindOptionalClick(button, () => {
       applyViewModeSelection(button.dataset.viewMode);
     });
   });
 }
 if (featureModeButtons.length) {
   featureModeButtons.forEach((button) => {
-    button.addEventListener("click", () => {
+    bindOptionalClick(button, () => {
       const nextMode = button.dataset.featureMode;
       if (!nextMode) {
         return;
@@ -25339,7 +25592,7 @@ if (featureModeButtons.length) {
 }
 if (spellingModeButtons.length) {
   spellingModeButtons.forEach((button) => {
-    button.addEventListener("click", () => {
+    bindOptionalClick(button, () => {
       const nextMode = button.dataset.spellingMode;
       if (!nextMode) {
         return;
@@ -25382,16 +25635,12 @@ function bindMirroredBooleanToggles(primaryToggle, secondaryToggle, applyValue, 
     setControlChecked(secondaryToggle, checked);
     applyLabelDisplayToggleChange({ refreshCustom });
   };
-  if (primaryToggle) {
-    primaryToggle.addEventListener("change", () => {
-      applyFromChecked(primaryToggle.checked);
-    });
-  }
-  if (secondaryToggle) {
-    secondaryToggle.addEventListener("change", () => {
-      applyFromChecked(secondaryToggle.checked);
-    });
-  }
+  bindOptionalChange(primaryToggle, () => {
+    applyFromChecked(primaryToggle.checked);
+  });
+  bindOptionalChange(secondaryToggle, () => {
+    applyFromChecked(secondaryToggle.checked);
+  });
 }
 
 function applyDistancesLayerToggle(checked) {
@@ -25408,23 +25657,16 @@ function bindAnalysisLayerTogglePair(primaryToggle, secondaryToggle, applyValue)
   const applyFromChecked = (checked) => {
     applyValue(checked);
   };
-  if (primaryToggle) {
-    primaryToggle.addEventListener("change", () => {
-      applyFromChecked(primaryToggle.checked);
-    });
-  }
-  if (secondaryToggle) {
-    secondaryToggle.addEventListener("change", () => {
-      applyFromChecked(secondaryToggle.checked);
-    });
-  }
+  bindOptionalChange(primaryToggle, () => {
+    applyFromChecked(primaryToggle.checked);
+  });
+  bindOptionalChange(secondaryToggle, () => {
+    applyFromChecked(secondaryToggle.checked);
+  });
 }
 
 function bindSingleBooleanToggle(toggle, applyValue) {
-  if (!toggle) {
-    return;
-  }
-  toggle.addEventListener("change", () => {
+  bindOptionalChange(toggle, () => {
     applyValue(Boolean(toggle.checked));
   });
 }
@@ -25434,6 +25676,73 @@ function bindSingleBooleanDrawToggle(toggle, applyValue) {
     applyValue(checked);
     draw();
     schedulePresetUrlUpdate();
+  });
+}
+
+function getCheckedRadioValue(groupName, fallbackValue = "") {
+  const selected = document.querySelector(`input[name="${groupName}"]:checked`);
+  return selected ? selected.value : fallbackValue;
+}
+
+function bindPresetInputHandler(inputElement, applyValue) {
+  bindOptionalInput(inputElement, () => {
+    applyValue();
+    schedulePresetUrlUpdate();
+  });
+}
+
+function bindOptionalEvent(element, eventName, handler, options) {
+  if (!element) {
+    return;
+  }
+  element.addEventListener(eventName, handler, options);
+}
+
+function bindOptionalClick(element, handler) {
+  bindOptionalEvent(element, "click", handler);
+}
+
+function bindOptionalChange(element, handler) {
+  bindOptionalEvent(element, "change", handler);
+}
+
+function bindOptionalInput(element, handler) {
+  bindOptionalEvent(element, "input", handler);
+}
+
+function bindDialogBackdropClose(dialog, returnValue) {
+  if (!dialog) {
+    return;
+  }
+  bindOptionalEvent(dialog, "click", (event) => {
+    if (event.target === dialog) {
+      dialog.close(returnValue);
+    }
+  });
+}
+
+function preventDialogEnterExceptTextarea(dialog) {
+  if (!dialog) {
+    return;
+  }
+  bindOptionalEvent(dialog, "keydown", (event) => {
+    if (event.key === "Enter" && event.target.tagName !== "TEXTAREA") {
+      event.preventDefault();
+    }
+  });
+}
+
+function bindOptionalDialogClose(dialog, handler) {
+  bindOptionalEvent(dialog, "close", handler);
+}
+
+function bindOptionalEnterKey(element, handler) {
+  bindOptionalEvent(element, "keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    handler(event);
   });
 }
 
@@ -25454,16 +25763,12 @@ function applyCentsModeToggle(kind, checked) {
 }
 
 function bindCentsModeTogglePair(primaryToggle, secondaryToggle, kind) {
-  if (primaryToggle) {
-    primaryToggle.addEventListener("change", () => {
-      applyCentsModeToggle(kind, primaryToggle.checked);
-    });
-  }
-  if (secondaryToggle) {
-    secondaryToggle.addEventListener("change", () => {
-      applyCentsModeToggle(kind, secondaryToggle.checked);
-    });
-  }
+  bindOptionalChange(primaryToggle, () => {
+    applyCentsModeToggle(kind, primaryToggle.checked);
+  });
+  bindOptionalChange(secondaryToggle, () => {
+    applyCentsModeToggle(kind, secondaryToggle.checked);
+  });
 }
 
 function bindMirroredDrawToggles(primaryToggle, secondaryToggle, applyValue) {
@@ -25474,16 +25779,12 @@ function bindMirroredDrawToggles(primaryToggle, secondaryToggle, applyValue) {
     draw();
     schedulePresetUrlUpdate();
   };
-  if (primaryToggle) {
-    primaryToggle.addEventListener("change", () => {
-      applyFromChecked(primaryToggle.checked);
-    });
-  }
-  if (secondaryToggle) {
-    secondaryToggle.addEventListener("change", () => {
-      applyFromChecked(secondaryToggle.checked);
-    });
-  }
+  bindOptionalChange(primaryToggle, () => {
+    applyFromChecked(primaryToggle.checked);
+  });
+  bindOptionalChange(secondaryToggle, () => {
+    applyFromChecked(secondaryToggle.checked);
+  });
 }
 
 bindMirroredBooleanToggles(
@@ -25517,7 +25818,7 @@ bindMirroredBooleanToggles(
 );
 if (showHelpToggle) {
   setControlChecked(showHelpToggle, showHelpEnabled);
-  showHelpToggle.addEventListener("change", () => {
+  bindOptionalChange(showHelpToggle, () => {
     showHelpEnabled = showHelpToggle.checked;
     if (!showHelpEnabled) {
       if (uiHint) {
@@ -25531,7 +25832,7 @@ if (showHelpToggle) {
 }
 if (centsPrecisionButtons.length) {
   centsPrecisionButtons.forEach((button) => {
-    button.addEventListener("click", () => {
+    bindOptionalClick(button, () => {
       const next = Number(button.dataset.centsPrecision);
       if (!Number.isFinite(next)) {
         return;
@@ -25547,84 +25848,72 @@ if (centsPrecisionButtons.length) {
 }
 if (layoutKeyMappingButtons.length) {
   layoutKeyMappingButtons.forEach((button) => {
-    button.addEventListener("click", () => {
+    bindOptionalClick(button, () => {
       setLayoutKeyMappingMode(button.dataset.layoutKeyMapping);
     });
   });
 }
-if (layoutShareLinkButton) {
-  layoutShareLinkButton.addEventListener("click", async () => {
-    const state = getPresetState();
-    const encoded = encodePresetState(state);
-    logPresetSizeBreakdown(state, encoded.length);
-    console.log("Preset size summary", {
-      encodedLength: encoded.length,
-      jsonBytes: getJsonByteSize(state),
-    });
-    const hash = `${PRESET_PARAM}=${encoded}`;
-    history.replaceState(null, "", `${location.pathname}${location.search}#${hash}`);
-    const shareUrl = `${location.origin}${location.pathname}${location.search}#${hash}`;
-    if (encoded.length > 3500) {
-      showFileSharePopover("Preset URL copied (very long). Use File > Save / Load if it fails.");
-    }
-    try {
-      await copyTextToClipboard(shareUrl);
-      showFileSharePopover("Preset URL copied. Paste it in a new tab to reopen this preset.");
-    } catch (error) {
-      showFileSharePopover("Couldn't copy the preset URL. Try again.");
-    }
+bindOptionalClick(layoutShareLinkButton, async () => {
+  const state = getPresetState();
+  const encoded = encodePresetState(state);
+  logPresetSizeBreakdown(state, encoded.length);
+  console.log("Preset size summary", {
+    encodedLength: encoded.length,
+    jsonBytes: getJsonByteSize(state),
   });
-}
-if (layoutExitButton) {
-  layoutExitButton.addEventListener("click", () => {
-    setControlChecked(layoutModeToggle, false);
-    setLayoutMode(false);
-    schedulePresetUrlUpdate();
-  });
-}
+  const hash = `${PRESET_PARAM}=${encoded}`;
+  history.replaceState(null, "", `${location.pathname}${location.search}#${hash}`);
+  const shareUrl = `${location.origin}${location.pathname}${location.search}#${hash}`;
+  if (encoded.length > 3500) {
+    showFileSharePopover("Preset URL copied (very long). Use File > Save / Load if it fails.");
+  }
+  try {
+    await copyTextToClipboard(shareUrl);
+    showFileSharePopover("Preset URL copied. Paste it in a new tab to reopen this preset.");
+  } catch (error) {
+    showFileSharePopover("Couldn't copy the preset URL. Try again.");
+  }
+});
+bindOptionalClick(layoutExitButton, () => {
+  setControlChecked(layoutModeToggle, false);
+  setLayoutMode(false);
+  schedulePresetUrlUpdate();
+});
 bindLayoutTextInput(layoutTitleInput, (value) => {
   layoutTitle = value;
 });
 bindLayoutTextInput(layoutCreatorInput, (value) => {
   layoutCreator = value;
 });
-if (layoutTitleSizeInput) {
-  layoutTitleSizeInput.addEventListener("input", () => {
-    pushLayoutUndoState();
-    setLayoutTitleSize(Number(layoutTitleSizeInput.value));
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutCreatorSizeInput) {
-  layoutCreatorSizeInput.addEventListener("input", () => {
-    pushLayoutUndoState();
-    setLayoutCreatorSize(Number(layoutCreatorSizeInput.value));
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
+bindLayoutNumericInput(layoutTitleSizeInput, {
+  applyValue: (value) => {
+    setLayoutTitleSize(value);
+  },
+});
+bindLayoutNumericInput(layoutCreatorSizeInput, {
+  applyValue: (value) => {
+    setLayoutCreatorSize(value);
+  },
+});
 bindLayoutSelectControl(layoutPageSizeSelect, (value) => {
   layoutPageSize = value || "letter";
 });
 bindLayoutSelectControl(layoutOrientationSelect, (value) => {
   layoutOrientation = value || "portrait";
 });
-if (layoutScaleInput) {
-  layoutScaleInput.addEventListener("input", () => {
-    pushLayoutUndoState();
-    view.zoom = Number(layoutScaleInput.value) || 1;
-    if (layoutLockPosition && layoutMode) {
-      layoutView = { ...layoutView, zoom: view.zoom };
-    }
-    updateLayoutScaleReadout();
-    draw();
-    markIsomorphicDirty();
-    schedulePresetUrlUpdate();
-  });
-}
+bindOptionalInput(layoutScaleInput, () => {
+  pushLayoutUndoState();
+  view.zoom = Number(layoutScaleInput.value) || 1;
+  if (layoutLockPosition && layoutMode) {
+    layoutView = { ...layoutView, zoom: view.zoom };
+  }
+  updateLayoutScaleReadout();
+  draw();
+  markIsomorphicDirty();
+  schedulePresetUrlUpdate();
+});
 if (layoutSpaceTrigger && layoutSpacePopover) {
-  layoutSpaceTrigger.addEventListener("click", (event) => {
+  bindOptionalClick(layoutSpaceTrigger, (event) => {
     if (!layoutMode) {
       return;
     }
@@ -25633,47 +25922,38 @@ if (layoutSpaceTrigger && layoutSpacePopover) {
     layoutSpacePopover.hidden = !layoutSpacePopover.hidden;
   });
 }
-if (layoutSpaceXInput) {
-  layoutSpaceXInput.addEventListener("input", () => {
-    pushLayoutUndoState();
+bindLayoutNumericInput(layoutSpaceXInput, {
+  applyValue: (value) => {
     applyLayoutSpacing({
-      x: Number(layoutSpaceXInput.value) || 1,
+      x: value || 1,
       y: layoutSpacing.y,
       z: layoutSpacing.z,
     });
-    updateLayoutSpacingControls();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutSpaceYInput) {
-  layoutSpaceYInput.addEventListener("input", () => {
-    pushLayoutUndoState();
+  },
+  afterChange: updateLayoutSpacingControls,
+});
+bindLayoutNumericInput(layoutSpaceYInput, {
+  applyValue: (value) => {
     applyLayoutSpacing({
       x: layoutSpacing.x,
-      y: Number(layoutSpaceYInput.value) || 1,
+      y: value || 1,
       z: layoutSpacing.z,
     });
-    updateLayoutSpacingControls();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
-if (layoutSpaceZInput) {
-  layoutSpaceZInput.addEventListener("input", () => {
-    pushLayoutUndoState();
+  },
+  afterChange: updateLayoutSpacingControls,
+});
+bindLayoutNumericInput(layoutSpaceZInput, {
+  applyValue: (value) => {
     applyLayoutSpacing({
       x: layoutSpacing.x,
       y: layoutSpacing.y,
-      z: Number(layoutSpaceZInput.value) || 1,
+      z: value || 1,
     });
-    updateLayoutSpacingControls();
-    draw();
-    schedulePresetUrlUpdate();
-  });
-}
+  },
+  afterChange: updateLayoutSpacingControls,
+});
 if (layoutKeyMappingTrigger && layoutKeyMappingPopover) {
-  layoutKeyMappingTrigger.addEventListener("click", (event) => {
+  bindOptionalClick(layoutKeyMappingTrigger, (event) => {
     if (!layoutMode) {
       return;
     }
@@ -25684,10 +25964,7 @@ if (layoutKeyMappingTrigger && layoutKeyMappingPopover) {
   });
 }
 function bindLayoutNumericInput(inputElement, { applyValue, afterChange = null }) {
-  if (!inputElement) {
-    return;
-  }
-  inputElement.addEventListener("input", () => {
+  bindOptionalInput(inputElement, () => {
     pushLayoutUndoState();
     applyValue(Number(inputElement.value));
     if (typeof afterChange === "function") {
@@ -25699,10 +25976,7 @@ function bindLayoutNumericInput(inputElement, { applyValue, afterChange = null }
 }
 
 function bindLayoutBooleanToggle(toggle, applyValue) {
-  if (!toggle) {
-    return;
-  }
-  toggle.addEventListener("change", () => {
+  bindOptionalChange(toggle, () => {
     pushLayoutUndoState();
     applyValue(Boolean(toggle.checked));
     draw();
@@ -25711,10 +25985,7 @@ function bindLayoutBooleanToggle(toggle, applyValue) {
 }
 
 function bindLayoutTextInput(inputElement, applyValue) {
-  if (!inputElement) {
-    return;
-  }
-  inputElement.addEventListener("input", () => {
+  bindOptionalInput(inputElement, () => {
     pushLayoutUndoState();
     applyValue(String(inputElement.value || "").trim());
     draw();
@@ -25723,10 +25994,7 @@ function bindLayoutTextInput(inputElement, applyValue) {
 }
 
 function bindLayoutSelectControl(selectElement, applyValue) {
-  if (!selectElement) {
-    return;
-  }
-  selectElement.addEventListener("change", () => {
+  bindOptionalChange(selectElement, () => {
     pushLayoutUndoState();
     applyValue(selectElement.value);
     draw();
@@ -26015,88 +26283,76 @@ function closeLayoutFontPopover({ revert = false } = {}) {
   layoutFontSnapshot = null;
 }
 
-if (layoutFontsButton && layoutFontPopover) {
-  layoutFontsButton.addEventListener("click", (event) => {
-    if (!layoutMode) {
-      return;
-    }
-    event.preventDefault();
-    if (!layoutFontPopover.hidden) {
-      closeLayoutFontPopover();
-      return;
-    }
-    layoutFontSnapshot = {
-      title: layoutTitleFont,
-      ratio: layoutRatioFont,
-      note: layoutNoteFont,
-      triangleLabel: layoutTriangleLabelFont,
-      customLabel: layoutCustomLabelFont,
-      keyMapping: layoutKeyMappingFont,
-      axisLegend: layoutAxisLegendFont,
-      lineLabel: layoutLineLabelFont,
-      creator: layoutCreatorFont,
-      titleWeight: layoutTitleFontWeight,
-      ratioWeight: layoutRatioFontWeight,
-      noteWeight: layoutNoteFontWeight,
-      triangleLabelWeight: layoutTriangleLabelFontWeight,
-      customLabelWeight: layoutCustomLabelFontWeight,
-      keyMappingWeight: layoutKeyMappingFontWeight,
-      axisLegendWeight: layoutAxisLegendFontWeight,
-      lineLabelWeight: layoutLineLabelFontWeight,
-      creatorWeight: layoutCreatorFontWeight,
-      titleSize: layoutTitleSize,
-      creatorSize: layoutCreatorSize,
-      ratioTextSize: layoutRatioTextSize,
-      noteTextSize: layoutNoteTextSize,
-      triangleLabelTextSize: layoutTriangleLabelTextSize,
-      customLabelTextSize: layoutCustomLabelTextSize,
-      keyMappingTextSize: layoutKeyMappingTextSize,
-      axisLegendTextSize: layoutAxisLegendTextSize,
-      lineLabelTextSize: layoutLineLabelTextSize,
-    };
-    updateLayoutCustomLabelControls();
-    syncLayoutFontPopoverInputs();
-    layoutFontPopover.hidden = false;
-    layoutFontsButton.setAttribute("aria-expanded", "true");
-  });
-}
-if (layoutAlignXButton) {
-  layoutAlignXButton.addEventListener("click", () => {
-    if (!layoutMode) {
-      return;
-    }
-    setLayoutAlignMode("x");
-  });
-}
-if (layoutAlignYButton) {
-  layoutAlignYButton.addEventListener("click", () => {
-    if (!layoutMode) {
-      return;
-    }
-    setLayoutAlignMode("y");
-  });
-}
-if (layoutStraightenButton) {
-  layoutStraightenButton.addEventListener("click", () => {
-    if (!layoutMode) {
-      return;
-    }
-    setLayoutAlignMode("straighten");
-  });
-}
-if (layoutFontCancelButton) {
-  layoutFontCancelButton.addEventListener("click", () => {
-    closeLayoutFontPopover({ revert: true });
-  });
-}
-if (layoutFontDoneButton) {
-  layoutFontDoneButton.addEventListener("click", () => {
+bindOptionalClick(layoutFontsButton, (event) => {
+  if (!layoutFontPopover || !layoutMode) {
+    return;
+  }
+  event.preventDefault();
+  if (!layoutFontPopover.hidden) {
     closeLayoutFontPopover();
-  });
-}
+    return;
+  }
+  layoutFontSnapshot = {
+    title: layoutTitleFont,
+    ratio: layoutRatioFont,
+    note: layoutNoteFont,
+    triangleLabel: layoutTriangleLabelFont,
+    customLabel: layoutCustomLabelFont,
+    keyMapping: layoutKeyMappingFont,
+    axisLegend: layoutAxisLegendFont,
+    lineLabel: layoutLineLabelFont,
+    creator: layoutCreatorFont,
+    titleWeight: layoutTitleFontWeight,
+    ratioWeight: layoutRatioFontWeight,
+    noteWeight: layoutNoteFontWeight,
+    triangleLabelWeight: layoutTriangleLabelFontWeight,
+    customLabelWeight: layoutCustomLabelFontWeight,
+    keyMappingWeight: layoutKeyMappingFontWeight,
+    axisLegendWeight: layoutAxisLegendFontWeight,
+    lineLabelWeight: layoutLineLabelFontWeight,
+    creatorWeight: layoutCreatorFontWeight,
+    titleSize: layoutTitleSize,
+    creatorSize: layoutCreatorSize,
+    ratioTextSize: layoutRatioTextSize,
+    noteTextSize: layoutNoteTextSize,
+    triangleLabelTextSize: layoutTriangleLabelTextSize,
+    customLabelTextSize: layoutCustomLabelTextSize,
+    keyMappingTextSize: layoutKeyMappingTextSize,
+    axisLegendTextSize: layoutAxisLegendTextSize,
+    lineLabelTextSize: layoutLineLabelTextSize,
+  };
+  updateLayoutCustomLabelControls();
+  syncLayoutFontPopoverInputs();
+  layoutFontPopover.hidden = false;
+  layoutFontsButton.setAttribute("aria-expanded", "true");
+});
+bindOptionalClick(layoutAlignXButton, () => {
+  if (!layoutMode) {
+    return;
+  }
+  setLayoutAlignMode("x");
+});
+bindOptionalClick(layoutAlignYButton, () => {
+  if (!layoutMode) {
+    return;
+  }
+  setLayoutAlignMode("y");
+});
+bindOptionalClick(layoutStraightenButton, () => {
+  if (!layoutMode) {
+    return;
+  }
+  setLayoutAlignMode("straighten");
+});
+bindOptionalClick(layoutFontCancelButton, () => {
+  closeLayoutFontPopover({ revert: true });
+});
+bindOptionalClick(layoutFontDoneButton, () => {
+  closeLayoutFontPopover();
+});
 let layoutKeyMappingTextSnapshot = null;
 if (layoutKeyMappingTextButton && layoutKeyMappingTextDialog) {
-  layoutKeyMappingTextButton.addEventListener("click", () => {
+  bindOptionalClick(layoutKeyMappingTextButton, () => {
     if (typeof layoutKeyMappingTextDialog.showModal === "function") {
       layoutKeyMappingTextSnapshot = {
         prefix: layoutKeyMappingPrefix,
@@ -26108,14 +26364,11 @@ if (layoutKeyMappingTextButton && layoutKeyMappingTextDialog) {
     }
   });
 }
-if (layoutPanelToggle) {
-  layoutPanelToggle.addEventListener("click", () => {
-    const isCollapsed = layoutPanel && layoutPanel.classList.contains("is-collapsed");
-    setLayoutPanelCollapsed(!isCollapsed);
-  });
-}
-if (layoutKeyMappingTextDialog) {
-  layoutKeyMappingTextDialog.addEventListener("close", () => {
+bindOptionalClick(layoutPanelToggle, () => {
+  const isCollapsed = layoutPanel && layoutPanel.classList.contains("is-collapsed");
+  setLayoutPanelCollapsed(!isCollapsed);
+});
+bindOptionalDialogClose(layoutKeyMappingTextDialog, () => {
     if (layoutKeyMappingTextDialog.returnValue === "cancel" && layoutKeyMappingTextSnapshot) {
       layoutKeyMappingPrefix = layoutKeyMappingTextSnapshot.prefix;
       layoutKeyMappingSuffix = layoutKeyMappingTextSnapshot.suffix;
@@ -26132,19 +26385,18 @@ if (layoutKeyMappingTextDialog) {
     layoutKeyMappingTextSnapshot = null;
     draw();
     schedulePresetUrlUpdate();
-  });
-}
+});
 document.querySelectorAll("dialog").forEach((dialog) => {
   setupDialogKeyDefaults(dialog);
 });
 if (creditsTrigger && creditsDialog) {
-  creditsTrigger.addEventListener("click", (event) => {
+  bindOptionalClick(creditsTrigger, (event) => {
     event.preventDefault();
     if (!creditsDialog.open) {
       creditsDialog.showModal();
     }
   });
-  creditsDialog.addEventListener("click", () => {
+  bindOptionalClick(creditsDialog, () => {
     if (creditsDialog.open) {
       creditsDialog.close("dismiss");
     }
@@ -26154,10 +26406,7 @@ function bindLayoutFontFamilyChange(
   selectElement,
   { getCurrent, setCurrent, getWeight, getSize, syncVars = false, invalidateCache = true }
 ) {
-  if (!selectElement) {
-    return;
-  }
-  selectElement.addEventListener("change", () => {
+  bindOptionalChange(selectElement, () => {
     pushLayoutUndoState();
     const nextValue = selectElement.value || getCurrent();
     setCurrent(nextValue);
@@ -26184,10 +26433,7 @@ function bindLayoutFontWeightChange(
     ensureReady = true,
   }
 ) {
-  if (!selectElement) {
-    return;
-  }
-  selectElement.addEventListener("change", () => {
+  bindOptionalChange(selectElement, () => {
     pushLayoutUndoState();
     const nextValue = Number(selectElement.value) || getCurrent();
     setCurrent(nextValue);
@@ -26202,159 +26448,188 @@ function bindLayoutFontWeightChange(
   });
 }
 
-bindLayoutFontFamilyChange(layoutTitleFontSelect, {
-  getCurrent: () => layoutTitleFont,
-  setCurrent: (value) => {
-    layoutTitleFont = value;
+[
+  {
+    selectElement: layoutTitleFontSelect,
+    getCurrent: () => layoutTitleFont,
+    setCurrent: (value) => {
+      layoutTitleFont = value;
+    },
+    getWeight: () => layoutTitleFontWeight,
+    getSize: () => layoutTitleSize,
+    syncVars: true,
   },
-  getWeight: () => layoutTitleFontWeight,
-  getSize: () => layoutTitleSize,
-  syncVars: true,
+  {
+    selectElement: layoutCreatorFontSelect,
+    getCurrent: () => layoutCreatorFont,
+    setCurrent: (value) => {
+      layoutCreatorFont = value;
+    },
+    getWeight: () => layoutCreatorFontWeight,
+    getSize: () => layoutCreatorSize,
+  },
+  {
+    selectElement: layoutRatioFontSelect,
+    getCurrent: () => layoutRatioFont,
+    setCurrent: (value) => {
+      layoutRatioFont = value;
+    },
+    getWeight: () => layoutRatioFontWeight,
+    getSize: () => layoutRatioTextSize,
+    syncVars: true,
+  },
+  {
+    selectElement: layoutNoteFontSelect,
+    getCurrent: () => layoutNoteFont,
+    setCurrent: (value) => {
+      layoutNoteFont = value;
+    },
+    getWeight: () => layoutNoteFontWeight,
+    getSize: () => layoutNoteTextSize,
+    syncVars: true,
+  },
+  {
+    selectElement: layoutCustomFontSelect,
+    getCurrent: () => layoutCustomLabelFont,
+    setCurrent: (value) => {
+      layoutCustomLabelFont = value;
+    },
+    getWeight: () => layoutCustomLabelFontWeight,
+    getSize: () => layoutCustomLabelTextSize,
+    syncVars: true,
+  },
+  {
+    selectElement: layoutKeyMappingFontSelect,
+    getCurrent: () => layoutKeyMappingFont,
+    setCurrent: (value) => {
+      layoutKeyMappingFont = value;
+    },
+    getWeight: () => layoutKeyMappingFontWeight,
+    getSize: () => layoutKeyMappingTextSize,
+    syncVars: true,
+    invalidateCache: false,
+  },
+  {
+    selectElement: layoutTriangleLabelFontSelect,
+    getCurrent: () => layoutTriangleLabelFont,
+    setCurrent: (value) => {
+      layoutTriangleLabelFont = value;
+    },
+    getWeight: () => layoutTriangleLabelFontWeight,
+    getSize: () => layoutTriangleLabelTextSize,
+    syncVars: true,
+  },
+  {
+    selectElement: layoutAxisFontSelect,
+    getCurrent: () => layoutAxisLegendFont,
+    setCurrent: (value) => {
+      layoutAxisLegendFont = value;
+    },
+    getWeight: () => layoutAxisLegendFontWeight,
+    getSize: () => layoutAxisLegendTextSize,
+  },
+  {
+    selectElement: layoutLineLabelFontSelect,
+    getCurrent: () => layoutLineLabelFont,
+    setCurrent: (value) => {
+      layoutLineLabelFont = value;
+    },
+    getWeight: () => layoutLineLabelFontWeight,
+    getSize: () => layoutLineLabelTextSize,
+  },
+].forEach((config) => {
+  const { selectElement, ...options } = config;
+  bindLayoutFontFamilyChange(selectElement, options);
 });
-bindLayoutFontFamilyChange(layoutCreatorFontSelect, {
-  getCurrent: () => layoutCreatorFont,
-  setCurrent: (value) => {
-    layoutCreatorFont = value;
+
+[
+  {
+    selectElement: layoutTitleWeightSelect,
+    getCurrent: () => layoutTitleFontWeight,
+    setCurrent: (value) => {
+      layoutTitleFontWeight = value;
+    },
+    getFamily: () => layoutTitleFont,
+    getSize: () => layoutTitleSize,
   },
-  getWeight: () => layoutCreatorFontWeight,
-  getSize: () => layoutCreatorSize,
-});
-bindLayoutFontWeightChange(layoutTitleWeightSelect, {
-  getCurrent: () => layoutTitleFontWeight,
-  setCurrent: (value) => {
-    layoutTitleFontWeight = value;
+  {
+    selectElement: layoutCreatorWeightSelect,
+    getCurrent: () => layoutCreatorFontWeight,
+    setCurrent: (value) => {
+      layoutCreatorFontWeight = value;
+    },
+    getFamily: () => layoutCreatorFont,
+    getSize: () => layoutCreatorSize,
   },
-  getFamily: () => layoutTitleFont,
-  getSize: () => layoutTitleSize,
-});
-bindLayoutFontWeightChange(layoutCreatorWeightSelect, {
-  getCurrent: () => layoutCreatorFontWeight,
-  setCurrent: (value) => {
-    layoutCreatorFontWeight = value;
+  {
+    selectElement: layoutRatioWeightSelect,
+    getCurrent: () => layoutRatioFontWeight,
+    setCurrent: (value) => {
+      layoutRatioFontWeight = value;
+    },
+    getFamily: () => layoutRatioFont,
+    getSize: () => layoutRatioTextSize,
   },
-  getFamily: () => layoutCreatorFont,
-  getSize: () => layoutCreatorSize,
-});
-bindLayoutFontFamilyChange(layoutRatioFontSelect, {
-  getCurrent: () => layoutRatioFont,
-  setCurrent: (value) => {
-    layoutRatioFont = value;
+  {
+    selectElement: layoutNoteWeightSelect,
+    getCurrent: () => layoutNoteFontWeight,
+    setCurrent: (value) => {
+      layoutNoteFontWeight = value;
+    },
+    getFamily: () => layoutNoteFont,
+    getSize: () => layoutNoteTextSize,
   },
-  getWeight: () => layoutRatioFontWeight,
-  getSize: () => layoutRatioTextSize,
-  syncVars: true,
-});
-bindLayoutFontWeightChange(layoutRatioWeightSelect, {
-  getCurrent: () => layoutRatioFontWeight,
-  setCurrent: (value) => {
-    layoutRatioFontWeight = value;
+  {
+    selectElement: layoutCustomWeightSelect,
+    getCurrent: () => layoutCustomLabelFontWeight,
+    setCurrent: (value) => {
+      layoutCustomLabelFontWeight = value;
+    },
+    getFamily: () => layoutCustomLabelFont,
+    getSize: () => layoutCustomLabelTextSize,
   },
-  getFamily: () => layoutRatioFont,
-  getSize: () => layoutRatioTextSize,
-});
-bindLayoutFontFamilyChange(layoutNoteFontSelect, {
-  getCurrent: () => layoutNoteFont,
-  setCurrent: (value) => {
-    layoutNoteFont = value;
+  {
+    selectElement: layoutKeyMappingWeightSelect,
+    getCurrent: () => layoutKeyMappingFontWeight,
+    setCurrent: (value) => {
+      layoutKeyMappingFontWeight = value;
+    },
+    getFamily: () => layoutKeyMappingFont,
+    getSize: () => layoutKeyMappingTextSize,
+    invalidateCache: false,
   },
-  getWeight: () => layoutNoteFontWeight,
-  getSize: () => layoutNoteTextSize,
-  syncVars: true,
-});
-bindLayoutFontWeightChange(layoutNoteWeightSelect, {
-  getCurrent: () => layoutNoteFontWeight,
-  setCurrent: (value) => {
-    layoutNoteFontWeight = value;
+  {
+    selectElement: layoutTriangleLabelWeightSelect,
+    getCurrent: () => layoutTriangleLabelFontWeight,
+    setCurrent: (value) => {
+      layoutTriangleLabelFontWeight = value;
+    },
+    getFamily: () => layoutTriangleLabelFont,
+    getSize: () => layoutTriangleLabelTextSize,
   },
-  getFamily: () => layoutNoteFont,
-  getSize: () => layoutNoteTextSize,
-});
-bindLayoutFontFamilyChange(layoutCustomFontSelect, {
-  getCurrent: () => layoutCustomLabelFont,
-  setCurrent: (value) => {
-    layoutCustomLabelFont = value;
+  {
+    selectElement: layoutAxisWeightSelect,
+    getCurrent: () => layoutAxisLegendFontWeight,
+    setCurrent: (value) => {
+      layoutAxisLegendFontWeight = value;
+    },
+    getFamily: () => layoutAxisLegendFont,
+    getSize: () => layoutAxisLegendTextSize,
+    ensureReady: false,
   },
-  getWeight: () => layoutCustomLabelFontWeight,
-  getSize: () => layoutCustomLabelTextSize,
-  syncVars: true,
-});
-bindLayoutFontWeightChange(layoutCustomWeightSelect, {
-  getCurrent: () => layoutCustomLabelFontWeight,
-  setCurrent: (value) => {
-    layoutCustomLabelFontWeight = value;
+  {
+    selectElement: layoutLineLabelWeightSelect,
+    getCurrent: () => layoutLineLabelFontWeight,
+    setCurrent: (value) => {
+      layoutLineLabelFontWeight = value;
+    },
+    getFamily: () => layoutLineLabelFont,
+    getSize: () => layoutLineLabelTextSize,
+    ensureReady: false,
   },
-  getFamily: () => layoutCustomLabelFont,
-  getSize: () => layoutCustomLabelTextSize,
-});
-bindLayoutFontFamilyChange(layoutKeyMappingFontSelect, {
-  getCurrent: () => layoutKeyMappingFont,
-  setCurrent: (value) => {
-    layoutKeyMappingFont = value;
-  },
-  getWeight: () => layoutKeyMappingFontWeight,
-  getSize: () => layoutKeyMappingTextSize,
-  syncVars: true,
-  invalidateCache: false,
-});
-bindLayoutFontWeightChange(layoutKeyMappingWeightSelect, {
-  getCurrent: () => layoutKeyMappingFontWeight,
-  setCurrent: (value) => {
-    layoutKeyMappingFontWeight = value;
-  },
-  getFamily: () => layoutKeyMappingFont,
-  getSize: () => layoutKeyMappingTextSize,
-  invalidateCache: false,
-});
-bindLayoutFontFamilyChange(layoutTriangleLabelFontSelect, {
-  getCurrent: () => layoutTriangleLabelFont,
-  setCurrent: (value) => {
-    layoutTriangleLabelFont = value;
-  },
-  getWeight: () => layoutTriangleLabelFontWeight,
-  getSize: () => layoutTriangleLabelTextSize,
-  syncVars: true,
-});
-bindLayoutFontFamilyChange(layoutAxisFontSelect, {
-  getCurrent: () => layoutAxisLegendFont,
-  setCurrent: (value) => {
-    layoutAxisLegendFont = value;
-  },
-  getWeight: () => layoutAxisLegendFontWeight,
-  getSize: () => layoutAxisLegendTextSize,
-});
-bindLayoutFontFamilyChange(layoutLineLabelFontSelect, {
-  getCurrent: () => layoutLineLabelFont,
-  setCurrent: (value) => {
-    layoutLineLabelFont = value;
-  },
-  getWeight: () => layoutLineLabelFontWeight,
-  getSize: () => layoutLineLabelTextSize,
-});
-bindLayoutFontWeightChange(layoutTriangleLabelWeightSelect, {
-  getCurrent: () => layoutTriangleLabelFontWeight,
-  setCurrent: (value) => {
-    layoutTriangleLabelFontWeight = value;
-  },
-  getFamily: () => layoutTriangleLabelFont,
-  getSize: () => layoutTriangleLabelTextSize,
-});
-bindLayoutFontWeightChange(layoutAxisWeightSelect, {
-  getCurrent: () => layoutAxisLegendFontWeight,
-  setCurrent: (value) => {
-    layoutAxisLegendFontWeight = value;
-  },
-  getFamily: () => layoutAxisLegendFont,
-  getSize: () => layoutAxisLegendTextSize,
-  ensureReady: false,
-});
-bindLayoutFontWeightChange(layoutLineLabelWeightSelect, {
-  getCurrent: () => layoutLineLabelFontWeight,
-  setCurrent: (value) => {
-    layoutLineLabelFontWeight = value;
-  },
-  getFamily: () => layoutLineLabelFont,
-  getSize: () => layoutLineLabelTextSize,
-  ensureReady: false,
+].forEach((config) => {
+  const { selectElement, ...options } = config;
+  bindLayoutFontWeightChange(selectElement, options);
 });
 bindLayoutNumericInput(layoutLineLabelSizeInput, {
   applyValue: (value) => {
@@ -26369,8 +26644,7 @@ bindLayoutBooleanToggle(layoutUnifySizeToggle, (checked) => {
   syncLayoutPerspectiveTextToggleState();
   layoutAxisAngles = { x: null, y: null, z: null };
 });
-if (layoutPerspectiveTextSizeToggle) {
-  layoutPerspectiveTextSizeToggle.addEventListener("change", () => {
+bindOptionalChange(layoutPerspectiveTextSizeToggle, () => {
     if (layoutUnifyNodeSize) {
       syncLayoutPerspectiveTextToggleState();
       return;
@@ -26380,10 +26654,8 @@ if (layoutPerspectiveTextSizeToggle) {
     syncLayoutPerspectiveTextToggleState();
     draw();
     schedulePresetUrlUpdate();
-  });
-}
-if (layoutResetButton) {
-  layoutResetButton.addEventListener("click", () => {
+});
+bindOptionalClick(layoutResetButton, () => {
     pushLayoutUndoState();
     const preserveLockPosition = layoutLockPosition;
     const preservedLayoutView = preserveLockPosition ? { ...layoutView } : null;
@@ -26397,92 +26669,66 @@ if (layoutResetButton) {
     }
     draw();
     schedulePresetUrlUpdate();
-  });
-}
-if (exportSvgButton) {
-  exportSvgButton.addEventListener("click", exportLayoutSvg);
-}
-if (exportPdfButton) {
-  exportPdfButton.addEventListener("click", exportLayoutPdf);
-}
-if (midiEnable) {
-  midiEnable.addEventListener("change", async () => {
-    midiEnabled = midiEnable.checked;
-    if (midiEnabled && !midiAccess) {
-      await initMidi();
-    }
-  });
-}
-if (midiPortSelect) {
-  midiPortSelect.addEventListener("change", () => {
-    selectMidiInput(midiPortSelect.value);
-  });
-}
-if (midiOutEnable) {
-  midiOutEnable.addEventListener("change", async () => {
-    midiOutEnabled = midiOutEnable.checked;
-    if (midiOutEnabled && !midiAccess) {
-      await initMidi();
-    }
+});
+bindOptionalClick(exportSvgButton, exportLayoutSvg);
+bindOptionalClick(exportPdfButton, exportLayoutPdf);
+bindOptionalChange(midiEnable, async () => {
+  midiEnabled = midiEnable.checked;
+  if (midiEnabled && !midiAccess) {
+    await initMidi();
+  }
+});
+bindOptionalChange(midiPortSelect, () => {
+  selectMidiInput(midiPortSelect.value);
+});
+bindOptionalChange(midiOutEnable, async () => {
+  midiOutEnabled = midiOutEnable.checked;
+  if (midiOutEnabled && !midiAccess) {
+    await initMidi();
+  }
+  if (midiOutEnabled && midiOutDevice) {
+    sendMidiOutPitchBendRange();
+  } else if (!midiOutEnabled) {
+    const active = [...midiOutActive.entries()];
+    active.forEach(([voiceId]) => {
+      const voice = findVoiceById(voiceId);
+      if (voice) {
+        sendMidiOutNoteOff(voice);
+      }
+    });
+  }
+});
+bindOptionalChange(midiOutPortSelect, () => {
+  selectMidiOutput(midiOutPortSelect.value);
+});
+bindOptionalInput(midiOutBendInput, () => {
+  const value = Number(midiOutBendInput.value);
+  if (Number.isFinite(value) && value > 0) {
+    midiOutBendRange = value;
     if (midiOutEnabled && midiOutDevice) {
       sendMidiOutPitchBendRange();
-    } else if (!midiOutEnabled) {
-      const active = [...midiOutActive.entries()];
-      active.forEach(([voiceId]) => {
-        const voice = findVoiceById(voiceId);
-        if (voice) {
-          sendMidiOutNoteOff(voice);
-        }
-      });
     }
-  });
-}
-if (midiOutPortSelect) {
-  midiOutPortSelect.addEventListener("change", () => {
-    selectMidiOutput(midiOutPortSelect.value);
-  });
-}
-if (midiOutBendInput) {
-  midiOutBendInput.addEventListener("input", () => {
-    const value = Number(midiOutBendInput.value);
-    if (Number.isFinite(value) && value > 0) {
-      midiOutBendRange = value;
-      if (midiOutEnabled && midiOutDevice) {
-        sendMidiOutPitchBendRange();
-      }
-    }
-  });
-}
-if (envelopeToggle) {
-  envelopeToggle.addEventListener("click", toggleEnvelopePanel);
-}
-if (animationToggle) {
-  animationToggle.addEventListener("click", toggleAnimationPanel);
-}
-if (ratioWheelToggle) {
-  ratioWheelToggle.addEventListener("click", toggleRatioWheelPanel);
-}
-if (midiMenuToggle) {
-  midiMenuToggle.addEventListener("click", toggleMidiMenuPanel);
-}
+  }
+});
+bindOptionalClick(envelopeToggle, toggleEnvelopePanel);
+bindOptionalClick(animationToggle, toggleAnimationPanel);
+bindOptionalClick(ratioWheelToggle, toggleRatioWheelPanel);
+bindOptionalClick(midiMenuToggle, toggleMidiMenuPanel);
 if (ratioWheelLarge) {
-  ratioWheelLarge.addEventListener("mousemove", handleRatioWheelHover);
-  ratioWheelLarge.addEventListener("mouseleave", clearRatioWheelHover);
-  ratioWheelLarge.addEventListener("click", handleRatioWheelClick);
+  bindOptionalEvent(ratioWheelLarge, "mousemove", handleRatioWheelHover);
 }
+bindOptionalClick(ratioWheelLarge, handleRatioWheelClick);
+if (ratioWheelLarge) {
+  bindOptionalEvent(ratioWheelLarge, "mouseleave", clearRatioWheelHover);
+}
+bindOptionalEnterKey(addIntervalInput, () => {
+  if (addIntervalDialog) {
+    addIntervalDialog.returnValue = "add";
+    addIntervalDialog.close();
+  }
+});
 if (addIntervalInput) {
-  addIntervalInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      if (addIntervalDialog) {
-        addIntervalDialog.returnValue = "add";
-        addIntervalDialog.close();
-      }
-    }
-  });
-}
-if (addIntervalSelect && addIntervalInput) {
-  addIntervalSelect.addEventListener("change", () => {
+  bindOptionalChange(addIntervalSelect, () => {
     const value = String(addIntervalSelect.value || "custom");
     if (value === "custom") {
       addIntervalInput.disabled = false;
@@ -26495,12 +26741,8 @@ if (addIntervalSelect && addIntervalInput) {
   });
 }
 if (findRatioDialog) {
-  findRatioDialog.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && event.target.tagName !== "TEXTAREA") {
-      event.preventDefault();
-    }
-  });
-  findRatioDialog.addEventListener("close", async () => {
+  preventDialogEnterExceptTextarea(findRatioDialog);
+  bindOptionalDialogClose(findRatioDialog, async () => {
     resetHeldModifiers();
     if (findRatioDialog.returnValue === "find") {
       await maybeConfirmFindRatioAxes(findRatioInput ? findRatioInput.value : "");
@@ -26512,18 +26754,12 @@ if (findRatioDialog) {
     }
   });
 }
-if (findRatioInput) {
-  findRatioInput.addEventListener("input", () => {
-    updateFindRatioAxisRecommendation(findRatioInput.value);
-  });
-}
+bindOptionalInput(findRatioInput, () => {
+  updateFindRatioAxisRecommendation(findRatioInput.value);
+});
 if (buildIntervalsDialog) {
-  buildIntervalsDialog.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && event.target.tagName !== "TEXTAREA") {
-      event.preventDefault();
-    }
-  });
-  buildIntervalsDialog.addEventListener("close", () => {
+  preventDialogEnterExceptTextarea(buildIntervalsDialog);
+  bindOptionalDialogClose(buildIntervalsDialog, () => {
     resetHeldModifiers();
     if (buildIntervalsDialog.returnValue === "build") {
       buildFromIntervalsInput(buildIntervalsInput ? buildIntervalsInput.value : "");
@@ -26534,8 +26770,7 @@ if (buildIntervalsDialog) {
     updateBuildIntervalsPreview();
   });
 }
-if (addIntervalDialog) {
-  addIntervalDialog.addEventListener("close", () => {
+bindOptionalDialogClose(addIntervalDialog, () => {
     resetHeldModifiers();
     if (addIntervalDialog.returnValue === "add") {
       const sourceNode = addIntervalSourceNodeId
@@ -26555,67 +26790,52 @@ if (addIntervalDialog) {
       addIntervalInput.value = "";
       addIntervalInput.disabled = false;
     }
-  });
-}
-if (presetToggle) {
-  presetToggle.addEventListener("click", togglePresetPanel);
-}
-if (fileToggle) {
-  fileToggle.addEventListener("click", toggleFilePanel);
-}
-if (uiHint) {
-  uiHint.addEventListener("click", () => {
-    uiHintDismissed = true;
-    showHelpEnabled = false;
-    if (showHelpToggle) {
-      setControlChecked(showHelpToggle, false);
-    }
-    setUiHintVisibility(false);
-  });
-}
-if (bannerMessage) {
-  bannerMessage.addEventListener("click", (event) => {
-    if (tempBannerActive) {
-      return;
-    }
-    const target = event.target instanceof Element ? event.target : bannerMessage;
-    const actionEl = target.closest("[data-layout-banner]");
-    const layoutAction = actionEl ? actionEl.getAttribute("data-layout-banner") : null;
-    if (layoutAction === "freeze") {
-      layoutLockPosition = true;
-      refreshLayoutFromView({ flatten: layoutFreezeFlatten });
-      updateLayoutLinkControls();
-      updateBannerMessage();
-      return;
-    }
-    if (layoutAction === "exit-align") {
-      setLayoutAlignMode("");
-      return;
-    }
-    bannerDismissedKey = currentBannerKey;
+});
+bindOptionalClick(presetToggle, togglePresetPanel);
+bindOptionalClick(fileToggle, toggleFilePanel);
+bindOptionalClick(uiHint, () => {
+  uiHintDismissed = true;
+  showHelpEnabled = false;
+  if (showHelpToggle) {
+    setControlChecked(showHelpToggle, false);
+  }
+  setUiHintVisibility(false);
+});
+bindOptionalClick(bannerMessage, (event) => {
+  if (tempBannerActive) {
+    return;
+  }
+  const target = event.target instanceof Element ? event.target : bannerMessage;
+  const actionEl = target.closest("[data-layout-banner]");
+  const layoutAction = actionEl ? actionEl.getAttribute("data-layout-banner") : null;
+  if (layoutAction === "freeze") {
+    layoutLockPosition = true;
+    refreshLayoutFromView({ flatten: layoutFreezeFlatten });
+    updateLayoutLinkControls();
     updateBannerMessage();
-  });
-}
-fundamentalInput.addEventListener("input", () => {
+    return;
+  }
+  if (layoutAction === "exit-align") {
+    setLayoutAlignMode("");
+    return;
+  }
+  bannerDismissedKey = currentBannerKey;
+  updateBannerMessage();
+});
+bindOptionalInput(fundamentalInput, () => {
   syncFundamentalNoteSelect();
   updateNodeFrequencies();
 });
-if (fundamentalOctaveDown) {
-  fundamentalOctaveDown.addEventListener("click", () => {
-    adjustFundamentalByFactor(0.5);
-  });
-}
-if (fundamentalOctaveUp) {
-  fundamentalOctaveUp.addEventListener("click", () => {
-    adjustFundamentalByFactor(2);
-  });
-}
-ratioXSelect.addEventListener("change", updateNodeRatios);
-ratioYSelect.addEventListener("change", updateNodeRatios);
-if (ratioZSelect) {
-  ratioZSelect.addEventListener("change", updateNodeRatios);
-}
-a4Input.addEventListener("input", () => {
+bindOptionalClick(fundamentalOctaveDown, () => {
+  adjustFundamentalByFactor(0.5);
+});
+bindOptionalClick(fundamentalOctaveUp, () => {
+  adjustFundamentalByFactor(2);
+});
+bindOptionalChange(ratioXSelect, updateNodeRatios);
+bindOptionalChange(ratioYSelect, updateNodeRatios);
+bindOptionalChange(ratioZSelect, updateNodeRatios);
+bindOptionalInput(a4Input, () => {
   const a4 = Number(a4Input.value) || 440;
   if (fundamentalNoteSelect.value !== FUNDAMENTAL_CUSTOM_VALUE) {
     const selectedMidi = Number(fundamentalNoteSelect.value);
@@ -26627,68 +26847,49 @@ a4Input.addEventListener("input", () => {
   syncFundamentalNoteSelect();
   updateNodeFrequencies();
 });
-fundamentalNoteSelect.addEventListener("change", onFundamentalNoteChange);
-if (fundamentalSpellingSharpButton) {
-  fundamentalSpellingSharpButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    applyFundamentalSpelling("sharp");
-  });
-}
-if (fundamentalSpellingFlatButton) {
-  fundamentalSpellingFlatButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    applyFundamentalSpelling("flat");
-  });
-}
-volumeSlider.addEventListener("input", () => {
-  updateVolume();
-  schedulePresetUrlUpdate();
+bindOptionalChange(fundamentalNoteSelect, onFundamentalNoteChange);
+bindOptionalClick(fundamentalSpellingSharpButton, (event) => {
+  event.preventDefault();
+  applyFundamentalSpelling("sharp");
 });
-if (lfoDepthSlider) {
-  lfoDepthSlider.addEventListener("input", () => {
-    updateLfoDepth();
-    schedulePresetUrlUpdate();
-  });
-}
+bindOptionalClick(fundamentalSpellingFlatButton, (event) => {
+  event.preventDefault();
+  applyFundamentalSpelling("flat");
+});
+bindPresetInputHandler(volumeSlider, updateVolume);
+bindPresetInputHandler(lfoDepthSlider, updateLfoDepth);
 if (lfoRateSlider) {
-  lfoRateSlider.addEventListener("input", () => {
-    updateLfoRate();
-    schedulePresetUrlUpdate();
-  });
+  bindPresetInputHandler(lfoRateSlider, updateLfoRate);
   updateLfoRate();
 }
-waveformSelect.addEventListener("change", () => {
+bindOptionalChange(waveformSelect, () => {
   handleSynthTypeChange();
 });
 if (synthModeInputs.length) {
-  synthModeInputs.forEach((input) => {
-    input.addEventListener("change", () => {
-      const selected = document.querySelector('input[name="synth-mode"]:checked');
-      synthMode = selected ? selected.value : "waveform";
-      syncSynthModeUI();
-      handleSynthTypeChange();
-    });
-  });
-}
-  if (soundfontPresetSelect) {
-    soundfontPresetSelect.addEventListener("change", () => {
-      const nextIndex = Number(soundfontPresetSelect.value);
-      if (Number.isFinite(nextIndex)) {
-        soundfontPresetIndex = nextIndex;
-        if (soundfontPresetList.length) {
-          soundfontPreset =
-            soundfontPresetList[soundfontPresetIndex] || soundfontPresetList[0] || null;
-        }
-      }
-      handleSynthTypeChange();
-    });
-  }
-if (physicalModelSelect) {
-  physicalModelSelect.addEventListener("change", () => {
+  const applySynthModeSelection = () => {
+    synthMode = getCheckedRadioValue("synth-mode", "waveform");
+    syncSynthModeUI();
     handleSynthTypeChange();
+  };
+  synthModeInputs.forEach((input) => {
+    bindOptionalChange(input, applySynthModeSelection);
   });
 }
-keyboardModeSelect.addEventListener("change", () => {
+bindOptionalChange(soundfontPresetSelect, () => {
+  const nextIndex = Number(soundfontPresetSelect.value);
+  if (Number.isFinite(nextIndex)) {
+    soundfontPresetIndex = nextIndex;
+    if (soundfontPresetList.length) {
+      soundfontPreset =
+        soundfontPresetList[soundfontPresetIndex] || soundfontPresetList[0] || null;
+    }
+  }
+  handleSynthTypeChange();
+});
+bindOptionalChange(physicalModelSelect, () => {
+  handleSynthTypeChange();
+});
+bindOptionalChange(keyboardModeSelect, () => {
   if (keyboardModeSelect.value === "off") {
     resetUiHintToDefault();
   }
@@ -26702,28 +26903,124 @@ keyboardModeSelect.addEventListener("change", () => {
   draw();
   schedulePresetUrlUpdate();
 });
-if (keyboardMapToggle) {
-  keyboardMapToggle.addEventListener("click", () => {
-    if (!isCustomPianoMode() || layoutMode) {
-      return;
-    }
-    const next = !customPianoMapMode;
-    setCustomPianoMapMode(next);
-    if (next) {
-      openKeyboardMapPopover();
-    } else {
-      closeKeyboardMapPopover();
-    }
-    updateCustomPianoKeyStyles();
+bindOptionalClick(keyboardMapToggle, () => {
+  if (!isCustomPianoMode() || layoutMode) {
+    return;
+  }
+  const next = !customPianoMapMode;
+  setCustomPianoMapMode(next);
+  if (next) {
+    openKeyboardMapPopover();
+  } else {
+    closeKeyboardMapPopover();
+  }
+  updateCustomPianoKeyStyles();
+});
+bindOptionalClick(keyboardMapClear, () => {
+  customPianoMap = new Map();
+  markCustomPianoMapDirty();
+  updateCustomPianoKeyStyles();
+  schedulePresetUrlUpdate();
+  draw();
+});
+bindOptionalChange(oneShotCheckbox, () => {
+  updatePatternLengthAvailability();
+  schedulePresetUrlUpdate();
+});
+if (envelopeTimeModeInputs.length) {
+  envelopeTimeModeInputs.forEach((input) => {
+    bindOptionalChange(input, () => {
+      envelopeTimeMode = getCheckedRadioValue("envelope-time", "absolute");
+      updateEnvelopeReadouts();
+      schedulePresetUrlUpdate();
+    });
   });
 }
-if (keyboardMapClear) {
-  keyboardMapClear.addEventListener("click", () => {
-    customPianoMap = new Map();
-    markCustomPianoMapDirty();
-    updateCustomPianoKeyStyles();
-    schedulePresetUrlUpdate();
-    draw();
+bindOptionalClick(looperToggle, () => {
+  if (looperState === "recording") {
+    stopLooperRecordingAndStartPlayback();
+    return;
+  }
+  if (looperState === "playing") {
+    startLooperOverdub();
+    return;
+  }
+  if (looperState === "overdubbing") {
+    stopLooperOverdub();
+    return;
+  }
+  if (looperState === "ready") {
+    startLooperPlayback();
+    return;
+  }
+  startLooperRecording();
+});
+bindSingleBooleanToggle(looperQuantizeEnabledToggle, (checked) => {
+  looperQuantizeEnabled = checked;
+  schedulePresetUrlUpdate();
+  draw();
+});
+bindOptionalClick(looperQuantizeMenuToggle, (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  if (!looperQuantizeMenu) {
+    return;
+  }
+  looperQuantizeMenu.hidden = !looperQuantizeMenu.hidden;
+});
+bindOptionalChange(looperQuantizeGridSelect, () => {
+  looperQuantizeGrid = looperQuantizeGridSelect.value || "16";
+  schedulePresetUrlUpdate();
+  draw();
+});
+bindOptionalInput(looperQuantizeStrengthSlider, () => {
+  const value = Number(looperQuantizeStrengthSlider.value);
+  looperQuantizeStrength = Number.isFinite(value) ? Math.max(0, Math.min(1, value / 100)) : 1;
+  updateLooperQuantizeStrengthReadout();
+  schedulePresetUrlUpdate();
+  draw();
+});
+bindOptionalEvent(window, "pointerdown", (event) => {
+  if (!looperQuantizeMenu || looperQuantizeMenu.hidden) {
+    return;
+  }
+  if (looperQuantizeMenu.contains(event.target)) {
+    return;
+  }
+  if (looperQuantizeMenuToggle && looperQuantizeMenuToggle.contains(event.target)) {
+    return;
+  }
+  looperQuantizeMenu.hidden = true;
+});
+bindOptionalClick(scorePlayToggle, () => {
+  if (patternPlayerState === "playing") {
+    stopPatternPlayback();
+  } else {
+    startPatternPlayback();
+  }
+});
+bindOptionalClick(patternBuildButton, () => {
+  buildPatternStates(false);
+  if (patternPlayerState === "playing") {
+    stopPatternPlayback();
+    startPatternPlayback();
+  }
+});
+bindOptionalClick(lfoPlayToggle, () => {
+  if (lfoPresetPlaying) {
+    stopLfoPresets();
+    return;
+  }
+  randomizeLfosForActiveNodes();
+  lfoPresetPlaying = true;
+  updateLfoPlayButton();
+});
+if (patternLengthModeInputs.length) {
+  patternLengthModeInputs.forEach((input) => {
+    bindOptionalChange(input, () => {
+      patternLengthMode = getCheckedRadioValue("pattern-length-mode", "sustain");
+      updatePatternLengthReadout();
+    });
   });
 }
 if (keyboardMapKeys.length) {
@@ -26732,7 +27029,7 @@ if (keyboardMapKeys.length) {
     if (!Number.isFinite(key)) {
       return;
     }
-    button.addEventListener("pointerdown", (event) => {
+    bindOptionalEvent(button, "pointerdown", (event) => {
       event.preventDefault();
       if (!isCustomPianoMode()) {
         return;
@@ -26758,129 +27055,45 @@ if (keyboardMapKeys.length) {
         stopCustomPianoMappedVoices(voiceIds);
       }
     };
-    button.addEventListener("pointerup", stopMapped);
-    button.addEventListener("pointerleave", stopMapped);
+    bindOptionalEvent(button, "pointerup", stopMapped);
+    bindOptionalEvent(button, "pointerleave", stopMapped);
   });
 }
-attackSlider.addEventListener("input", () => {
-  updateEnvelopeReadouts();
-  schedulePresetUrlUpdate();
+bindPresetInputHandler(attackSlider, updateEnvelopeReadouts);
+bindPresetInputHandler(decaySlider, updateEnvelopeReadouts);
+bindPresetInputHandler(sustainSlider, updateEnvelopeReadouts);
+bindPresetInputHandler(releaseSlider, updateEnvelopeReadouts);
+bindOptionalClick(looperClear, () => {
+  clearLooper();
 });
-decaySlider.addEventListener("input", () => {
-  updateEnvelopeReadouts();
-  schedulePresetUrlUpdate();
+bindOptionalClick(lfoStopButton, () => {
+  scheduleLfoStopsAtCycleEnd();
 });
-sustainSlider.addEventListener("input", () => {
-  updateEnvelopeReadouts();
-  schedulePresetUrlUpdate();
+bindOptionalClick(allNotesOffButton, () => {
+  allNotesOff();
 });
-releaseSlider.addEventListener("input", () => {
-  updateEnvelopeReadouts();
-  schedulePresetUrlUpdate();
+bindOptionalInput(tempoSlider, () => {
+  updateTempoReadout();
 });
-if (oneShotCheckbox) {
-  oneShotCheckbox.addEventListener("change", () => {
-    updatePatternLengthAvailability();
-    schedulePresetUrlUpdate();
-  });
+bindOptionalInput(patternLengthSlider, () => {
+  updatePatternLengthReadout();
+});
+if (looperQuantizeGridSelect) {
+  looperQuantizeGrid = looperQuantizeGridSelect.value || "16";
 }
-if (envelopeTimeModeInputs.length) {
-  envelopeTimeModeInputs.forEach((input) => {
-    input.addEventListener("change", () => {
-      const selected = document.querySelector('input[name="envelope-time"]:checked');
-      envelopeTimeMode = selected ? selected.value : "absolute";
-      updateEnvelopeReadouts();
-      schedulePresetUrlUpdate();
-    });
-  });
+if (looperQuantizeStrengthSlider) {
+  const strengthValue = Number(looperQuantizeStrengthSlider.value);
+  looperQuantizeStrength = Number.isFinite(strengthValue)
+    ? Math.max(0, Math.min(1, strengthValue / 100))
+    : 1;
 }
-if (looperToggle) {
-  looperToggle.addEventListener("click", () => {
-    if (looperState === "recording") {
-      startLooperPlayback();
-      return;
-    }
-    if (looperState === "playing") {
-      stopLooperPlayback();
-      return;
-    }
-    if (looperState === "ready") {
-      startLooperPlayback();
-      return;
-    }
-    startLooperRecording();
-  });
+if (looperQuantizeEnabledToggle) {
+  looperQuantizeEnabled = Boolean(looperQuantizeEnabledToggle.checked);
 }
-if (looperClear) {
-  looperClear.addEventListener("click", () => {
-    clearLooper();
-  });
-}
-if (scorePlayToggle) {
-  scorePlayToggle.addEventListener("click", () => {
-    if (patternPlayerState === "playing") {
-      stopPatternPlayback();
-    } else {
-      startPatternPlayback();
-    }
-  });
-}
-if (patternBuildButton) {
-  patternBuildButton.addEventListener("click", () => {
-    buildPatternStates(false);
-    if (patternPlayerState === "playing") {
-      stopPatternPlayback();
-      startPatternPlayback();
-    }
-  });
-}
-if (lfoPlayToggle) {
-  lfoPlayToggle.addEventListener("click", () => {
-    if (lfoPresetPlaying) {
-      stopLfoPresets();
-      return;
-    }
-    randomizeLfosForActiveNodes();
-    lfoPresetPlaying = true;
-    updateLfoPlayButton();
-  });
-}
-if (lfoStopButton) {
-  lfoStopButton.addEventListener("click", () => {
-    scheduleLfoStopsAtCycleEnd();
-  });
-}
-if (allNotesOffButton) {
-  allNotesOffButton.addEventListener("click", () => {
-    allNotesOff();
-  });
-}
-if (tempoSlider) {
-  tempoSlider.addEventListener("input", () => {
-    updateTempoReadout();
-  });
-}
-if (patternLengthSlider) {
-  patternLengthSlider.addEventListener("input", () => {
-    updatePatternLengthReadout();
-  });
-}
-if (patternLengthModeInputs.length) {
-  patternLengthModeInputs.forEach((input) => {
-    input.addEventListener("change", () => {
-      const selected = document.querySelector(
-        'input[name="pattern-length-mode"]:checked'
-      );
-      patternLengthMode = selected ? selected.value : "sustain";
-      updatePatternLengthReadout();
-    });
-  });
-}
-initEnvelopeSliders();
+updateLooperQuantizeStrengthReadout();
 updateEnvelopeReadouts();
 if (synthModeInputs.length) {
-  const selected = document.querySelector('input[name="synth-mode"]:checked');
-  synthMode = selected ? selected.value : synthMode;
+  synthMode = getCheckedRadioValue("synth-mode", synthMode);
 }
 syncSynthModeUI();
 currentSynthWaveform = getCurrentWaveformType();
@@ -26915,12 +27128,8 @@ if (document.fonts && document.fonts.load) {
     .catch(() => {});
 }
 if (layoutCustomLabelDialog && layoutCustomLabelInput) {
-  layoutCustomLabelDialog.addEventListener("click", (event) => {
-    if (event.target === layoutCustomLabelDialog) {
-      layoutCustomLabelDialog.close("confirm");
-    }
-  });
-  layoutCustomLabelDialog.addEventListener("close", () => {
+  bindDialogBackdropClose(layoutCustomLabelDialog, "confirm");
+  bindOptionalDialogClose(layoutCustomLabelDialog, () => {
     resetHeldModifiers();
     if (layoutCustomLabelDialog.returnValue === "cancel") {
       layoutCustomLabelEditId = null;
@@ -26965,12 +27174,8 @@ if (layoutCustomLabelDialog && layoutCustomLabelInput) {
   });
 }
 if (octaveShiftDialog && octaveShiftInput) {
-  octaveShiftDialog.addEventListener("click", (event) => {
-    if (event.target === octaveShiftDialog) {
-      octaveShiftDialog.close("clear");
-    }
-  });
-  octaveShiftDialog.addEventListener("close", () => {
+  bindDialogBackdropClose(octaveShiftDialog, "clear");
+  bindOptionalDialogClose(octaveShiftDialog, () => {
     resetHeldModifiers();
     if (octaveShiftTargetId == null) {
       return;
@@ -27004,19 +27209,60 @@ if (octaveShiftDialog && octaveShiftInput) {
     octaveShiftTargetId = null;
   });
 }
-canvas.addEventListener("pointerdown", onPointerDown);
-canvas.addEventListener("pointermove", onPointerMove);
-canvas.addEventListener("pointerup", onPointerUp);
-canvas.addEventListener("pointerleave", onPointerLeave);
-canvas.addEventListener("dblclick", onCanvasDoubleClick);
-canvas.addEventListener("wheel", onWheel, { passive: false });
-window.addEventListener("resize", resizeCanvas);
-window.addEventListener("resize", updateRatioWheelPosition);
-window.addEventListener("resize", updateKeyboardMapPopoverPosition);
-window.addEventListener("pointerdown", enableAudioFromGesture);
-window.addEventListener("keydown", enableAudioFromGesture);
-window.addEventListener("keydown", handleKeyDown);
-window.addEventListener("keyup", handleKeyUp);
+if (triangleLabelDialog) {
+  bindOptionalDialogClose(triangleLabelDialog, () => {
+    if (!triangleLabelTargetKey || !triangleLabelTargetTri) {
+      return;
+    }
+    const result = triangleLabelDialog.returnValue;
+    if (result === "cancel") {
+      triangleLabelTargetKey = null;
+      triangleLabelTargetTri = null;
+      return;
+    }
+    const entry = triangleLabels.get(triangleLabelTargetKey);
+    const parts = triangleLabelTargetKey.split(":");
+    const coords = parts[1] ? parts[1].split(",") : [];
+    const baseEntry = {
+      plane: parts[0],
+      x: Number(coords[0]),
+      y: Number(coords[1]),
+      z: Number(coords[2]),
+      tri: triangleLabelTargetTri,
+      label: "",
+    };
+    if (result === "none") {
+      if (entry) {
+        triangleLabels.delete(triangleLabelTargetKey);
+      }
+    } else if (triangleLabelInput) {
+      const nextEntry = entry ? { ...entry } : baseEntry;
+      nextEntry.label = triangleLabelInput.value.trim();
+      if (nextEntry.label) {
+        triangleLabels.set(triangleLabelTargetKey, normalizeTriangleLabelEntry(nextEntry));
+      } else if (entry) {
+        triangleLabels.delete(triangleLabelTargetKey);
+      }
+    }
+    triangleLabelTargetKey = null;
+    triangleLabelTargetTri = null;
+    schedulePresetUrlUpdate();
+    draw();
+  });
+}
+bindOptionalEvent(canvas, "pointerdown", onPointerDown);
+bindOptionalEvent(canvas, "pointermove", onPointerMove);
+bindOptionalEvent(canvas, "pointerup", onPointerUp);
+bindOptionalEvent(canvas, "pointerleave", onPointerLeave);
+bindOptionalEvent(canvas, "dblclick", onCanvasDoubleClick);
+bindOptionalEvent(canvas, "wheel", onWheel, { passive: false });
+bindOptionalEvent(window, "resize", resizeCanvas);
+bindOptionalEvent(window, "resize", updateRatioWheelPosition);
+bindOptionalEvent(window, "resize", updateKeyboardMapPopoverPosition);
+bindOptionalEvent(window, "pointerdown", enableAudioFromGesture);
+bindOptionalEvent(window, "keydown", enableAudioFromGesture);
+bindOptionalEvent(window, "keydown", handleKeyDown);
+bindOptionalEvent(window, "keyup", handleKeyUp);
 window.snapshotDebug = {
   enable: () => {
     snapshotDebugEnabled = true;
@@ -27025,7 +27271,7 @@ window.snapshotDebug = {
     snapshotDebugEnabled = false;
   },
 };
-window.addEventListener("keydown", (event) => {
+bindOptionalEvent(window, "keydown", (event) => {
   syncCapsLockState(event);
   const keyboardModeEnabled = snapshotKeyboardModeToggle
     ? snapshotKeyboardModeToggle.checked
@@ -27088,47 +27334,6 @@ window.addEventListener("keydown", (event) => {
   }
   if (event.key.toLowerCase() === "m") {
     mHeld = true;
-  }
-if (triangleLabelDialog) {
-  triangleLabelDialog.addEventListener("close", () => {
-    if (!triangleLabelTargetKey || !triangleLabelTargetTri) {
-      return;
-    }
-    const result = triangleLabelDialog.returnValue;
-    if (result === "cancel") {
-      triangleLabelTargetKey = null;
-      triangleLabelTargetTri = null;
-      return;
-    }
-    const entry = triangleLabels.get(triangleLabelTargetKey);
-      const parts = triangleLabelTargetKey.split(":");
-      const coords = parts[1] ? parts[1].split(",") : [];
-      const baseEntry = {
-        plane: parts[0],
-        x: Number(coords[0]),
-        y: Number(coords[1]),
-        z: Number(coords[2]),
-        tri: triangleLabelTargetTri,
-        label: "",
-      };
-      if (result === "none") {
-        if (entry) {
-          triangleLabels.delete(triangleLabelTargetKey);
-        }
-      } else if (triangleLabelInput) {
-        const nextEntry = entry ? { ...entry } : baseEntry;
-        nextEntry.label = triangleLabelInput.value.trim();
-        if (nextEntry.label) {
-          triangleLabels.set(triangleLabelTargetKey, normalizeTriangleLabelEntry(nextEntry));
-        } else if (entry) {
-          triangleLabels.delete(triangleLabelTargetKey);
-        }
-      }
-      triangleLabelTargetKey = null;
-      triangleLabelTargetTri = null;
-      schedulePresetUrlUpdate();
-      draw();
-    });
   }
   if (event.key.toLowerCase() === "r") {
     rHeld = true;
@@ -27203,7 +27408,7 @@ if (triangleLabelDialog) {
     return;
   }
 });
-window.addEventListener("pointerdown", (event) => {
+bindOptionalEvent(window, "pointerdown", (event) => {
   if (!layoutSpacePopover || layoutSpacePopover.hidden) {
     return;
   }
@@ -27215,7 +27420,7 @@ window.addEventListener("pointerdown", (event) => {
   }
   layoutSpacePopover.hidden = true;
 });
-window.addEventListener("pointerdown", (event) => {
+bindOptionalEvent(window, "pointerdown", (event) => {
   if (!layoutKeyMappingPopover || layoutKeyMappingPopover.hidden) {
     return;
   }
@@ -27230,7 +27435,7 @@ window.addEventListener("pointerdown", (event) => {
     layoutKeyMappingTrigger.setAttribute("aria-expanded", "false");
   }
 });
-window.addEventListener("pointerdown", (event) => {
+bindOptionalEvent(window, "pointerdown", (event) => {
   if (!layoutFontPopover || layoutFontPopover.hidden) {
     return;
   }
@@ -27242,7 +27447,7 @@ window.addEventListener("pointerdown", (event) => {
   }
   closeLayoutFontPopover();
 });
-window.addEventListener("pointerdown", (event) => {
+bindOptionalEvent(window, "pointerdown", (event) => {
   if (!keyboardMapPopover || keyboardMapPopover.hidden) {
     return;
   }
@@ -27257,7 +27462,7 @@ window.addEventListener("pointerdown", (event) => {
   }
   keyboardMapPopover.hidden = true;
 });
-window.addEventListener("keyup", (event) => {
+bindOptionalEvent(window, "keyup", (event) => {
   syncCapsLockState(event);
   if (event.key === "Shift") {
     shiftHeld = false;
@@ -27311,11 +27516,8 @@ window.addEventListener("keyup", (event) => {
   }
 });
 
-if (customRatioDialog) {
-  customRatioDialog.addEventListener("close", handleCustomRatioDialogClose);
-}
-if (distanceLabelDialog) {
-  distanceLabelDialog.addEventListener("close", () => {
+bindOptionalDialogClose(customRatioDialog, handleCustomRatioDialogClose);
+bindOptionalDialogClose(distanceLabelDialog, () => {
     resetHeldModifiers();
     const edgeKey = pendingDistanceLabelEditKey;
     pendingDistanceLabelEditKey = "";
@@ -27364,7 +27566,6 @@ if (distanceLabelDialog) {
     schedulePresetUrlUpdate();
     draw();
   });
-}
 
 resizeCanvas();
 updateRatioWheelPosition();

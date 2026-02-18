@@ -1780,7 +1780,8 @@ button:active {
   position: absolute;
   bottom: calc(100% + 8px);
   top: auto;
-  right: 0;
+  left: 50%;
+  transform: translateX(-50%);
   min-width: 220px;
   padding: 14px;
   display: grid;
@@ -2013,6 +2014,29 @@ body.map-mode-active::before {
 .looper-clear:hover,
 .looper-clear:focus {
   color: var(--accent);
+}
+
+.looper-quantize-row {
+  align-items: center;
+  gap: 8px;
+}
+
+.looper-quantize-row label {
+  margin-right: auto;
+}
+
+.looper-quantize-menu {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.looper-quantize-menu .control-group {
+  margin-bottom: 10px;
+}
+
+.looper-quantize-menu .control-group:last-child {
+  margin-bottom: 0;
 }
 
 .lfo-label {

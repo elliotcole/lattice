@@ -20881,6 +20881,94 @@ function getPresetLayoutSourceViewState() {
     : null;
 }
 
+const PRESET_LAYOUT_DEFAULT_VALUE_KEYS = [
+  ["titleSize", () => LAYOUT_DEFAULTS.titleSize],
+  ["creatorSize", () => LAYOUT_DEFAULTS.creatorSize],
+  ["nodeSize", () => LAYOUT_DEFAULTS.nodeSize],
+  ["ratioTextSize", () => LAYOUT_DEFAULTS.ratioTextSize],
+  ["noteTextSize", () => LAYOUT_DEFAULTS.noteTextSize],
+  ["triangleLabelTextSize", () => LAYOUT_DEFAULTS.triangleLabelTextSize],
+  ["customLabelTextSize", () => LAYOUT_DEFAULTS.customLabelTextSize],
+  ["keyMappingTextSize", () => LAYOUT_DEFAULTS.keyMappingTextSize],
+  ["keyMappingOffset", () => LAYOUT_DEFAULTS.keyMappingOffset],
+  ["keyMappingDark", () => LAYOUT_DEFAULTS.keyMappingDark],
+  ["keyMappingPrefix", () => LAYOUT_DEFAULTS.keyMappingPrefix],
+  ["keyMappingSuffix", () => LAYOUT_DEFAULTS.keyMappingSuffix],
+  ["axisLegendTextSize", () => LAYOUT_DEFAULTS.axisLegendTextSize],
+  ["lineLabelTextSize", () => LAYOUT_DEFAULTS.lineLabelTextSize],
+  ["titleMargin", () => LAYOUT_DEFAULTS.titleMargin],
+  ["titleFont", () => LAYOUT_DEFAULTS.titleFont],
+  ["creatorFont", () => LAYOUT_DEFAULTS.creatorFont],
+  ["ratioFont", () => LAYOUT_DEFAULTS.ratioFont],
+  ["noteFont", () => LAYOUT_DEFAULTS.noteFont],
+  ["triangleLabelFont", () => LAYOUT_DEFAULTS.triangleLabelFont],
+  ["customLabelFont", () => LAYOUT_DEFAULTS.customLabelFont],
+  ["keyMappingFont", () => LAYOUT_DEFAULTS.keyMappingFont],
+  ["axisLegendFont", () => LAYOUT_DEFAULTS.axisLegendFont],
+  ["lineLabelFont", () => LAYOUT_DEFAULTS.lineLabelFont],
+  ["titleFontWeight", () => LAYOUT_DEFAULTS.titleFontWeight],
+  ["creatorFontWeight", () => LAYOUT_DEFAULTS.creatorFontWeight],
+  ["ratioFontWeight", () => LAYOUT_DEFAULTS.ratioFontWeight],
+  ["noteFontWeight", () => LAYOUT_DEFAULTS.noteFontWeight],
+  ["triangleLabelFontWeight", () => LAYOUT_DEFAULTS.triangleLabelFontWeight],
+  ["customLabelFontWeight", () => LAYOUT_DEFAULTS.customLabelFontWeight],
+  ["keyMappingFontWeight", () => LAYOUT_DEFAULTS.keyMappingFontWeight],
+  ["axisLegendFontWeight", () => LAYOUT_DEFAULTS.axisLegendFontWeight],
+  ["lineLabelFontWeight", () => LAYOUT_DEFAULTS.lineLabelFontWeight],
+  ["nodeShape", () => LAYOUT_DEFAULTS.nodeShape],
+  ["unifyNodeSize", () => LAYOUT_DEFAULTS.unifyNodeSize],
+  ["keyMappingsMode", () => LAYOUT_DEFAULTS.keyMappingsMode],
+  ["pageSize", () => LAYOUT_DEFAULTS.pageSize],
+  ["orientation", () => LAYOUT_DEFAULTS.orientation],
+  ["lockPosition", () => LAYOUT_DEFAULTS.lockPosition],
+  ["zoom", () => LAYOUT_DEFAULTS.zoom],
+];
+
+const PRESET_LAYOUT_EMPTY_ARRAY_KEYS = [
+  "customLabels",
+  "positionOffsets",
+  "customNodePositions",
+  "nodeShapes",
+  "labelOffsets",
+  "keyMappingOffsets",
+];
+
+function isDefaultLayoutSpacing(value) {
+  return Boolean(value) &&
+    value.x === LAYOUT_DEFAULTS.spacing.x &&
+    value.y === LAYOUT_DEFAULTS.spacing.y &&
+    value.z === LAYOUT_DEFAULTS.spacing.z;
+}
+
+function prunePresetLayoutState(
+  layoutState,
+  { isEmptyArray, isDefaultLayoutView, isDefaultAxisOffsets, isDefaultAxisHidden, isDefaultAxisAngles }
+) {
+  if (!layoutState.mode) delete layoutState.mode;
+  if (!layoutState.title) delete layoutState.title;
+  if (!layoutState.creator) delete layoutState.creator;
+
+  PRESET_LAYOUT_DEFAULT_VALUE_KEYS.forEach(([key, getDefaultValue]) => {
+    if (layoutState[key] === getDefaultValue()) {
+      delete layoutState[key];
+    }
+  });
+
+  if (isDefaultLayoutSpacing(layoutState.spacing)) {
+    delete layoutState.spacing;
+  }
+  if (isDefaultLayoutView(layoutState.view)) delete layoutState.view;
+  if (!layoutState.sourceView) delete layoutState.sourceView;
+  PRESET_LAYOUT_EMPTY_ARRAY_KEYS.forEach((key) => {
+    if (isEmptyArray(layoutState[key])) {
+      delete layoutState[key];
+    }
+  });
+  if (isDefaultAxisOffsets(layoutState.axisOffsets)) delete layoutState.axisOffsets;
+  if (isDefaultAxisHidden(layoutState.axisHidden)) delete layoutState.axisHidden;
+  if (isDefaultAxisAngles(layoutState.axisAngles)) delete layoutState.axisAngles;
+}
+
 function buildPresetLayoutState(layoutViewState, layoutSourceViewState, includeDefaults = false) {
   const isEmptyArray = (value) => !Array.isArray(value) || value.length === 0;
   const isDefaultLayoutView = (value) =>
@@ -20968,81 +21056,17 @@ function buildPresetLayoutState(layoutViewState, layoutSourceViewState, includeD
     zoom: layoutViewState.zoom,
   };
 
-  const deleteIfDefault = (key, defaultValue) => {
-    if (layoutState[key] === defaultValue) {
-      delete layoutState[key];
-    }
-  };
-
   if (includeDefaults) {
     return layoutState;
   }
 
-  if (!layoutState.mode) delete layoutState.mode;
-  if (!layoutState.title) delete layoutState.title;
-  if (!layoutState.creator) delete layoutState.creator;
-  [
-    ["titleSize", LAYOUT_DEFAULTS.titleSize],
-    ["creatorSize", LAYOUT_DEFAULTS.creatorSize],
-    ["nodeSize", LAYOUT_DEFAULTS.nodeSize],
-    ["ratioTextSize", LAYOUT_DEFAULTS.ratioTextSize],
-    ["noteTextSize", LAYOUT_DEFAULTS.noteTextSize],
-    ["triangleLabelTextSize", LAYOUT_DEFAULTS.triangleLabelTextSize],
-    ["customLabelTextSize", LAYOUT_DEFAULTS.customLabelTextSize],
-    ["keyMappingTextSize", LAYOUT_DEFAULTS.keyMappingTextSize],
-    ["keyMappingOffset", LAYOUT_DEFAULTS.keyMappingOffset],
-    ["keyMappingDark", LAYOUT_DEFAULTS.keyMappingDark],
-    ["keyMappingPrefix", LAYOUT_DEFAULTS.keyMappingPrefix],
-    ["keyMappingSuffix", LAYOUT_DEFAULTS.keyMappingSuffix],
-    ["axisLegendTextSize", LAYOUT_DEFAULTS.axisLegendTextSize],
-    ["lineLabelTextSize", LAYOUT_DEFAULTS.lineLabelTextSize],
-    ["titleMargin", LAYOUT_DEFAULTS.titleMargin],
-    ["titleFont", LAYOUT_DEFAULTS.titleFont],
-    ["creatorFont", LAYOUT_DEFAULTS.creatorFont],
-    ["ratioFont", LAYOUT_DEFAULTS.ratioFont],
-    ["noteFont", LAYOUT_DEFAULTS.noteFont],
-    ["triangleLabelFont", LAYOUT_DEFAULTS.triangleLabelFont],
-    ["customLabelFont", LAYOUT_DEFAULTS.customLabelFont],
-    ["keyMappingFont", LAYOUT_DEFAULTS.keyMappingFont],
-    ["axisLegendFont", LAYOUT_DEFAULTS.axisLegendFont],
-    ["lineLabelFont", LAYOUT_DEFAULTS.lineLabelFont],
-    ["titleFontWeight", LAYOUT_DEFAULTS.titleFontWeight],
-    ["creatorFontWeight", LAYOUT_DEFAULTS.creatorFontWeight],
-    ["ratioFontWeight", LAYOUT_DEFAULTS.ratioFontWeight],
-    ["noteFontWeight", LAYOUT_DEFAULTS.noteFontWeight],
-    ["triangleLabelFontWeight", LAYOUT_DEFAULTS.triangleLabelFontWeight],
-    ["customLabelFontWeight", LAYOUT_DEFAULTS.customLabelFontWeight],
-    ["keyMappingFontWeight", LAYOUT_DEFAULTS.keyMappingFontWeight],
-    ["axisLegendFontWeight", LAYOUT_DEFAULTS.axisLegendFontWeight],
-    ["lineLabelFontWeight", LAYOUT_DEFAULTS.lineLabelFontWeight],
-    ["nodeShape", LAYOUT_DEFAULTS.nodeShape],
-    ["unifyNodeSize", LAYOUT_DEFAULTS.unifyNodeSize],
-    ["keyMappingsMode", LAYOUT_DEFAULTS.keyMappingsMode],
-    ["pageSize", LAYOUT_DEFAULTS.pageSize],
-    ["orientation", LAYOUT_DEFAULTS.orientation],
-    ["lockPosition", LAYOUT_DEFAULTS.lockPosition],
-    ["zoom", LAYOUT_DEFAULTS.zoom],
-  ].forEach(([key, defaultValue]) => deleteIfDefault(key, defaultValue));
-
-  if (
-    layoutState.spacing &&
-    layoutState.spacing.x === LAYOUT_DEFAULTS.spacing.x &&
-    layoutState.spacing.y === LAYOUT_DEFAULTS.spacing.y &&
-    layoutState.spacing.z === LAYOUT_DEFAULTS.spacing.z
-  ) {
-    delete layoutState.spacing;
-  }
-  if (isDefaultLayoutView(layoutState.view)) delete layoutState.view;
-  if (!layoutState.sourceView) delete layoutState.sourceView;
-  if (isEmptyArray(layoutState.customLabels)) delete layoutState.customLabels;
-  if (isEmptyArray(layoutState.positionOffsets)) delete layoutState.positionOffsets;
-  if (isEmptyArray(layoutState.customNodePositions)) delete layoutState.customNodePositions;
-  if (isEmptyArray(layoutState.nodeShapes)) delete layoutState.nodeShapes;
-  if (isEmptyArray(layoutState.labelOffsets)) delete layoutState.labelOffsets;
-  if (isEmptyArray(layoutState.keyMappingOffsets)) delete layoutState.keyMappingOffsets;
-  if (isDefaultAxisOffsets(layoutState.axisOffsets)) delete layoutState.axisOffsets;
-  if (isDefaultAxisHidden(layoutState.axisHidden)) delete layoutState.axisHidden;
-  if (isDefaultAxisAngles(layoutState.axisAngles)) delete layoutState.axisAngles;
+  prunePresetLayoutState(layoutState, {
+    isEmptyArray,
+    isDefaultLayoutView,
+    isDefaultAxisOffsets,
+    isDefaultAxisHidden,
+    isDefaultAxisAngles,
+  });
 
   return layoutState;
 }
@@ -21094,23 +21118,78 @@ function pruneEmptyPresetCollections(state) {
   });
 }
 
-function getPresetState(options = {}) {
-  const includeDefaults = Boolean(options && options.includeDefaults);
-  const isEmptyObject = (value) =>
-    !value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length;
-  const active = serializePresetActiveNodes();
-  const customState = serializePresetCustomNodes();
-  const layoutViewState = getPresetLayoutViewState();
-  const layoutSourceViewState = getPresetLayoutSourceViewState();
-  const { lineLabelOverridesState, lineLabelPositionsState } = serializePresetLineLabelState();
-  const { distanceEdgesState, distanceOverridesState } = serializePresetDistanceState();
-  const layoutState = buildPresetLayoutState(
-    layoutViewState,
-    layoutSourceViewState,
-    includeDefaults
-  );
+function getPresetViewState() {
+  return {
+    zoom: view.zoom,
+    offsetX: view.offsetX,
+    offsetY: view.offsetY,
+    rotX: view.rotX,
+    rotY: view.rotY,
+  };
+}
 
-  const state = {
+function getPresetRatiosState() {
+  return [
+    Number(ratioXSelect.value) || 3,
+    Number(ratioYSelect.value) || 5,
+    Number(ratioZSelect.value) || 7,
+  ];
+}
+
+function getPresetExponentOffsetState() {
+  return {
+    x: Number(latticeExponentOffset.x) || 0,
+    y: Number(latticeExponentOffset.y) || 0,
+    z: Number(latticeExponentOffset.z) || 0,
+  };
+}
+
+function getPresetTrianglesState() {
+  return Array.from(triangleDiagonals.values()).map((entry) => ({
+    plane: entry.plane,
+    x: entry.x,
+    y: entry.y,
+    z: entry.z,
+    expZ: gridCenterZ - entry.z,
+    diag: entry.diag,
+    tri: entry.tri,
+  }));
+}
+
+function getPresetTriangleLabelsState() {
+  return Array.from(triangleLabels.values()).map((entry) => ({
+    plane: entry.plane,
+    x: entry.x,
+    y: entry.y,
+    z: entry.z,
+    expZ: gridCenterZ - entry.z,
+    tri: entry.tri,
+    label: entry.label || "",
+  }));
+}
+
+function getPresetSynthState() {
+  return {
+    volume: Number(volumeSlider.value),
+    lfoDepth: Number(lfoDepthSlider.value),
+    lfoRate,
+    keyboardMode: keyboardModeSelect ? keyboardModeSelect.value : "off",
+    customPianoMap: serializeCustomPianoMap(),
+    mode: synthMode,
+    waveform: waveformSelect ? waveformSelect.value : "sine",
+    soundfontPreset: soundfontPresetIndex,
+    physicalModel: physicalModelSelect ? physicalModelSelect.value : KARPLUS_WAVEFORM,
+    attack: getEnvelopeSliderValue(attackSlider),
+    decay: getEnvelopeSliderValue(decaySlider),
+    sustain: Number(sustainSlider.value),
+    release: getEnvelopeSliderValue(releaseSlider),
+    oneShot: Boolean(oneShotCheckbox && oneShotCheckbox.checked),
+    envelopeTimeMode,
+  };
+}
+
+function buildPresetStateSkeleton(active, customState, lineLabelState, distanceState) {
+  return {
     v: 1,
     active,
     customNodes: customState,
@@ -21119,52 +21198,22 @@ function getPresetState(options = {}) {
     tiltDeg: latticeTiltDeg,
     distances: analysisLayers.distances,
     microtonal: analysisLayers.microtonal,
-    view: {
-      zoom: view.zoom,
-      offsetX: view.offsetX,
-      offsetY: view.offsetY,
-      rotX: view.rotX,
-      rotY: view.rotY,
-    },
+    view: getPresetViewState(),
     axes: showAxes,
     grid: showGrid,
     lineLabels: showLineLabels,
-    lineLabelOverrides: lineLabelOverridesState,
-    lineLabelPositions: lineLabelPositionsState,
-    distanceEdges: distanceEdgesState,
-    distanceEdgeOverrides: distanceOverridesState,
+    lineLabelOverrides: lineLabelState.lineLabelOverridesState,
+    lineLabelPositions: lineLabelState.lineLabelPositionsState,
+    distanceEdges: distanceState.distanceEdgesState,
+    distanceEdgeOverrides: distanceState.distanceOverridesState,
     circles: showCircles,
     keyMappings: showKeyMappings,
-    ratios: [
-      Number(ratioXSelect.value) || 3,
-      Number(ratioYSelect.value) || 5,
-      Number(ratioZSelect.value) || 7,
-    ],
-    exponentOffset: {
-      x: Number(latticeExponentOffset.x) || 0,
-      y: Number(latticeExponentOffset.y) || 0,
-      z: Number(latticeExponentOffset.z) || 0,
-    },
+    ratios: getPresetRatiosState(),
+    exponentOffset: getPresetExponentOffsetState(),
     noteSpellings: Array.from(nodeSpellingOverrides.entries()),
     octaveOffsets: Array.from(nodeOctaveOffsets.entries()),
-    triangles: Array.from(triangleDiagonals.values()).map((entry) => ({
-      plane: entry.plane,
-      x: entry.x,
-      y: entry.y,
-      z: entry.z,
-      expZ: gridCenterZ - entry.z,
-      diag: entry.diag,
-      tri: entry.tri,
-    })),
-    triangleLabels: Array.from(triangleLabels.values()).map((entry) => ({
-      plane: entry.plane,
-      x: entry.x,
-      y: entry.y,
-      z: entry.z,
-      expZ: gridCenterZ - entry.z,
-      tri: entry.tri,
-      label: entry.label || "",
-    })),
+    triangles: getPresetTrianglesState(),
+    triangleLabels: getPresetTriangleLabelsState(),
     fundamental: Number(fundamentalInput.value) || 220,
     a4: Number(a4Input.value) || 440,
     fundamentalSpelling,
@@ -21178,24 +21227,27 @@ function getPresetState(options = {}) {
     hejiEnabled,
     enharmonicsEnabled,
     centsPrecision,
-    synth: {
-      volume: Number(volumeSlider.value),
-      lfoDepth: Number(lfoDepthSlider.value),
-      lfoRate,
-      keyboardMode: keyboardModeSelect ? keyboardModeSelect.value : "off",
-      customPianoMap: serializeCustomPianoMap(),
-      mode: synthMode,
-      waveform: waveformSelect ? waveformSelect.value : "sine",
-      soundfontPreset: soundfontPresetIndex,
-      physicalModel: physicalModelSelect ? physicalModelSelect.value : KARPLUS_WAVEFORM,
-      attack: getEnvelopeSliderValue(attackSlider),
-      decay: getEnvelopeSliderValue(decaySlider),
-      sustain: Number(sustainSlider.value),
-      release: getEnvelopeSliderValue(releaseSlider),
-      oneShot: Boolean(oneShotCheckbox && oneShotCheckbox.checked),
-      envelopeTimeMode,
-    },
+    synth: getPresetSynthState(),
   };
+}
+
+function getPresetState(options = {}) {
+  const includeDefaults = Boolean(options && options.includeDefaults);
+  const isEmptyObject = (value) =>
+    !value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length;
+  const active = serializePresetActiveNodes();
+  const customState = serializePresetCustomNodes();
+  const layoutViewState = getPresetLayoutViewState();
+  const layoutSourceViewState = getPresetLayoutSourceViewState();
+  const lineLabelState = serializePresetLineLabelState();
+  const distanceState = serializePresetDistanceState();
+  const layoutState = buildPresetLayoutState(
+    layoutViewState,
+    layoutSourceViewState,
+    includeDefaults
+  );
+
+  const state = buildPresetStateSkeleton(active, customState, lineLabelState, distanceState);
 
   pruneEmptyPresetCollections(state);
   if (!includeDefaults && isEmptyObject(layoutState)) {
@@ -21562,30 +21614,37 @@ function applyPresetBooleanCheckboxState(value, checkboxes, onApply) {
   return true;
 }
 
+function applyPresetBooleanField(state, key, checkboxes, applyValue, fallbackValue) {
+  const applied = applyPresetBooleanCheckboxState(state[key], checkboxes, applyValue);
+  if (!applied && fallbackValue !== undefined) {
+    applyValue(fallbackValue);
+    checkboxes.forEach((checkbox) => setControlChecked(checkbox, fallbackValue));
+  }
+  return applied;
+}
+
 function applyPresetDisplayToggleState(state) {
-  applyPresetBooleanCheckboxState(state.axes, [navAxesToggle], (value) => {
+  applyPresetBooleanField(state, "axes", [navAxesToggle], (value) => {
     showAxes = value;
   });
-  applyPresetBooleanCheckboxState(state.grid, [navGridToggle], (value) => {
+  applyPresetBooleanField(state, "grid", [navGridToggle], (value) => {
     showGrid = value;
   });
-  const hasLineLabels = applyPresetBooleanCheckboxState(
-    state.lineLabels,
+  applyPresetBooleanField(
+    state,
+    "lineLabels",
     [lineLabelsToggle, layoutLineLabelsToggle],
     (value) => {
       showLineLabels = value;
-    }
+    },
+    false
   );
-  if (!hasLineLabels) {
-    showLineLabels = false;
-    setControlChecked(lineLabelsToggle, showLineLabels);
-    setControlChecked(layoutLineLabelsToggle, showLineLabels);
-  }
-  applyPresetBooleanCheckboxState(state.circles, [navCirclesToggle, layoutCirclesToggle], (value) => {
+  applyPresetBooleanField(state, "circles", [navCirclesToggle, layoutCirclesToggle], (value) => {
     showCircles = value;
   });
-  applyPresetBooleanCheckboxState(
-    state.keyMappings,
+  applyPresetBooleanField(
+    state,
+    "keyMappings",
     [navKeyMappingsToggle, layoutKeyMappingsToggle],
     (value) => {
       showKeyMappings = value;
@@ -21602,6 +21661,33 @@ function applyPresetDisplayToggleState(state) {
   }
 }
 
+function normalizeDistanceEdgeOverrideEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const key = String(entry.key || "");
+  if (!key) {
+    return null;
+  }
+  const value = {};
+  if (Number.isFinite(entry.labelT)) {
+    value.labelT = entry.labelT;
+  }
+  if (entry.controlOffset && Number.isFinite(entry.controlOffset.x)) {
+    value.controlOffset = {
+      x: Number(entry.controlOffset.x) || 0,
+      y: Number(entry.controlOffset.y) || 0,
+    };
+  }
+  if (typeof entry.showName === "boolean") {
+    value.showName = entry.showName;
+  }
+  if (typeof entry.customText === "string" && entry.customText.trim()) {
+    value.customText = entry.customText.trim();
+  }
+  return { key, value };
+}
+
 function applyPresetDistanceState(state) {
   if (Array.isArray(state.distanceEdges)) {
     state.distanceEdges.forEach((edgeKey) => {
@@ -21612,30 +21698,11 @@ function applyPresetDistanceState(state) {
   }
   if (Array.isArray(state.distanceEdgeOverrides)) {
     state.distanceEdgeOverrides.forEach((entry) => {
-      if (!entry || typeof entry !== "object") {
+      const normalized = normalizeDistanceEdgeOverrideEntry(entry);
+      if (!normalized) {
         return;
       }
-      const key = String(entry.key || "");
-      if (!key) {
-        return;
-      }
-      const next = {};
-      if (Number.isFinite(entry.labelT)) {
-        next.labelT = entry.labelT;
-      }
-      if (entry.controlOffset && Number.isFinite(entry.controlOffset.x)) {
-        next.controlOffset = {
-          x: Number(entry.controlOffset.x) || 0,
-          y: Number(entry.controlOffset.y) || 0,
-        };
-      }
-      if (typeof entry.showName === "boolean") {
-        next.showName = entry.showName;
-      }
-      if (typeof entry.customText === "string" && entry.customText.trim()) {
-        next.customText = entry.customText.trim();
-      }
-      distanceEdgeOverrides.set(key, next);
+      distanceEdgeOverrides.set(normalized.key, normalized.value);
     });
   }
 }
@@ -21680,51 +21747,63 @@ function applyPresetReadoutAndTuningSettings(state) {
     spellingMode = state.spellingMode === "true" ? "true" : "simple";
     syncSpellingModeControls();
   }
-  if (typeof state.showHz === "boolean") {
-    showHz = state.showHz;
-    setControlChecked(showHzToggle, showHz);
-    setControlChecked(layoutShowHzToggle, showHz);
-  }
-  if (typeof state.showRatioCents === "boolean") {
-    showRatioCents = state.showRatioCents;
-    setControlChecked(showRatioCentsToggle, showRatioCents);
-    setControlChecked(layoutShowRatioCentsToggle, showRatioCents);
-  }
+  applyPresetBooleanField(
+    state,
+    "showHz",
+    [showHzToggle, layoutShowHzToggle],
+    (value) => {
+      showHz = value;
+    }
+  );
+  applyPresetBooleanField(
+    state,
+    "showRatioCents",
+    [showRatioCentsToggle, layoutShowRatioCentsToggle],
+    (value) => {
+      showRatioCents = value;
+    }
+  );
   if (typeof state.showCentsDeviation === "boolean") {
     showCentsDeviation = state.showCentsDeviation;
   } else {
     showCentsDeviation = true;
   }
-  if (typeof state.showCentsSign === "boolean") {
-    showCentsSign = state.showCentsSign;
-    setControlChecked(showCentsSignToggle, showCentsSign);
-  }
-  if (typeof state.connectOrphans === "boolean") {
-    connectOrphansEnabled = state.connectOrphans;
-    setControlChecked(connectOrphansToggle, connectOrphansEnabled);
-  }
+  applyPresetBooleanField(state, "showCentsSign", [showCentsSignToggle], (value) => {
+    showCentsSign = value;
+  });
+  applyPresetBooleanField(state, "connectOrphans", [connectOrphansToggle], (value) => {
+    connectOrphansEnabled = value;
+  });
   if (Number.isFinite(state.tiltDeg)) {
     setLatticeTilt(state.tiltDeg);
   } else {
     setLatticeTilt(0);
   }
-  if (typeof state.directionalRatioLabels === "boolean") {
-    directionalRatioLabels = state.directionalRatioLabels;
-    setControlChecked(directionalRatioLabelsToggle, directionalRatioLabels);
-  } else {
-    directionalRatioLabels = false;
-    setControlChecked(directionalRatioLabelsToggle, directionalRatioLabels);
-  }
-  if (typeof state.hejiEnabled === "boolean") {
-    hejiEnabled = state.hejiEnabled;
-    setControlChecked(hejiEnabledToggle, hejiEnabled);
-    setControlChecked(layoutHejiEnabledToggle, hejiEnabled);
-  }
-  if (typeof state.enharmonicsEnabled === "boolean") {
-    enharmonicsEnabled = state.enharmonicsEnabled;
-    setControlChecked(enharmonicsEnabledToggle, enharmonicsEnabled);
-    setControlChecked(layoutEnharmonicsEnabledToggle, enharmonicsEnabled);
-  }
+  applyPresetBooleanField(
+    state,
+    "directionalRatioLabels",
+    [directionalRatioLabelsToggle],
+    (value) => {
+      directionalRatioLabels = value;
+    },
+    false
+  );
+  applyPresetBooleanField(
+    state,
+    "hejiEnabled",
+    [hejiEnabledToggle, layoutHejiEnabledToggle],
+    (value) => {
+      hejiEnabled = value;
+    }
+  );
+  applyPresetBooleanField(
+    state,
+    "enharmonicsEnabled",
+    [enharmonicsEnabledToggle, layoutEnharmonicsEnabledToggle],
+    (value) => {
+      enharmonicsEnabled = value;
+    }
+  );
   if (Number.isFinite(state.centsPrecision)) {
     centsPrecision = Math.min(2, Math.max(0, Math.round(state.centsPrecision)));
     syncCentsPrecisionControls();
@@ -21783,6 +21862,26 @@ function applyLayoutBooleanStateValue(layoutState, key, applyValue, inputElement
   return true;
 }
 
+function applyLayoutFiniteNumberStateValue(
+  layoutState,
+  key,
+  { applyValue, inputElement, transform = null, onApplied = null } = {}
+) {
+  if (!Number.isFinite(layoutState[key])) {
+    return false;
+  }
+  const raw = Number(layoutState[key]);
+  const value = typeof transform === "function" ? transform(raw) : raw;
+  applyValue(value);
+  if (inputElement) {
+    setControlValue(inputElement, value);
+  }
+  if (typeof onApplied === "function") {
+    onApplied(value);
+  }
+  return true;
+}
+
 function applyPresetLayoutMetadataAndSizing(layoutState) {
   pendingLayoutLabelOffsets = Array.isArray(layoutState.labelOffsets)
     ? layoutState.labelOffsets
@@ -21829,65 +21928,86 @@ function applyPresetLayoutMetadataAndSizing(layoutState) {
     updateLayoutNoteTextReadout();
     updateLayoutTriangleLabelReadout();
   }
-  if (Number.isFinite(layoutState.nodeSize)) {
-    layoutNodeSize = layoutState.nodeSize;
-    setControlValue(layoutNodeSizeInput, layoutNodeSize);
-    updateLayoutNodeSizeReadout();
-  }
-  if (Number.isFinite(layoutState.ratioTextSize)) {
-    layoutRatioTextSize = layoutState.ratioTextSize;
-    setControlValue(layoutRatioTextSizeInput, layoutRatioTextSize);
-    updateLayoutRatioTextReadout();
-  }
-  if (Number.isFinite(layoutState.noteTextSize)) {
-    layoutNoteTextSize = layoutState.noteTextSize;
-    setControlValue(layoutNoteTextSizeInput, layoutNoteTextSize);
-    updateLayoutNoteTextReadout();
-  }
-  if (Number.isFinite(layoutState.triangleLabelTextSize)) {
-    layoutTriangleLabelTextSize = layoutState.triangleLabelTextSize;
-    setControlValue(layoutTriangleLabelSizeInput, layoutTriangleLabelTextSize);
-    updateLayoutTriangleLabelReadout();
-  } else {
+  applyLayoutFiniteNumberStateValue(layoutState, "nodeSize", {
+    applyValue: (value) => {
+      layoutNodeSize = value;
+    },
+    inputElement: layoutNodeSizeInput,
+    onApplied: () => updateLayoutNodeSizeReadout(),
+  });
+  applyLayoutFiniteNumberStateValue(layoutState, "ratioTextSize", {
+    applyValue: (value) => {
+      layoutRatioTextSize = value;
+    },
+    inputElement: layoutRatioTextSizeInput,
+    onApplied: () => updateLayoutRatioTextReadout(),
+  });
+  applyLayoutFiniteNumberStateValue(layoutState, "noteTextSize", {
+    applyValue: (value) => {
+      layoutNoteTextSize = value;
+    },
+    inputElement: layoutNoteTextSizeInput,
+    onApplied: () => updateLayoutNoteTextReadout(),
+  });
+  const hasTriangleLabelTextSize = applyLayoutFiniteNumberStateValue(
+    layoutState,
+    "triangleLabelTextSize",
+    {
+      applyValue: (value) => {
+        layoutTriangleLabelTextSize = value;
+      },
+      inputElement: layoutTriangleLabelSizeInput,
+      onApplied: () => updateLayoutTriangleLabelReadout(),
+    }
+  );
+  if (!hasTriangleLabelTextSize) {
     layoutTriangleLabelTextSize = Math.max(10, Math.round(layoutNoteTextSize + 6));
     setControlValue(layoutTriangleLabelSizeInput, layoutTriangleLabelTextSize);
     updateLayoutTriangleLabelReadout();
   }
-  if (Number.isFinite(layoutState.customLabelTextSize)) {
-    layoutCustomLabelTextSize = Math.min(
-      36,
-      Math.max(8, Math.round(layoutState.customLabelTextSize))
-    );
-    setControlValue(layoutCustomLabelSizeInput, layoutCustomLabelTextSize);
-  }
-  if (Number.isFinite(layoutState.keyMappingTextSize)) {
-    layoutKeyMappingTextSize = Math.min(
-      20,
-      Math.max(8, Math.round(layoutState.keyMappingTextSize))
-    );
-    setControlValue(layoutKeyMappingSizeInput, layoutKeyMappingTextSize);
-  }
-  if (Number.isFinite(layoutState.keyMappingOffset)) {
-    layoutKeyMappingOffset = Math.min(40, Math.max(0, Math.round(layoutState.keyMappingOffset)));
-    setControlValue(layoutKeyMappingOffsetInput, layoutKeyMappingOffset);
-  }
+  applyLayoutFiniteNumberStateValue(layoutState, "customLabelTextSize", {
+    transform: (value) => Math.min(36, Math.max(8, Math.round(value))),
+    applyValue: (value) => {
+      layoutCustomLabelTextSize = value;
+    },
+    inputElement: layoutCustomLabelSizeInput,
+  });
+  applyLayoutFiniteNumberStateValue(layoutState, "keyMappingTextSize", {
+    transform: (value) => Math.min(20, Math.max(8, Math.round(value))),
+    applyValue: (value) => {
+      layoutKeyMappingTextSize = value;
+    },
+    inputElement: layoutKeyMappingSizeInput,
+  });
+  applyLayoutFiniteNumberStateValue(layoutState, "keyMappingOffset", {
+    transform: (value) => Math.min(40, Math.max(0, Math.round(value))),
+    applyValue: (value) => {
+      layoutKeyMappingOffset = value;
+    },
+    inputElement: layoutKeyMappingOffsetInput,
+  });
   applyLayoutBooleanStateValue(layoutState, "keyMappingDark", (value) => {
     layoutKeyMappingDark = value;
   }, layoutKeyMappingDarkToggle);
-  if (Number.isFinite(layoutState.axisLegendTextSize)) {
-    layoutAxisLegendTextSize = Math.min(
-      36,
-      Math.max(10, Math.round(layoutState.axisLegendTextSize))
-    );
-    setControlValue(layoutAxisSizeInput, layoutAxisLegendTextSize);
-  }
-  if (Number.isFinite(layoutState.lineLabelTextSize)) {
-    layoutLineLabelTextSize = Math.min(
-      28,
-      Math.max(8, Math.round(layoutState.lineLabelTextSize))
-    );
-    setControlValue(layoutLineLabelSizeInput, layoutLineLabelTextSize);
-  } else {
+  applyLayoutFiniteNumberStateValue(layoutState, "axisLegendTextSize", {
+    transform: (value) => Math.min(36, Math.max(10, Math.round(value))),
+    applyValue: (value) => {
+      layoutAxisLegendTextSize = value;
+    },
+    inputElement: layoutAxisSizeInput,
+  });
+  const hasLineLabelTextSize = applyLayoutFiniteNumberStateValue(
+    layoutState,
+    "lineLabelTextSize",
+    {
+      transform: (value) => Math.min(28, Math.max(8, Math.round(value))),
+      applyValue: (value) => {
+        layoutLineLabelTextSize = value;
+      },
+      inputElement: layoutLineLabelSizeInput,
+    }
+  );
+  if (!hasLineLabelTextSize) {
     layoutLineLabelTextSize = Math.max(8, Math.round(layoutRatioTextSize * 0.6));
     setControlValue(layoutLineLabelSizeInput, layoutLineLabelTextSize);
   }
@@ -21963,31 +22083,29 @@ function applyPresetFontFamily(layoutState, key, applyValue, selectElement) {
   return true;
 }
 
+const PRESET_LAYOUT_FONT_FAMILY_SPECS = [
+  { key: "titleFont", select: () => layoutTitleFontSelect, apply: (value) => (layoutTitleFont = value) },
+  { key: "creatorFont", select: () => layoutCreatorFontSelect, apply: (value) => (layoutCreatorFont = value) },
+  { key: "ratioFont", select: () => layoutRatioFontSelect, apply: (value) => (layoutRatioFont = value) },
+  { key: "noteFont", select: () => layoutNoteFontSelect, apply: (value) => (layoutNoteFont = value) },
+  {
+    key: "triangleLabelFont",
+    select: () => layoutTriangleLabelFontSelect,
+    apply: (value) => (layoutTriangleLabelFont = value),
+  },
+  { key: "customLabelFont", select: () => layoutCustomFontSelect, apply: (value) => (layoutCustomLabelFont = value) },
+  {
+    key: "keyMappingFont",
+    select: () => layoutKeyMappingFontSelect,
+    apply: (value) => (layoutKeyMappingFont = value),
+  },
+  { key: "axisLegendFont", select: () => layoutAxisFontSelect, apply: (value) => (layoutAxisLegendFont = value) },
+];
+
 function applyPresetLayoutFontFamilies(layoutState) {
-  applyPresetFontFamily(layoutState, "titleFont", (value) => {
-    layoutTitleFont = value;
-  }, layoutTitleFontSelect);
-  applyPresetFontFamily(layoutState, "creatorFont", (value) => {
-    layoutCreatorFont = value;
-  }, layoutCreatorFontSelect);
-  applyPresetFontFamily(layoutState, "ratioFont", (value) => {
-    layoutRatioFont = value;
-  }, layoutRatioFontSelect);
-  applyPresetFontFamily(layoutState, "noteFont", (value) => {
-    layoutNoteFont = value;
-  }, layoutNoteFontSelect);
-  applyPresetFontFamily(layoutState, "triangleLabelFont", (value) => {
-    layoutTriangleLabelFont = value;
-  }, layoutTriangleLabelFontSelect);
-  applyPresetFontFamily(layoutState, "customLabelFont", (value) => {
-    layoutCustomLabelFont = value;
-  }, layoutCustomFontSelect);
-  applyPresetFontFamily(layoutState, "keyMappingFont", (value) => {
-    layoutKeyMappingFont = value;
-  }, layoutKeyMappingFontSelect);
-  applyPresetFontFamily(layoutState, "axisLegendFont", (value) => {
-    layoutAxisLegendFont = value;
-  }, layoutAxisFontSelect);
+  PRESET_LAYOUT_FONT_FAMILY_SPECS.forEach((spec) => {
+    applyPresetFontFamily(layoutState, spec.key, spec.apply, spec.select());
+  });
   if (!applyPresetFontFamily(layoutState, "lineLabelFont", (value) => {
     layoutLineLabelFont = value;
   }, layoutLineLabelFontSelect)) {
@@ -22006,37 +22124,70 @@ function applyPresetFontWeight(layoutState, key, applyValue, selectElement) {
   return true;
 }
 
+const PRESET_LAYOUT_FONT_WEIGHT_SPECS = [
+  {
+    key: "axisLegendFontWeight",
+    select: () => layoutAxisWeightSelect,
+    apply: (value) => (layoutAxisLegendFontWeight = value),
+  },
+  {
+    key: "titleFontWeight",
+    select: () => layoutTitleWeightSelect,
+    apply: (value) => (layoutTitleFontWeight = value),
+  },
+  {
+    key: "creatorFontWeight",
+    select: () => layoutCreatorWeightSelect,
+    apply: (value) => (layoutCreatorFontWeight = value),
+  },
+  {
+    key: "ratioFontWeight",
+    select: () => layoutRatioWeightSelect,
+    apply: (value) => (layoutRatioFontWeight = value),
+  },
+  {
+    key: "noteFontWeight",
+    select: () => layoutNoteWeightSelect,
+    apply: (value) => (layoutNoteFontWeight = value),
+  },
+  {
+    key: "triangleLabelFontWeight",
+    select: () => layoutTriangleLabelWeightSelect,
+    apply: (value) => (layoutTriangleLabelFontWeight = value),
+  },
+  {
+    key: "customLabelFontWeight",
+    select: () => layoutCustomWeightSelect,
+    apply: (value) => (layoutCustomLabelFontWeight = value),
+  },
+  {
+    key: "keyMappingFontWeight",
+    select: () => layoutKeyMappingWeightSelect,
+    apply: (value) => (layoutKeyMappingFontWeight = value),
+  },
+];
+
 function applyPresetLayoutFontWeights(layoutState) {
-  applyPresetFontWeight(layoutState, "axisLegendFontWeight", (value) => {
-    layoutAxisLegendFontWeight = value;
-  }, layoutAxisWeightSelect);
+  applyPresetFontWeight(
+    layoutState,
+    "axisLegendFontWeight",
+    (value) => {
+      layoutAxisLegendFontWeight = value;
+    },
+    layoutAxisWeightSelect
+  );
   if (!applyPresetFontWeight(layoutState, "lineLabelFontWeight", (value) => {
     layoutLineLabelFontWeight = value;
   }, layoutLineLabelWeightSelect)) {
     layoutLineLabelFontWeight = layoutAxisLegendFontWeight;
     setControlValue(layoutLineLabelWeightSelect, layoutLineLabelFontWeight);
   }
-  applyPresetFontWeight(layoutState, "titleFontWeight", (value) => {
-    layoutTitleFontWeight = value;
-  }, layoutTitleWeightSelect);
-  applyPresetFontWeight(layoutState, "creatorFontWeight", (value) => {
-    layoutCreatorFontWeight = value;
-  }, layoutCreatorWeightSelect);
-  applyPresetFontWeight(layoutState, "ratioFontWeight", (value) => {
-    layoutRatioFontWeight = value;
-  }, layoutRatioWeightSelect);
-  applyPresetFontWeight(layoutState, "noteFontWeight", (value) => {
-    layoutNoteFontWeight = value;
-  }, layoutNoteWeightSelect);
-  applyPresetFontWeight(layoutState, "triangleLabelFontWeight", (value) => {
-    layoutTriangleLabelFontWeight = value;
-  }, layoutTriangleLabelWeightSelect);
-  applyPresetFontWeight(layoutState, "customLabelFontWeight", (value) => {
-    layoutCustomLabelFontWeight = value;
-  }, layoutCustomWeightSelect);
-  applyPresetFontWeight(layoutState, "keyMappingFontWeight", (value) => {
-    layoutKeyMappingFontWeight = value;
-  }, layoutKeyMappingWeightSelect);
+  PRESET_LAYOUT_FONT_WEIGHT_SPECS.forEach((spec) => {
+    if (spec.key === "axisLegendFontWeight") {
+      return;
+    }
+    applyPresetFontWeight(layoutState, spec.key, spec.apply, spec.select());
+  });
 }
 
 function applyPresetLayoutCustomLabels(layoutState) {
@@ -22197,32 +22348,41 @@ function applyPresetLayoutState(layoutState) {
   applyPresetLayoutViewAndModeState(layoutState);
 }
 
+function normalizePresetTrianglePosition(entry, targetCenterZ, targetDepth) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const plane = entry.plane;
+  if (plane !== "xy" && plane !== "xz" && plane !== "yz") {
+    return null;
+  }
+  const x = Number(entry.x);
+  const y = Number(entry.y);
+  const expZ = Number(entry.expZ);
+  const z = Number.isFinite(expZ)
+    ? targetCenterZ - expZ
+    : Number(entry.z);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return null;
+  }
+  if (z < 0 || z >= targetDepth) {
+    return null;
+  }
+  return { plane, x, y, z };
+}
+
 function applyPresetTrianglesState(presetTriangles, targetCenterZ, targetDepth) {
   if (!presetTriangles) {
     return;
   }
   presetTriangles.forEach((entry) => {
-    if (!entry || typeof entry !== "object") {
+    const position = normalizePresetTrianglePosition(entry, targetCenterZ, targetDepth);
+    if (!position) {
       return;
     }
-    const plane = entry.plane;
+    const { plane, x, y, z } = position;
     const diag = entry.diag;
-    if (plane !== "xy" && plane !== "xz" && plane !== "yz") {
-      return;
-    }
     if (diag !== "backslash" && diag !== "slash") {
-      return;
-    }
-    const x = Number(entry.x);
-    const y = Number(entry.y);
-    const expZ = Number(entry.expZ);
-    const z = Number.isFinite(expZ)
-      ? targetCenterZ - expZ
-      : Number(entry.z);
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-      return;
-    }
-    if (z < 0 || z >= targetDepth) {
       return;
     }
     const tri = typeof entry.tri === "string" ? entry.tri : "";
@@ -22257,27 +22417,13 @@ function applyPresetTriangleLabelsState(
     return;
   }
   presetTriangleLabels.forEach((entry) => {
-    if (!entry || typeof entry !== "object") {
+    const position = normalizePresetTrianglePosition(entry, targetCenterZ, targetDepth);
+    if (!position) {
       return;
     }
-    const plane = entry.plane;
-    if (plane !== "xy" && plane !== "xz" && plane !== "yz") {
-      return;
-    }
+    const { plane, x, y, z } = position;
     const tri = typeof entry.tri === "string" ? entry.tri : "";
     if (!TRIANGLE_TRI_IDS.has(tri)) {
-      return;
-    }
-    const x = Number(entry.x);
-    const y = Number(entry.y);
-    const expZ = Number(entry.expZ);
-    const z = Number.isFinite(expZ)
-      ? targetCenterZ - expZ
-      : Number(entry.z);
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-      return;
-    }
-    if (z < 0 || z >= targetDepth) {
       return;
     }
     const label = typeof entry.label === "string" ? entry.label : "";
@@ -22350,14 +22496,16 @@ function applyPresetSynthState(synthState) {
   if (!synthState || typeof synthState !== "object") {
     return;
   }
-  if (Number.isFinite(synthState.volume)) {
-    volumeSlider.value = String(synthState.volume);
-    updateVolume();
-  }
-  if (Number.isFinite(synthState.lfoDepth) && lfoDepthSlider) {
-    lfoDepthSlider.value = String(synthState.lfoDepth);
-    updateLfoDepth();
-  }
+  const applyFiniteSliderField = (key, slider, onApply) => {
+    if (!Number.isFinite(synthState[key]) || !slider) {
+      return false;
+    }
+    slider.value = String(synthState[key]);
+    onApply();
+    return true;
+  };
+  applyFiniteSliderField("volume", volumeSlider, () => updateVolume());
+  applyFiniteSliderField("lfoDepth", lfoDepthSlider, () => updateLfoDepth());
   if (Number.isFinite(synthState.lfoRate) && lfoRateSlider) {
     setLfoRateSlider(synthState.lfoRate);
     updateLfoRate();
@@ -22388,17 +22536,17 @@ function applyPresetSynthState(synthState) {
   }
   syncSynthModeUI();
   handleSynthTypeChange();
-  if (Number.isFinite(synthState.attack)) {
-    setEnvelopeSliderFromValue(attackSlider, Number(synthState.attack));
-  }
-  if (Number.isFinite(synthState.decay)) {
-    setEnvelopeSliderFromValue(decaySlider, Number(synthState.decay));
-  }
+  [
+    ["attack", attackSlider],
+    ["decay", decaySlider],
+    ["release", releaseSlider],
+  ].forEach(([key, slider]) => {
+    if (Number.isFinite(synthState[key])) {
+      setEnvelopeSliderFromValue(slider, Number(synthState[key]));
+    }
+  });
   if (Number.isFinite(synthState.sustain)) {
     sustainSlider.value = String(synthState.sustain);
-  }
-  if (Number.isFinite(synthState.release)) {
-    setEnvelopeSliderFromValue(releaseSlider, Number(synthState.release));
   }
   if (oneShotCheckbox && typeof synthState.oneShot === "boolean") {
     setControlChecked(oneShotCheckbox, synthState.oneShot);
@@ -22478,8 +22626,7 @@ function applyPresetModeUiState(wants3D, preserveViewMode) {
   updateUiHint();
 }
 
-function initializePresetApplyContext(state, options = {}) {
-  const preserveViewMode = Boolean(options.preserveViewMode);
+function applyPresetSnapshotPayloadState(state) {
   snapshotBaseState = state.snapshotBase || null;
   if (Array.isArray(state.snapshots)) {
     applySnapshotsFromPreset(state.snapshots);
@@ -22496,7 +22643,14 @@ function initializePresetApplyContext(state, options = {}) {
     updateSnapshotUi();
   }
   applyPresetSnapshotSettings(state.snapshotSettings);
-  const layoutState = state.layout && typeof state.layout === "object" ? state.layout : null;
+}
+
+function resolvePresetLayoutState(state) {
+  return state.layout && typeof state.layout === "object" ? state.layout : null;
+}
+
+function applyPresetModeAndGeometrySetup(state, layoutState, options = {}) {
+  const preserveViewMode = Boolean(options.preserveViewMode);
   const presetWants3D = Boolean(state.mode3d);
   applyPresetLayoutModeSelection(
     layoutState,
@@ -22510,7 +22664,6 @@ function initializePresetApplyContext(state, options = {}) {
     applyPresetGeometryState(state, layoutState);
   applyPresetModeUiState(wants3D, preserveViewMode);
   return {
-    layoutState,
     pendingLineLabelOverridesState,
     pendingLineLabelPositionsState,
     viewState,
@@ -22518,6 +22671,16 @@ function initializePresetApplyContext(state, options = {}) {
     targetCenterZ,
     presetTriangles,
     presetTriangleLabels,
+  };
+}
+
+function initializePresetApplyContext(state, options = {}) {
+  applyPresetSnapshotPayloadState(state);
+  const layoutState = resolvePresetLayoutState(state);
+  const presetModeAndGeometry = applyPresetModeAndGeometrySetup(state, layoutState, options);
+  return {
+    layoutState,
+    ...presetModeAndGeometry,
   };
 }
 
@@ -22599,19 +22762,31 @@ function applyPresetPreRebuildState(state, presetContext) {
   return collectPresetActiveKeys(state);
 }
 
-function runPresetApplyPipeline(state, options, presetContext) {
-  applyPresetCoreTuningState(state);
-  applyPresetSpellingAndOctaveState(state);
-  applyPresetSynthState(state.synth);
-  applyPresetViewState(presetContext.viewState);
-  const activeKeys = applyPresetPreRebuildState(state, presetContext);
+function rebuildFromPresetActiveKeys(activeKeys, options) {
   customNodes = [];
   rebuildLattice(activeKeys, {
     remapTriangles: false,
     remapLayoutOffsets: false,
     stopVoices: !options.skipStopVoices,
   });
+}
+
+function applyPresetPreRebuildPipeline(state, presetContext) {
+  applyPresetCoreTuningState(state);
+  applyPresetSpellingAndOctaveState(state);
+  applyPresetSynthState(state.synth);
+  applyPresetViewState(presetContext.viewState);
+  return applyPresetPreRebuildState(state, presetContext);
+}
+
+function applyPresetPostRebuildPipeline(state, presetContext) {
   applyPresetPostRebuildState(state, presetContext);
+}
+
+function runPresetApplyPipeline(state, options, presetContext) {
+  const activeKeys = applyPresetPreRebuildPipeline(state, presetContext);
+  rebuildFromPresetActiveKeys(activeKeys, options);
+  applyPresetPostRebuildPipeline(state, presetContext);
 }
 
 function applyPresetState(state, options = {}) {

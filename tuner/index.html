@@ -137,6 +137,13 @@
       <button id="mic-power-toggle" type="button" class="tiny-button">Turn Mic On</button>
       <label for="mic-gain">Mic Input Volume</label>
       <input id="mic-gain" type="range" min="0.25" max="4" step="0.01" value="1" />
+      <label for="analysis-preset-select">Detection Preset</label>
+      <select id="analysis-preset-select" aria-label="Analysis preset">
+        <option value="custom">Custom</option>
+        <option value="balanced">Balanced</option>
+        <option value="stable">Stable</option>
+        <option value="responsive">Responsive</option>
+      </select>
       <div class="mic-meter" aria-hidden="true">
         <div id="mic-meter-fill" class="mic-meter-fill"></div>
       </div>
@@ -165,6 +172,19 @@
               value="0.88"
             />
 
+            <label for="analysis-raw-init-confirm">Raw Init Confirm (frames)</label>
+            <input id="analysis-raw-init-confirm" type="number" min="1" max="8" step="1" value="2" />
+
+            <label for="analysis-raw-init-stability">Raw Init Stability (st)</label>
+            <input
+              id="analysis-raw-init-stability"
+              type="number"
+              min="0.1"
+              max="3"
+              step="0.05"
+              value="0.9"
+            />
+
             <label for="analysis-min-freq">Min Freq (Hz)</label>
             <input id="analysis-min-freq" type="number" min="20" max="400" step="1" value="70" />
 
@@ -184,11 +204,60 @@
             <label for="analysis-jump-confirm">Jump Confirm Frames</label>
             <input id="analysis-jump-confirm" type="number" min="1" max="8" step="1" value="2" />
 
+            <label for="analysis-voice-enter-rms-factor">Voice Enter RMS x</label>
+            <input
+              id="analysis-voice-enter-rms-factor"
+              type="number"
+              min="1"
+              max="3"
+              step="0.01"
+              value="1.35"
+            />
+
+            <label for="analysis-voice-exit-rms-factor">Voice Exit RMS x</label>
+            <input
+              id="analysis-voice-exit-rms-factor"
+              type="number"
+              min="0.2"
+              max="1.2"
+              step="0.01"
+              value="0.78"
+            />
+
+            <label for="analysis-voice-enter-corr-offset">Voice Enter Corr +</label>
+            <input
+              id="analysis-voice-enter-corr-offset"
+              type="number"
+              min="0"
+              max="0.2"
+              step="0.005"
+              value="0.04"
+            />
+
+            <label for="analysis-voice-exit-corr-offset">Voice Exit Corr +</label>
+            <input
+              id="analysis-voice-exit-corr-offset"
+              type="number"
+              min="-0.25"
+              max="0.15"
+              step="0.005"
+              value="-0.06"
+            />
+
+            <label for="analysis-voice-enter-frames">Voice Enter Frames</label>
+            <input id="analysis-voice-enter-frames" type="number" min="1" max="12" step="1" value="2" />
+
+            <label for="analysis-voice-exit-frames">Voice Exit Frames</label>
+            <input id="analysis-voice-exit-frames" type="number" min="1" max="20" step="1" value="5" />
+
             <label for="analysis-smooth-follow">Smooth Follow</label>
             <input id="analysis-smooth-follow" type="number" min="0.01" max="0.5" step="0.01" value="0.18" />
 
             <label for="analysis-idle-decay">Idle Decay</label>
             <input id="analysis-idle-decay" type="number" min="0.8" max="0.995" step="0.005" value="0.95" />
+
+            <label for="analysis-onset-quarantine">Onset Quarantine (frames)</label>
+            <input id="analysis-onset-quarantine" type="number" min="0" max="12" step="1" value="2" />
 
             <label for="analysis-range-margin">Range Margin (st)</label>
             <input id="analysis-range-margin" type="number" min="0" max="4" step="0.05" value="0.75" />

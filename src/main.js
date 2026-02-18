@@ -20666,6 +20666,7 @@ function lzDecompress(compressed, bitsPerChar, getNextValue) {
   }
 }
 
+// Preset Encode/Decode
 function encodePresetState(state) {
   const json = JSON.stringify(state);
   const compressed = lzCompressToEncodedURIComponent(json);
@@ -20742,6 +20743,7 @@ function logPresetSizeBreakdown(state, encodedLength) {
   }
 }
 
+// Preset File I/O
 async function downloadLatticeState() {
   const state = getPresetState();
   const json = JSON.stringify(state, null, 2);
@@ -20782,6 +20784,7 @@ async function downloadLatticeState() {
   closeFilePanel();
 }
 
+// Preset Serialization
 function serializePresetLineLabelState() {
   const lineLabelOverridesState = Array.from(lineLabelOverrides.entries()).map(
     ([key, value]) => [key, Boolean(value)]
@@ -20792,35 +20795,150 @@ function serializePresetLineLabelState() {
   return { lineLabelOverridesState, lineLabelPositionsState };
 }
 
+// Preset Parsing Helpers
+function forEachNormalizedPresetEntry(entries, normalizeEntry, onEntry) {
+  if (!Array.isArray(entries)) {
+    return;
+  }
+  entries.forEach((entry) => {
+    const normalized = normalizeEntry(entry);
+    if (normalized != null) {
+      onEntry(normalized);
+    }
+  });
+}
+
+function parsePresetTupleEntry(entry, { minLength = 2, keyIndex = 0, valueIndex = 1 } = {}) {
+  if (!Array.isArray(entry) || entry.length < minLength) {
+    return null;
+  }
+  return {
+    key: entry[keyIndex],
+    value: entry[valueIndex],
+  };
+}
+
+function normalizePresetLineLabelOverrideEntry(entry) {
+  const tuple = parsePresetTupleEntry(entry);
+  if (!tuple) {
+    return null;
+  }
+  const key = String(tuple.key || "");
+  if (!key) {
+    return null;
+  }
+  return [key, Boolean(tuple.value)];
+}
+
+function normalizePresetLineLabelPositionEntry(entry) {
+  const tuple = parsePresetTupleEntry(entry);
+  if (!tuple) {
+    return null;
+  }
+  const key = String(tuple.key || "");
+  const value = Number(tuple.value);
+  if (!key || !Number.isFinite(value)) {
+    return null;
+  }
+  return [key, Math.max(0, Math.min(1, value))];
+}
+
+function normalizeDistanceEdgeOverrideEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const key = String(entry.key || "");
+  if (!key) {
+    return null;
+  }
+  const value = {};
+  if (Number.isFinite(entry.labelT)) {
+    value.labelT = entry.labelT;
+  }
+  if (entry.controlOffset && Number.isFinite(entry.controlOffset.x)) {
+    value.controlOffset = {
+      x: Number(entry.controlOffset.x) || 0,
+      y: Number(entry.controlOffset.y) || 0,
+    };
+  }
+  if (typeof entry.showName === "boolean") {
+    value.showName = entry.showName;
+  }
+  if (typeof entry.customText === "string" && entry.customText.trim()) {
+    value.customText = entry.customText.trim();
+  }
+  return { key, value };
+}
+
+function normalizePresetSpellingEntry(entry) {
+  const tuple = parsePresetTupleEntry(entry);
+  if (!tuple) {
+    return null;
+  }
+  const nodeId = tuple.key;
+  const spelling = tuple.value;
+  if (spelling === "flat") {
+    return [nodeId, "upper"];
+  }
+  if (spelling === "lower" || spelling === "upper") {
+    return [nodeId, spelling];
+  }
+  return null;
+}
+
+function normalizePresetOctaveOffsetEntry(entry) {
+  const tuple = parsePresetTupleEntry(entry);
+  if (!tuple) {
+    return null;
+  }
+  const key = String(tuple.key);
+  const shift = Number(tuple.value);
+  if (!Number.isFinite(shift) || shift === 0) {
+    return null;
+  }
+  return [key, Math.trunc(shift)];
+}
+
+function normalizePresetTrianglePosition(entry, targetCenterZ, targetDepth) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const plane = entry.plane;
+  if (plane !== "xy" && plane !== "xz" && plane !== "yz") {
+    return null;
+  }
+  const x = Number(entry.x);
+  const y = Number(entry.y);
+  const expZ = Number(entry.expZ);
+  const z = Number.isFinite(expZ)
+    ? targetCenterZ - expZ
+    : Number(entry.z);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return null;
+  }
+  if (z < 0 || z >= targetDepth) {
+    return null;
+  }
+  return { plane, x, y, z };
+}
+
 function applyPresetLineLabelState(overridesState, positionsState) {
   lineLabelOverrides.clear();
   lineLabelPositionOverrides.clear();
-  if (Array.isArray(overridesState)) {
-    overridesState.forEach((entry) => {
-      if (!Array.isArray(entry) || entry.length < 2) {
-        return;
-      }
-      const key = String(entry[0] || "");
-      if (!key) {
-        return;
-      }
-      lineLabelOverrides.set(key, Boolean(entry[1]));
-    });
-  }
-  if (Array.isArray(positionsState)) {
-    positionsState.forEach((entry) => {
-      if (!Array.isArray(entry) || entry.length < 2) {
-        return;
-      }
-      const key = String(entry[0] || "");
-      const value = Number(entry[1]);
-      if (!key || !Number.isFinite(value)) {
-        return;
-      }
-      const clamped = Math.max(0, Math.min(1, value));
-      lineLabelPositionOverrides.set(key, clamped);
-    });
-  }
+  forEachNormalizedPresetEntry(
+    overridesState,
+    normalizePresetLineLabelOverrideEntry,
+    (normalized) => {
+      lineLabelOverrides.set(normalized[0], normalized[1]);
+    }
+  );
+  forEachNormalizedPresetEntry(
+    positionsState,
+    normalizePresetLineLabelPositionEntry,
+    (normalized) => {
+      lineLabelPositionOverrides.set(normalized[0], normalized[1]);
+    }
+  );
 }
 
 function serializePresetDistanceState() {
@@ -21266,6 +21384,7 @@ function getPresetState(options = {}) {
   return state;
 }
 
+// Preset Normalize
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -21315,6 +21434,7 @@ function normalizePresetStateWithDefaults(state) {
   return deepMergePresetState(presetStateDefaults, state);
 }
 
+// Preset State Application Helpers
 function applyPresetCustomNodes(entries) {
   customNodes = [];
   if (!Array.isArray(entries)) {
@@ -21389,6 +21509,7 @@ function applyPresetCustomNodes(entries) {
   refreshCustomNodes();
 }
 
+// Preset URL Sync + Read
 function updatePresetUrl(trigger = "direct") {
   if (!presetSyncEnabled) {
     return;
@@ -21457,6 +21578,7 @@ function readPresetFromUrl() {
   }
 }
 
+// Snapshot Settings Apply
 function syncSnapshotSettingsControls() {
   setControlChecked(snapshotDeferToggle, snapshotDeferToCycleEnd);
   setControlChecked(snapshotRestoreToggle, snapshotRestorePlayNodes);
@@ -21512,6 +21634,7 @@ function applyPresetSnapshotSettings(settings) {
   updateSnapshotUi();
 }
 
+// Preset Apply Pipeline (Transient + Geometry + Rebuild)
 function resetPresetAnalysisState() {
   analysisLayers.distances = false;
   analysisLayers.microtonal = false;
@@ -21661,33 +21784,6 @@ function applyPresetDisplayToggleState(state) {
   }
 }
 
-function normalizeDistanceEdgeOverrideEntry(entry) {
-  if (!entry || typeof entry !== "object") {
-    return null;
-  }
-  const key = String(entry.key || "");
-  if (!key) {
-    return null;
-  }
-  const value = {};
-  if (Number.isFinite(entry.labelT)) {
-    value.labelT = entry.labelT;
-  }
-  if (entry.controlOffset && Number.isFinite(entry.controlOffset.x)) {
-    value.controlOffset = {
-      x: Number(entry.controlOffset.x) || 0,
-      y: Number(entry.controlOffset.y) || 0,
-    };
-  }
-  if (typeof entry.showName === "boolean") {
-    value.showName = entry.showName;
-  }
-  if (typeof entry.customText === "string" && entry.customText.trim()) {
-    value.customText = entry.customText.trim();
-  }
-  return { key, value };
-}
-
 function applyPresetDistanceState(state) {
   if (Array.isArray(state.distanceEdges)) {
     state.distanceEdges.forEach((edgeKey) => {
@@ -21696,46 +21792,30 @@ function applyPresetDistanceState(state) {
       }
     });
   }
-  if (Array.isArray(state.distanceEdgeOverrides)) {
-    state.distanceEdgeOverrides.forEach((entry) => {
-      const normalized = normalizeDistanceEdgeOverrideEntry(entry);
-      if (!normalized) {
-        return;
-      }
+  forEachNormalizedPresetEntry(
+    state.distanceEdgeOverrides,
+    normalizeDistanceEdgeOverrideEntry,
+    (normalized) => {
       distanceEdgeOverrides.set(normalized.key, normalized.value);
-    });
-  }
+    }
+  );
 }
 
 function applyPresetSpellingAndOctaveState(state) {
   if (Array.isArray(state.noteSpellings)) {
     nodeSpellingOverrides = new Map();
-    state.noteSpellings.forEach((entry) => {
-      if (!Array.isArray(entry) || entry.length < 2) {
-        return;
-      }
-      const [nodeId, spelling] = entry;
-      if (spelling === "flat") {
-        nodeSpellingOverrides.set(nodeId, "upper");
-      } else if (spelling === "lower" || spelling === "upper") {
-        nodeSpellingOverrides.set(nodeId, spelling);
-      }
+    forEachNormalizedPresetEntry(state.noteSpellings, normalizePresetSpellingEntry, (normalized) => {
+        nodeSpellingOverrides.set(normalized[0], normalized[1]);
     });
   }
   nodeOctaveOffsets = new Map();
-  if (Array.isArray(state.octaveOffsets)) {
-    state.octaveOffsets.forEach((entry) => {
-      if (!Array.isArray(entry) || entry.length < 2) {
-        return;
-      }
-      const key = String(entry[0]);
-      const shift = Number(entry[1]);
-      if (!Number.isFinite(shift) || shift === 0) {
-        return;
-      }
-      nodeOctaveOffsets.set(key, Math.trunc(shift));
-    });
-  }
+  forEachNormalizedPresetEntry(
+    state.octaveOffsets,
+    normalizePresetOctaveOffsetEntry,
+    (normalized) => {
+      nodeOctaveOffsets.set(normalized[0], normalized[1]);
+    }
+  );
 }
 
 function applyPresetReadoutAndTuningSettings(state) {
@@ -22346,29 +22426,6 @@ function applyPresetLayoutState(layoutState) {
   applyPresetLayoutPositioningState(layoutState);
   applyPresetLayoutTypographyAndOptions(layoutState);
   applyPresetLayoutViewAndModeState(layoutState);
-}
-
-function normalizePresetTrianglePosition(entry, targetCenterZ, targetDepth) {
-  if (!entry || typeof entry !== "object") {
-    return null;
-  }
-  const plane = entry.plane;
-  if (plane !== "xy" && plane !== "xz" && plane !== "yz") {
-    return null;
-  }
-  const x = Number(entry.x);
-  const y = Number(entry.y);
-  const expZ = Number(entry.expZ);
-  const z = Number.isFinite(expZ)
-    ? targetCenterZ - expZ
-    : Number(entry.z);
-  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-    return null;
-  }
-  if (z < 0 || z >= targetDepth) {
-    return null;
-  }
-  return { plane, x, y, z };
 }
 
 function applyPresetTrianglesState(presetTriangles, targetCenterZ, targetDepth) {

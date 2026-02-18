@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "description": "Template pack for repeatable tuner calibration checks.",
+  "targets": {
+    "steady_sine": { "p95_jitter_cents_max": 1.5, "median_error_cents_max": 1.0 },
+    "steady_voice": { "p95_jitter_cents_max": 6.0, "median_error_cents_max": 4.0 },
+    "step_jumps": { "lock_ms_max": 120, "octave_errors_max": 0 },
+    "glissando": { "false_jump_rate_max": 0.02 },
+    "silence_noise": { "false_voiced_rate_max": 0.01 }
+  },
+  "clips": [
+    {
+      "id": "steady_sine_196",
+      "file": "./calibration/steady_sine_196.wav",
+      "fundamental_hz": 130.8127826503,
+      "segments": [
+        {
+          "label": "steady",
+          "t_start_s": 0.3,
+          "t_end_s": 2.8,
+          "expected_hz": 196.0,
+          "type": "steady"
+        }
+      ]
+    },
+    {
+      "id": "step_jumps_voice",
+      "file": "./calibration/step_jumps_voice.wav",
+      "fundamental_hz": 130.8127826503,
+      "segments": [
+        {
+          "label": "jump_1",
+          "t_start_s": 0.8,
+          "t_end_s": 1.2,
+          "expected_hz": 174.614,
+          "type": "step"
+        },
+        {
+          "label": "jump_2",
+          "t_start_s": 1.5,
+          "t_end_s": 1.9,
+          "expected_hz": 196.0,
+          "type": "step"
+        }
+      ]
+    }
+  ]
+}

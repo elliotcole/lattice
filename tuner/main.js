@@ -119,15 +119,25 @@ const calibrateToggle = document.getElementById("calibrate-toggle");
 const analysisPanel = document.getElementById("analysis-panel");
 const debugPanel = document.getElementById("debug-panel");
 const calibratePanel = document.getElementById("calibrate-panel");
+const analysisPresetSelect = document.getElementById("analysis-preset-select");
 const analysisRmsThresholdInput = document.getElementById("analysis-rms-threshold");
 const analysisRmsWindowInput = document.getElementById("analysis-rms-window");
 const analysisCorrThresholdInput = document.getElementById("analysis-corr-threshold");
+const analysisRawInitConfirmInput = document.getElementById("analysis-raw-init-confirm");
+const analysisRawInitStabilityInput = document.getElementById("analysis-raw-init-stability");
 const analysisMinFreqInput = document.getElementById("analysis-min-freq");
 const analysisMaxFreqInput = document.getElementById("analysis-max-freq");
 const analysisJumpThresholdInput = document.getElementById("analysis-jump-threshold");
 const analysisJumpConfirmInput = document.getElementById("analysis-jump-confirm");
+const analysisVoiceEnterRmsFactorInput = document.getElementById("analysis-voice-enter-rms-factor");
+const analysisVoiceExitRmsFactorInput = document.getElementById("analysis-voice-exit-rms-factor");
+const analysisVoiceEnterCorrOffsetInput = document.getElementById("analysis-voice-enter-corr-offset");
+const analysisVoiceExitCorrOffsetInput = document.getElementById("analysis-voice-exit-corr-offset");
+const analysisVoiceEnterFramesInput = document.getElementById("analysis-voice-enter-frames");
+const analysisVoiceExitFramesInput = document.getElementById("analysis-voice-exit-frames");
 const analysisSmoothFollowInput = document.getElementById("analysis-smooth-follow");
 const analysisIdleDecayInput = document.getElementById("analysis-idle-decay");
+const analysisOnsetQuarantineInput = document.getElementById("analysis-onset-quarantine");
 const analysisRangeMarginInput = document.getElementById("analysis-range-margin");
 const analysisOutRangeHoldInput = document.getElementById("analysis-out-range-hold");
 const anomalyEnabledInput = document.getElementById("anomaly-enabled");
@@ -188,6 +198,10 @@ let pendingOutOfRangeFrames = 0;
 let liveAcceptedRawSemitone = null;
 let livePendingRawJumpSemitone = null;
 let livePendingRawJumpFrames = 0;
+let liveVoiced = false;
+let liveVoicedEnterFrames = 0;
+let liveVoicedExitFrames = 0;
+let liveOnsetQuarantineFramesRemaining = 0;
 let bottomDragActive = false;
 let bottomDragStartY = 0;
 let rangeOffsetStartValue = 0;
@@ -214,7 +228,7 @@ const analysisConfig = {
   octaveFlipConfirmFrames: 3,
   smoothFollow: 0.18,
   stabilityDeadbandCents: 6,
-  stabilityFollow: 0.02,
+  stabilityFollow: 0.008,
   stabilityMinCorrelation: 0.985,
   idleDecay: 0.95,
   onsetConfirmFrames: 3,
@@ -225,8 +239,65 @@ const analysisConfig = {
   discontinuityThresholdSt: 2.8,
   discontinuityConfirmFrames: 2,
   discontinuityOctaveConfirmFrames: 4,
+  rawInitConfirmFrames: 2,
+  rawInitStabilitySemitones: 0.9,
+  voiceEnterRmsFactor: 1.35,
+  voiceExitRmsFactor: 0.78,
+  voiceEnterCorrOffset: 0.04,
+  voiceExitCorrOffset: -0.06,
+  voiceEnterFrames: 2,
+  voiceExitFrames: 5,
+  onsetQuarantineFrames: 2,
   rangeMargin: 0.75,
   outOfRangeHoldFrames: 8,
+};
+
+const ANALYSIS_PRESET_BASE = Object.freeze({ ...analysisConfig });
+const ANALYSIS_PRESETS = {
+  balanced: { ...ANALYSIS_PRESET_BASE },
+  stable: {
+    ...ANALYSIS_PRESET_BASE,
+    rmsWindowFrames: 5,
+    correlationThreshold: 0.9,
+    jumpThreshold: 0.58,
+    jumpConfirmFrames: 3,
+    smoothFollow: 0.14,
+    stabilityDeadbandCents: 8,
+    stabilityFollow: 0.006,
+    onsetConfirmFrames: 4,
+    onsetStabilitySemitones: 0.85,
+    rawInitConfirmFrames: 3,
+    rawInitStabilitySemitones: 0.7,
+    voiceEnterRmsFactor: 1.45,
+    voiceExitRmsFactor: 0.74,
+    voiceEnterCorrOffset: 0.05,
+    voiceExitCorrOffset: -0.07,
+    voiceEnterFrames: 3,
+    voiceExitFrames: 6,
+    onsetQuarantineFrames: 3,
+  },
+  responsive: {
+    ...ANALYSIS_PRESET_BASE,
+    rmsThreshold: 0.009,
+    rmsWindowFrames: 3,
+    correlationThreshold: 0.86,
+    jumpThreshold: 0.9,
+    jumpConfirmFrames: 1,
+    smoothFollow: 0.25,
+    stabilityDeadbandCents: 4,
+    stabilityFollow: 0.014,
+    onsetConfirmFrames: 2,
+    onsetStabilitySemitones: 1.45,
+    rawInitConfirmFrames: 1,
+    rawInitStabilitySemitones: 1.2,
+    voiceEnterRmsFactor: 1.2,
+    voiceExitRmsFactor: 0.86,
+    voiceEnterCorrOffset: 0.02,
+    voiceExitCorrOffset: -0.03,
+    voiceEnterFrames: 1,
+    voiceExitFrames: 3,
+    onsetQuarantineFrames: 1,
+  },
 };
 
 const anomalyCapture = {
@@ -255,6 +326,7 @@ const calibrationState = {
   round: 1,
   grossWinner: null,
   candidateSets: [],
+  grossTraceBounds: null,
 };
 
 const calibrationRanges = {
@@ -282,6 +354,15 @@ const calibrationRanges = {
   discontinuityThresholdSt: [0.8, 8],
   discontinuityConfirmFrames: [1, 8],
   discontinuityOctaveConfirmFrames: [2, 10],
+  rawInitConfirmFrames: [1, 6],
+  rawInitStabilitySemitones: [0.2, 2.5],
+  voiceEnterRmsFactor: [1, 2.5],
+  voiceExitRmsFactor: [0.3, 1],
+  voiceEnterCorrOffset: [0, 0.12],
+  voiceExitCorrOffset: [-0.2, 0],
+  voiceEnterFrames: [1, 6],
+  voiceExitFrames: [1, 12],
+  onsetQuarantineFrames: [0, 8],
   rangeMargin: [0.2, 2.2],
   outOfRangeHoldFrames: [3, 24],
 };
@@ -531,6 +612,25 @@ function median(values) {
     return sorted[middle];
   }
   return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function percentile(values, p) {
+  if (!Array.isArray(values) || !values.length) {
+    return null;
+  }
+  const sorted = values.filter((value) => Number.isFinite(value)).slice().sort((a, b) => a - b);
+  if (!sorted.length) {
+    return null;
+  }
+  const clamped = Math.max(0, Math.min(1, Number(p)));
+  const idx = clamped * (sorted.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) {
+    return sorted[lo];
+  }
+  const t = idx - lo;
+  return sorted[lo] * (1 - t) + sorted[hi] * t;
 }
 
 function gcd(a, b) {
@@ -2401,10 +2501,78 @@ function resetLiveTrackingState(clearSmooth = false) {
   liveAcceptedRawSemitone = null;
   livePendingRawJumpSemitone = null;
   livePendingRawJumpFrames = 0;
+  liveVoiced = false;
+  liveVoicedEnterFrames = 0;
+  liveVoicedExitFrames = 0;
+  liveOnsetQuarantineFramesRemaining = 0;
   if (clearSmooth) {
     smoothSemitone = null;
     displaySemitone = null;
   }
+}
+
+function getVoiceGateThresholds(cfg = analysisConfig) {
+  const baseRms = Math.max(0.0001, Number(cfg.rmsThreshold) || 0.01);
+  const baseCorr = clampNumber(Number(cfg.correlationThreshold), 0.5, 0.999, 0.88);
+  const enterRmsFactor = Math.max(1, Number(cfg.voiceEnterRmsFactor) || 1.35);
+  const exitRmsFactor = clampNumber(Number(cfg.voiceExitRmsFactor), 0.2, 1.2, 0.78);
+  const enterCorrOffset = clampNumber(Number(cfg.voiceEnterCorrOffset), -0.1, 0.2, 0.04);
+  const exitCorrOffset = clampNumber(Number(cfg.voiceExitCorrOffset), -0.25, 0.15, -0.06);
+  return {
+    enterRms: baseRms * enterRmsFactor,
+    exitRms: baseRms * exitRmsFactor,
+    enterCorr: clampNumber(baseCorr + enterCorrOffset, 0.5, 0.999, 0.9),
+    exitCorr: clampNumber(baseCorr + exitCorrOffset, 0.35, 0.999, 0.82),
+  };
+}
+
+function updateLiveVoicedState(hasCandidatePitch, rmsWindowed, correlation, cfg = analysisConfig) {
+  const thresholds = getVoiceGateThresholds(cfg);
+  const enterFramesRequired = Math.max(1, Math.round(cfg.voiceEnterFrames || 2));
+  const exitFramesRequired = Math.max(1, Math.round(cfg.voiceExitFrames || 5));
+  const enterReady =
+    Boolean(hasCandidatePitch) &&
+    Number(rmsWindowed) >= thresholds.enterRms &&
+    Number(correlation) >= thresholds.enterCorr;
+  const stayReady =
+    Boolean(hasCandidatePitch) &&
+    Number(rmsWindowed) >= thresholds.exitRms &&
+    Number(correlation) >= thresholds.exitCorr;
+  let entered = false;
+  let exited = false;
+
+  if (!liveVoiced) {
+    if (enterReady) {
+      liveVoicedEnterFrames += 1;
+      if (liveVoicedEnterFrames >= enterFramesRequired) {
+        liveVoiced = true;
+        liveVoicedEnterFrames = 0;
+        liveVoicedExitFrames = 0;
+        entered = true;
+        liveOnsetQuarantineFramesRemaining = Math.max(
+          0,
+          Math.round(Number(cfg.onsetQuarantineFrames) || 0)
+        );
+      }
+    } else {
+      liveVoicedEnterFrames = 0;
+    }
+    return { entered, exited, voiced: liveVoiced };
+  }
+
+  if (stayReady) {
+    liveVoicedExitFrames = 0;
+  } else {
+    liveVoicedExitFrames += 1;
+    if (liveVoicedExitFrames >= exitFramesRequired) {
+      liveVoiced = false;
+      liveVoicedExitFrames = 0;
+      liveVoicedEnterFrames = 0;
+      liveOnsetQuarantineFramesRemaining = 0;
+      exited = true;
+    }
+  }
+  return { entered, exited, voiced: liveVoiced };
 }
 
 function gateRawPitchCandidate(rawPitch, fundamental) {
@@ -2425,10 +2593,28 @@ function gateRawPitchCandidate(rawPitch, fundamental) {
   const octaveTolerance = Math.max(0.05, Number(analysisConfig.octaveFlipTolerance) || 0.45);
 
   if (!Number.isFinite(liveAcceptedRawSemitone)) {
-    liveAcceptedRawSemitone = rawSemitone;
-    livePendingRawJumpSemitone = null;
-    livePendingRawJumpFrames = 0;
-    return { pitchHz: rawPitch, reason: "accepted_initial" };
+    const initConfirmFrames = Math.max(1, Math.round(analysisConfig.rawInitConfirmFrames || 2));
+    const initTolerance = Math.max(0.05, Number(analysisConfig.rawInitStabilitySemitones) || 0.9);
+    const nearPending =
+      Number.isFinite(livePendingRawJumpSemitone) &&
+      Math.abs(rawSemitone - livePendingRawJumpSemitone) <= initTolerance;
+    if (nearPending) {
+      livePendingRawJumpFrames += 1;
+      livePendingRawJumpSemitone = livePendingRawJumpSemitone * 0.6 + rawSemitone * 0.4;
+    } else {
+      livePendingRawJumpSemitone = rawSemitone;
+      livePendingRawJumpFrames = 1;
+    }
+    if (livePendingRawJumpFrames >= initConfirmFrames && Number.isFinite(livePendingRawJumpSemitone)) {
+      liveAcceptedRawSemitone = livePendingRawJumpSemitone;
+      livePendingRawJumpSemitone = null;
+      livePendingRawJumpFrames = 0;
+      return {
+        pitchHz: fundamental * Math.pow(2, liveAcceptedRawSemitone / 12),
+        reason: "accepted_initial",
+      };
+    }
+    return { pitchHz: null, reason: "pending_initial" };
   }
 
   const jumpDelta = Math.abs(rawSemitone - liveAcceptedRawSemitone);
@@ -2544,7 +2730,10 @@ function updateTrackedSemitone(candidateSemitone, correlation = 1) {
       0.95,
       Math.max(0.01, baseFollow + Math.min(0.55, unclampedJumpDelta * 0.07))
     );
-    const follow = confirmedOctaveJump ? Math.max(dynamicFollow, 0.6) : dynamicFollow;
+    const corrNorm = clampNumber((Number(correlation) - 0.84) / 0.15, 0, 1, 1);
+    const confidenceScale = 0.55 + 0.45 * corrNorm;
+    const adaptiveFollow = dynamicFollow * confidenceScale;
+    const follow = confirmedOctaveJump ? Math.max(adaptiveFollow, 0.58) : adaptiveFollow;
     smoothSemitone = smoothSemitone * (1 - follow) + stabilizedCandidate * follow;
     pendingJumpSemitone = null;
     pendingJumpFrames = 0;
@@ -2678,15 +2867,36 @@ function renderLoop() {
     const rawGate = gateRawPitchCandidate(rawPitchDetected, fundamental);
     const rawPitch = rawGate.pitchHz;
     const hasDetectedRaw = Boolean(rawPitchDetected && Number.isFinite(rawPitchDetected));
+    const voicedState = updateLiveVoicedState(
+      Boolean(rawPitch && Number.isFinite(rawPitch)),
+      rmsWindowed,
+      detection.correlation
+    );
+    if (voicedState.entered) {
+      smoothSemitone = null;
+      displaySemitone = null;
+      pendingJumpSemitone = null;
+      pendingJumpFrames = 0;
+      pendingOctaveSemitone = null;
+      pendingOctaveFrames = 0;
+      liveMedianSemitoneHistory = [];
+      liveOnsetSemitoneHistory = [];
+      inactivePitchFrames = 0;
+    } else if (voicedState.exited) {
+      displaySemitone = null;
+      smoothSemitone = null;
+      liveMedianSemitoneHistory = [];
+      liveOnsetSemitoneHistory = [];
+    }
     const bounds = getVisualizationSemitoneBounds();
     const margin = Math.max(0, analysisConfig.rangeMargin);
     const normalized = normalizePitchToRange(rawPitch, fundamental, bounds, margin, smoothSemitone);
     const inRange = normalized.inRange;
     const pitch = inRange ? normalized.frequency : null;
-    const hasUsablePitch = Boolean(pitch && Number.isFinite(pitch));
+    const hasUsablePitch = Boolean(liveVoiced && pitch && Number.isFinite(pitch));
     detectedPitchHz = null;
     liveHasActivePitch = false;
-    if (rawPitch && Number.isFinite(rawPitch) && !inRange) {
+    if (liveVoiced && rawPitch && Number.isFinite(rawPitch) && !inRange) {
       outOfRangeFrames += 1;
       liveOutOfRangeDirection = normalized.outDirection || 0;
       const clampConfirmFrames = Math.max(1, Math.round(analysisConfig.outOfRangeClampConfirmFrames || 2));
@@ -2723,6 +2933,8 @@ function renderLoop() {
 
     if (hasUsablePitch && detection.reason === "ok") {
       inactivePitchFrames = 0;
+    } else if (liveVoiced && hasDetectedRaw && !rawPitch) {
+      inactivePitchFrames = 0;
     } else {
       inactivePitchFrames += 1;
     }
@@ -2734,13 +2946,19 @@ function renderLoop() {
       const semi = Number.isFinite(normalized.semitone)
         ? normalized.semitone
         : 12 * Math.log2(pitch / fundamental);
-      if (Number.isFinite(smoothSemitone)) {
+      if (!Number.isFinite(smoothSemitone) && liveOnsetQuarantineFramesRemaining > 0) {
+        liveOnsetQuarantineFramesRemaining = Math.max(0, liveOnsetQuarantineFramesRemaining - 1);
+        liveOnsetSemitoneHistory = [];
+        displaySemitone = null;
+        liveHasActivePitch = false;
+      } else if (Number.isFinite(smoothSemitone)) {
         liveOnsetSemitoneHistory = [];
         updateTrackedSemitone(semi, detection.correlation);
         displaySemitone = Number.isFinite(smoothSemitone) ? smoothSemitone : semi;
       } else {
-        const onsetCorrFloor = Math.max(Number(analysisConfig.correlationThreshold) || 0.88, 0.94);
-        const onsetRmsFloor = Math.max((Number(analysisConfig.rmsThreshold) || 0.01) * 2.2, 0.02);
+        const voicedThresholds = getVoiceGateThresholds(analysisConfig);
+        const onsetCorrFloor = Math.max(voicedThresholds.enterCorr, 0.93);
+        const onsetRmsFloor = Math.max(voicedThresholds.enterRms, (Number(analysisConfig.rmsThreshold) || 0.01) * 2.2);
         const onsetStableFrames = Math.max(1, Math.round(analysisConfig.onsetConfirmFrames || 3));
         const onsetStability = Math.max(0.1, Number(analysisConfig.onsetStabilitySemitones) || 1.1);
         const onsetTrusted = detection.correlation >= onsetCorrFloor && rmsWindowed >= onsetRmsFloor;
@@ -2777,10 +2995,14 @@ function renderLoop() {
         }
       }
       liveHasActivePitch = Number.isFinite(displaySemitone);
-    } else if (hasDetectedRaw && !rawPitch && Number.isFinite(smoothSemitone)) {
+    } else if (liveVoiced && hasDetectedRaw && !rawPitch && Number.isFinite(smoothSemitone)) {
       // Rejected discontinuity frame: hold stable estimate instead of decaying/resetting.
       displaySemitone = smoothSemitone;
       liveHasActivePitch = true;
+    } else if (!liveVoiced) {
+      displaySemitone = null;
+      liveHasActivePitch = false;
+      liveOutOfRangeDirection = 0;
     } else if (!hasDetectedRaw && Number.isFinite(smoothSemitone)) {
       smoothSemitone *= analysisConfig.idleDecay;
       if (Math.abs(smoothSemitone) > 200 || !Number.isFinite(smoothSemitone)) {
@@ -2812,6 +3034,7 @@ function renderLoop() {
       raw_semitone:
         rawPitch && Number.isFinite(rawPitch) && fundamental > 0 ? 12 * Math.log2(rawPitch / fundamental) : null,
       raw_gate_reason: rawGate.reason,
+      voiced: liveVoiced,
       normalized_pitch_hz: normalized.frequency,
       in_range: Boolean(inRange),
       out_direction: normalized.outDirection || 0,
@@ -3146,6 +3369,7 @@ function bindAnalysisNumberInput(input, configKey, min, max, fallback, round = f
     if (round) {
       input.value = String(Math.round(value));
     }
+    syncAnalysisPresetSelect();
     persistSettings();
   });
 }
@@ -3159,8 +3383,57 @@ function togglePanelVisibility(panel, toggleButton) {
   toggleButton.classList.toggle("button-on", willShow);
 }
 
+function setToolPanelOpen(panel, toggleButton, open) {
+  if (!panel || !toggleButton) {
+    return;
+  }
+  panel.hidden = !open;
+  toggleButton.classList.toggle("button-on", Boolean(open));
+}
+
 function cloneAnalysisConfig() {
   return { ...analysisConfig };
+}
+
+function isPresetValueMatch(a, b) {
+  const na = Number(a);
+  const nb = Number(b);
+  if (Number.isFinite(na) && Number.isFinite(nb)) {
+    return Math.abs(na - nb) <= 1e-6;
+  }
+  return a === b;
+}
+
+function getMatchingAnalysisPresetName(config = analysisConfig) {
+  const keys = Object.keys(ANALYSIS_PRESET_BASE);
+  const presetEntries = Object.entries(ANALYSIS_PRESETS).filter(([name]) => name !== "balanced");
+  for (const [presetName, presetConfig] of presetEntries) {
+    let matches = true;
+    for (const key of keys) {
+      if (!isPresetValueMatch(config[key], presetConfig[key])) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      return presetName;
+    }
+  }
+  let matchesBalanced = true;
+  for (const key of keys) {
+    if (!isPresetValueMatch(config[key], ANALYSIS_PRESETS.balanced[key])) {
+      matchesBalanced = false;
+      break;
+    }
+  }
+  return matchesBalanced ? "balanced" : "custom";
+}
+
+function syncAnalysisPresetSelect() {
+  if (!analysisPresetSelect) {
+    return;
+  }
+  analysisPresetSelect.value = getMatchingAnalysisPresetName(analysisConfig);
 }
 
 function applyAnalysisConfig(config) {
@@ -3169,17 +3442,36 @@ function applyAnalysisConfig(config) {
   if (analysisRmsWindowInput) analysisRmsWindowInput.value = String(Math.round(analysisConfig.rmsWindowFrames));
   if (analysisCorrThresholdInput)
     analysisCorrThresholdInput.value = String(analysisConfig.correlationThreshold);
+  if (analysisRawInitConfirmInput)
+    analysisRawInitConfirmInput.value = String(Math.round(analysisConfig.rawInitConfirmFrames));
+  if (analysisRawInitStabilityInput)
+    analysisRawInitStabilityInput.value = String(analysisConfig.rawInitStabilitySemitones);
   if (analysisMinFreqInput) analysisMinFreqInput.value = String(Math.round(analysisConfig.minFreq));
   if (analysisMaxFreqInput) analysisMaxFreqInput.value = String(Math.round(analysisConfig.maxFreq));
   if (analysisJumpThresholdInput)
     analysisJumpThresholdInput.value = String(analysisConfig.jumpThreshold);
   if (analysisJumpConfirmInput)
     analysisJumpConfirmInput.value = String(Math.round(analysisConfig.jumpConfirmFrames));
+  if (analysisVoiceEnterRmsFactorInput)
+    analysisVoiceEnterRmsFactorInput.value = String(analysisConfig.voiceEnterRmsFactor);
+  if (analysisVoiceExitRmsFactorInput)
+    analysisVoiceExitRmsFactorInput.value = String(analysisConfig.voiceExitRmsFactor);
+  if (analysisVoiceEnterCorrOffsetInput)
+    analysisVoiceEnterCorrOffsetInput.value = String(analysisConfig.voiceEnterCorrOffset);
+  if (analysisVoiceExitCorrOffsetInput)
+    analysisVoiceExitCorrOffsetInput.value = String(analysisConfig.voiceExitCorrOffset);
+  if (analysisVoiceEnterFramesInput)
+    analysisVoiceEnterFramesInput.value = String(Math.round(analysisConfig.voiceEnterFrames));
+  if (analysisVoiceExitFramesInput)
+    analysisVoiceExitFramesInput.value = String(Math.round(analysisConfig.voiceExitFrames));
   if (analysisSmoothFollowInput) analysisSmoothFollowInput.value = String(analysisConfig.smoothFollow);
   if (analysisIdleDecayInput) analysisIdleDecayInput.value = String(analysisConfig.idleDecay);
+  if (analysisOnsetQuarantineInput)
+    analysisOnsetQuarantineInput.value = String(Math.round(analysisConfig.onsetQuarantineFrames));
   if (analysisRangeMarginInput) analysisRangeMarginInput.value = String(analysisConfig.rangeMargin);
   if (analysisOutRangeHoldInput)
     analysisOutRangeHoldInput.value = String(Math.round(analysisConfig.outOfRangeHoldFrames));
+  syncAnalysisPresetSelect();
   persistSettings();
 }
 
@@ -3205,6 +3497,10 @@ function makeRandomCandidate(base = null, fine = false) {
       key === "jumpConfirmFrames" ||
       key === "onsetConfirmFrames" ||
       key === "onsetResetFrames" ||
+      key === "rawInitConfirmFrames" ||
+      key === "voiceEnterFrames" ||
+      key === "voiceExitFrames" ||
+      key === "onsetQuarantineFrames" ||
       key === "discontinuityConfirmFrames" ||
       key === "discontinuityOctaveConfirmFrames" ||
       key === "outOfRangeHoldFrames";
@@ -3231,6 +3527,10 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
   let acceptedRawSemitone = null;
   let pendingRawJumpSemitone = null;
   let pendingRawJumpFrames = 0;
+  let voiced = false;
+  let voicedEnterFrames = 0;
+  let voicedExitFrames = 0;
+  let onsetQuarantineFramesRemaining = 0;
   const medianBuffer = [];
   const onsetBuffer = [];
   let inactiveFrames = 0;
@@ -3254,6 +3554,8 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
     const detection = detectPitchWithConfig(slice, sampleRate, windowedRms, rawRms, cfg);
     const rawPitchDetected = detection.frequency;
     const hasDetectedRaw = Boolean(rawPitchDetected && Number.isFinite(rawPitchDetected));
+    const rawDetectedSemitone =
+      hasDetectedRaw && fundamental > 0 ? 12 * Math.log2(rawPitchDetected / fundamental) : null;
     let rawPitch = null;
     if (hasDetectedRaw && fundamental > 0) {
       const rawSemitoneDetected = 12 * Math.log2(rawPitchDetected / fundamental);
@@ -3265,10 +3567,24 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
       );
       const rawOctaveTolerance = Math.max(0.05, Number(cfg.octaveFlipTolerance) || 0.45);
       if (!Number.isFinite(acceptedRawSemitone)) {
-        acceptedRawSemitone = rawSemitoneDetected;
-        pendingRawJumpSemitone = null;
-        pendingRawJumpFrames = 0;
-        rawPitch = rawPitchDetected;
+        const initConfirmFrames = Math.max(1, Math.round(cfg.rawInitConfirmFrames || 2));
+        const initTolerance = Math.max(0.05, Number(cfg.rawInitStabilitySemitones) || 0.9);
+        const nearPending =
+          Number.isFinite(pendingRawJumpSemitone) &&
+          Math.abs(rawSemitoneDetected - pendingRawJumpSemitone) <= initTolerance;
+        if (nearPending) {
+          pendingRawJumpFrames += 1;
+          pendingRawJumpSemitone = pendingRawJumpSemitone * 0.6 + rawSemitoneDetected * 0.4;
+        } else {
+          pendingRawJumpSemitone = rawSemitoneDetected;
+          pendingRawJumpFrames = 1;
+        }
+        if (pendingRawJumpFrames >= initConfirmFrames && Number.isFinite(pendingRawJumpSemitone)) {
+          acceptedRawSemitone = pendingRawJumpSemitone;
+          pendingRawJumpSemitone = null;
+          pendingRawJumpFrames = 0;
+          rawPitch = fundamental * Math.pow(2, acceptedRawSemitone / 12);
+        }
       } else {
         const rawJumpDelta = Math.abs(rawSemitoneDetected - acceptedRawSemitone);
         if (rawJumpDelta <= rawThreshold) {
@@ -3300,6 +3616,54 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
     }
     confidenceTotal += detection.correlation || 0;
     usedCount += 1;
+    const voicedThresholds = getVoiceGateThresholds(cfg);
+    const enterReady =
+      Boolean(rawPitch && Number.isFinite(rawPitch)) &&
+      windowedRms >= voicedThresholds.enterRms &&
+      (detection.correlation || 0) >= voicedThresholds.enterCorr;
+    const stayReady =
+      Boolean(rawPitch && Number.isFinite(rawPitch)) &&
+      windowedRms >= voicedThresholds.exitRms &&
+      (detection.correlation || 0) >= voicedThresholds.exitCorr;
+    const enterFramesRequired = Math.max(1, Math.round(cfg.voiceEnterFrames || 2));
+    const exitFramesRequired = Math.max(1, Math.round(cfg.voiceExitFrames || 5));
+    if (!voiced) {
+      if (enterReady) {
+        voicedEnterFrames += 1;
+        if (voicedEnterFrames >= enterFramesRequired) {
+          voiced = true;
+          voicedEnterFrames = 0;
+          voicedExitFrames = 0;
+          onsetQuarantineFramesRemaining = Math.max(0, Math.round(Number(cfg.onsetQuarantineFrames) || 0));
+          smooth = null;
+          pending = null;
+          pendingFrames = 0;
+          pendingOctave = null;
+          pendingOctaveFrames = 0;
+          medianBuffer.length = 0;
+          onsetBuffer.length = 0;
+        }
+      } else {
+        voicedEnterFrames = 0;
+      }
+    } else if (stayReady) {
+      voicedExitFrames = 0;
+    } else {
+      voicedExitFrames += 1;
+      if (voicedExitFrames >= exitFramesRequired) {
+        voiced = false;
+        voicedExitFrames = 0;
+        voicedEnterFrames = 0;
+        onsetQuarantineFramesRemaining = 0;
+        smooth = null;
+        pending = null;
+        pendingFrames = 0;
+        pendingOctave = null;
+        pendingOctaveFrames = 0;
+        medianBuffer.length = 0;
+        onsetBuffer.length = 0;
+      }
+    }
 
     let inRange = false;
     let pitch = null;
@@ -3324,8 +3688,8 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
       }
     }
 
-    const hasUsablePitch = Boolean(pitch && Number.isFinite(pitch) && detection.reason === "ok");
-    const hasRejectedRawJump = hasDetectedRaw && !rawPitch;
+    const hasUsablePitch = Boolean(voiced && pitch && Number.isFinite(pitch) && detection.reason === "ok");
+    const hasRejectedRawJump = voiced && hasDetectedRaw && !rawPitch;
     if (hasUsablePitch || hasRejectedRawJump) {
       inactiveFrames = 0;
     } else {
@@ -3344,11 +3708,15 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
       onsetBuffer.length = 0;
     }
 
-    if (pitch && Number.isFinite(pitch)) {
+    if (hasUsablePitch && pitch && Number.isFinite(pitch)) {
       const semi = 12 * Math.log2(pitch / fundamental);
       if (!Number.isFinite(smooth)) {
-        const onsetCorrFloor = Math.max(Number(cfg.correlationThreshold) || 0.88, 0.94);
-        const onsetRmsFloor = Math.max((Number(cfg.rmsThreshold) || 0.01) * 2.2, 0.02);
+        if (onsetQuarantineFramesRemaining > 0) {
+          onsetQuarantineFramesRemaining = Math.max(0, onsetQuarantineFramesRemaining - 1);
+          onsetBuffer.length = 0;
+        } else {
+        const onsetCorrFloor = Math.max(voicedThresholds.enterCorr, 0.93);
+        const onsetRmsFloor = Math.max(voicedThresholds.enterRms, (Number(cfg.rmsThreshold) || 0.01) * 2.2);
         const onsetStableFrames = Math.max(1, Math.round(cfg.onsetConfirmFrames || 3));
         const onsetStability = Math.max(0.1, Number(cfg.onsetStabilitySemitones) || 1.1);
         const onsetTrusted = detection.correlation >= onsetCorrFloor && windowedRms >= onsetRmsFloor;
@@ -3371,6 +3739,7 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
           }
         } else {
           onsetBuffer.length = 0;
+        }
         }
       } else {
         onsetBuffer.length = 0;
@@ -3449,7 +3818,10 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
                 0.95,
                 Math.max(0.01, baseFollow + Math.min(0.55, delta * 0.07))
               );
-              const follow = confirmedOctaveJump ? Math.max(dynamicFollow, 0.6) : dynamicFollow;
+              const corrNorm = clampNumber((Number(detection.correlation) - 0.84) / 0.15, 0, 1, 1);
+              const confidenceScale = 0.55 + 0.45 * corrNorm;
+              const adaptiveFollow = dynamicFollow * confidenceScale;
+              const follow = confirmedOctaveJump ? Math.max(adaptiveFollow, 0.58) : adaptiveFollow;
               smooth = smooth * (1 - follow) + candidateSemi * follow;
               pending = null;
               pendingFrames = 0;
@@ -3493,6 +3865,7 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
       t: start / sampleRate,
       semitone: Number.isFinite(displaySemitone) ? displaySemitone : null,
       rawSemitone,
+      rawDetectedSemitone,
       rawPitch,
       inRange,
       reason: detection.reason,
@@ -3582,42 +3955,65 @@ function renderCandidateTrace(cardCanvas, trace, bounds) {
   const cctx = cardCanvas.getContext("2d");
   const width = cardCanvas.width;
   const height = cardCanvas.height;
+  const isDark = document.body.classList.contains("theme-dark");
+  const bg = isDark ? "#0b1320" : "#e7edf5";
+  const grid = isDark ? "rgba(205,220,245,0.32)" : "rgba(36,58,92,0.35)";
+  const rawColor = isDark ? "rgba(208,221,243,0.68)" : "rgba(59,78,113,0.62)";
+  const filteredColor = isDark ? "#61e8ff" : "#0057b8";
+  const emptyColor = isDark ? "rgba(225,235,249,0.9)" : "rgba(25,38,58,0.9)";
   cctx.clearRect(0, 0, width, height);
-  cctx.fillStyle = "rgba(0,0,0,0.1)";
+  cctx.fillStyle = bg;
   cctx.fillRect(0, 0, width, height);
 
-  cctx.strokeStyle = "rgba(170,180,200,0.4)";
+  cctx.strokeStyle = grid;
   cctx.lineWidth = 1;
   cctx.beginPath();
   cctx.moveTo(0, height - 0.5);
   cctx.lineTo(width, height - 0.5);
   cctx.stroke();
 
-  let first = true;
-  let hasAnySegment = false;
-  cctx.strokeStyle = "#57a7ff";
-  cctx.lineWidth = 1.5;
-  cctx.beginPath();
-  for (let i = 0; i < trace.length; i += 1) {
-    const point = trace[i];
-    const displaySemi = point.semitone;
-    if (!Number.isFinite(displaySemi)) {
-      first = true;
-      continue;
+  const valueToY = (semi) =>
+    ((bounds.max - semi) / Math.max(0.001, bounds.max - bounds.min)) * height;
+  const drawSeries = (color, widthPx, getter) => {
+    let first = true;
+    let hasSegment = false;
+    cctx.strokeStyle = color;
+    cctx.lineWidth = widthPx;
+    cctx.beginPath();
+    for (let i = 0; i < trace.length; i += 1) {
+      const point = trace[i];
+      const semi = getter(point);
+      if (!Number.isFinite(semi)) {
+        first = true;
+        continue;
+      }
+      const x = (i / Math.max(1, trace.length - 1)) * width;
+      const y = valueToY(semi);
+      if (first) {
+        cctx.moveTo(x, y);
+        first = false;
+      } else {
+        cctx.lineTo(x, y);
+      }
+      hasSegment = true;
     }
-    const x = (i / Math.max(1, trace.length - 1)) * width;
-    const y = ((bounds.max - displaySemi) / Math.max(0.001, bounds.max - bounds.min)) * height;
-    if (first) {
-      cctx.moveTo(x, y);
-      first = false;
-      hasAnySegment = true;
-    } else {
-      cctx.lineTo(x, y);
-      hasAnySegment = true;
+    if (hasSegment) {
+      cctx.stroke();
     }
-  }
-  if (hasAnySegment) {
-    cctx.stroke();
+    return hasSegment;
+  };
+
+  const hasRaw = drawSeries(rawColor, 1.5, (point) =>
+    Number.isFinite(point.rawDetectedSemitone) ? point.rawDetectedSemitone : point.rawSemitone
+  );
+  const hasFiltered = drawSeries(filteredColor, 2.2, (point) => point.semitone);
+
+  if (!hasRaw && !hasFiltered) {
+    cctx.fillStyle = emptyColor;
+    cctx.font = "11px Lexend, sans-serif";
+    cctx.textAlign = "center";
+    cctx.textBaseline = "middle";
+    cctx.fillText("No trace detected", width * 0.5, height * 0.5);
   }
 }
 
@@ -3682,6 +4078,13 @@ function renderCalibrationCandidates(candidates, roundLabel) {
     return;
   }
   clearCalibrationCandidates();
+  if (!Array.isArray(candidates) || !candidates.length) {
+    const empty = document.createElement("div");
+    empty.className = "meter-text";
+    empty.textContent = "No candidates available. Record again and retry.";
+    calCandidates.appendChild(empty);
+    return;
+  }
   const allSemitones = [];
   candidates.forEach((candidate) => {
     candidate.result.trace.forEach((point) => {
@@ -3689,20 +4092,45 @@ function renderCalibrationCandidates(candidates, roundLabel) {
         allSemitones.push(point.semitone);
       } else if (Number.isFinite(point.rawSemitone)) {
         allSemitones.push(point.rawSemitone);
+      } else if (Number.isFinite(point.rawDetectedSemitone)) {
+        allSemitones.push(point.rawDetectedSemitone);
       }
     });
   });
-  let bounds = { min: -24, max: 24 };
-  if (allSemitones.length) {
-    const min = Math.min(...allSemitones);
-    const max = Math.max(...allSemitones);
-    const paddedMin = Math.floor(min - 2);
-    const paddedMax = Math.ceil(max + 2);
-    if (paddedMax - paddedMin >= 6) {
-      bounds = {
-        min: Math.max(-48, paddedMin),
-        max: Math.min(72, paddedMax),
-      };
+  let bounds = null;
+  if (
+    roundLabel === "fine" &&
+    calibrationState.grossTraceBounds &&
+    Number.isFinite(calibrationState.grossTraceBounds.min) &&
+    Number.isFinite(calibrationState.grossTraceBounds.max)
+  ) {
+    bounds = {
+      min: calibrationState.grossTraceBounds.min,
+      max: calibrationState.grossTraceBounds.max,
+    };
+  } else {
+    bounds = { min: -24, max: 24 };
+    if (allSemitones.length) {
+      const p05 = percentile(allSemitones, 0.05);
+      const p95 = percentile(allSemitones, 0.95);
+      const center = median(allSemitones);
+      if (Number.isFinite(p05) && Number.isFinite(p95) && Number.isFinite(center)) {
+        const denseSpan = Math.max(0, p95 - p05);
+        const targetSpan = clampNumber(denseSpan + 2, 6, 16, 10);
+        const half = targetSpan / 2;
+        const minBound = Math.max(-48, center - half);
+        const maxBound = Math.min(72, center + half);
+        bounds = {
+          min: Math.floor(minBound * 2) / 2,
+          max: Math.ceil(maxBound * 2) / 2,
+        };
+        if (bounds.max - bounds.min < 4) {
+          bounds = { min: center - 2, max: center + 2 };
+        }
+      }
+    }
+    if (roundLabel === "gross") {
+      calibrationState.grossTraceBounds = { ...bounds };
     }
   }
   candidates.forEach((candidate, idx) => {
@@ -3714,10 +4142,11 @@ function renderCalibrationCandidates(candidates, roundLabel) {
     renderCandidateTrace(canvasEl, candidate.result.trace, bounds);
     const meta = document.createElement("div");
     meta.className = "meter-text";
+    const traceCount = candidate.result.trace.filter((point) => Number.isFinite(point.semitone)).length;
     meta.textContent =
       `Score ${candidate.result.score.toFixed(1)} · valid ${candidate.result.metrics.validCount} · ` +
-      `jumps ${candidate.result.metrics.jumpCount} · jag ${candidate.result.metrics.meanDelta.toFixed(2)} · ` +
-      `oct ${candidate.result.metrics.octaveFlipCount}`;
+      `trace ${traceCount} · jumps ${candidate.result.metrics.jumpCount} · ` +
+      `jag ${candidate.result.metrics.meanDelta.toFixed(2)} · oct ${candidate.result.metrics.octaveFlipCount}`;
     const pickBtn = document.createElement("button");
     pickBtn.type = "button";
     pickBtn.className = "tiny-button";
@@ -3767,12 +4196,23 @@ function runCalibrationCandidates() {
   candidates.sort((a, b) => b.result.score - a.result.score);
   calibrationState.candidateSets = candidates;
   renderCalibrationCandidates(candidates, roundLabel);
+  const hasVisibleTrace = candidates.some((candidate) =>
+    candidate.result.trace.some(
+      (point) =>
+        Number.isFinite(point.semitone) ||
+        Number.isFinite(point.rawSemitone) ||
+        Number.isFinite(point.rawDetectedSemitone)
+    )
+  );
   const message =
     roundLabel === "gross"
       ? "Gross pass: pick the trace that best matches your performance."
       : "Fine pass: pick the best refinement.";
-  setCalibrationStatus(message);
-  setCalibrationWindowStatus(message);
+  const warning = hasVisibleTrace
+    ? ""
+    : " No visible trace detected. Try stronger input, lower RMS/correlation gates, or record again.";
+  setCalibrationStatus(`${message}${warning}`);
+  setCalibrationWindowStatus(`${message}${warning}`);
 }
 
 function resetCalibration() {
@@ -3780,6 +4220,7 @@ function resetCalibration() {
   calibrationState.round = 1;
   calibrationState.grossWinner = null;
   calibrationState.candidateSets = [];
+  calibrationState.grossTraceBounds = null;
   calibrationState.audioSamples = null;
   calibrationState.sampleRate = 0;
   clearCalibrationCandidates();
@@ -3894,6 +4335,7 @@ syncRangeNumberBoxesFromSliders();
 refreshMarkers();
 updateReferenceButton();
 updateMicUiState();
+syncAnalysisPresetSelect();
 resizeCanvas();
 positionMicPanel();
 syncStateToQueryString();
@@ -4075,21 +4517,46 @@ if (micGainInput) {
   });
 }
 
+if (analysisPresetSelect) {
+  analysisPresetSelect.addEventListener("change", () => {
+    const presetName = analysisPresetSelect.value;
+    const preset = ANALYSIS_PRESETS[presetName];
+    if (preset) {
+      applyAnalysisConfig(preset);
+      setCalibrationStatus(`Applied ${presetName} preset.`);
+    }
+  });
+}
+
 bindAnalysisNumberInput(analysisRmsThresholdInput, "rmsThreshold", 0.001, 0.2, 0.01, false);
 bindAnalysisNumberInput(analysisRmsWindowInput, "rmsWindowFrames", 1, 32, 4, true);
 bindAnalysisNumberInput(analysisCorrThresholdInput, "correlationThreshold", 0.5, 0.99, 0.88, false);
+bindAnalysisNumberInput(analysisRawInitConfirmInput, "rawInitConfirmFrames", 1, 8, 2, true);
+bindAnalysisNumberInput(analysisRawInitStabilityInput, "rawInitStabilitySemitones", 0.1, 3, 0.9, false);
 bindAnalysisNumberInput(analysisMinFreqInput, "minFreq", 20, 400, 70, true);
 bindAnalysisNumberInput(analysisMaxFreqInput, "maxFreq", 300, 3000, 1400, true);
 bindAnalysisNumberInput(analysisJumpThresholdInput, "jumpThreshold", 0.1, 6, 0.65, false);
 bindAnalysisNumberInput(analysisJumpConfirmInput, "jumpConfirmFrames", 1, 8, 2, true);
+bindAnalysisNumberInput(analysisVoiceEnterRmsFactorInput, "voiceEnterRmsFactor", 1, 3, 1.35, false);
+bindAnalysisNumberInput(analysisVoiceExitRmsFactorInput, "voiceExitRmsFactor", 0.2, 1.2, 0.78, false);
+bindAnalysisNumberInput(analysisVoiceEnterCorrOffsetInput, "voiceEnterCorrOffset", 0, 0.2, 0.04, false);
+bindAnalysisNumberInput(analysisVoiceExitCorrOffsetInput, "voiceExitCorrOffset", -0.25, 0.15, -0.06, false);
+bindAnalysisNumberInput(analysisVoiceEnterFramesInput, "voiceEnterFrames", 1, 12, 2, true);
+bindAnalysisNumberInput(analysisVoiceExitFramesInput, "voiceExitFrames", 1, 20, 5, true);
 bindAnalysisNumberInput(analysisSmoothFollowInput, "smoothFollow", 0.01, 0.5, 0.18, false);
 bindAnalysisNumberInput(analysisIdleDecayInput, "idleDecay", 0.8, 0.995, 0.95, false);
+bindAnalysisNumberInput(analysisOnsetQuarantineInput, "onsetQuarantineFrames", 0, 12, 2, true);
 bindAnalysisNumberInput(analysisRangeMarginInput, "rangeMargin", 0, 4, 0.75, false);
 bindAnalysisNumberInput(analysisOutRangeHoldInput, "outOfRangeHoldFrames", 1, 60, 8, true);
 
 if (analysisToggle) {
   analysisToggle.addEventListener("click", () => {
-    togglePanelVisibility(analysisPanel, analysisToggle);
+    const willOpen = Boolean(analysisPanel && analysisPanel.hidden);
+    setToolPanelOpen(analysisPanel, analysisToggle, willOpen);
+    setToolPanelOpen(calibratePanel, calibrateToggle, false);
+    if (!willOpen) {
+      setCalibrationFocus(false);
+    }
   });
 }
 
@@ -4101,8 +4568,10 @@ if (debugToggle) {
 
 if (calibrateToggle) {
   calibrateToggle.addEventListener("click", () => {
-    togglePanelVisibility(calibratePanel, calibrateToggle);
-    if (calibratePanel && calibratePanel.hidden) {
+    const willOpen = Boolean(calibratePanel && calibratePanel.hidden);
+    setToolPanelOpen(calibratePanel, calibrateToggle, willOpen);
+    setToolPanelOpen(analysisPanel, analysisToggle, false);
+    if (!willOpen) {
       setCalibrationFocus(false);
     }
   });

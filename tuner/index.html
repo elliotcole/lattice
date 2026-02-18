@@ -153,143 +153,6 @@
         <button id="calibrate-toggle" type="button" class="tiny-button">Calibrate</button>
       </div>
       <div class="mic-subpanels">
-        <section id="analysis-panel" class="panel tools-panel" hidden>
-          <div class="tools-title">Settings</div>
-          <div class="tool-grid">
-            <label for="analysis-rms-threshold">RMS Gate</label>
-            <input id="analysis-rms-threshold" type="number" min="0.001" max="0.2" step="0.001" value="0.01" />
-
-            <label for="analysis-rms-window">RMS Window (frames)</label>
-            <input id="analysis-rms-window" type="number" min="1" max="32" step="1" value="4" />
-
-            <label for="analysis-corr-threshold">Correlation Gate</label>
-            <input
-              id="analysis-corr-threshold"
-              type="number"
-              min="0.5"
-              max="0.99"
-              step="0.01"
-              value="0.88"
-            />
-
-            <label for="analysis-raw-init-confirm">Raw Init Confirm (frames)</label>
-            <input id="analysis-raw-init-confirm" type="number" min="1" max="8" step="1" value="2" />
-
-            <label for="analysis-raw-init-stability">Raw Init Stability (st)</label>
-            <input
-              id="analysis-raw-init-stability"
-              type="number"
-              min="0.1"
-              max="3"
-              step="0.05"
-              value="0.9"
-            />
-
-            <label for="analysis-min-freq">Min Freq (Hz)</label>
-            <input id="analysis-min-freq" type="number" min="20" max="400" step="1" value="70" />
-
-            <label for="analysis-max-freq">Max Freq (Hz)</label>
-            <input id="analysis-max-freq" type="number" min="300" max="3000" step="1" value="1400" />
-
-            <label for="analysis-jump-threshold">Jump Threshold (st)</label>
-            <input
-              id="analysis-jump-threshold"
-              type="number"
-              min="0.1"
-              max="6"
-              step="0.05"
-              value="0.65"
-            />
-
-            <label for="analysis-jump-confirm">Jump Confirm Frames</label>
-            <input id="analysis-jump-confirm" type="number" min="1" max="8" step="1" value="2" />
-
-            <label for="analysis-voice-enter-rms-factor">Voice Enter RMS x</label>
-            <input
-              id="analysis-voice-enter-rms-factor"
-              type="number"
-              min="1"
-              max="3"
-              step="0.01"
-              value="1.35"
-            />
-
-            <label for="analysis-voice-exit-rms-factor">Voice Exit RMS x</label>
-            <input
-              id="analysis-voice-exit-rms-factor"
-              type="number"
-              min="0.2"
-              max="1.2"
-              step="0.01"
-              value="0.78"
-            />
-
-            <label for="analysis-voice-enter-corr-offset">Voice Enter Corr +</label>
-            <input
-              id="analysis-voice-enter-corr-offset"
-              type="number"
-              min="0"
-              max="0.2"
-              step="0.005"
-              value="0.04"
-            />
-
-            <label for="analysis-voice-exit-corr-offset">Voice Exit Corr +</label>
-            <input
-              id="analysis-voice-exit-corr-offset"
-              type="number"
-              min="-0.25"
-              max="0.15"
-              step="0.005"
-              value="-0.06"
-            />
-
-            <label for="analysis-voice-enter-frames">Voice Enter Frames</label>
-            <input id="analysis-voice-enter-frames" type="number" min="1" max="12" step="1" value="2" />
-
-            <label for="analysis-voice-exit-frames">Voice Exit Frames</label>
-            <input id="analysis-voice-exit-frames" type="number" min="1" max="20" step="1" value="5" />
-
-            <label for="analysis-smooth-follow">Smooth Follow</label>
-            <input id="analysis-smooth-follow" type="number" min="0.01" max="0.5" step="0.01" value="0.18" />
-
-            <label for="analysis-idle-decay">Idle Decay</label>
-            <input id="analysis-idle-decay" type="number" min="0.8" max="0.995" step="0.005" value="0.95" />
-
-            <label for="analysis-onset-quarantine">Onset Quarantine (frames)</label>
-            <input id="analysis-onset-quarantine" type="number" min="0" max="12" step="1" value="2" />
-
-            <label for="analysis-range-margin">Range Margin (st)</label>
-            <input id="analysis-range-margin" type="number" min="0" max="4" step="0.05" value="0.75" />
-
-            <label for="analysis-out-range-hold">Out-of-range Hold (frames)</label>
-            <input id="analysis-out-range-hold" type="number" min="1" max="60" step="1" value="8" />
-          </div>
-          <div class="tools-title">Anomaly Capture</div>
-          <div class="tool-grid">
-            <label for="anomaly-enabled">Enable</label>
-            <input id="anomaly-enabled" type="checkbox" />
-
-            <label for="anomaly-threshold-st">Jump Threshold (st)</label>
-            <input id="anomaly-threshold-st" type="number" min="1" max="24" step="0.5" value="7" />
-
-            <label for="anomaly-pre-ms">Pre (ms)</label>
-            <input id="anomaly-pre-ms" type="number" min="200" max="4000" step="50" value="1200" />
-
-            <label for="anomaly-post-ms">Post (ms)</label>
-            <input id="anomaly-post-ms" type="number" min="200" max="4000" step="50" value="1200" />
-
-            <label for="anomaly-cooldown-ms">Cooldown (ms)</label>
-            <input id="anomaly-cooldown-ms" type="number" min="200" max="5000" step="50" value="1200" />
-          </div>
-          <div class="debug-actions">
-            <button id="anomaly-clear" type="button" class="tiny-button">Clear</button>
-            <button id="anomaly-copy-json" type="button" class="tiny-button">Copy JSON</button>
-            <button id="anomaly-copy-csv" type="button" class="tiny-button">Copy CSV</button>
-          </div>
-          <div id="anomaly-status" class="meter-text">Captures: 0</div>
-        </section>
-
         <section id="calibrate-panel" class="panel tools-panel" hidden>
           <div class="tools-title">Calibration</div>
           <div class="debug-actions">
@@ -304,6 +167,143 @@
       </div>
     </aside>
 
+    <section id="analysis-panel" class="panel tools-panel analysis-panel-floating" hidden>
+      <div class="tools-title">Settings</div>
+      <div class="tool-grid analysis-grid">
+        <label for="analysis-rms-threshold">RMS Gate</label>
+        <input id="analysis-rms-threshold" type="number" min="0.001" max="0.2" step="0.001" value="0.01" />
+
+        <label for="analysis-rms-window">RMS Window (frames)</label>
+        <input id="analysis-rms-window" type="number" min="1" max="32" step="1" value="4" />
+
+        <label for="analysis-corr-threshold">Correlation Gate</label>
+        <input
+          id="analysis-corr-threshold"
+          type="number"
+          min="0.5"
+          max="0.99"
+          step="0.01"
+          value="0.88"
+        />
+
+        <label for="analysis-raw-init-confirm">Raw Init Confirm (frames)</label>
+        <input id="analysis-raw-init-confirm" type="number" min="1" max="8" step="1" value="2" />
+
+        <label for="analysis-raw-init-stability">Raw Init Stability (st)</label>
+        <input
+          id="analysis-raw-init-stability"
+          type="number"
+          min="0.1"
+          max="3"
+          step="0.05"
+          value="0.9"
+        />
+
+        <label for="analysis-min-freq">Min Freq (Hz)</label>
+        <input id="analysis-min-freq" type="number" min="20" max="400" step="1" value="70" />
+
+        <label for="analysis-max-freq">Max Freq (Hz)</label>
+        <input id="analysis-max-freq" type="number" min="300" max="3000" step="1" value="1400" />
+
+        <label for="analysis-jump-threshold">Jump Threshold (st)</label>
+        <input
+          id="analysis-jump-threshold"
+          type="number"
+          min="0.1"
+          max="6"
+          step="0.05"
+          value="0.65"
+        />
+
+        <label for="analysis-jump-confirm">Jump Confirm Frames</label>
+        <input id="analysis-jump-confirm" type="number" min="1" max="8" step="1" value="2" />
+
+        <label for="analysis-voice-enter-rms-factor">Voice Enter RMS x</label>
+        <input
+          id="analysis-voice-enter-rms-factor"
+          type="number"
+          min="1"
+          max="3"
+          step="0.01"
+          value="1.35"
+        />
+
+        <label for="analysis-voice-exit-rms-factor">Voice Exit RMS x</label>
+        <input
+          id="analysis-voice-exit-rms-factor"
+          type="number"
+          min="0.2"
+          max="1.2"
+          step="0.01"
+          value="0.78"
+        />
+
+        <label for="analysis-voice-enter-corr-offset">Voice Enter Corr +</label>
+        <input
+          id="analysis-voice-enter-corr-offset"
+          type="number"
+          min="0"
+          max="0.2"
+          step="0.005"
+          value="0.04"
+        />
+
+        <label for="analysis-voice-exit-corr-offset">Voice Exit Corr +</label>
+        <input
+          id="analysis-voice-exit-corr-offset"
+          type="number"
+          min="-0.25"
+          max="0.15"
+          step="0.005"
+          value="-0.06"
+        />
+
+        <label for="analysis-voice-enter-frames">Voice Enter Frames</label>
+        <input id="analysis-voice-enter-frames" type="number" min="1" max="12" step="1" value="2" />
+
+        <label for="analysis-voice-exit-frames">Voice Exit Frames</label>
+        <input id="analysis-voice-exit-frames" type="number" min="1" max="20" step="1" value="5" />
+
+        <label for="analysis-smooth-follow">Smooth Follow</label>
+        <input id="analysis-smooth-follow" type="number" min="0.01" max="0.5" step="0.01" value="0.18" />
+
+        <label for="analysis-idle-decay">Idle Decay</label>
+        <input id="analysis-idle-decay" type="number" min="0.8" max="0.995" step="0.005" value="0.95" />
+
+        <label for="analysis-onset-quarantine">Onset Quarantine (frames)</label>
+        <input id="analysis-onset-quarantine" type="number" min="0" max="12" step="1" value="2" />
+
+        <label for="analysis-range-margin">Range Margin (st)</label>
+        <input id="analysis-range-margin" type="number" min="0" max="4" step="0.05" value="0.75" />
+
+        <label for="analysis-out-range-hold">Out-of-range Hold (frames)</label>
+        <input id="analysis-out-range-hold" type="number" min="1" max="60" step="1" value="8" />
+      </div>
+      <div class="tools-title">Anomaly Capture</div>
+      <div class="tool-grid anomaly-grid">
+        <label for="anomaly-enabled">Enable</label>
+        <input id="anomaly-enabled" type="checkbox" />
+
+        <label for="anomaly-threshold-st">Jump Threshold (st)</label>
+        <input id="anomaly-threshold-st" type="number" min="1" max="24" step="0.5" value="7" />
+
+        <label for="anomaly-pre-ms">Pre (ms)</label>
+        <input id="anomaly-pre-ms" type="number" min="200" max="4000" step="50" value="1200" />
+
+        <label for="anomaly-post-ms">Post (ms)</label>
+        <input id="anomaly-post-ms" type="number" min="200" max="4000" step="50" value="1200" />
+
+        <label for="anomaly-cooldown-ms">Cooldown (ms)</label>
+        <input id="anomaly-cooldown-ms" type="number" min="200" max="5000" step="50" value="1200" />
+      </div>
+      <div class="debug-actions">
+        <button id="anomaly-clear" type="button" class="tiny-button">Clear</button>
+        <button id="anomaly-copy-json" type="button" class="tiny-button">Copy JSON</button>
+        <button id="anomaly-copy-csv" type="button" class="tiny-button">Copy CSV</button>
+      </div>
+      <div id="anomaly-status" class="meter-text">Captures: 0</div>
+    </section>
+
     <section id="cal-window" class="cal-window" hidden>
       <article class="panel cal-window-card">
         <header class="cal-window-head">
@@ -311,6 +311,12 @@
           <button id="cal-window-close" type="button" class="tiny-button">Close</button>
         </header>
         <div id="cal-window-status" class="meter-text"></div>
+        <div id="cal-window-progress" class="cal-window-progress" hidden>
+          <div id="cal-window-progress-text" class="meter-text">Running calibration...</div>
+          <div class="cal-window-progress-track" aria-hidden="true">
+            <div id="cal-window-progress-fill" class="cal-window-progress-fill"></div>
+          </div>
+        </div>
         <div id="cal-candidates" class="cal-candidates"></div>
       </article>
     </section>
@@ -327,6 +333,7 @@
       <article class="card">
         <div class="label">Cents Deviation</div>
         <div id="cents" class="value">--</div>
+        <div id="out-of-range-readout" class="subvalue" aria-live="polite"></div>
       </article>
     </section>
 

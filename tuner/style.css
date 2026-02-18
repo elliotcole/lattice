@@ -515,6 +515,15 @@ button.button-on {
   background: var(--panel);
 }
 
+.analysis-panel-floating {
+  position: fixed;
+  z-index: 4;
+  width: min(460px, calc(100vw - 24px));
+  max-height: min(70vh, 760px);
+  overflow: auto;
+  background: color-mix(in srgb, var(--panel), transparent 12%);
+}
+
 .tools-title {
   font-size: 11px;
   color: var(--text-primary);
@@ -528,6 +537,14 @@ button.button-on {
   grid-template-columns: 1fr 88px;
   gap: 5px 8px;
   align-items: center;
+}
+
+.analysis-grid {
+  grid-template-columns: minmax(0, 1fr) 88px minmax(0, 1fr) 88px;
+}
+
+.anomaly-grid {
+  grid-template-columns: 1fr 88px;
 }
 
 .tool-grid label {
@@ -623,6 +640,28 @@ body.theme-dark .cal-card {
   padding-right: 4px;
 }
 
+.cal-window-progress {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+
+.cal-window-progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-solid), transparent 20%);
+  overflow: hidden;
+}
+
+.cal-window-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+
 .cal-window .cal-card canvas {
   height: 220px;
 }
@@ -650,6 +689,15 @@ body.theme-dark .cal-card {
   line-height: 1;
   font-family: "IBM Plex Sans", sans-serif;
   text-shadow: none;
+}
+
+.subvalue {
+  min-height: 14px;
+  margin-top: 3px;
+  color: var(--viz-blob-warn);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.15px;
 }
 
 .spelling-dialog {
@@ -687,6 +735,17 @@ body.theme-dark .cal-card {
     bottom: 58px;
     left: 12px;
     width: min(250px, calc(100vw - 24px));
+  }
+
+  .analysis-panel-floating {
+    left: 12px !important;
+    right: 12px;
+    width: auto;
+    max-height: min(60vh, 520px);
+  }
+
+  .analysis-grid {
+    grid-template-columns: 1fr 88px;
   }
 
   .readout-float {

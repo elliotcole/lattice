@@ -90,6 +90,7 @@ const statusEl = document.getElementById("status");
 const hzEl = document.getElementById("hz");
 const noteEl = document.getElementById("note");
 const centsEl = document.getElementById("cents");
+const outOfRangeReadoutEl = document.getElementById("out-of-range-readout");
 
 const fundamentalInput = document.getElementById("fundamental");
 const fundamentalNoteSelect = document.getElementById("fundamental-note");
@@ -159,6 +160,9 @@ const calCandidates = document.getElementById("cal-candidates");
 const calWindow = document.getElementById("cal-window");
 const calWindowClose = document.getElementById("cal-window-close");
 const calWindowStatus = document.getElementById("cal-window-status");
+const calWindowProgress = document.getElementById("cal-window-progress");
+const calWindowProgressText = document.getElementById("cal-window-progress-text");
+const calWindowProgressFill = document.getElementById("cal-window-progress-fill");
 const fundamentalSpellingDialog = document.getElementById("fundamental-spelling-dialog");
 const fundamentalSpellingSharpButton = document.getElementById("fundamental-spelling-sharp");
 const fundamentalSpellingFlatButton = document.getElementById("fundamental-spelling-flat");
@@ -212,6 +216,10 @@ let frameCounter = 0;
 let decayTrailPoints = [];
 let lastDecayTrailSampleMs = 0;
 let liveInputStrength = 0;
+let noPitchHoldSemitone = null;
+let noPitchHoldStrength = 0;
+let noPitchHoldLastMs = 0;
+let lastInRangeTrackedSemitone = null;
 const DECAY_TRAIL_DURATION_MS = 4800;
 
 const analysisConfig = {
@@ -327,7 +335,9 @@ const calibrationState = {
   grossWinner: null,
   candidateSets: [],
   grossTraceBounds: null,
+  isRunning: false,
 };
+const AUTO_PICK_TOP_CALIBRATION_CANDIDATE = true;
 
 const calibrationRanges = {
   rmsThreshold: [0.003, 0.06],
@@ -1981,16 +1991,54 @@ function getNearestRatioAtSemitone(semitone) {
 
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
-  const width = canvas.clientWidth;
-  const height = canvas.clientHeight;
-  canvas.width = Math.round(width * dpr);
-  canvas.height = Math.round(height * dpr);
+  const width = Math.max(1, Math.round(canvas.clientWidth));
+  const height = Math.max(1, Math.round(canvas.clientHeight));
+  const targetWidth = Math.max(1, Math.round(width * dpr));
+  const targetHeight = Math.max(1, Math.round(height * dpr));
+  if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+  }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+function ensureCanvasResolution() {
+  const width = Math.max(1, Math.round(canvas.clientWidth));
+  const height = Math.max(1, Math.round(canvas.clientHeight));
+  const dpr = window.devicePixelRatio || 1;
+  const targetWidth = Math.max(1, Math.round(width * dpr));
+  const targetHeight = Math.max(1, Math.round(height * dpr));
+  if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+    resizeCanvas();
+  } else {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  return { width, height };
+}
+
+function refreshLayoutAndViz() {
+  resizeCanvas();
+  positionMicPanel();
+  positionAnalysisPanel();
+  drawViz();
+}
+
+function scheduleStartupLayoutPasses() {
+  let pass = 0;
+  const runPass = () => {
+    pass += 1;
+    refreshLayoutAndViz();
+    if (pass < 4) {
+      requestAnimationFrame(runPass);
+    }
+  };
+  requestAnimationFrame(runPass);
+}
+
 function drawViz() {
-  const width = canvas.clientWidth;
-  const height = canvas.clientHeight;
+  const size = ensureCanvasResolution();
+  const width = size.width;
+  const height = size.height;
   const bounds = getVisualizationSemitoneBounds();
   const fundamental = Number(fundamentalInput.value) || 261.63;
   const a4 = Number(a4Input.value) || 440;
@@ -2036,6 +2084,7 @@ function drawViz() {
   const blobGood = getCssVar("--viz-blob-good", "rgba(97,245,177,0.95)");
   const blobWarn = getCssVar("--viz-blob-warn", "rgba(246,198,93,0.95)");
   const blobBad = getCssVar("--viz-blob-bad", "rgba(255,109,109,0.95)");
+  const blobGap = getCssVar("--viz-et", "rgba(159,182,212,0.9)");
   const toneColorFor = (tone) => (tone === "warn" ? blobWarn : tone === "bad" ? blobBad : blobGood);
   const markerColorFor = (marker) => {
     if (!colorFamiliesEnabled) {
@@ -2294,7 +2343,12 @@ function drawViz() {
       }
       visible.push({
         x,
-        y: yForSemitone(point.semitone),
+        y:
+          Number(point.outDirection) < 0
+            ? height
+            : Number(point.outDirection) > 0
+              ? 0
+              : yForSemitone(point.semitone),
         alpha: 1 - age / trailDurationMs,
         tone: point.tone || "good",
         strength: Number.isFinite(point.strength) ? point.strength : 1,
@@ -2365,6 +2419,17 @@ function drawViz() {
       const centsText = centsRounded === 0 ? "0" : `${centsRounded > 0 ? "+" : ""}${centsRounded}`;
       ctx.fillText(`${centsText}c`, lineX + 34, y - 18);
     }
+  } else if (Number.isFinite(noPitchHoldSemitone) && noPitchHoldStrength > 0) {
+    const y = yForSemitone(noPitchHoldSemitone);
+    const alpha = Math.max(0, Math.min(1, noPitchHoldStrength));
+    const radius = 7 + 3 * alpha;
+    ctx.save();
+    ctx.globalAlpha = 0.2 + 0.7 * alpha;
+    ctx.fillStyle = blobGap;
+    ctx.beginPath();
+    ctx.arc(lineX, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -2508,6 +2573,33 @@ function resetLiveTrackingState(clearSmooth = false) {
   if (clearSmooth) {
     smoothSemitone = null;
     displaySemitone = null;
+    noPitchHoldSemitone = null;
+    noPitchHoldStrength = 0;
+    noPitchHoldLastMs = 0;
+    lastInRangeTrackedSemitone = null;
+  }
+}
+
+function updateNoPitchHoldState(nowMs, anchorSemitone = null, hasTrackedPitch = false) {
+  if (hasTrackedPitch && Number.isFinite(anchorSemitone)) {
+    noPitchHoldSemitone = anchorSemitone;
+    noPitchHoldStrength = 1;
+    noPitchHoldLastMs = nowMs;
+    return;
+  }
+  if (!Number.isFinite(noPitchHoldSemitone) || noPitchHoldStrength <= 0) {
+    noPitchHoldSemitone = null;
+    noPitchHoldStrength = 0;
+    noPitchHoldLastMs = nowMs;
+    return;
+  }
+  const deltaMs = Math.max(0, nowMs - (noPitchHoldLastMs || nowMs));
+  noPitchHoldLastMs = nowMs;
+  const fadeTauMs = 420;
+  noPitchHoldStrength *= Math.exp(-deltaMs / fadeTauMs);
+  if (!Number.isFinite(noPitchHoldStrength) || noPitchHoldStrength < 0.03) {
+    noPitchHoldSemitone = null;
+    noPitchHoldStrength = 0;
   }
 }
 
@@ -2761,11 +2853,15 @@ function updateTrackedSemitone(candidateSemitone, correlation = 1) {
 }
 
 function updateReadout(freq, options = {}) {
+  const outOfRange = Boolean(options.outOfRange);
   if (!freq || !Number.isFinite(freq)) {
     hzEl.textContent = "-- Hz";
     noteEl.textContent = "--";
     centsEl.textContent = "--";
-    statusEl.textContent = "Listening...";
+    if (outOfRangeReadoutEl) {
+      outOfRangeReadoutEl.textContent = outOfRange ? "Out of Range" : "";
+    }
+    statusEl.textContent = outOfRange ? "Out of range" : "Listening...";
     return;
   }
   const fundamental = getFundamentalHz();
@@ -2776,6 +2872,9 @@ function updateReadout(freq, options = {}) {
   noteEl.textContent = nearestRatio ? nearestRatio.label : "--";
   const cents = nearestRatio ? Math.round(nearestRatio.cents) : 0;
   centsEl.textContent = cents === 0 ? "0" : `${cents > 0 ? "+" : ""}${cents}`;
+  if (outOfRangeReadoutEl) {
+    outOfRangeReadoutEl.textContent = outOfRange ? "Out of Range" : "";
+  }
   statusEl.textContent = "Tracking pitch";
 }
 
@@ -2825,6 +2924,7 @@ function updateDecayTrail(nowMs) {
     const tone = centsOff <= 8 ? "good" : centsOff <= 24 ? "warn" : "bad";
     decayTrailPoints.push({
       semitone: displaySemitone,
+      outDirection: Number.isFinite(liveOutOfRangeDirection) ? liveOutOfRangeDirection : 0,
       t: nowMs,
       tone,
       strength: Math.max(0.08, Math.min(1, liveInputStrength || 0)),
@@ -2891,6 +2991,14 @@ function renderLoop() {
     const bounds = getVisualizationSemitoneBounds();
     const margin = Math.max(0, analysisConfig.rangeMargin);
     const normalized = normalizePitchToRange(rawPitch, fundamental, bounds, margin, smoothSemitone);
+    const rawDetectedNormalized = normalizePitchToRange(
+      rawPitchDetected,
+      fundamental,
+      bounds,
+      margin,
+      smoothSemitone
+    );
+    const rawDetectedOutOfRange = hasDetectedRaw && !rawDetectedNormalized.inRange;
     const inRange = normalized.inRange;
     const pitch = inRange ? normalized.frequency : null;
     const hasUsablePitch = Boolean(liveVoiced && pitch && Number.isFinite(pitch));
@@ -3022,9 +3130,18 @@ function renderLoop() {
       Number.isFinite(displaySemitone) && liveHasActivePitch && fundamental > 0
         ? fundamental * Math.pow(2, displaySemitone / 12)
         : null;
+    const hasInRangeTrackedPitch =
+      Number.isFinite(displaySemitone) && liveHasActivePitch && liveOutOfRangeDirection === 0;
+    if (hasInRangeTrackedPitch) {
+      lastInRangeTrackedSemitone = displaySemitone;
+    }
     detectedPitchHz = filteredReadoutPitch;
-    const showOutOfRange = outOfRangeFrames >= Math.max(1, Math.round(analysisConfig.outOfRangeHoldFrames));
-    updateReadout(filteredReadoutPitch, { outOfRange: showOutOfRange });
+    const showOutOfRange = rawDetectedOutOfRange;
+    const readoutPitch =
+      showOutOfRange && Number.isFinite(rawPitchDetected)
+        ? rawPitchDetected
+        : filteredReadoutPitch;
+    updateReadout(readoutPitch, { outOfRange: showOutOfRange });
 
     const frame = {
       i: ++frameCounter,
@@ -3054,6 +3171,7 @@ function renderLoop() {
     anomalyCapture.prevFrame = frame;
   }
 
+  updateNoPitchHoldState(nowMs, lastInRangeTrackedSemitone, hasLiveAudioTrack(stream) && Number.isFinite(displaySemitone) && liveHasActivePitch && liveOutOfRangeDirection === 0);
   updateDecayTrail(nowMs);
 
   drawViz();
@@ -3095,6 +3213,8 @@ async function start() {
       statusEl.textContent = "Listening...";
     }
     updateMicUiState();
+    // Mic permission can change viewport/layout timing; force a fresh multi-pass redraw.
+    scheduleStartupLayoutPasses();
   } catch (error) {
     if (statusEl) {
       statusEl.textContent = "Microphone access failed. Allow mic access and refresh.";
@@ -3111,6 +3231,13 @@ function toggleMicPanel() {
   positionMicPanel();
   const opening = micPanel.hidden;
   micPanel.hidden = !opening;
+  if (!opening) {
+    setToolPanelOpen(analysisPanel, analysisToggle, false);
+    setToolPanelOpen(calibratePanel, calibrateToggle, false);
+    setCalibrationFocus(false);
+  } else {
+    positionAnalysisPanel();
+  }
   if (startBtn) {
     startBtn.classList.toggle("button-on", opening);
   }
@@ -3126,6 +3253,30 @@ function positionMicPanel() {
   }
   const micButtonRect = startBtn.getBoundingClientRect();
   micPanel.style.top = `${Math.max(12, Math.round(micButtonRect.top))}px`;
+}
+
+function positionAnalysisPanel() {
+  if (!analysisPanel || !analysisToggle) {
+    return;
+  }
+  if (analysisPanel.hidden) {
+    return;
+  }
+  const buttonRect = analysisToggle.getBoundingClientRect();
+  const panelRect = analysisPanel.getBoundingClientRect();
+  const panelWidth = Math.max(280, Math.round(panelRect.width || 460));
+  const panelHeight = Math.max(220, Math.round(panelRect.height || 420));
+  const margin = 12;
+  let left = Math.round(buttonRect.left);
+  let top = Math.round(buttonRect.bottom + 8);
+  if (left + panelWidth > window.innerWidth - margin) {
+    left = Math.max(margin, Math.round(window.innerWidth - panelWidth - margin));
+  }
+  if (top + panelHeight > window.innerHeight - margin) {
+    top = Math.max(margin, Math.round(window.innerHeight - panelHeight - margin));
+  }
+  analysisPanel.style.left = `${left}px`;
+  analysisPanel.style.top = `${top}px`;
 }
 
 function stopMic() {
@@ -3486,37 +3637,173 @@ function mutateAround(base, min, max, factor = 0.2, integer = false) {
   return integer ? Math.round(next) : next;
 }
 
-function makeRandomCandidate(base = null, fine = false) {
-  const next = {};
+const calibrationIntegerKeys = new Set([
+  "rmsWindowFrames",
+  "minFreq",
+  "maxFreq",
+  "jumpConfirmFrames",
+  "onsetConfirmFrames",
+  "onsetResetFrames",
+  "rawInitConfirmFrames",
+  "voiceEnterFrames",
+  "voiceExitFrames",
+  "onsetQuarantineFrames",
+  "discontinuityConfirmFrames",
+  "discontinuityOctaveConfirmFrames",
+  "outOfRangeHoldFrames",
+  "medianWindowFrames",
+  "outOfRangeClampConfirmFrames",
+]);
+const calibrationTunableKeys = new Set([
+  "rmsThreshold",
+  "rmsWindowFrames",
+  "correlationThreshold",
+  "jumpThreshold",
+  "jumpConfirmFrames",
+  "medianWindowFrames",
+  "maxSemitoneStepPerFrame",
+  "octaveFlipTolerance",
+  "octaveFlipConfirmFrames",
+  "smoothFollow",
+  "stabilityDeadbandCents",
+  "stabilityFollow",
+  "stabilityMinCorrelation",
+  "onsetConfirmFrames",
+  "onsetStabilitySemitones",
+  "onsetResetFrames",
+  "discontinuityThresholdSt",
+  "discontinuityConfirmFrames",
+  "discontinuityOctaveConfirmFrames",
+  "rawInitConfirmFrames",
+  "rawInitStabilitySemitones",
+  "voiceEnterRmsFactor",
+  "voiceExitRmsFactor",
+  "voiceEnterCorrOffset",
+  "voiceExitCorrOffset",
+  "voiceEnterFrames",
+  "voiceExitFrames",
+  "onsetQuarantineFrames",
+  "rangeMargin",
+  "outOfRangeHoldFrames",
+  "outOfRangeClampConfirmFrames",
+  "outOfRangeClampCorrelation",
+]);
+
+function normalizeCandidateConfig(config) {
+  const normalized = {};
   Object.entries(calibrationRanges).forEach(([key, range]) => {
     const [min, max] = range;
-    const integer =
-      key === "rmsWindowFrames" ||
-      key === "minFreq" ||
-      key === "maxFreq" ||
-      key === "jumpConfirmFrames" ||
-      key === "onsetConfirmFrames" ||
-      key === "onsetResetFrames" ||
-      key === "rawInitConfirmFrames" ||
-      key === "voiceEnterFrames" ||
-      key === "voiceExitFrames" ||
-      key === "onsetQuarantineFrames" ||
-      key === "discontinuityConfirmFrames" ||
-      key === "discontinuityOctaveConfirmFrames" ||
-      key === "outOfRangeHoldFrames";
-    if (fine && base) {
-      next[key] = mutateAround(base[key], min, max, 0.12, integer);
-    } else {
-      const value = randomInRange(min, max);
-      next[key] = integer ? Math.round(value) : value;
-    }
+    const fallback = analysisConfig[key];
+    const integer = calibrationIntegerKeys.has(key);
+    const value = clampNumber(config?.[key], min, max, fallback);
+    normalized[key] = integer ? Math.round(value) : value;
   });
-  return next;
+  return normalized;
+}
+
+function candidateConfigSignature(config) {
+  const normalized = normalizeCandidateConfig(config);
+  return Object.keys(calibrationRanges)
+    .map((key) => `${key}:${Number(normalized[key]).toFixed(calibrationIntegerKeys.has(key) ? 0 : 5)}`)
+    .join("|");
+}
+
+function getCalibrationMutationSpread(key, roundLabel) {
+  const isFine = roundLabel === "fine";
+  const base = isFine ? 0.05 : 0.1;
+  if (
+    key === "rmsThreshold" ||
+    key === "correlationThreshold" ||
+    key === "smoothFollow" ||
+    key === "stabilityFollow" ||
+    key === "stabilityMinCorrelation" ||
+    key === "voiceEnterCorrOffset" ||
+    key === "voiceExitCorrOffset"
+  ) {
+    return isFine ? 0.03 : 0.07;
+  }
+  if (
+    key === "rmsWindowFrames" ||
+    key === "jumpConfirmFrames" ||
+    key === "onsetConfirmFrames" ||
+    key === "rawInitConfirmFrames" ||
+    key === "voiceEnterFrames" ||
+    key === "voiceExitFrames" ||
+    key === "onsetQuarantineFrames" ||
+    key === "outOfRangeHoldFrames" ||
+    key === "outOfRangeClampConfirmFrames" ||
+    key === "discontinuityConfirmFrames" ||
+    key === "discontinuityOctaveConfirmFrames"
+  ) {
+    return isFine ? 0.02 : 0.05;
+  }
+  return base;
+}
+
+function makeRandomCandidate(base = null, fine = false, spread = 0.2) {
+  const roundLabel = fine ? "fine" : "gross";
+  const anchor = normalizeCandidateConfig(base || analysisConfig);
+  const next = { ...anchor };
+  Object.entries(calibrationRanges).forEach(([key, range]) => {
+    if (!calibrationTunableKeys.has(key)) {
+      return;
+    }
+    const [min, max] = range;
+    const integer = calibrationIntegerKeys.has(key);
+    const keySpread = Math.max(0.005, getCalibrationMutationSpread(key, roundLabel) * spread);
+    next[key] = mutateAround(anchor[key], min, max, keySpread, integer);
+  });
+  return normalizeCandidateConfig(next);
+}
+
+function buildCalibrationCandidates(roundLabel) {
+  const targetCount = roundLabel === "gross" ? 10 : 6;
+  const candidates = [];
+  const seen = new Set();
+  const addCandidate = (config, label) => {
+    const normalized = normalizeCandidateConfig(config);
+    const signature = candidateConfigSignature(normalized);
+    if (seen.has(signature)) {
+      return false;
+    }
+    seen.add(signature);
+    candidates.push({ config: normalized, label });
+    return true;
+  };
+
+  const base = roundLabel === "fine" ? calibrationState.grossWinner || analysisConfig : analysisConfig;
+  addCandidate(analysisConfig, "Current");
+  if (roundLabel === "fine" && calibrationState.grossWinner) {
+    addCandidate(calibrationState.grossWinner, "Gross Winner");
+  }
+  if (roundLabel === "gross") {
+    addCandidate(ANALYSIS_PRESETS.balanced, "Preset Balanced");
+    addCandidate(ANALYSIS_PRESETS.stable, "Preset Stable");
+    addCandidate(ANALYSIS_PRESETS.responsive, "Preset Responsive");
+  }
+
+  let attempts = 0;
+  const localSpread = roundLabel === "fine" ? 0.8 : 1;
+  while (candidates.length < targetCount && attempts < 80) {
+    const candidate = makeRandomCandidate(base, true, localSpread);
+    addCandidate(candidate, roundLabel === "fine" ? `Refine ${candidates.length + 1}` : `Mutate ${candidates.length + 1}`);
+    attempts += 1;
+  }
+  while (candidates.length < targetCount) {
+    addCandidate(makeRandomCandidate(base, true, roundLabel === "fine" ? 0.65 : 0.85), `Mutate ${candidates.length + 1}`);
+  }
+  return candidates;
 }
 
 function sampleTraceWithConfig(samples, sampleRate, cfg) {
-  const frameSize = 2048;
-  const hopSize = 512;
+  let frameSize = 4096;
+  if (samples.length < frameSize * 2) {
+    frameSize = 2048;
+  }
+  if (samples.length < frameSize * 2) {
+    frameSize = 1024;
+  }
+  const hopSize = Math.max(256, Math.round(frameSize / 4));
   const trace = [];
   const rmsWindow = [];
   let smooth = null;
@@ -3536,6 +3823,7 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
   let inactiveFrames = 0;
   let outOfRangeCount = 0;
   let validCount = 0;
+  let trackedCount = 0;
   let jumpCount = 0;
   let octaveRejectCount = 0;
   let confidenceTotal = 0;
@@ -3870,6 +4158,9 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
       inRange,
       reason: detection.reason,
     });
+    if (Number.isFinite(displaySemitone)) {
+      trackedCount += 1;
+    }
   }
 
   let deltaSum = 0;
@@ -3877,6 +4168,7 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
   let accelSum = 0;
   let accelCount = 0;
   let octaveFlipCount = 0;
+  let extremeJumpCount = 0;
   let prevSemi = null;
   let prevDelta = null;
   let currentRun = 0;
@@ -3901,6 +4193,9 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
       const absDelta = Math.abs(delta);
       deltaSum += absDelta;
       deltaCount += 1;
+      if (absDelta >= 1.8) {
+        extremeJumpCount += 1;
+      }
       if (Math.abs(absDelta - 12) <= Math.max(0.4, (cfg.octaveFlipTolerance || 0.45) * 1.35)) {
         octaveFlipCount += 1;
       }
@@ -3922,15 +4217,20 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
   const meanAccel = accelCount ? accelSum / accelCount : 0;
   const meanRun = runCount ? runTotal / runCount : 0;
   const confidenceMean = usedCount ? confidenceTotal / usedCount : 0;
+  const trackingCoverage = trace.length ? trackedCount / trace.length : 0;
+  const lowCoveragePenalty = trackingCoverage < 0.45 ? (0.45 - trackingCoverage) * 320 : 0;
   const score =
     validCount * 2.3 +
+    trackingCoverage * 260 +
     confidenceMean * 80 +
     maxRun * 0.8 +
     meanRun * 0.35 -
+    lowCoveragePenalty -
     jumpCount * 2.4 -
     outOfRangeCount * 1.35 -
     meanDelta * 36 -
     meanAccel * 20 -
+    extremeJumpCount * 16 -
     octaveFlipCount * 24 -
     octaveRejectCount * 10;
   return {
@@ -3944,9 +4244,11 @@ function sampleTraceWithConfig(samples, sampleRate, cfg) {
       meanDelta,
       meanAccel,
       octaveFlipCount,
+      extremeJumpCount,
       octaveRejectCount,
       maxRun,
       meanRun,
+      trackingCoverage,
     },
   };
 }
@@ -3958,7 +4260,6 @@ function renderCandidateTrace(cardCanvas, trace, bounds) {
   const isDark = document.body.classList.contains("theme-dark");
   const bg = isDark ? "#0b1320" : "#e7edf5";
   const grid = isDark ? "rgba(205,220,245,0.32)" : "rgba(36,58,92,0.35)";
-  const rawColor = isDark ? "rgba(208,221,243,0.68)" : "rgba(59,78,113,0.62)";
   const filteredColor = isDark ? "#61e8ff" : "#0057b8";
   const emptyColor = isDark ? "rgba(225,235,249,0.9)" : "rgba(25,38,58,0.9)";
   cctx.clearRect(0, 0, width, height);
@@ -4003,18 +4304,30 @@ function renderCandidateTrace(cardCanvas, trace, bounds) {
     return hasSegment;
   };
 
-  const hasRaw = drawSeries(rawColor, 1.5, (point) =>
-    Number.isFinite(point.rawDetectedSemitone) ? point.rawDetectedSemitone : point.rawSemitone
-  );
   const hasFiltered = drawSeries(filteredColor, 2.2, (point) => point.semitone);
-
-  if (!hasRaw && !hasFiltered) {
+  if (!hasFiltered) {
     cctx.fillStyle = emptyColor;
     cctx.font = "11px Lexend, sans-serif";
     cctx.textAlign = "center";
     cctx.textBaseline = "middle";
-    cctx.fillText("No trace detected", width * 0.5, height * 0.5);
+    cctx.fillText("No stable track", width * 0.5, height * 0.5);
   }
+}
+
+function isUsableCalibrationCandidate(result) {
+  if (!result || !Array.isArray(result.trace) || !result.trace.length) {
+    return false;
+  }
+  const tracked = result.trace.filter((point) => Number.isFinite(point.semitone)).length;
+  const minTracked = Math.max(12, Math.round(result.trace.length * 0.14));
+  const coverage = Number(result.metrics?.trackingCoverage) || 0;
+  const extremeJumps = Number(result.metrics?.extremeJumpCount || 0);
+  return (
+    tracked >= minTracked &&
+    coverage >= 0.2 &&
+    Number(result.metrics?.validCount || 0) >= 1 &&
+    extremeJumps <= Math.max(8, Math.round(tracked * 0.1))
+  );
 }
 
 function clearCalibrationCandidates() {
@@ -4032,6 +4345,34 @@ function setCalibrationStatus(text) {
 function setCalibrationWindowStatus(text) {
   if (calWindowStatus) {
     calWindowStatus.textContent = text || "";
+  }
+}
+
+function setCalibrationProgress(active, completed = 0, total = 1, text = "") {
+  if (calWindowProgress) {
+    calWindowProgress.hidden = !active;
+  }
+  if (calWindowProgressText) {
+    calWindowProgressText.textContent = text || "Running calibration...";
+  }
+  if (calWindowProgressFill) {
+    const safeTotal = Math.max(1, Number(total) || 1);
+    const safeCompleted = clampNumber(Number(completed), 0, safeTotal, 0);
+    const percent = (safeCompleted / safeTotal) * 100;
+    calWindowProgressFill.style.width = `${percent.toFixed(1)}%`;
+  }
+}
+
+async function yieldToUi() {
+  await new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
+function setCalibrationRunning(active) {
+  calibrationState.isRunning = Boolean(active);
+  if (calRunButton) {
+    calRunButton.disabled = calibrationState.isRunning;
   }
 }
 
@@ -4144,8 +4485,9 @@ function renderCalibrationCandidates(candidates, roundLabel) {
     meta.className = "meter-text";
     const traceCount = candidate.result.trace.filter((point) => Number.isFinite(point.semitone)).length;
     meta.textContent =
-      `Score ${candidate.result.score.toFixed(1)} · valid ${candidate.result.metrics.validCount} · ` +
-      `trace ${traceCount} · jumps ${candidate.result.metrics.jumpCount} · ` +
+      `${candidate.label} · Score ${candidate.result.score.toFixed(1)} · valid ${candidate.result.metrics.validCount} · ` +
+      `coverage ${(candidate.result.metrics.trackingCoverage * 100).toFixed(0)}% · ` +
+      `trace ${traceCount} · jumps ${candidate.result.metrics.jumpCount} · xjump ${candidate.result.metrics.extremeJumpCount} · ` +
       `jag ${candidate.result.metrics.meanDelta.toFixed(2)} · oct ${candidate.result.metrics.octaveFlipCount}`;
     const pickBtn = document.createElement("button");
     pickBtn.type = "button";
@@ -4163,12 +4505,13 @@ function onCalibrationCandidatePicked(candidate, roundLabel) {
   if (roundLabel === "gross") {
     calibrationState.grossWinner = candidate.config;
     calibrationState.round = 2;
-    runCalibrationCandidates();
+    void runCalibrationCandidates();
     return;
   }
   applyAnalysisConfig(candidate.config);
   setCalibrationStatus("Calibration applied. You can repeat to refine further.");
   setCalibrationWindowStatus("Calibration applied.");
+  setCalibrationProgress(false, 0, 1, "");
   if (calibratePanel) {
     calibratePanel.hidden = true;
   }
@@ -4178,31 +4521,76 @@ function onCalibrationCandidatePicked(candidate, roundLabel) {
   setCalibrationFocus(false);
 }
 
-function runCalibrationCandidates() {
+async function runCalibrationCandidates() {
   if (!calibrationState.audioSamples || !calibrationState.sampleRate) {
     setCalibrationStatus("Record a sample first.");
     return;
   }
-  setCalibrationFocus(true);
-  const roundLabel = calibrationState.round <= 1 ? "gross" : "fine";
-  const candidateCount = roundLabel === "gross" ? 6 : 6;
-  const base = roundLabel === "fine" ? calibrationState.grossWinner : null;
-  const candidates = [];
-  for (let i = 0; i < candidateCount; i += 1) {
-    const config = makeRandomCandidate(base, roundLabel === "fine");
-    const result = sampleTraceWithConfig(calibrationState.audioSamples, calibrationState.sampleRate, config);
-    candidates.push({ config, result });
+  if (calibrationState.isRunning) {
+    return;
   }
-  candidates.sort((a, b) => b.result.score - a.result.score);
+  setCalibrationRunning(true);
+  try {
+    setCalibrationFocus(true);
+    const roundLabel = calibrationState.round <= 1 ? "gross" : "fine";
+    const generated = buildCalibrationCandidates(roundLabel);
+    setCalibrationProgress(true, 0, generated.length, `Scoring ${roundLabel} candidates...`);
+    setCalibrationStatus(`Running ${roundLabel} calibration...`);
+    setCalibrationWindowStatus(`Running ${roundLabel} calibration...`);
+    await yieldToUi();
+    const scored = [];
+    for (let i = 0; i < generated.length; i += 1) {
+      const entry = generated[i];
+      const config = entry.config;
+      const result = sampleTraceWithConfig(calibrationState.audioSamples, calibrationState.sampleRate, config);
+      scored.push({ config, label: entry.label, result });
+      setCalibrationProgress(true, i + 1, generated.length, `Scoring ${roundLabel} candidates... ${i + 1}/${generated.length}`);
+      await yieldToUi();
+    }
+  const seen = new Set(scored.map((candidate) => candidateConfigSignature(candidate.config)));
+  const usable = scored
+    .filter((candidate) => isUsableCalibrationCandidate(candidate.result))
+    .sort((a, b) => b.result.score - a.result.score);
+  const seedConfig =
+    (usable.length ? usable[0].config : null) ||
+    (roundLabel === "fine" ? calibrationState.grossWinner : null) ||
+    analysisConfig;
+  let extraAttempts = 0;
+  while (usable.length < 6 && extraAttempts < 180) {
+    const spread = roundLabel === "fine" ? 0.55 : 0.75;
+    const cfg = makeRandomCandidate(seedConfig, true, spread);
+    const sig = candidateConfigSignature(cfg);
+    if (seen.has(sig)) {
+      extraAttempts += 1;
+      continue;
+    }
+    seen.add(sig);
+    const result = sampleTraceWithConfig(calibrationState.audioSamples, calibrationState.sampleRate, cfg);
+    if (isUsableCalibrationCandidate(result)) {
+      usable.push({ config: cfg, label: `${roundLabel === "fine" ? "Refine" : "Mutate"} extra ${usable.length + 1}`, result });
+      usable.sort((a, b) => b.result.score - a.result.score);
+    }
+    extraAttempts += 1;
+    if (extraAttempts % 3 === 0) {
+      setCalibrationProgress(true, Math.min(generated.length, usable.length), generated.length, `Refining viable candidates... ${usable.length}/6`);
+      await yieldToUi();
+    }
+  }
+  const candidates = usable.slice(0, 6);
   calibrationState.candidateSets = candidates;
+  if (AUTO_PICK_TOP_CALIBRATION_CANDIDATE && candidates.length > 0) {
+    const top = candidates[0];
+    const roundName = roundLabel === "gross" ? "gross" : "fine";
+    setCalibrationRunning(false);
+    setCalibrationProgress(true, 1, 1, `Applying best ${roundName} candidate...`);
+    setCalibrationStatus(`Auto-selecting top ${roundName} candidate (${top.result.score.toFixed(1)}).`);
+    setCalibrationWindowStatus(`Auto-selecting top ${roundName} candidate.`);
+    onCalibrationCandidatePicked(top, roundLabel);
+    return;
+  }
   renderCalibrationCandidates(candidates, roundLabel);
   const hasVisibleTrace = candidates.some((candidate) =>
-    candidate.result.trace.some(
-      (point) =>
-        Number.isFinite(point.semitone) ||
-        Number.isFinite(point.rawSemitone) ||
-        Number.isFinite(point.rawDetectedSemitone)
-    )
+    candidate.result.trace.some((point) => Number.isFinite(point.semitone))
   );
   const message =
     roundLabel === "gross"
@@ -4211,12 +4599,22 @@ function runCalibrationCandidates() {
   const warning = hasVisibleTrace
     ? ""
     : " No visible trace detected. Try stronger input, lower RMS/correlation gates, or record again.";
-  setCalibrationStatus(`${message}${warning}`);
-  setCalibrationWindowStatus(`${message}${warning}`);
+  const availabilityNote = candidates.length < 6 ? ` Only ${candidates.length} viable candidates found.` : "";
+  setCalibrationStatus(`${message}${availabilityNote}${warning}`);
+  setCalibrationWindowStatus(`${message}${availabilityNote}${warning}`);
+    setCalibrationRunning(false);
+    setCalibrationProgress(false, 0, 1, "");
+  } catch (_error) {
+    setCalibrationRunning(false);
+    setCalibrationProgress(false, 0, 1, "");
+    setCalibrationStatus("Calibration failed. Try recording again.");
+    setCalibrationWindowStatus("Calibration failed.");
+  }
 }
 
 function resetCalibration() {
   cleanupCalibrationPlayback();
+  setCalibrationRunning(false);
   calibrationState.round = 1;
   calibrationState.grossWinner = null;
   calibrationState.candidateSets = [];
@@ -4224,6 +4622,7 @@ function resetCalibration() {
   calibrationState.audioSamples = null;
   calibrationState.sampleRate = 0;
   clearCalibrationCandidates();
+  setCalibrationProgress(false, 0, 1, "");
   setCalibrationStatus("Record 10-20s of your source, then run candidates.");
   setCalibrationWindowStatus("");
   setCalibrationFocus(false);
@@ -4336,10 +4735,8 @@ refreshMarkers();
 updateReferenceButton();
 updateMicUiState();
 syncAnalysisPresetSelect();
-resizeCanvas();
-positionMicPanel();
 syncStateToQueryString();
-drawViz();
+scheduleStartupLayoutPasses();
 rafId = requestAnimationFrame(renderLoop);
 
 startBtn.addEventListener("click", () => {
@@ -4551,9 +4948,15 @@ bindAnalysisNumberInput(analysisOutRangeHoldInput, "outOfRangeHoldFrames", 1, 60
 
 if (analysisToggle) {
   analysisToggle.addEventListener("click", () => {
+    if (micPanel && micPanel.hidden) {
+      return;
+    }
     const willOpen = Boolean(analysisPanel && analysisPanel.hidden);
     setToolPanelOpen(analysisPanel, analysisToggle, willOpen);
     setToolPanelOpen(calibratePanel, calibrateToggle, false);
+    if (willOpen) {
+      positionAnalysisPanel();
+    }
     if (!willOpen) {
       setCalibrationFocus(false);
     }
@@ -4668,7 +5071,7 @@ if (calPlayToggle) {
 
 if (calRunButton) {
   calRunButton.addEventListener("click", () => {
-    runCalibrationCandidates();
+    void runCalibrationCandidates();
   });
 }
 
@@ -4685,9 +5088,17 @@ if (calWindowClose) {
 }
 
 window.addEventListener("resize", () => {
-  resizeCanvas();
-  positionMicPanel();
-  drawViz();
+  refreshLayoutAndViz();
+});
+
+window.addEventListener("pageshow", () => {
+  scheduleStartupLayoutPasses();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    scheduleStartupLayoutPasses();
+  }
 });
 
 canvas.addEventListener(

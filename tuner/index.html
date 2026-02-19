@@ -10,9 +10,9 @@
       href="https://fonts.googleapis.com/css2?family=Lexend:wght@200..700&family=Noto+Serif:wght@400..700&family=IBM+Plex+Sans:wght@300..700&display=swap"
       rel="stylesheet"
     />
-    <script type="module" crossorigin src="../assets/tuner-RsGDusrW.js"></script>
+    <script type="module" crossorigin src="../assets/tuner-BWSKufC5.js"></script>
     <link rel="modulepreload" crossorigin href="../assets/modulepreload-polyfill-B5Qt9EMX.js">
-    <link rel="stylesheet" crossorigin href="../assets/tuner-ciWbbPKm.css">
+    <link rel="stylesheet" crossorigin href="../assets/tuner-BLiHGe_v.css">
   </head>
   <body>
     <section class="viz-wrap">
@@ -336,6 +336,24 @@
         <div class="label">Cents Deviation</div>
         <div id="cents" class="value">--</div>
         <div id="out-of-range-readout" class="subvalue" aria-live="polite"></div>
+      </article>
+      <article id="self-test-card" class="card self-test-card" hidden>
+        <div class="label">Self Test</div>
+        <div class="self-test-row">
+          <span class="self-test-chip self-test-chip-good"></span>
+          <span>Green</span>
+          <span id="self-test-good" class="self-test-value">0%</span>
+        </div>
+        <div class="self-test-row">
+          <span class="self-test-chip self-test-chip-warn"></span>
+          <span>Yellow</span>
+          <span id="self-test-warn" class="self-test-value">0%</span>
+        </div>
+        <div class="self-test-row">
+          <span class="self-test-chip self-test-chip-bad"></span>
+          <span>Red</span>
+          <span id="self-test-bad" class="self-test-value">0%</span>
+        </div>
       </article>
     </section>
 

@@ -90,6 +90,17 @@ canvas {
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
 }
 
+body.performance-mode .left-rail,
+body.performance-mode .tuner-title,
+body.performance-mode #mic-panel,
+body.performance-mode #analysis-panel,
+body.performance-mode #calibrate-panel,
+body.performance-mode #cal-window,
+body.performance-mode dialog,
+body.performance-mode [role="dialog"] {
+  display: none !important;
+}
+
 .tuner-title {
   position: fixed;
   top: 0;
@@ -698,6 +709,45 @@ body.theme-dark .cal-card {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.15px;
+}
+
+.self-test-card {
+  display: grid;
+  gap: 4px;
+}
+
+.self-test-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.self-test-chip {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.self-test-chip-good {
+  background: var(--viz-blob-good);
+}
+
+.self-test-chip-warn {
+  background: var(--viz-blob-warn);
+}
+
+.self-test-chip-bad {
+  background: var(--viz-blob-bad);
+}
+
+.self-test-value {
+  min-width: 38px;
+  text-align: right;
+  font-weight: 600;
 }
 
 .spelling-dialog {

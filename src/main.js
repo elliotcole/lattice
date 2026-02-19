@@ -377,6 +377,22 @@ let currentBannerKey = "";
 let tempBannerActive = false;
 let tempBannerTimer = null;
 let tempBannerHideTimer = null;
+let performanceModeEnabled = false;
+let keyboardModeToggleMemory = null;
+
+if (
+  typeof HTMLDialogElement !== "undefined" &&
+  !window.__latticePerformanceDialogPatchInstalled
+) {
+  const nativeShowModal = HTMLDialogElement.prototype.showModal;
+  HTMLDialogElement.prototype.showModal = function patchedShowModal(...args) {
+    if (document.body.classList.contains("performance-mode")) {
+      return;
+    }
+    return nativeShowModal.apply(this, args);
+  };
+  window.__latticePerformanceDialogPatchInstalled = true;
+}
 
 function clampZoom(value) {
   return Math.min(2.2, Math.max(0.5, value));
@@ -17363,6 +17379,10 @@ function updateUiHint() {
   if (!uiHint) {
     return;
   }
+  if (performanceModeEnabled) {
+    setUiHintVisibility(false);
+    return;
+  }
   const helpEnabled = showHelpToggle ? showHelpToggle.checked : showHelpEnabled;
   const nextKey = getUiHintKey();
   if (nextKey !== uiHintKey) {
@@ -17449,6 +17469,261 @@ function updateUiHint() {
 
 function resetUiHintToDefault() {
   spellingHintActive = false;
+}
+
+function isPerformanceModeHotkey(event) {
+  if (!event || event.defaultPrevented || event.repeat) {
+    return false;
+  }
+  const key = String(event.key).toLowerCase();
+  return (
+    event.altKey &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    (event.code === "KeyF" || key === "f" || key === "ƒ")
+  );
+}
+
+function hideBannerImmediately() {
+  if (!bannerMessage) {
+    return;
+  }
+  bannerMessage.hidden = true;
+  bannerMessage.textContent = "";
+  bannerMessage.classList.remove("banner-interactive");
+  bannerMessage.classList.remove("is-fading");
+}
+
+function closePerformanceModeUi() {
+  if (keyboardHelpTimer) {
+    clearTimeout(keyboardHelpTimer);
+    keyboardHelpTimer = null;
+  }
+  if (keyboardHelp) {
+    keyboardHelp.classList.remove("is-visible");
+  }
+  if (tempBannerTimer) {
+    clearTimeout(tempBannerTimer);
+    tempBannerTimer = null;
+  }
+  if (tempBannerHideTimer) {
+    clearTimeout(tempBannerHideTimer);
+    tempBannerHideTimer = null;
+  }
+  tempBannerActive = false;
+  hideBannerImmediately();
+  setUiHintVisibility(false);
+  document.querySelectorAll("dialog[open]").forEach((dialog) => {
+    try {
+      dialog.close("cancel");
+    } catch (_error) {
+      // noop
+    }
+  });
+  closePresetOverlay();
+  closeIntervalChart();
+  closeLayoutFontPopover({ revert: false });
+  if (layoutSpacePopover) {
+    layoutSpacePopover.hidden = true;
+  }
+  if (layoutKeyMappingPopover) {
+    layoutKeyMappingPopover.hidden = true;
+  }
+  if (looperQuantizeMenu) {
+    looperQuantizeMenu.hidden = true;
+  }
+  if (fileSharePopover) {
+    fileSharePopover.hidden = true;
+  }
+  if (optionsPanel) {
+    optionsPanel.hidden = true;
+    optionsPanel.classList.remove("panel-open");
+  }
+  if (calculatePanel) {
+    calculatePanel.hidden = true;
+    calculatePanel.classList.remove("panel-open");
+  }
+  if (filePanel) {
+    filePanel.hidden = true;
+    filePanel.classList.remove("panel-open");
+  }
+  if (envelopePanel) {
+    envelopePanel.hidden = true;
+    envelopePanel.classList.remove("panel-open");
+  }
+  if (animationPanel) {
+    animationPanel.hidden = true;
+    animationPanel.classList.remove("panel-open");
+  }
+  if (ratioWheelPanel) {
+    ratioWheelPanel.hidden = true;
+    ratioWheelPanel.classList.remove("panel-open");
+  }
+  if (midiMenuPanel) {
+    midiMenuPanel.hidden = true;
+    midiMenuPanel.classList.remove("panel-open");
+  }
+  if (optionsToggle) {
+    optionsToggle.setAttribute("aria-expanded", "false");
+  }
+  if (calculateToggle) {
+    calculateToggle.setAttribute("aria-expanded", "false");
+  }
+  if (fileToggle) {
+    fileToggle.setAttribute("aria-expanded", "false");
+  }
+  if (envelopeToggle) {
+    envelopeToggle.setAttribute("aria-expanded", "false");
+  }
+  if (animationToggle) {
+    animationToggle.setAttribute("aria-expanded", "false");
+  }
+  if (ratioWheelToggle) {
+    ratioWheelToggle.setAttribute("aria-expanded", "false");
+  }
+  if (midiMenuToggle) {
+    midiMenuToggle.setAttribute("aria-expanded", "false");
+  }
+}
+
+function setPerformanceMode(enabled) {
+  performanceModeEnabled = Boolean(enabled);
+  document.body.classList.toggle("performance-mode", performanceModeEnabled);
+  if (performanceModeEnabled) {
+    closePerformanceModeUi();
+  }
+  updateUiHint();
+  updateBannerMessage();
+}
+
+function togglePerformanceMode() {
+  setPerformanceMode(!performanceModeEnabled);
+}
+
+function handlePerformanceModeHotkey(event) {
+  if (!isPerformanceModeHotkey(event)) {
+    return;
+  }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  togglePerformanceMode();
+}
+
+function isTextEntryTargetForHotkeys(target) {
+  if (!target) {
+    return false;
+  }
+  if (target.isContentEditable) {
+    return true;
+  }
+  const tag = String(target.tagName || "").toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select";
+}
+
+function isModeSwitchHotkey(event) {
+  if (!event || event.defaultPrevented || event.repeat) {
+    return false;
+  }
+  if (isTextEntryTargetForHotkeys(event.target)) {
+    return false;
+  }
+  return event.ctrlKey && !event.metaKey && !event.altKey;
+}
+
+function handleModeSwitchHotkey(event) {
+  if (!isModeSwitchHotkey(event)) {
+    return;
+  }
+  let targetMode = "";
+  const key = String(event.key);
+  const keyCode = Number(event.keyCode || event.which || 0);
+  if (
+    event.code === "Digit1" ||
+    event.code === "Numpad1" ||
+    key === "1" ||
+    key === "!" ||
+    keyCode === 49 ||
+    keyCode === 97
+  ) {
+    targetMode = "2d";
+  } else if (
+    event.code === "Digit2" ||
+    event.code === "Numpad2" ||
+    key === "2" ||
+    key === "@" ||
+    keyCode === 50 ||
+    keyCode === 98
+  ) {
+    targetMode = "3d";
+  } else if (
+    event.code === "Digit3" ||
+    event.code === "Numpad3" ||
+    key === "3" ||
+    key === "#" ||
+    keyCode === 51 ||
+    keyCode === 99
+  ) {
+    targetMode = "layout";
+  } else {
+    return;
+  }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  if (targetMode === "layout") {
+    setLayoutMode(true);
+    return;
+  }
+  if (layoutMode) {
+    setLayoutMode(false);
+  }
+  set3DMode(targetMode === "3d", { preserveDepth: true });
+  schedulePresetUrlUpdate();
+}
+
+function isKeyboardModeToggleHotkey(event) {
+  if (!event || event.defaultPrevented || event.repeat) {
+    return false;
+  }
+  if (isTextEntryTargetForHotkeys(event.target)) {
+    return false;
+  }
+  return event.ctrlKey && !event.metaKey && !event.altKey;
+}
+
+function applyKeyboardModeValue(modeValue) {
+  if (!keyboardModeSelect || keyboardModeSelect.disabled) {
+    return;
+  }
+  const nextMode = String(modeValue || "off");
+  if (keyboardModeSelect.value === nextMode) {
+    return;
+  }
+  keyboardModeSelect.value = nextMode;
+  keyboardModeSelect.dispatchEvent(new Event("change"));
+}
+
+function handleKeyboardModeToggleHotkey(event) {
+  if (!isKeyboardModeToggleHotkey(event)) {
+    return;
+  }
+  const key = String(event.key || "").toLowerCase();
+  if (!(event.code === "KeyK" || key === "k")) {
+    return;
+  }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  if (!keyboardModeSelect || keyboardModeSelect.disabled) {
+    return;
+  }
+  const currentMode = keyboardModeSelect.value || "off";
+  if (currentMode !== "off") {
+    keyboardModeToggleMemory = currentMode;
+    applyKeyboardModeValue("off");
+    return;
+  }
+  if (keyboardModeToggleMemory && keyboardModeToggleMemory !== "off") {
+    applyKeyboardModeValue(keyboardModeToggleMemory);
+  }
 }
 
 function isCustomPianoMode() {
@@ -17785,6 +18060,10 @@ function showKeyboardModeHelp(message) {
   if (!keyboardHelp) {
     return;
   }
+  if (performanceModeEnabled) {
+    keyboardHelp.classList.remove("is-visible");
+    return;
+  }
   keyboardHelp.textContent = message;
   keyboardHelp.classList.add("is-visible");
   if (keyboardHelpTimer) {
@@ -17798,6 +18077,10 @@ function showKeyboardModeHelp(message) {
 
 function updateBannerMessage() {
   if (!bannerMessage) {
+    return;
+  }
+  if (performanceModeEnabled) {
+    hideBannerImmediately();
     return;
   }
   if (tempBannerActive) {
@@ -17865,6 +18148,10 @@ function updateBannerMessage() {
 
 function showTemporaryBanner(text, durationMs = 2000) {
   if (!bannerMessage) {
+    return;
+  }
+  if (performanceModeEnabled) {
+    hideBannerImmediately();
     return;
   }
   tempBannerActive = true;
@@ -27491,6 +27778,9 @@ bindOptionalEvent(canvas, "wheel", onWheel, { passive: false });
 bindOptionalEvent(window, "resize", resizeCanvas);
 bindOptionalEvent(window, "resize", updateRatioWheelPosition);
 bindOptionalEvent(window, "resize", updateKeyboardMapPopoverPosition);
+bindOptionalEvent(window, "keydown", handlePerformanceModeHotkey, { capture: true });
+bindOptionalEvent(window, "keydown", handleModeSwitchHotkey, { capture: true });
+bindOptionalEvent(window, "keydown", handleKeyboardModeToggleHotkey, { capture: true });
 bindOptionalEvent(window, "pointerdown", enableAudioFromGesture);
 bindOptionalEvent(window, "keydown", enableAudioFromGesture);
 bindOptionalEvent(window, "keydown", handleKeyDown);

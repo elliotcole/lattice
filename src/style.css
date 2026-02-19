@@ -249,6 +249,23 @@ body.theme-dark {
   margin: 0;
 }
 
+body.performance-mode .panel,
+body.performance-mode .title,
+body.performance-mode .help-toggle,
+body.performance-mode .ui-hint,
+body.performance-mode .keyboard-help,
+body.performance-mode .preset-overlay,
+body.performance-mode .interval-chart-overlay,
+body.performance-mode .layout-overlay,
+body.performance-mode .layout-font-popover,
+body.performance-mode .layout-space-popover,
+body.performance-mode .layout-key-mapping-popover,
+body.performance-mode .file-share-popover,
+body.performance-mode dialog,
+body.performance-mode [role="dialog"] {
+  display: none !important;
+}
+
 .controls {
   flex: 1;
   display: flex;

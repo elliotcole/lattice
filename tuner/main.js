@@ -91,6 +91,10 @@ const hzEl = document.getElementById("hz");
 const noteEl = document.getElementById("note");
 const centsEl = document.getElementById("cents");
 const outOfRangeReadoutEl = document.getElementById("out-of-range-readout");
+const selfTestCard = document.getElementById("self-test-card");
+const selfTestGoodEl = document.getElementById("self-test-good");
+const selfTestWarnEl = document.getElementById("self-test-warn");
+const selfTestBadEl = document.getElementById("self-test-bad");
 
 const fundamentalInput = document.getElementById("fundamental");
 const fundamentalNoteSelect = document.getElementById("fundamental-note");
@@ -168,6 +172,21 @@ const fundamentalSpellingSharpButton = document.getElementById("fundamental-spel
 const fundamentalSpellingFlatButton = document.getElementById("fundamental-spelling-flat");
 const canvas = document.getElementById("viz");
 const ctx = canvas.getContext("2d");
+let performanceModeEnabled = false;
+
+if (
+  typeof HTMLDialogElement !== "undefined" &&
+  !window.__tunerPerformanceDialogPatchInstalled
+) {
+  const nativeShowModal = HTMLDialogElement.prototype.showModal;
+  HTMLDialogElement.prototype.showModal = function patchedShowModal(...args) {
+    if (document.body.classList.contains("performance-mode")) {
+      return;
+    }
+    return nativeShowModal.apply(this, args);
+  };
+  window.__tunerPerformanceDialogPatchInstalled = true;
+}
 
 let fundamentalSpelling = "sharp";
 let ratioItems = [];
@@ -220,7 +239,103 @@ let noPitchHoldSemitone = null;
 let noPitchHoldStrength = 0;
 let noPitchHoldLastMs = 0;
 let lastInRangeTrackedSemitone = null;
+let liveBlobTone = null;
 const DECAY_TRAIL_DURATION_MS = 4800;
+const selfTestState = {
+  running: false,
+  lastMs: 0,
+  lastTone: null,
+  totalsMs: { good: 0, warn: 0, bad: 0 },
+};
+
+function isTextEntryTarget(target) {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  const tag = String(target.tagName || "").toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select";
+}
+
+function closePerformanceModeUi() {
+  setToolPanelOpen(analysisPanel, analysisToggle, false);
+  setToolPanelOpen(calibratePanel, calibrateToggle, false);
+  if (micPanel) {
+    micPanel.hidden = true;
+  }
+  setCalibrationFocus(false);
+  if (calWindow) {
+    calWindow.hidden = true;
+  }
+  if (fundamentalSpellingDialog && fundamentalSpellingDialog.open) {
+    try {
+      fundamentalSpellingDialog.close("cancel");
+    } catch (_error) {
+      // noop
+    }
+  }
+  document.querySelectorAll("dialog[open]").forEach((dialog) => {
+    try {
+      dialog.close("cancel");
+    } catch (_error) {
+      // noop
+    }
+  });
+}
+
+function setPerformanceMode(enabled) {
+  performanceModeEnabled = Boolean(enabled);
+  document.body.classList.toggle("performance-mode", performanceModeEnabled);
+  if (performanceModeEnabled) {
+    closePerformanceModeUi();
+  }
+}
+
+function togglePerformanceMode() {
+  setPerformanceMode(!performanceModeEnabled);
+}
+
+function resetSelfTestTotals() {
+  selfTestState.totalsMs.good = 0;
+  selfTestState.totalsMs.warn = 0;
+  selfTestState.totalsMs.bad = 0;
+}
+
+function renderSelfTestResults() {
+  const total =
+    selfTestState.totalsMs.good + selfTestState.totalsMs.warn + selfTestState.totalsMs.bad;
+  const pct = (value) => (total > 0 ? Math.round((value / total) * 100) : 0);
+  if (selfTestGoodEl) selfTestGoodEl.textContent = `${pct(selfTestState.totalsMs.good)}%`;
+  if (selfTestWarnEl) selfTestWarnEl.textContent = `${pct(selfTestState.totalsMs.warn)}%`;
+  if (selfTestBadEl) selfTestBadEl.textContent = `${pct(selfTestState.totalsMs.bad)}%`;
+}
+
+function startSelfTest(nowMs) {
+  resetSelfTestTotals();
+  selfTestState.running = true;
+  selfTestState.lastMs = nowMs;
+  selfTestState.lastTone = liveBlobTone;
+  if (selfTestCard) selfTestCard.hidden = true;
+}
+
+function stopSelfTest(nowMs) {
+  updateSelfTest(nowMs, liveBlobTone);
+  selfTestState.running = false;
+  selfTestState.lastTone = null;
+  renderSelfTestResults();
+  if (selfTestCard) selfTestCard.hidden = false;
+}
+
+function updateSelfTest(nowMs, tone) {
+  if (!selfTestState.running) {
+    return;
+  }
+  const delta = Math.max(0, nowMs - (selfTestState.lastMs || nowMs));
+  const prevTone = selfTestState.lastTone;
+  if (delta > 0 && (prevTone === "good" || prevTone === "warn" || prevTone === "bad")) {
+    selfTestState.totalsMs[prevTone] += delta;
+  }
+  selfTestState.lastMs = nowMs;
+  selfTestState.lastTone = tone;
+}
 
 const analysisConfig = {
   rmsThreshold: 0.01,
@@ -2419,6 +2534,7 @@ function drawViz() {
       const centsText = centsRounded === 0 ? "0" : `${centsRounded > 0 ? "+" : ""}${centsRounded}`;
       ctx.fillText(`${centsText}c`, lineX + 34, y - 18);
     }
+    liveBlobTone = centsOff <= 8 ? "good" : centsOff <= 24 ? "warn" : "bad";
   } else if (Number.isFinite(noPitchHoldSemitone) && noPitchHoldStrength > 0) {
     const y = yForSemitone(noPitchHoldSemitone);
     const alpha = Math.max(0, Math.min(1, noPitchHoldStrength));
@@ -2430,6 +2546,9 @@ function drawViz() {
     ctx.arc(lineX, y, radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+    liveBlobTone = null;
+  } else {
+    liveBlobTone = null;
   }
 }
 
@@ -3172,6 +3291,7 @@ function renderLoop() {
   }
 
   updateNoPitchHoldState(nowMs, lastInRangeTrackedSemitone, hasLiveAudioTrack(stream) && Number.isFinite(displaySemitone) && liveHasActivePitch && liveOutOfRangeDirection === 0);
+  updateSelfTest(nowMs, liveBlobTone);
   updateDecayTrail(nowMs);
 
   drawViz();
@@ -5086,6 +5206,40 @@ if (calWindowClose) {
     setCalibrationFocus(false);
   });
 }
+
+window.addEventListener("keydown", (event) => {
+  const key = String(event.key).toLowerCase();
+  if (
+    (event.code === "KeyF" || key === "f" || key === "ƒ") &&
+    event.altKey &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.repeat
+  ) {
+    event.preventDefault();
+    togglePerformanceMode();
+    return;
+  }
+  if (event.defaultPrevented) {
+    return;
+  }
+  if (event.repeat) {
+    return;
+  }
+  if (isTextEntryTarget(event.target)) {
+    return;
+  }
+  if (key !== "t") {
+    return;
+  }
+  event.preventDefault();
+  const nowMs = performance.now();
+  if (selfTestState.running) {
+    stopSelfTest(nowMs);
+  } else {
+    startSelfTest(nowMs);
+  }
+});
 
 window.addEventListener("resize", () => {
   refreshLayoutAndViz();

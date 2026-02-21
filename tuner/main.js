@@ -2281,27 +2281,40 @@ function drawViz() {
     return width;
   }
 
+  function partFont(part, scale = 1) {
+    const size = Math.max(8, (Number(part.size) || ratioLabelFontSize) * scale);
+    const family = part.family || "'IBM Plex Sans', sans-serif";
+    return `${size}px ${family}`;
+  }
+
   function getRatioMarkerTextParts(marker) {
     const useSargam = labelMode === "sargam";
     const parts = [
-      { text: marker.ratioLabel || marker.label, font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif` },
+      {
+        text: marker.ratioLabel || marker.label,
+        size: ratioLabelFontSize,
+        family: "'IBM Plex Sans', sans-serif",
+      },
     ];
     if (showNoteNames && marker.noteLabelInfo) {
-      parts.push({ text: " \u00b7 ", font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif` });
+      parts.push({ text: " \u00b7 ", size: ratioLabelFontSize, family: "'IBM Plex Sans', sans-serif" });
       if (useSargam) {
         parts.push({
           text: marker.noteLabelInfo.sargamText || marker.noteLabelInfo.baseText || marker.noteLabelInfo.pitchClass || "",
-          font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif`,
+          size: ratioLabelFontSize,
+          family: "'IBM Plex Sans', sans-serif",
         });
       } else {
         parts.push({
           text: marker.noteLabelInfo.baseText || marker.noteLabelInfo.pitchClass || "",
-          font: `${ratioLabelFontSize}px 'IBM Plex Sans', sans-serif`,
+          size: ratioLabelFontSize,
+          family: "'IBM Plex Sans', sans-serif",
         });
         if (marker.noteLabelInfo.suffixText) {
           parts.push({
             text: marker.noteLabelInfo.suffixText,
-            font: `${ratioLabelFontSize}px 'HEJI2Text', 'IBM Plex Sans', sans-serif`,
+            size: ratioLabelFontSize,
+            family: "'HEJI2Text', 'IBM Plex Sans', sans-serif",
           });
         }
       }
@@ -2309,19 +2322,19 @@ function drawViz() {
     return parts;
   }
 
-  function getPartsTotalWidth(parts) {
-    return parts.reduce((sum, part) => sum + measureLabelPart(part.text, part.font), 0);
+  function getPartsTotalWidth(parts, scale = 1) {
+    return parts.reduce((sum, part) => sum + measureLabelPart(part.text, partFont(part, scale)), 0);
   }
 
-  function drawRatioMarkerText(parts, side, anchorX, y, totalWidth) {
-    const width = Number.isFinite(totalWidth) ? totalWidth : getPartsTotalWidth(parts);
+  function drawRatioMarkerText(parts, side, anchorX, y, totalWidth, scale = 1) {
+    const width = Number.isFinite(totalWidth) ? totalWidth : getPartsTotalWidth(parts, scale);
     let x = side === "right" ? anchorX : anchorX - width;
     for (const part of parts) {
       if (!part.text) continue;
-      ctx.font = part.font;
+      ctx.font = partFont(part, scale);
       ctx.textAlign = "left";
       ctx.fillText(part.text, x, y);
-      x += measureLabelPart(part.text, part.font);
+      x += measureLabelPart(part.text, partFont(part, scale));
     }
   }
 
@@ -2357,6 +2370,25 @@ function drawViz() {
     return rect.left >= 4 && rect.right <= width - 4;
   }
 
+  function clampAnchorForSide(side, anchorX, totalWidth) {
+    const minX = 4;
+    const maxX = width - 4;
+    if (side === "right") {
+      const minAnchor = minX;
+      const maxAnchor = maxX - totalWidth;
+      if (!Number.isFinite(maxAnchor) || maxAnchor < minAnchor) {
+        return minAnchor;
+      }
+      return Math.max(minAnchor, Math.min(maxAnchor, anchorX));
+    }
+    const minAnchor = minX + totalWidth;
+    const maxAnchor = maxX;
+    if (!Number.isFinite(minAnchor) || minAnchor > maxAnchor) {
+      return maxAnchor;
+    }
+    return Math.max(minAnchor, Math.min(maxAnchor, anchorX));
+  }
+
   function findPlacementForMarker(y, totalWidth, primarySide = "left") {
     const secondarySide = primarySide === "left" ? "right" : "left";
     const maxLaneSearch = 120;
@@ -2381,12 +2413,7 @@ function drawViz() {
         return { side: secondarySide, lane: laneIndex, anchorX: secondaryAnchorX, rect: secondaryRect };
       }
     }
-
-    const fallbackLane = maxLaneSearch + 1;
-    const fallbackOffset = Math.max(18, ratioLabelFontSize * 1.25) + fallbackLane * laneStep;
-    const fallbackAnchorX = primarySide === "right" ? lineX + fallbackOffset : lineX - fallbackOffset;
-    const fallbackRect = getLabelRect(primarySide, fallbackAnchorX, y, totalWidth);
-    return { side: primarySide, lane: fallbackLane, anchorX: fallbackAnchorX, rect: fallbackRect };
+    return null;
   }
 
   function findPlacementForSideOnly(y, totalWidth, side = "right") {
@@ -2402,11 +2429,7 @@ function drawViz() {
         return { side, lane: laneIndex, anchorX, rect };
       }
     }
-    const fallbackLane = maxLaneSearch + 1;
-    const fallbackOffset = Math.max(18, ratioLabelFontSize * 1.25) + fallbackLane * laneStep;
-    const fallbackAnchorX = side === "right" ? lineX + fallbackOffset : lineX - fallbackOffset;
-    const fallbackRect = getLabelRect(side, fallbackAnchorX, y, totalWidth);
-    return { side, lane: fallbackLane, anchorX: fallbackAnchorX, rect: fallbackRect };
+    return null;
   }
 
   for (let index = 0; index < ratioMarkers.length; index += 1) {
@@ -2416,31 +2439,63 @@ function drawViz() {
     const y = yForSemitone(marker.semitone);
     const isOctaveMarker = Math.abs(marker.semitone - Math.round(marker.semitone / 12) * 12) <= 0.02;
     const parts = getRatioMarkerTextParts(marker);
-    const totalWidth = getPartsTotalWidth(parts);
     const baselineOffset = Math.max(18, ratioLabelFontSize * 1.25);
     const baselineSide = isOctaveMarker ? "right" : "left";
-    const baselineAnchorX = baselineSide === "right" ? lineX + baselineOffset : lineX - baselineOffset;
-    const baselineRect = getLabelRect(baselineSide, baselineAnchorX, y, totalWidth);
-    const baselineCollision =
-      !isRectVisible(baselineRect) ||
-      labelRects.some((existing) =>
-        rectsOverlap(baselineRect, existing, collisionProximityX, collisionProximityY)
-      );
+    const scaleCandidates = isMobileMode
+      ? [1, 0.94, 0.88, 0.82, 0.76, 0.7]
+      : [1];
 
+    let chosenScale = 1;
     let side = baselineSide;
-    let anchorX = baselineAnchorX;
-    let labelRect = baselineRect;
-    if (baselineCollision) {
+    let anchorX = baselineSide === "right" ? lineX + baselineOffset : lineX - baselineOffset;
+    let labelRect = null;
+    let chosenTotalWidth = 0;
+
+    for (let s = 0; s < scaleCandidates.length; s += 1) {
+      const scale = scaleCandidates[s];
+      const totalWidth = getPartsTotalWidth(parts, scale);
+      const baselineAnchorRaw = baselineSide === "right" ? lineX + baselineOffset : lineX - baselineOffset;
+      const baselineAnchor = clampAnchorForSide(baselineSide, baselineAnchorRaw, totalWidth);
+      const baselineRect = getLabelRect(baselineSide, baselineAnchor, y, totalWidth);
+      const baselineCollision =
+        !isRectVisible(baselineRect) ||
+        labelRects.some((existing) =>
+          rectsOverlap(baselineRect, existing, collisionProximityX, collisionProximityY)
+        );
+      if (!baselineCollision) {
+        chosenScale = scale;
+        chosenTotalWidth = totalWidth;
+        side = baselineSide;
+        anchorX = baselineAnchor;
+        labelRect = baselineRect;
+        break;
+      }
+
       const placement = isOctaveMarker
-        ? findPlacementForSideOnly(y, totalWidth, "right")
+        ? findPlacementForSideOnly(y, totalWidth, "right") ||
+          (isMobileMode ? findPlacementForSideOnly(y, totalWidth, "left") : null)
         : (() => {
             alternateOnOverlap = !alternateOnOverlap;
             const primarySide = alternateOnOverlap ? "right" : "left";
             return findPlacementForMarker(y, totalWidth, primarySide);
           })();
-      side = placement.side;
-      anchorX = placement.anchorX;
-      labelRect = placement.rect;
+      if (placement) {
+        chosenScale = scale;
+        chosenTotalWidth = totalWidth;
+        side = placement.side;
+        anchorX = clampAnchorForSide(side, placement.anchorX, totalWidth);
+        labelRect = getLabelRect(side, anchorX, y, totalWidth);
+        break;
+      }
+    }
+
+    if (!labelRect) {
+      chosenScale = scaleCandidates[scaleCandidates.length - 1] || 1;
+      chosenTotalWidth = getPartsTotalWidth(parts, chosenScale);
+      side = isOctaveMarker ? (isMobileMode ? "left" : "right") : baselineSide;
+      const fallbackAnchorRaw = side === "right" ? lineX + baselineOffset : lineX - baselineOffset;
+      anchorX = clampAnchorForSide(side, fallbackAnchorRaw, chosenTotalWidth);
+      labelRect = getLabelRect(side, anchorX, y, chosenTotalWidth);
     }
 
     const connectorEndX = side === "right" ? anchorX - 5 : anchorX + 5;
@@ -2454,7 +2509,7 @@ function drawViz() {
     ctx.stroke();
 
     ctx.fillStyle = markerColor;
-    drawRatioMarkerText(parts, side, anchorX, y, totalWidth);
+    drawRatioMarkerText(parts, side, anchorX, y, chosenTotalWidth, chosenScale);
     labelRects.push(labelRect);
     ctx.globalAlpha = 1;
   }

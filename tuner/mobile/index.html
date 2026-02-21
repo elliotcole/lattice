@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Tuning Lattice Tuner Mobile</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Lexend:wght@200..700&family=Noto+Serif:wght@400..700&family=IBM+Plex+Sans:wght@300..700&display=swap"
+      rel="stylesheet"
+    />
+    <script type="module" crossorigin src="../../assets/modulepreload-polyfill-B5Qt9EMX.js"></script>
+    <script type="module" crossorigin src="../../assets/main-DJ3SwagH.js"></script>
+    <link rel="stylesheet" crossorigin href="../../assets/main-BMofJ7MC.css">
+  </head>
+  <body class="mobile-mode">
+    <section class="viz-wrap">
+      <canvas id="viz" width="760" height="640"></canvas>
+      <div id="mic-overlay" class="mic-overlay">
+        <p><a id="activate-mic-link" href="#">Activate</a> microphone</p>
+      </div>
+    </section>
+
+    <div id="mobile-rotate-overlay" class="mobile-rotate-overlay" hidden>
+      Rotate device to portrait.
+    </div>
+
+    <button id="startBtn" type="button" class="mobile-gear-button" aria-label="Open settings">⚙</button>
+    <div id="mobile-settings-backdrop" class="mobile-settings-backdrop" hidden></div>
+
+    <aside id="mic-panel" class="panel mic-panel mobile-settings-modal" hidden>
+      <div class="mobile-settings-head">
+        <h2>Settings</h2>
+        <button id="mobile-settings-close" type="button" class="tiny-button">Close</button>
+      </div>
+
+      <section class="controls">
+        <div class="control-group">
+          <label for="fundamental-note">Fundamental</label>
+          <div class="fundamental-main-line">
+            <select id="fundamental-note"></select>
+            <input id="fundamental" type="number" min="20" max="2000" step="0.01" value="261.63" />
+            <span class="suffix">Hz</span>
+          </div>
+          <div class="fundamental-tools-line">
+            <button id="fundamental-octave-down" type="button" class="tiny-button">/2</button>
+            <button id="fundamental-octave-up" type="button" class="tiny-button">x2</button>
+            <label for="a4" class="a4-inline-label">A4 =</label>
+            <input id="a4" type="number" min="380" max="470" step="0.1" value="440" />
+          </div>
+        </div>
+
+        <div class="control-group">
+          <label for="ratios-input">Ratios</label>
+          <input
+            id="ratios-input"
+            type="text"
+            value="1/1, 9/8, 5/4, 4/3, 3/2, 5/3, 15/8, 2/1"
+            spellcheck="false"
+          />
+          <small>Comma or space separated</small>
+        </div>
+
+        <div class="control-group">
+          <label>Show</label>
+          <div class="show-line">
+            <label class="checkline compact">
+              <span>Labels</span>
+            </label>
+            <div class="radio-pill-group" role="radiogroup" aria-label="Label mode">
+              <label class="radio-pill">
+                <input id="show-label-mode-note" name="show-label-mode" type="radio" value="note" checked />
+                <span>Note Names</span>
+              </label>
+              <label class="radio-pill">
+                <input id="show-label-mode-sargam" name="show-label-mode" type="radio" value="sargam" />
+                <span>Sargam</span>
+              </label>
+              <label class="radio-pill">
+                <input id="show-label-mode-none" name="show-label-mode" type="radio" value="none" />
+                <span>None</span>
+              </label>
+            </div>
+            <label class="checkline compact">
+              <input id="show-12et" type="checkbox" checked />
+              <span>12-ET Labels</span>
+            </label>
+            <label class="checkline compact">
+              <input id="decay-mode" type="checkbox" />
+              <span>Decay</span>
+            </label>
+            <label class="checkline compact">
+              <input id="color-families" type="checkbox" />
+              <span>Color</span>
+            </label>
+            <label class="checkline compact">
+              <input id="show-cents-deviation" type="checkbox" checked />
+              <span>Cents deviation</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <label>Range</label>
+          <div class="range-line">
+            <div class="inline-ranges">
+              <input id="range-size" type="range" min="12" max="36" step="1" value="12" />
+            </div>
+            <span id="range-readout">0..+12</span>
+          </div>
+          <small>One-finger drag: offset. Two-finger pinch: range.</small>
+        </div>
+
+        <div class="control-group">
+          <label>Reference Tone</label>
+          <div class="fundamental-row reference-row">
+            <button id="reference-toggle" type="button">Play</button>
+            <span class="suffix">Level</span>
+            <input id="reference-level" type="range" min="-30" max="0" step="1" value="-14" />
+          </div>
+        </div>
+
+        <div class="control-group">
+          <label for="mic-gain">Mic Input Volume</label>
+          <button id="mic-power-toggle" type="button" class="tiny-button">Turn Mic On</button>
+          <input id="mic-gain" type="range" min="0.25" max="4" step="0.01" value="1" />
+          <label for="analysis-preset-select">Detection Preset</label>
+          <select id="analysis-preset-select" aria-label="Analysis preset">
+            <option value="custom">Custom</option>
+            <option value="balanced">Balanced</option>
+            <option value="stable">Stable</option>
+            <option value="responsive">Responsive</option>
+          </select>
+          <div class="mic-meter" aria-hidden="true">
+            <div id="mic-meter-fill" class="mic-meter-fill"></div>
+          </div>
+          <div id="mic-meter-text" class="meter-text">Input: --</div>
+        </div>
+
+        <div class="control-group">
+          <label>Calibration</label>
+          <div class="debug-actions">
+            <button id="cal-record-toggle" type="button" class="tiny-button">Start Rec</button>
+            <button id="cal-play-toggle" type="button" class="tiny-button">Play Rec</button>
+            <button id="cal-run" type="button" class="tiny-button">Calibrate</button>
+            <button id="cal-reset" type="button" class="tiny-button">Reset</button>
+          </div>
+          <div id="cal-status" class="meter-text">Record 10-20s of your source, then calibrate.</div>
+          <div id="cal-playback-status" class="meter-text">Playback: --</div>
+        </div>
+
+        <label class="theme-toggle" for="theme-toggle">
+          <input id="theme-toggle" type="checkbox" />
+          <span>Dark mode</span>
+        </label>
+        <p id="status" class="status"></p>
+      </section>
+    </aside>
+
+    <section id="cal-window" class="cal-window" hidden>
+      <article class="panel cal-window-card">
+        <header class="cal-window-head">
+          <h2>Calibration</h2>
+          <button id="cal-window-close" type="button" class="tiny-button">Close</button>
+        </header>
+        <div id="cal-window-status" class="meter-text"></div>
+        <div id="cal-window-progress" class="cal-window-progress" hidden>
+          <div id="cal-window-progress-text" class="meter-text">Running calibration...</div>
+          <div class="cal-window-progress-track" aria-hidden="true">
+            <div id="cal-window-progress-fill" class="cal-window-progress-fill"></div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="readout-float">
+      <article class="card">
+        <div class="label">Detected</div>
+        <div id="hz" class="value">-- Hz</div>
+      </article>
+      <article class="card">
+        <div class="label">Nearest Ratio</div>
+        <div id="note" class="value">--</div>
+      </article>
+      <article class="card">
+        <div class="label">Cents Deviation</div>
+        <div id="cents" class="value">--</div>
+        <div id="out-of-range-readout" class="subvalue" aria-live="polite"></div>
+      </article>
+      <article id="self-test-card" class="card self-test-card" hidden>
+        <div class="label">Self Test</div>
+        <div class="self-test-row">
+          <span class="self-test-chip self-test-chip-good"></span>
+          <span>Green</span>
+          <span id="self-test-good" class="self-test-value">0%</span>
+        </div>
+        <div class="self-test-row">
+          <span class="self-test-chip self-test-chip-warn"></span>
+          <span>Yellow</span>
+          <span id="self-test-warn" class="self-test-value">0%</span>
+        </div>
+        <div class="self-test-row">
+          <span class="self-test-chip self-test-chip-bad"></span>
+          <span>Red</span>
+          <span id="self-test-bad" class="self-test-value">0%</span>
+        </div>
+      </article>
+    </section>
+
+    <dialog id="fundamental-spelling-dialog" class="spelling-dialog">
+      <div class="dialog-content">
+        <h2>Spell fundamental:</h2>
+        <div class="dialog-actions">
+          <button id="fundamental-spelling-sharp" type="button"></button>
+          <button id="fundamental-spelling-flat" type="button"></button>
+        </div>
+      </div>
+    </dialog>
+
+  </body>
+</html>

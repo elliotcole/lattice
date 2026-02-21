@@ -619,10 +619,11 @@ body.theme-dark .cal-card {
 
 .cal-window-card {
   width: min(1100px, calc(100vw - 40px));
-  height: min(82vh, 860px);
+  min-height: 180px;
+  max-height: min(82vh, 860px);
   padding: 10px;
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto;
   gap: 8px;
   opacity: 1;
 }
@@ -649,6 +650,87 @@ body.theme-dark .cal-card {
   overflow: auto;
   min-height: 0;
   padding-right: 4px;
+}
+
+body.mobile-mode .tuner-title,
+body.mobile-mode .left-rail,
+body.mobile-mode #analysis-panel,
+body.mobile-mode #debug-panel,
+body.mobile-mode #self-test-card {
+  display: none !important;
+}
+
+body.mobile-mode .mobile-gear-button {
+  position: fixed;
+  right: 14px;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  z-index: 5;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-solid), transparent 8%);
+  color: var(--text-primary);
+  font-size: 24px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.24);
+}
+
+body.mobile-mode .mobile-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  background: rgba(7, 10, 14, 0.45);
+}
+
+body.mobile-mode .mobile-settings-modal {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  top: auto;
+  z-index: 7;
+  max-height: min(78vh, 760px);
+  overflow: auto;
+  width: auto;
+  padding: 10px;
+  opacity: 1;
+}
+
+body.mobile-mode .mobile-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+body.mobile-mode .mobile-settings-head h2 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+body.mobile-mode .readout-float {
+  top: 10px;
+  right: 10px;
+  width: min(200px, calc(100vw - 20px));
+}
+
+body.mobile-mode .mobile-rotate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 24px;
+  background: rgba(8, 12, 18, 0.88);
+  color: #f0f3f8;
+  font-size: 18px;
+  font-weight: 600;
 }
 
 .cal-window-progress {

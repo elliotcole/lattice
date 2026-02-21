@@ -117,6 +117,9 @@ const micGainInput = document.getElementById("mic-gain");
 const micMeterFill = document.getElementById("mic-meter-fill");
 const micMeterText = document.getElementById("mic-meter-text");
 const micPanel = document.getElementById("mic-panel");
+const mobileSettingsBackdrop = document.getElementById("mobile-settings-backdrop");
+const mobileSettingsClose = document.getElementById("mobile-settings-close");
+const mobileRotateOverlay = document.getElementById("mobile-rotate-overlay");
 const themeToggle = document.getElementById("theme-toggle");
 const analysisToggle = document.getElementById("analysis-toggle");
 const debugToggle = document.getElementById("debug-toggle");
@@ -173,6 +176,7 @@ const fundamentalSpellingFlatButton = document.getElementById("fundamental-spell
 const canvas = document.getElementById("viz");
 const ctx = canvas.getContext("2d");
 let performanceModeEnabled = false;
+const isMobileMode = document.body.classList.contains("mobile-mode");
 
 if (
   typeof HTMLDialogElement !== "undefined" &&
@@ -229,6 +233,10 @@ let bottomDragActive = false;
 let bottomDragStartY = 0;
 let rangeOffsetStartValue = 0;
 let rangeOffsetSemitones = 0;
+const activeTouchPoints = new Map();
+let pinchActive = false;
+let pinchStartDistance = 0;
+let pinchStartRange = 12;
 let outOfRangeFrames = 0;
 let rmsWindowValues = [];
 let frameCounter = 0;
@@ -253,6 +261,14 @@ function isTextEntryTarget(target) {
   if (target.isContentEditable) return true;
   const tag = String(target.tagName || "").toLowerCase();
   return tag === "input" || tag === "textarea" || tag === "select";
+}
+
+function updateMobileOrientationLock() {
+  if (!isMobileMode || !mobileRotateOverlay) {
+    return;
+  }
+  const isLandscape = window.matchMedia("(orientation: landscape)").matches;
+  mobileRotateOverlay.hidden = !isLandscape;
 }
 
 function closePerformanceModeUi() {
@@ -309,6 +325,9 @@ function renderSelfTestResults() {
 }
 
 function startSelfTest(nowMs) {
+  if (isMobileMode) {
+    return;
+  }
   resetSelfTestTotals();
   selfTestState.running = true;
   selfTestState.lastMs = nowMs;
@@ -317,6 +336,9 @@ function startSelfTest(nowMs) {
 }
 
 function stopSelfTest(nowMs) {
+  if (isMobileMode) {
+    return;
+  }
   updateSelfTest(nowMs, liveBlobTone);
   selfTestState.running = false;
   selfTestState.lastTone = null;
@@ -325,6 +347,9 @@ function stopSelfTest(nowMs) {
 }
 
 function updateSelfTest(nowMs, tone) {
+  if (isMobileMode) {
+    return;
+  }
   if (!selfTestState.running) {
     return;
   }
@@ -3358,6 +3383,9 @@ function toggleMicPanel() {
   } else {
     positionAnalysisPanel();
   }
+  if (isMobileMode && mobileSettingsBackdrop) {
+    mobileSettingsBackdrop.hidden = !opening;
+  }
   if (startBtn) {
     startBtn.classList.toggle("button-on", opening);
   }
@@ -3365,6 +3393,10 @@ function toggleMicPanel() {
 
 function positionMicPanel() {
   if (!micPanel || !startBtn) {
+    return;
+  }
+  if (isMobileMode) {
+    micPanel.style.top = "";
     return;
   }
   if (window.matchMedia("(max-width: 760px)").matches) {
@@ -4535,90 +4567,9 @@ function setCalibrationFocus(enabled) {
 }
 
 function renderCalibrationCandidates(candidates, roundLabel) {
-  if (!calCandidates) {
-    return;
-  }
-  clearCalibrationCandidates();
-  if (!Array.isArray(candidates) || !candidates.length) {
-    const empty = document.createElement("div");
-    empty.className = "meter-text";
-    empty.textContent = "No candidates available. Record again and retry.";
-    calCandidates.appendChild(empty);
-    return;
-  }
-  const allSemitones = [];
-  candidates.forEach((candidate) => {
-    candidate.result.trace.forEach((point) => {
-      if (Number.isFinite(point.semitone)) {
-        allSemitones.push(point.semitone);
-      } else if (Number.isFinite(point.rawSemitone)) {
-        allSemitones.push(point.rawSemitone);
-      } else if (Number.isFinite(point.rawDetectedSemitone)) {
-        allSemitones.push(point.rawDetectedSemitone);
-      }
-    });
-  });
-  let bounds = null;
-  if (
-    roundLabel === "fine" &&
-    calibrationState.grossTraceBounds &&
-    Number.isFinite(calibrationState.grossTraceBounds.min) &&
-    Number.isFinite(calibrationState.grossTraceBounds.max)
-  ) {
-    bounds = {
-      min: calibrationState.grossTraceBounds.min,
-      max: calibrationState.grossTraceBounds.max,
-    };
-  } else {
-    bounds = { min: -24, max: 24 };
-    if (allSemitones.length) {
-      const p05 = percentile(allSemitones, 0.05);
-      const p95 = percentile(allSemitones, 0.95);
-      const center = median(allSemitones);
-      if (Number.isFinite(p05) && Number.isFinite(p95) && Number.isFinite(center)) {
-        const denseSpan = Math.max(0, p95 - p05);
-        const targetSpan = clampNumber(denseSpan + 2, 6, 16, 10);
-        const half = targetSpan / 2;
-        const minBound = Math.max(-48, center - half);
-        const maxBound = Math.min(72, center + half);
-        bounds = {
-          min: Math.floor(minBound * 2) / 2,
-          max: Math.ceil(maxBound * 2) / 2,
-        };
-        if (bounds.max - bounds.min < 4) {
-          bounds = { min: center - 2, max: center + 2 };
-        }
-      }
-    }
-    if (roundLabel === "gross") {
-      calibrationState.grossTraceBounds = { ...bounds };
-    }
-  }
-  candidates.forEach((candidate, idx) => {
-    const card = document.createElement("article");
-    card.className = "cal-card";
-    const canvasEl = document.createElement("canvas");
-    canvasEl.width = 240;
-    canvasEl.height = 66;
-    renderCandidateTrace(canvasEl, candidate.result.trace, bounds);
-    const meta = document.createElement("div");
-    meta.className = "meter-text";
-    const traceCount = candidate.result.trace.filter((point) => Number.isFinite(point.semitone)).length;
-    meta.textContent =
-      `${candidate.label} · Score ${candidate.result.score.toFixed(1)} · valid ${candidate.result.metrics.validCount} · ` +
-      `coverage ${(candidate.result.metrics.trackingCoverage * 100).toFixed(0)}% · ` +
-      `trace ${traceCount} · jumps ${candidate.result.metrics.jumpCount} · xjump ${candidate.result.metrics.extremeJumpCount} · ` +
-      `jag ${candidate.result.metrics.meanDelta.toFixed(2)} · oct ${candidate.result.metrics.octaveFlipCount}`;
-    const pickBtn = document.createElement("button");
-    pickBtn.type = "button";
-    pickBtn.className = "tiny-button";
-    pickBtn.textContent = `Pick ${idx + 1}`;
-    pickBtn.addEventListener("click", () => {
-      onCalibrationCandidatePicked(candidate, roundLabel);
-    });
-    card.append(canvasEl, meta, pickBtn);
-    calCandidates.appendChild(card);
-  });
+  // Candidate chart rendering retired; calibration auto-selects.
+  void candidates;
+  void roundLabel;
 }
 
 function onCalibrationCandidatePicked(candidate, roundLabel) {
@@ -4698,8 +4649,9 @@ async function runCalibrationCandidates() {
   }
   const candidates = usable.slice(0, 6);
   calibrationState.candidateSets = candidates;
-  if (AUTO_PICK_TOP_CALIBRATION_CANDIDATE && candidates.length > 0) {
-    const top = candidates[0];
+  const scoredTop = scored.slice().sort((a, b) => b.result.score - a.result.score)[0];
+  const top = candidates[0] || scoredTop || null;
+  if (AUTO_PICK_TOP_CALIBRATION_CANDIDATE && top) {
     const roundName = roundLabel === "gross" ? "gross" : "fine";
     setCalibrationRunning(false);
     setCalibrationProgress(true, 1, 1, `Applying best ${roundName} candidate...`);
@@ -4708,20 +4660,8 @@ async function runCalibrationCandidates() {
     onCalibrationCandidatePicked(top, roundLabel);
     return;
   }
-  renderCalibrationCandidates(candidates, roundLabel);
-  const hasVisibleTrace = candidates.some((candidate) =>
-    candidate.result.trace.some((point) => Number.isFinite(point.semitone))
-  );
-  const message =
-    roundLabel === "gross"
-      ? "Gross pass: pick the trace that best matches your performance."
-      : "Fine pass: pick the best refinement.";
-  const warning = hasVisibleTrace
-    ? ""
-    : " No visible trace detected. Try stronger input, lower RMS/correlation gates, or record again.";
-  const availabilityNote = candidates.length < 6 ? ` Only ${candidates.length} viable candidates found.` : "";
-  setCalibrationStatus(`${message}${availabilityNote}${warning}`);
-  setCalibrationWindowStatus(`${message}${availabilityNote}${warning}`);
+  setCalibrationStatus("Calibration could not find a reliable candidate. Try recording again.");
+  setCalibrationWindowStatus("No reliable candidate found.");
     setCalibrationRunning(false);
     setCalibrationProgress(false, 0, 1, "");
   } catch (_error) {
@@ -4743,7 +4683,7 @@ function resetCalibration() {
   calibrationState.sampleRate = 0;
   clearCalibrationCandidates();
   setCalibrationProgress(false, 0, 1, "");
-  setCalibrationStatus("Record 10-20s of your source, then run candidates.");
+  setCalibrationStatus("Record 10-20s of your source, then calibrate.");
   setCalibrationWindowStatus("");
   setCalibrationFocus(false);
 }
@@ -4773,9 +4713,9 @@ async function decodeRecordedCalibrationAudio(blob) {
     calibrationState.sampleRate = audioBuffer.sampleRate;
     setCalibrationFocus(false);
     setCalibrationStatus(
-      `Recorded ${(audioBuffer.duration).toFixed(1)}s @ ${Math.round(audioBuffer.sampleRate)} Hz. Run candidates.`
+      `Recorded ${(audioBuffer.duration).toFixed(1)}s @ ${Math.round(audioBuffer.sampleRate)} Hz. Ready to calibrate.`
     );
-    setCalibrationWindowStatus("Run candidates to compare settings.");
+    setCalibrationWindowStatus("Ready to calibrate.");
   } finally {
     await ctxLocal.close();
   }
@@ -4857,11 +4797,49 @@ updateMicUiState();
 syncAnalysisPresetSelect();
 syncStateToQueryString();
 scheduleStartupLayoutPasses();
+if (isMobileMode) {
+  if (selfTestCard) {
+    selfTestCard.hidden = true;
+  }
+  updateMobileOrientationLock();
+}
 rafId = requestAnimationFrame(renderLoop);
 
 startBtn.addEventListener("click", () => {
   toggleMicPanel();
 });
+
+if (mobileSettingsClose) {
+  mobileSettingsClose.addEventListener("click", () => {
+    if (micPanel) {
+      micPanel.hidden = true;
+    }
+    if (mobileSettingsBackdrop) {
+      mobileSettingsBackdrop.hidden = true;
+    }
+    if (startBtn) {
+      startBtn.classList.remove("button-on");
+    }
+    setToolPanelOpen(analysisPanel, analysisToggle, false);
+    setToolPanelOpen(calibratePanel, calibrateToggle, false);
+    setCalibrationFocus(false);
+  });
+}
+
+if (mobileSettingsBackdrop) {
+  mobileSettingsBackdrop.addEventListener("click", () => {
+    if (micPanel) {
+      micPanel.hidden = true;
+    }
+    mobileSettingsBackdrop.hidden = true;
+    if (startBtn) {
+      startBtn.classList.remove("button-on");
+    }
+    setToolPanelOpen(analysisPanel, analysisToggle, false);
+    setToolPanelOpen(calibratePanel, calibrateToggle, false);
+    setCalibrationFocus(false);
+  });
+}
 
 if (micPowerToggle) {
   micPowerToggle.addEventListener("click", async () => {
@@ -5229,7 +5207,7 @@ window.addEventListener("keydown", (event) => {
   if (isTextEntryTarget(event.target)) {
     return;
   }
-  if (key !== "t") {
+  if (isMobileMode || key !== "t") {
     return;
   }
   event.preventDefault();
@@ -5243,15 +5221,18 @@ window.addEventListener("keydown", (event) => {
 
 window.addEventListener("resize", () => {
   refreshLayoutAndViz();
+  updateMobileOrientationLock();
 });
 
 window.addEventListener("pageshow", () => {
   scheduleStartupLayoutPasses();
+  updateMobileOrientationLock();
 });
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     scheduleStartupLayoutPasses();
+    updateMobileOrientationLock();
   }
 });
 
@@ -5268,14 +5249,52 @@ canvas.addEventListener(
   { passive: false }
 );
 
+function getTouchDistance() {
+  const points = Array.from(activeTouchPoints.values());
+  if (points.length < 2) {
+    return 0;
+  }
+  const dx = points[0].x - points[1].x;
+  const dy = points[0].y - points[1].y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
 canvas.addEventListener("pointerdown", (event) => {
-  bottomDragActive = true;
-  bottomDragStartY = event.clientY;
-  rangeOffsetStartValue = getBottomSemitoneValue();
+  if (isMobileMode && event.pointerType === "touch") {
+    activeTouchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (activeTouchPoints.size >= 2) {
+      pinchActive = true;
+      bottomDragActive = false;
+      pinchStartDistance = getTouchDistance();
+      pinchStartRange = getRangeSemitoneValue();
+    } else {
+      pinchActive = false;
+      bottomDragActive = true;
+      bottomDragStartY = event.clientY;
+      rangeOffsetStartValue = getBottomSemitoneValue();
+    }
+  } else {
+    bottomDragActive = true;
+    bottomDragStartY = event.clientY;
+    rangeOffsetStartValue = getBottomSemitoneValue();
+  }
   canvas.setPointerCapture(event.pointerId);
 });
 
 canvas.addEventListener("pointermove", (event) => {
+  if (isMobileMode && event.pointerType === "touch") {
+    if (activeTouchPoints.has(event.pointerId)) {
+      activeTouchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    }
+    if (pinchActive && activeTouchPoints.size >= 2) {
+      const distance = getTouchDistance();
+      const delta = Math.round((distance - pinchStartDistance) / 14);
+      setRangeSemitoneValue(pinchStartRange + delta);
+      persistSettings();
+      syncStateToQueryString();
+      return;
+    }
+  }
   if (!bottomDragActive) {
     return;
   }
@@ -5288,7 +5307,22 @@ canvas.addEventListener("pointermove", (event) => {
 });
 
 function stopBottomDrag(event) {
-  bottomDragActive = false;
+  if (isMobileMode && event.pointerType === "touch") {
+    activeTouchPoints.delete(event.pointerId);
+    if (activeTouchPoints.size < 2) {
+      pinchActive = false;
+    }
+    if (activeTouchPoints.size === 1) {
+      const lastPoint = Array.from(activeTouchPoints.values())[0];
+      bottomDragActive = true;
+      bottomDragStartY = lastPoint.y;
+      rangeOffsetStartValue = getBottomSemitoneValue();
+    } else if (activeTouchPoints.size === 0) {
+      bottomDragActive = false;
+    }
+  } else {
+    bottomDragActive = false;
+  }
   try {
     canvas.releasePointerCapture(event.pointerId);
   } catch (_error) {

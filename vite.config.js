@@ -7,6 +7,7 @@ export default {
       input: {
         main: resolve(__dirname, "index.html"),
         tuner: resolve(__dirname, "tuner/index.html"),
+        tunerMobile: resolve(__dirname, "tuner/mobile/index.html"),
       },
     },
   },

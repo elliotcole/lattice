@@ -271,6 +271,13 @@ function updateMobileOrientationLock() {
   mobileRotateOverlay.hidden = !isLandscape;
 }
 
+function blockNativeMobileGesture(event) {
+  if (!isMobileMode) {
+    return;
+  }
+  event.preventDefault();
+}
+
 function closePerformanceModeUi() {
   setToolPanelOpen(analysisPanel, analysisToggle, false);
   setToolPanelOpen(calibratePanel, calibrateToggle, false);
@@ -5261,6 +5268,7 @@ function getTouchDistance() {
 
 canvas.addEventListener("pointerdown", (event) => {
   if (isMobileMode && event.pointerType === "touch") {
+    event.preventDefault();
     activeTouchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (activeTouchPoints.size >= 2) {
       pinchActive = true;
@@ -5283,6 +5291,7 @@ canvas.addEventListener("pointerdown", (event) => {
 
 canvas.addEventListener("pointermove", (event) => {
   if (isMobileMode && event.pointerType === "touch") {
+    event.preventDefault();
     if (activeTouchPoints.has(event.pointerId)) {
       activeTouchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
     }
@@ -5308,6 +5317,7 @@ canvas.addEventListener("pointermove", (event) => {
 
 function stopBottomDrag(event) {
   if (isMobileMode && event.pointerType === "touch") {
+    event.preventDefault();
     activeTouchPoints.delete(event.pointerId);
     if (activeTouchPoints.size < 2) {
       pinchActive = false;
@@ -5332,6 +5342,12 @@ function stopBottomDrag(event) {
 
 canvas.addEventListener("pointerup", stopBottomDrag);
 canvas.addEventListener("pointercancel", stopBottomDrag);
+
+if (isMobileMode) {
+  document.addEventListener("gesturestart", blockNativeMobileGesture, { passive: false });
+  document.addEventListener("gesturechange", blockNativeMobileGesture, { passive: false });
+  document.addEventListener("gestureend", blockNativeMobileGesture, { passive: false });
+}
 
 window.addEventListener("beforeunload", () => {
   cancelAnimationFrame(rafId);

@@ -82,6 +82,13 @@ canvas {
   display: block;
 }
 
+body.mobile-mode,
+body.mobile-mode .viz-wrap,
+body.mobile-mode canvas {
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
 .panel {
   background: var(--panel);
   backdrop-filter: blur(8px);
@@ -714,9 +721,27 @@ body.mobile-mode .mobile-settings-head h2 {
 }
 
 body.mobile-mode .readout-float {
-  top: 10px;
-  right: 10px;
-  width: min(200px, calc(100vw - 20px));
+  top: auto;
+  right: auto;
+  left: 10px;
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  width: min(156px, calc(100vw - 76px));
+  gap: 5px;
+  z-index: 4;
+}
+
+body.mobile-mode .readout-float .label {
+  font-size: 9px;
+  letter-spacing: 0.45px;
+}
+
+body.mobile-mode .readout-float .value {
+  font-size: 15px;
+  margin-top: 1px;
+}
+
+body.mobile-mode .readout-float .subvalue {
+  font-size: 10px;
 }
 
 body.mobile-mode .mobile-rotate-overlay {

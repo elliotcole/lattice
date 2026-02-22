@@ -413,7 +413,12 @@ function updateTiltReadout() {
     return;
   }
   const shown = Math.abs(latticeTiltDeg) < 0.05 ? 0 : latticeTiltDeg;
-  tiltReadout.textContent = `${shown.toFixed(shown % 1 === 0 ? 0 : 1)}\u00b0`;
+  const formatted = shown.toFixed(shown % 1 === 0 ? 0 : 1);
+  if ("value" in tiltReadout) {
+    tiltReadout.value = formatted;
+  } else {
+    tiltReadout.textContent = `${formatted}\u00b0`;
+  }
 }
 
 function setLatticeTilt(nextTiltDeg, options = {}) {
@@ -519,12 +524,14 @@ function resetHeldModifiers() {
 const midiActiveNotes = new Map();
 const activeKeys = new Map();
 const triangleDiagonals = new Map();
+const autoTriangleDiagonals = new Map();
 let triangleHover = null;
 let triangleLabelTargetKey = null;
 let triangleLabelTargetTri = null;
 const TRIANGLE_DIAGONAL_HIT_DISTANCE = 10;
 const TRIANGLE_TRI_IDS = new Set(["abd", "acd", "abc", "bcd"]);
 const triangleLabels = new Map();
+let autoTrianglesDirty = true;
 const TRIANGLE_TRI_TO_DIAG = {
   abd: "backslash",
   acd: "backslash",
@@ -1594,6 +1601,10 @@ function deactivateAxisMode() {
 let isomorphicKeyMap = null;
 let isomorphicLayout = null;
 let isomorphicDirty = true;
+let isomorphicTriangleKeyMap = null;
+let isomorphicTriangleLayout = null;
+let isomorphicTriangleDirty = true;
+let triangleKeyboardActiveKeys = new Map();
 let keyboardKeyPositions = null;
 let looperState = "idle";
 let looperEvents = [];
@@ -1871,7 +1882,8 @@ function updateKeyMappingToggleVisibility() {
     keyboardMode === "piano" ||
     keyboardMode === "piano-custom" ||
     keyboardMode === "iso" ||
-    keyboardMode === "iso-fuzzy";
+    keyboardMode === "iso-fuzzy" ||
+    keyboardMode === "iso-tri";
   if (container) {
     container.hidden = !showNavToggle;
     container.style.display = showNavToggle ? "" : "none";
@@ -2015,6 +2027,10 @@ function markIsomorphicDirty() {
   isomorphicDirty = true;
   isomorphicKeyMap = null;
   isomorphicLayout = null;
+  isomorphicTriangleDirty = true;
+  isomorphicTriangleKeyMap = null;
+  isomorphicTriangleLayout = null;
+  markAutoTrianglesDirty();
 }
 
 function updateLooperButton() {
@@ -4919,6 +4935,7 @@ function allNotesOff() {
   lfoArmingId = null;
   lfoArmingStart = 0;
   customPianoActiveKeys.clear();
+  clearTriangleKeyboardActiveVoices();
   clearCustomPianoPreviewVoices();
   stopAllVoices();
   nodes.forEach((node) => {
@@ -5598,16 +5615,10 @@ function getScreenAxisDir() {
   return { dir, perp: { x: -dir.y, y: dir.x }, axis: useXAxis ? "x" : "y" };
 }
 
-function buildScreenIsomorphicLayout() {
-  const activeNodes = nodes.filter((node) => node.active);
-  if (!activeNodes.length) {
+function buildScreenIsomorphicLayoutFromProjected(projected, getId, getValue) {
+  if (!projected.length) {
     return new Map();
   }
-
-  const projected = activeNodes.map((node) => {
-    const pos = worldToScreen(node.coordinate);
-    return { node, x: pos.x, y: pos.y };
-  });
 
   let minX = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
@@ -5623,10 +5634,10 @@ function buildScreenIsomorphicLayout() {
   const spanY = Math.max(1, maxY - minY);
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-  const items = projected.map((item) => ({
-    ...item,
-    uNorm: (item.x - minX) / spanX,
-    vNorm: (item.y - minY) / spanY,
+  const items = projected.map((entry) => ({
+    entry,
+    uNorm: (entry.x - minX) / spanX,
+    vNorm: (entry.y - minY) / spanY,
   }));
 
   const rowThreshold = (() => {
@@ -5655,7 +5666,8 @@ function buildScreenIsomorphicLayout() {
   const rows = [];
   const sortedByV = [...items].sort((a, b) => a.vNorm - b.vNorm);
   const updateRowStats = (row, item) => {
-    const gridY = item.node.gridY;
+    const value = getValue(item.entry);
+    const gridY = Number.isFinite(value?.gridY) ? value.gridY : Math.round(item.vNorm * 100);
     row.items.push(item);
     row.centerV = (row.centerV * (row.items.length - 1) + item.vNorm) / row.items.length;
     const nextCount = (row.gridYCounts.get(gridY) || 0) + 1;
@@ -5668,23 +5680,27 @@ function buildScreenIsomorphicLayout() {
   sortedByV.forEach((item) => {
     const last = rows[rows.length - 1];
     if (!last) {
+      const value = getValue(item.entry);
+      const gridY = Number.isFinite(value?.gridY) ? value.gridY : Math.round(item.vNorm * 100);
       rows.push({
         centerV: item.vNorm,
         items: [item],
-        gridYCounts: new Map([[item.node.gridY, 1]]),
-        dominantGridY: item.node.gridY,
+        gridYCounts: new Map([[gridY, 1]]),
+        dominantGridY: gridY,
       });
       return;
     }
     const gap = Math.abs(item.vNorm - last.centerV);
-    const prefersRow = item.node.gridY === last.dominantGridY;
+    const value = getValue(item.entry);
+    const itemGridY = Number.isFinite(value?.gridY) ? value.gridY : Math.round(item.vNorm * 100);
+    const prefersRow = itemGridY === last.dominantGridY;
     const threshold = Math.max(minRowGapNorm, prefersRow ? rowThreshold * 1.6 : rowThreshold);
     if (gap > threshold) {
       rows.push({
         centerV: item.vNorm,
         items: [item],
-        gridYCounts: new Map([[item.node.gridY, 1]]),
-        dominantGridY: item.node.gridY,
+        gridYCounts: new Map([[itemGridY, 1]]),
+        dominantGridY: itemGridY,
       });
       return;
     }
@@ -5881,17 +5897,17 @@ function buildScreenIsomorphicLayout() {
           Math.pow(item.uNorm - keyCenterU, 2) + Math.pow(item.vNorm - keyCenterV, 2);
         const existing = layout.get(key);
         if (!existing || dist < existing.dist) {
-          layout.set(key, { node: item.node, dist });
+          layout.set(key, { entry: item.entry, dist });
         }
       });
     });
-    const mappedNodes = new Set();
+    const mappedItems = new Set();
     layout.forEach((value) => {
-      mappedNodes.add(value.node.id);
+      mappedItems.add(getId(value.entry));
     });
     return {
       layout,
-      mappedCount: mappedNodes.size,
+      mappedCount: mappedItems.size,
       maxRowKeys,
     };
   };
@@ -5921,10 +5937,26 @@ function buildScreenIsomorphicLayout() {
 
   const result = new Map();
   best.layout.forEach((value, key) => {
-    result.set(key, value.node);
+    result.set(key, getValue(value.entry));
   });
 
   return result;
+}
+
+function buildScreenIsomorphicLayout() {
+  const activeNodes = nodes.filter((node) => node.active);
+  if (!activeNodes.length) {
+    return new Map();
+  }
+  const projected = activeNodes.map((node) => {
+    const pos = worldToScreen(node.coordinate);
+    return { id: node.id, value: node, x: pos.x, y: pos.y };
+  });
+  return buildScreenIsomorphicLayoutFromProjected(
+    projected,
+    (entry) => entry.id,
+    (entry) => entry.value
+  );
 }
 
 function drawKeyBanner(pos, radius, label, alpha) {
@@ -5951,6 +5983,32 @@ function drawKeyBanner(pos, radius, label, alpha) {
   ctx.stroke();
   ctx.fillStyle = "#ffffff";
   ctx.fillText(label, pos.x, y + boxHeight / 2);
+  ctx.restore();
+}
+
+function drawTriangleKeyBanner(pos, label, alpha = 1) {
+  const paddingX = 5;
+  const paddingY = 2;
+  const fontSize = 10;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `${fontSize}px "Lexend", sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const textWidth = Math.max(1, ctx.measureText(label).width);
+  const boxWidth = textWidth + paddingX * 2;
+  const boxHeight = fontSize + paddingY * 2;
+  const x = pos.x - boxWidth / 2;
+  const y = pos.y - boxHeight / 2;
+  ctx.fillStyle = "rgba(10, 15, 20, 0.7)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(x, y, boxWidth, boxHeight, 6);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(label, pos.x, pos.y);
   ctx.restore();
 }
 
@@ -6021,6 +6079,122 @@ function ensureIsomorphicMaps() {
   isomorphicLayout = layout;
   isomorphicKeyMap = keyMap;
   isomorphicDirty = false;
+}
+
+function getEffectiveTriangleTargets() {
+  ensureAutoTriangleDiagonals();
+  const targets = [];
+  const gridMap = getActiveGridNodeMap();
+  const width = canvas ? canvas.clientWidth : 0;
+  const height = canvas ? canvas.clientHeight : 0;
+  const isPointInView = (point) => {
+    if (!point || !point.visible) {
+      return false;
+    }
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+      return false;
+    }
+    if (width <= 0 || height <= 0) {
+      return true;
+    }
+    return point.x >= 0 && point.x <= width && point.y >= 0 && point.y <= height;
+  };
+  const triIdsForDiag = (diag) =>
+    diag === "backslash" ? ["abd", "acd"] : ["abc", "bcd"];
+  forEachEffectiveTriangleDiagonal((entry) => {
+    const triIds = triIdsForDiag(entry.diag);
+    triIds.forEach((tri) => {
+      const triNodes = getTriangleLabelPoints(tri, getTriangleCellNodes(entry, gridMap));
+      if (!triNodes || triNodes.length !== 3) {
+        return;
+      }
+      const projectedNodes = triNodes.map((node) => worldToScreen(node.coordinate));
+      if (projectedNodes.some((point) => !isPointInView(point))) {
+        return;
+      }
+      const centroid = {
+        x: (triNodes[0].coordinate.x + triNodes[1].coordinate.x + triNodes[2].coordinate.x) / 3,
+        y: (triNodes[0].coordinate.y + triNodes[1].coordinate.y + triNodes[2].coordinate.y) / 3,
+        z: (triNodes[0].coordinate.z + triNodes[1].coordinate.z + triNodes[2].coordinate.z) / 3,
+      };
+      const id = `${triangleKey(entry)}:${tri}`;
+      const screen = worldToScreen(centroid);
+      targets.push({
+        id,
+        triangle: {
+          plane: entry.plane,
+          x: entry.x,
+          y: entry.y,
+          z: entry.z,
+          diag: entry.diag,
+          tri,
+        },
+        triNodes,
+        coordinate: centroid,
+        screen,
+      });
+    });
+  });
+  return targets;
+}
+
+function buildIsomorphicTriangleLayout() {
+  const targets = getEffectiveTriangleTargets();
+  if (!targets.length) {
+    return new Map();
+  }
+  const projectedAll = targets.map((target) => {
+    const pos = worldToScreen(target.coordinate);
+    return { id: target.id, value: target, x: pos.x, y: pos.y };
+  });
+  const projected = projectedAll;
+  if (!projected.length) {
+    return new Map();
+  }
+  return buildScreenIsomorphicLayoutFromProjected(
+    projected,
+    (entry) => entry.id,
+    (entry) => entry.value
+  );
+}
+
+function ensureIsomorphicTriangleMaps() {
+  if (!isomorphicTriangleDirty && isomorphicTriangleLayout && isomorphicTriangleKeyMap) {
+    return;
+  }
+  const layout = buildIsomorphicTriangleLayout();
+  const keyMap = new Map();
+  layout.forEach((target, key) => {
+    if (target && target.id) {
+      keyMap.set(target.id, key.toUpperCase());
+    }
+  });
+  isomorphicTriangleLayout = layout;
+  isomorphicTriangleKeyMap = keyMap;
+  isomorphicTriangleDirty = false;
+}
+
+function findIsomorphicTriangleForKey(key) {
+  ensureIsomorphicTriangleMaps();
+  return isomorphicTriangleLayout ? isomorphicTriangleLayout.get(key) || null : null;
+}
+
+function clearTriangleKeyboardActiveVoices() {
+  if (!triangleKeyboardActiveKeys.size) {
+    return;
+  }
+  triangleKeyboardActiveKeys.forEach((voiceIds) => {
+    if (!Array.isArray(voiceIds)) {
+      return;
+    }
+    voiceIds.forEach((voiceId) => {
+      const voice = findVoiceById(voiceId);
+      if (voice) {
+        stopVoice(voice);
+      }
+    });
+  });
+  triangleKeyboardActiveKeys.clear();
 }
 
 function handleKeyDown(event) {
@@ -6138,7 +6312,7 @@ function handleKeyDown(event) {
   if (mode === "piano-custom" && customPianoMapMode) {
     return;
   }
-  if (activeKeys.has(key)) {
+  if (mode !== "iso-tri" && activeKeys.has(key)) {
     return;
   }
 
@@ -6192,6 +6366,32 @@ function handleKeyDown(event) {
       freq: resolved.freq,
       source: "keyboard",
     });
+  } else if (mode === "iso-tri") {
+    if (triangleKeyboardActiveKeys.has(key)) {
+      return;
+    }
+    const target = findIsomorphicTriangleForKey(key);
+    if (!target || !Array.isArray(target.triNodes) || !target.triNodes.length) {
+      return;
+    }
+    const voiceIds = [];
+    target.triNodes.forEach((node) => {
+      const voice = startVoice({
+        nodeId: node.id,
+        octave: 0,
+        freq: node.freq,
+        source: "keyboard",
+      });
+      if (voice) {
+        voiceIds.push(voice.id);
+      }
+    });
+    if (!voiceIds.length) {
+      return;
+    }
+    triangleKeyboardActiveKeys.set(key, voiceIds);
+    draw();
+    return;
   }
 
   if (!voice) {
@@ -6226,6 +6426,25 @@ function handleKeyUp(event) {
       return;
     }
     stopCustomPianoMappedVoices(voiceIds);
+    return;
+  }
+  if (mode === "iso-tri") {
+    const triVoiceIds = triangleKeyboardActiveKeys.get(key);
+    if (!triVoiceIds) {
+      return;
+    }
+    const isOneShot = Boolean(oneShotCheckbox && oneShotCheckbox.checked);
+    triangleKeyboardActiveKeys.delete(key);
+    if (isOneShot) {
+      return;
+    }
+    triVoiceIds.forEach((voiceId) => {
+      const voice = findVoiceById(voiceId);
+      if (voice) {
+        stopVoice(voice);
+      }
+    });
+    draw();
     return;
   }
   const voiceId = activeKeys.get(key);
@@ -9177,6 +9396,188 @@ function triangleCellKeys(entry) {
   };
 }
 
+// EXPERIMENT: hidden keyboard mode "iso-tri" (isomorphic triangle mapping).
+// The UI option is intentionally removed for now; implementation is retained
+// for possible future revival or deletion in a cleanup pass.
+function isTriangleKeyboardMode(mode = getKeyboardMode()) {
+  return mode === "iso-tri";
+}
+
+function useAutoTrianglesOnly() {
+  return isTriangleKeyboardMode();
+}
+
+function hasEffectiveTriangleDiagonal(key) {
+  if (useAutoTrianglesOnly()) {
+    return autoTriangleDiagonals.has(key);
+  }
+  return triangleDiagonals.has(key) || autoTriangleDiagonals.has(key);
+}
+
+function forEachEffectiveTriangleDiagonal(callback) {
+  if (useAutoTrianglesOnly()) {
+    autoTriangleDiagonals.forEach((entry, key) => {
+      callback(entry, key);
+    });
+    return;
+  }
+  autoTriangleDiagonals.forEach((entry, key) => {
+    if (!triangleDiagonals.has(key)) {
+      callback(entry, key);
+    }
+  });
+  triangleDiagonals.forEach((entry, key) => {
+    callback(entry, key);
+  });
+}
+
+function clearAutoTriangleDiagonals() {
+  if (!autoTriangleDiagonals.size) {
+    return;
+  }
+  autoTriangleDiagonals.clear();
+}
+
+function markAutoTrianglesDirty() {
+  autoTrianglesDirty = true;
+}
+
+function getActiveGridNodeMap() {
+  const gridMap = new Map();
+  nodes.forEach((node) => {
+    if (node.active && !node.isCustom) {
+      gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
+    }
+  });
+  return gridMap;
+}
+
+function rebuildAutoTriangleDiagonals() {
+  autoTriangleDiagonals.clear();
+  const mode = getKeyboardMode();
+  if (!isTriangleKeyboardMode(mode)) {
+    autoTrianglesDirty = false;
+    return;
+  }
+  const gridMap = getActiveGridNodeMap();
+  if (!gridMap.size) {
+    autoTrianglesDirty = false;
+    return;
+  }
+  const pickTopLeftToBottomRightDiagonal = (a, b, c, d, backslashEntry, slashEntry) => {
+    const pa = worldToScreen(getNodeDisplayCoordinate(a));
+    const pb = worldToScreen(getNodeDisplayCoordinate(b));
+    const pc = worldToScreen(getNodeDisplayCoordinate(c));
+    const pd = worldToScreen(getNodeDisplayCoordinate(d));
+    const corners = [
+      { key: "a", p: pa },
+      { key: "b", p: pb },
+      { key: "c", p: pc },
+      { key: "d", p: pd },
+    ];
+    const score = (corner) => corner.p.x + corner.p.y;
+    let topLeft = corners[0];
+    let bottomRight = corners[0];
+    for (let i = 1; i < corners.length; i += 1) {
+      const corner = corners[i];
+      const s = score(corner);
+      const sTop = score(topLeft);
+      const sBottom = score(bottomRight);
+      if (s < sTop - 1e-6 || (Math.abs(s - sTop) < 1e-6 && corner.p.x < topLeft.p.x)) {
+        topLeft = corner;
+      }
+      if (s > sBottom + 1e-6 || (Math.abs(s - sBottom) < 1e-6 && corner.p.x > bottomRight.p.x)) {
+        bottomRight = corner;
+      }
+    }
+    const endpoints = `${topLeft.key}${bottomRight.key}`;
+    if (endpoints === "ad" || endpoints === "da") {
+      return backslashEntry;
+    }
+    if (endpoints === "bc" || endpoints === "cb") {
+      return slashEntry;
+    }
+    const backslashMid = {
+      x: (pa.x + pd.x) / 2,
+      y: (pa.y + pd.y) / 2,
+    };
+    const slashMid = {
+      x: (pb.x + pc.x) / 2,
+      y: (pb.y + pc.y) / 2,
+    };
+    const backslashScore = backslashMid.x + backslashMid.y;
+    const slashScore = slashMid.x + slashMid.y;
+    return backslashScore <= slashScore ? backslashEntry : slashEntry;
+  };
+  for (let z = 0; z < gridDepth; z += 1) {
+    for (let y = 0; y < GRID_ROWS - 1; y += 1) {
+      for (let x = 0; x < GRID_COLS - 1; x += 1) {
+        const a = gridMap.get(`${x},${y},${z}`);
+        const b = gridMap.get(`${x + 1},${y},${z}`);
+        const c = gridMap.get(`${x},${y + 1},${z}`);
+        const d = gridMap.get(`${x + 1},${y + 1},${z}`);
+        if (!(a && b && c && d)) {
+          continue;
+        }
+        const backslash = normalizeTriangleEntry({ plane: "xy", x, y, z, diag: "backslash", tri: "abd" });
+        const slash = normalizeTriangleEntry({ plane: "xy", x, y, z, diag: "slash", tri: "abc" });
+        const chosen = pickTopLeftToBottomRightDiagonal(a, b, c, d, backslash, slash);
+        autoTriangleDiagonals.set(triangleKey(chosen), chosen);
+      }
+    }
+  }
+  if (gridDepth > 1) {
+    for (let y = 0; y < GRID_ROWS; y += 1) {
+      for (let z = 0; z < gridDepth - 1; z += 1) {
+        for (let x = 0; x < GRID_COLS - 1; x += 1) {
+          const a = gridMap.get(`${x},${y},${z}`);
+          const b = gridMap.get(`${x + 1},${y},${z}`);
+          const c = gridMap.get(`${x},${y},${z + 1}`);
+          const d = gridMap.get(`${x + 1},${y},${z + 1}`);
+          if (!(a && b && c && d)) {
+            continue;
+          }
+          const backslash = normalizeTriangleEntry({ plane: "xz", x, y, z, diag: "backslash", tri: "abd" });
+          const slash = normalizeTriangleEntry({ plane: "xz", x, y, z, diag: "slash", tri: "abc" });
+          const chosen = pickTopLeftToBottomRightDiagonal(a, b, c, d, backslash, slash);
+          autoTriangleDiagonals.set(triangleKey(chosen), chosen);
+        }
+      }
+    }
+    for (let x = 0; x < GRID_COLS; x += 1) {
+      for (let z = 0; z < gridDepth - 1; z += 1) {
+        for (let y = 0; y < GRID_ROWS - 1; y += 1) {
+          const a = gridMap.get(`${x},${y},${z}`);
+          const b = gridMap.get(`${x},${y + 1},${z}`);
+          const c = gridMap.get(`${x},${y},${z + 1}`);
+          const d = gridMap.get(`${x},${y + 1},${z + 1}`);
+          if (!(a && b && c && d)) {
+            continue;
+          }
+          const backslash = normalizeTriangleEntry({ plane: "yz", x, y, z, diag: "backslash", tri: "abd" });
+          const slash = normalizeTriangleEntry({ plane: "yz", x, y, z, diag: "slash", tri: "abc" });
+          const chosen = pickTopLeftToBottomRightDiagonal(a, b, c, d, backslash, slash);
+          autoTriangleDiagonals.set(triangleKey(chosen), chosen);
+        }
+      }
+    }
+  }
+  autoTrianglesDirty = false;
+}
+
+function ensureAutoTriangleDiagonals() {
+  if (!isTriangleKeyboardMode()) {
+    if (autoTriangleDiagonals.size) {
+      autoTriangleDiagonals.clear();
+    }
+    autoTrianglesDirty = true;
+    return;
+  }
+  if (autoTrianglesDirty) {
+    rebuildAutoTriangleDiagonals();
+  }
+}
+
 function normalizeTriangleEntry(entry) {
   return {
     plane: entry.plane,
@@ -9318,20 +9719,16 @@ function getTriangleLabelPoints(tri, nodes) {
 }
 
 function drawTriangleDiagonals(nodePosMap, disableScale = false) {
-  if (!triangleDiagonals.size) {
+  ensureAutoTriangleDiagonals();
+  if (!triangleDiagonals.size && !autoTriangleDiagonals.size) {
     return;
   }
-  const gridMap = new Map();
-  nodes.forEach((node) => {
-    if (node.active && !node.isCustom) {
-      gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
-    }
-  });
+  const gridMap = getActiveGridNodeMap();
   ctx.save();
   ctx.strokeStyle = themeColors.edge;
   ctx.lineWidth = 1.5;
   ctx.setLineDash([6, 4]);
-  triangleDiagonals.forEach((entry) => {
+  forEachEffectiveTriangleDiagonal((entry) => {
     const { a, b } = getTriangleDiagonalNodes(entry, gridMap);
     if (!a || !b) {
       return;
@@ -9383,18 +9780,14 @@ function drawTriangleLabels(nodePosMap, disableScale = false) {
   if (!triangleLabels.size) {
     return;
   }
-  const gridMap = new Map();
-  nodes.forEach((node) => {
-    if (node.active && !node.isCustom) {
-      gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
-    }
-  });
+  ensureAutoTriangleDiagonals();
+  const gridMap = getActiveGridNodeMap();
   triangleLabels.forEach((entry) => {
     if (!entry.label) {
       return;
     }
     const diag = TRIANGLE_TRI_TO_DIAG[entry.tri];
-    if (!diag || !triangleDiagonals.has(triangleKey({ ...entry, diag }))) {
+    if (!diag || !hasEffectiveTriangleDiagonal(triangleKey({ ...entry, diag }))) {
       return;
     }
     const cellNodes = getTriangleCellNodes(entry, gridMap);
@@ -9815,6 +10208,7 @@ function pruneTriangleDiagonals() {
 }
 
 function findTriangleHit(screenPoint) {
+  ensureAutoTriangleDiagonals();
   const activeMap = new Map();
   const allMap = new Map();
   nodes.forEach((node) => {
@@ -9844,8 +10238,8 @@ function findTriangleHit(screenPoint) {
       return;
     }
     const keys = triangleCellKeys(entryBase);
-    const hasBackslash = triangleDiagonals.has(keys.backslash);
-    const hasSlash = triangleDiagonals.has(keys.slash);
+    const hasBackslash = hasEffectiveTriangleDiagonal(keys.backslash);
+    const hasSlash = hasEffectiveTriangleDiagonal(keys.slash);
     const activeDiag = hasBackslash ? "backslash" : hasSlash ? "slash" : null;
     const pA = worldToScreen(getNodeDisplayCoordinate(aAll), disableScale);
     const pB = worldToScreen(getNodeDisplayCoordinate(bAll), disableScale);
@@ -11527,16 +11921,12 @@ function addCustomConnectionSegments(nodePosMap, segments) {
 }
 
 function addTriangleDiagonalSegments(nodePosMap, segments) {
-  if (!triangleDiagonals.size) {
+  ensureAutoTriangleDiagonals();
+  if (!triangleDiagonals.size && !autoTriangleDiagonals.size) {
     return;
   }
-  const gridMap = new Map();
-  nodes.forEach((node) => {
-    if (node.active && !node.isCustom) {
-      gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
-    }
-  });
-  triangleDiagonals.forEach((entry) => {
+  const gridMap = getActiveGridNodeMap();
+  forEachEffectiveTriangleDiagonal((entry) => {
     const { a, b } = getTriangleDiagonalNodes(entry, gridMap);
     if (!a || !b) {
       return;
@@ -11839,6 +12229,7 @@ function draw() {
   const keyboardMode = getKeyboardMode();
   const isPianoMode = keyboardMode === "piano";
   const isIsomorphicMode = keyboardMode === "iso" || keyboardMode === "iso-fuzzy";
+  const isIsomorphicTriangleMode = keyboardMode === "iso-tri";
   const isCustomMapMode = keyboardMode === "piano-custom";
   const customPianoLabels =
     isCustomMapMode && (layoutMode || showKeyMappings) ? getCustomPianoLabelMap() : null;
@@ -11850,7 +12241,30 @@ function draw() {
   if (isIsomorphicMode) {
     ensureIsomorphicMaps();
   }
+  if (isIsomorphicTriangleMode) {
+    ensureIsomorphicTriangleMaps();
+  }
   const keyMap = isIsomorphicMode ? isomorphicKeyMap : null;
+  const triangleKeyMap =
+    isIsomorphicTriangleMode && showKeyMappings && !layoutMode ? isomorphicTriangleKeyMap : null;
+  const triangleTargetById = new Map();
+  if (triangleKeyMap && isomorphicTriangleLayout) {
+    isomorphicTriangleLayout.forEach((target) => {
+      if (target && target.id && !triangleTargetById.has(target.id)) {
+        triangleTargetById.set(target.id, target);
+      }
+    });
+  }
+  if (triangleKeyMap && triangleTargetById.size) {
+    triangleKeyMap.forEach((keyLabel, targetId) => {
+      const target = triangleTargetById.get(targetId);
+      if (!target) {
+        return;
+      }
+      const pos = worldToScreen(target.coordinate);
+      drawTriangleKeyBanner(pos, keyLabel, 1);
+    });
+  }
   const reducedEffects = is3DMode && view.reducedEffects;
   const lightDir = getLightDir2D();
   nodeRenderList.forEach(({ node, pos }) => {
@@ -14543,7 +14957,7 @@ function onPointerUp(event) {
       const triangle = findTriangleHit(screenPoint);
       if (triangle && triangle.tri) {
         const key = triangleKey(triangle);
-        if (triangleDiagonals.has(key)) {
+        if (hasEffectiveTriangleDiagonal(key)) {
           const gridMap = new Map();
           nodes.forEach((node) => {
             if (!node.isCustom) {
@@ -14579,7 +14993,7 @@ function onPointerUp(event) {
               const trianglesToStop = [];
               const triIdsForDiag = (diag) =>
                 diag === "backslash" ? ["abd", "acd"] : ["abc", "bcd"];
-              triangleDiagonals.forEach((entry) => {
+              forEachEffectiveTriangleDiagonal((entry) => {
                 const ids = triIdsForDiag(entry.diag);
                 ids.forEach((triId) => {
                   const triKey = `${triangleKey(entry)}:${triId}`;
@@ -14602,7 +15016,7 @@ function onPointerUp(event) {
                     trianglesToStop.push(nodesForTri);
                   }
                 });
-                });
+              });
                 if (trianglesToStop.length) {
                 trianglesToStop.forEach((nodesForTri) => {
                   nodesForTri.forEach((node) => {
@@ -23024,6 +23438,14 @@ function applyPresetSynthState(synthState) {
     syncCustomPianoModeUi(keyboardModeSelect.value);
     updateUiHint();
     updateKeyMappingToggleVisibility();
+    if (isTriangleKeyboardMode(keyboardModeSelect.value)) {
+      markAutoTrianglesDirty();
+      ensureAutoTriangleDiagonals();
+    } else {
+      clearTriangleKeyboardActiveVoices();
+      clearAutoTriangleDiagonals();
+      markAutoTrianglesDirty();
+    }
     markIsomorphicDirty();
   }
   if (Array.isArray(synthState.customPianoMap)) {
@@ -24843,14 +25265,10 @@ async function buildLayoutSvgString(
     });
   }
 
-  if (triangleDiagonals.size) {
-    const gridMap = new Map();
-    nodes.forEach((node) => {
-      if (node.active && !node.isCustom) {
-        gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
-      }
-    });
-    triangleDiagonals.forEach((entry) => {
+  ensureAutoTriangleDiagonals();
+  if (triangleDiagonals.size || autoTriangleDiagonals.size) {
+    const gridMap = getActiveGridNodeMap();
+    forEachEffectiveTriangleDiagonal((entry) => {
       const { a, b } = getTriangleDiagonalNodes(entry, gridMap);
       if (!a || !b) {
         return;
@@ -24883,18 +25301,13 @@ async function buildLayoutSvgString(
     });
   }
   if (triangleLabels.size) {
-    const gridMap = new Map();
-    nodes.forEach((node) => {
-      if (node.active && !node.isCustom) {
-        gridMap.set(`${node.gridX},${node.gridY},${node.gridZ}`, node);
-      }
-    });
+    const gridMap = getActiveGridNodeMap();
     for (const entry of triangleLabels) {
       if (!entry.label) {
         continue;
       }
       const diag = TRIANGLE_TRI_TO_DIAG[entry.tri];
-      if (!diag || !triangleDiagonals.has(triangleKey({ ...entry, diag }))) {
+      if (!diag || !hasEffectiveTriangleDiagonal(triangleKey({ ...entry, diag }))) {
         continue;
       }
       const cellNodes = getTriangleCellNodes(entry, gridMap);
@@ -25616,6 +26029,9 @@ function resetLattice() {
   distanceSelectedEdges.clear();
   distanceEdgeOverrides.clear();
   customPianoActiveKeys.clear();
+  clearTriangleKeyboardActiveVoices();
+  clearAutoTriangleDiagonals();
+  markAutoTrianglesDirty();
   customPianoMap = new Map();
   customPianoSelectedKey = null;
   customNodes = [];
@@ -25876,6 +26292,11 @@ bindOptionalInput(navDistanceInput, () => {
 });
 bindOptionalInput(tiltInput, () => {
   setLatticeTilt(tiltInput.value, { syncControl: false });
+  draw();
+  schedulePresetUrlUpdate();
+});
+bindOptionalInput(tiltReadout, () => {
+  setLatticeTilt(tiltReadout.value);
   draw();
   schedulePresetUrlUpdate();
 });
@@ -27620,6 +28041,15 @@ bindOptionalChange(physicalModelSelect, () => {
   handleSynthTypeChange();
 });
 bindOptionalChange(keyboardModeSelect, () => {
+  const nextMode = keyboardModeSelect.value;
+  if (!isTriangleKeyboardMode(nextMode)) {
+    clearTriangleKeyboardActiveVoices();
+    clearAutoTriangleDiagonals();
+    markAutoTrianglesDirty();
+  } else {
+    markAutoTrianglesDirty();
+    ensureAutoTriangleDiagonals();
+  }
   if (keyboardModeSelect.value === "off") {
     resetUiHintToDefault();
   }

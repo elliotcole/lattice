@@ -1057,14 +1057,15 @@ button:active {
 }
 
 #tilt {
-  width: 160px;
-  min-width: 160px;
-  max-width: 160px;
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
 }
 
 #tilt-readout {
-  display: inline-block;
-  width: 4.5ch;
+  width: 60px;
+  min-width: 60px;
+  max-width: 60px;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }

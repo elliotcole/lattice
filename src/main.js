@@ -223,6 +223,7 @@ const directionalRatioLabelsToggle = document.getElementById("directional-ratio-
 const connectOrphansToggle = document.getElementById("connect-orphans");
 const hejiEnabledToggle = document.getElementById("heji-enabled");
 const enharmonicsEnabledToggle = document.getElementById("enharmonics-enabled");
+const enharmonicsGroup = document.getElementById("enharmonics-group");
 const centsPrecisionButtons = document.querySelectorAll("[data-cents-precision]");
 const layoutKeyMappingButtons = document.querySelectorAll("[data-layout-key-mapping]");
 const sequencePatternSelect = document.getElementById("sequence-pattern");
@@ -288,6 +289,7 @@ const layoutShowBody = document.getElementById("layout-show-body");
 const layoutKeyMappingsGroup = document.getElementById("layout-key-mappings-group");
 const layoutHejiEnabledToggle = document.getElementById("layout-heji-enabled");
 const layoutEnharmonicsEnabledToggle = document.getElementById("layout-enharmonics-enabled");
+const layoutEnharmonicsGroup = document.getElementById("layout-enharmonics-group");
 const layoutShowHzToggle = document.getElementById("layout-show-hz");
 const layoutShowRatioCentsToggle = document.getElementById("layout-show-ratio-cents");
 const layoutShowCentsDeviationToggle = document.getElementById("layout-show-cents-deviation");
@@ -361,6 +363,7 @@ const ADD_INTERVAL_RING_COLOR = "rgba(220, 72, 72, 0.9)";
 const MICROTONAL_HOVER_RING_COLOR = "rgba(134, 239, 172, 0.95)";
 const MICROTONAL_SELECTED_RING_COLOR = "rgba(16, 185, 129, 0.95)";
 const GUIDE_DEPTH_DENOM_MAX = 3.2;
+const EDGE_LABEL_SIZE_DEFAULT = 12;
 const distanceEdges = [];
 const distanceEdgeOverrides = new Map();
 let distanceLabelDrag = null;
@@ -394,8 +397,11 @@ if (
   window.__latticePerformanceDialogPatchInstalled = true;
 }
 
+const ZOOM_MIN = 0.375;
+const ZOOM_MAX = 2.95;
+
 function clampZoom(value) {
-  return Math.min(2.2, Math.max(0.5, value));
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
 }
 
 function clampTiltDeg(value) {
@@ -1319,9 +1325,23 @@ const primes = [
   3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73,
   79, 83, 89, 97,
 ];
-const GRID_COLS = 20;
-const GRID_ROWS = 20;
-const GRID_DEPTH = 12;
+const AXIS_MIN_XY_DEFAULT = -8;
+const AXIS_MAX_XY_DEFAULT = 8;
+const AXIS_MIN_Z_DEFAULT = -3;
+const AXIS_MAX_Z_DEFAULT = 3;
+const AXIS_MIN_XY_LIMIT = -16;
+const AXIS_MAX_XY_LIMIT = 16;
+const AXIS_MIN_Z_LIMIT = -10;
+const AXIS_MAX_Z_LIMIT = 10;
+const DEFAULT_GRID_COLS = AXIS_MAX_XY_DEFAULT - AXIS_MIN_XY_DEFAULT + 1;
+const DEFAULT_GRID_ROWS = AXIS_MAX_XY_DEFAULT - AXIS_MIN_XY_DEFAULT + 1;
+const DEFAULT_GRID_DEPTH = AXIS_MAX_Z_DEFAULT - AXIS_MIN_Z_DEFAULT + 1;
+const AXIS_RANGE_MAX_COLS = AXIS_MAX_XY_LIMIT - AXIS_MIN_XY_LIMIT + 1;
+const AXIS_RANGE_MAX_ROWS = AXIS_MAX_XY_LIMIT - AXIS_MIN_XY_LIMIT + 1;
+const AXIS_RANGE_MAX_DEPTH = AXIS_MAX_Z_LIMIT - AXIS_MIN_Z_LIMIT + 1;
+let GRID_COLS = DEFAULT_GRID_COLS;
+let GRID_ROWS = DEFAULT_GRID_ROWS;
+let GRID_DEPTH = DEFAULT_GRID_DEPTH;
 const GRID_SPACING = 120;
 const BUILTIN_WAVEFORMS = ["sine", "triangle", "square", "sawtooth"];
 const CUSTOM_WAVEFORMS = new Set(customOscillatorTypes || []);
@@ -1742,6 +1762,7 @@ let showCentsSign = false;
 let directionalRatioLabels = false;
 let hejiEnabled = true;
 let enharmonicsEnabled = true;
+let enharmonicsEnabledPreference = true;
 let centsPrecision = 0;
 let showCircles = true;
 let showLineLabels = true;
@@ -4423,10 +4444,11 @@ function computeCustomNodeCoordinate(sourceNode, slot) {
     return null;
   }
   const offset = getCustomSlotOffset(slot);
+  const sourceZ = Number.isFinite(sourceNode.coordinate?.z) ? sourceNode.coordinate.z : 0;
   return {
     x: sourceNode.coordinate.x + offset.x,
     y: sourceNode.coordinate.y + offset.y,
-    z: 0,
+    z: sourceZ,
   };
 }
 
@@ -4437,8 +4459,10 @@ function createCustomNodeFromSource(sourceNode, slot, factorNumerator, factorDen
   const coordinate = computeCustomNodeCoordinate(sourceNode, slot) || {
     x: sourceNode.coordinate.x,
     y: sourceNode.coordinate.y,
-    z: 0,
+    z: Number.isFinite(sourceNode.coordinate?.z) ? sourceNode.coordinate.z : 0,
   };
+  const sourceExponentZ = Number.isFinite(sourceNode.exponentZ) ? sourceNode.exponentZ : 0;
+  const sourceGridZ = Number.isFinite(sourceNode.gridZ) ? sourceNode.gridZ : sourceExponentZ;
   const node = {
     id: nextCustomNodeId++,
     sourceNodeId: sourceNode.id,
@@ -4450,10 +4474,10 @@ function createCustomNodeFromSource(sourceNode, slot, factorNumerator, factorDen
     denominator: 1,
     exponentX: null,
     exponentY: null,
-    exponentZ: 0,
+    exponentZ: sourceExponentZ,
     gridX: null,
     gridY: null,
-    gridZ: 0,
+    gridZ: sourceGridZ,
     coordinate: { ...coordinate },
     freq: 0,
     cents_from_et: 0,
@@ -7220,10 +7244,26 @@ function enforceCentsDisplayMode() {
   if (showCentsDeviation) {
     showRatioCents = false;
   }
+  const centsDeviationEnabled = Boolean(showCentsDeviation);
+  if (!centsDeviationEnabled) {
+    enharmonicsEnabled = false;
+  } else {
+    enharmonicsEnabled = Boolean(enharmonicsEnabledPreference);
+  }
   setControlChecked(showCentsDeviationToggle, showCentsDeviation);
   setControlChecked(layoutShowCentsDeviationToggle, showCentsDeviation);
   setControlChecked(showRatioCentsToggle, showRatioCents);
   setControlChecked(layoutShowRatioCentsToggle, showRatioCents);
+  setControlChecked(enharmonicsEnabledToggle, enharmonicsEnabled);
+  setControlChecked(layoutEnharmonicsEnabledToggle, enharmonicsEnabled);
+  setControlDisabled(enharmonicsEnabledToggle, !centsDeviationEnabled);
+  setControlDisabled(layoutEnharmonicsEnabledToggle, !centsDeviationEnabled);
+  if (enharmonicsGroup) {
+    enharmonicsGroup.classList.toggle("is-disabled", !centsDeviationEnabled);
+  }
+  if (layoutEnharmonicsGroup) {
+    layoutEnharmonicsGroup.classList.toggle("is-disabled", !centsDeviationEnabled);
+  }
 }
 
 function getOctaveOffsetKey(node) {
@@ -9487,7 +9527,7 @@ function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
   }
   const labelFont = layoutMode ? layoutLineLabelFont : "Noto Serif";
   const labelWeight = layoutMode ? layoutLineLabelFontWeight : 400;
-  const labelSize = layoutMode ? getLayoutLineLabelSize() : 14;
+  const labelSize = layoutMode ? getLayoutLineLabelSize() : EDGE_LABEL_SIZE_DEFAULT;
   ctx.save();
   ctx.lineWidth = 1.5;
   orphanGuideEdges.forEach((edgeKey) => {
@@ -10200,7 +10240,9 @@ function drawCanvasEdgeSegment({
     ctx.save();
     const effectiveLabelAlpha = Number.isFinite(labelAlpha) ? labelAlpha : alpha;
     ctx.globalAlpha = effectiveLabelAlpha;
-    ctx.translate(midX, midY);
+    const labelNudgeX = Math.max(0.5, size * 0.04);
+    const labelNudgeY = Math.max(1, size * 0.14);
+    ctx.translate(midX - labelNudgeX, midY - labelNudgeY);
     ctx.rotate(angle);
     ctx.fillStyle = themeColors.textSecondary;
     ctx.textAlign = "center";
@@ -10944,7 +10986,7 @@ function drawDistanceConnections(nodePosMap) {
     ? getLayoutLineLabelSize()
     : is3DMode
     ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
-    : 14;
+    : EDGE_LABEL_SIZE_DEFAULT;
   for (let i = 0; i < selectedEdges.length; i += 1) {
     const { a, b, aKey, bKey, edgeKey } = selectedEdges[i];
     const startEntry = nodePosMap.get(a.id);
@@ -11301,7 +11343,7 @@ function drawCommaConnections(nodePosMap) {
     ? getLayoutLineLabelSize()
     : is3DMode
     ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
-    : 14;
+    : EDGE_LABEL_SIZE_DEFAULT;
   aggregatedEdges.forEach(({ a, b, color, labels }) => {
     const startEntry = nodePosMap.get(a.id);
     const endEntry = nodePosMap.get(b.id);
@@ -11714,7 +11756,7 @@ function draw() {
   } else if (!showMicrotonal) {
     const labelFont = layoutMode ? layoutLineLabelFont : "Noto Serif";
     const labelWeight = layoutMode ? layoutLineLabelFontWeight : 400;
-    const labelSize = layoutMode ? getLayoutLineLabelSize() : 14;
+    const labelSize = layoutMode ? getLayoutLineLabelSize() : EDGE_LABEL_SIZE_DEFAULT;
     edges.forEach(([a, b]) => {
       if (!a.active || !b.active) {
         return;
@@ -14560,8 +14602,8 @@ function onPointerUp(event) {
                     trianglesToStop.push(nodesForTri);
                   }
                 });
-              });
-              if (trianglesToStop.length) {
+                });
+                if (trianglesToStop.length) {
                 trianglesToStop.forEach((nodesForTri) => {
                   nodesForTri.forEach((node) => {
                     const voice = node.baseVoiceId ? findVoiceById(node.baseVoiceId) : null;
@@ -14573,13 +14615,20 @@ function onPointerUp(event) {
                 });
                 let activated = false;
                 triNodes.forEach((node) => {
-                  if (!node.active) {
-                    node.active = true;
-                    syncCustomNodesWithSource(node.id, true);
+                  const key = `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`;
+                  if (activateNodeByExponentKey(key)) {
                     activated = true;
                   }
                 });
-                triNodes.forEach((node) => {
+                const refreshedTriNodes = triNodes
+                  .map(
+                    (node) =>
+                      getNodeByExponentKey(
+                        `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`
+                      ) || node
+                  )
+                  .filter(Boolean);
+                refreshedTriNodes.forEach((node) => {
                   if (node.baseVoiceId && findVoiceById(node.baseVoiceId)) {
                     return;
                   }
@@ -14594,11 +14643,6 @@ function onPointerUp(event) {
                   }
                 });
                 if (activated) {
-                  updatePitchInstances();
-                  refreshPatternFromActiveNodes();
-                  updateUiHint();
-                  markIsomorphicDirty();
-                  schedulePresetUrlUpdate();
                 }
                 handled = true;
               }
@@ -14607,13 +14651,20 @@ function onPointerUp(event) {
               {
                 let activated = false;
                 triNodes.forEach((node) => {
-                  if (!node.active) {
-                    node.active = true;
-                    syncCustomNodesWithSource(node.id, true);
+                  const key = `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`;
+                  if (activateNodeByExponentKey(key)) {
                     activated = true;
                   }
                 });
-                triNodes.forEach((node) => {
+                const refreshedTriNodes = triNodes
+                  .map(
+                    (node) =>
+                      getNodeByExponentKey(
+                        `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`
+                      ) || node
+                  )
+                  .filter(Boolean);
+                refreshedTriNodes.forEach((node) => {
                   if (node.baseVoiceId && findVoiceById(node.baseVoiceId)) {
                     return;
                   }
@@ -14628,11 +14679,6 @@ function onPointerUp(event) {
                   }
                 });
                 if (activated) {
-                  updatePitchInstances();
-                  refreshPatternFromActiveNodes();
-                  updateUiHint();
-                  markIsomorphicDirty();
-                  schedulePresetUrlUpdate();
                 }
               }
             }
@@ -14710,14 +14756,7 @@ function onPointerUp(event) {
         if (hit.isCenter && !event.shiftKey) {
           return;
         }
-        hit.active = true;
-        syncCustomNodesWithSource(hit.id, true);
-        updatePitchInstances();
-        refreshPatternFromActiveNodes();
-        updateUiHint();
-        markIsomorphicDirty();
-        schedulePresetUrlUpdate();
-        draw();
+        activateNode(hit);
         return;
       }
       if (analysisLayers.microtonal) {
@@ -14972,14 +15011,14 @@ function onWheel(event) {
   }
   const zoomDelta = event.deltaY > 0 ? 0.92 : 1.08;
   if (is3DMode) {
-    view.zoom = Math.min(2.2, Math.max(0.5, view.zoom * zoomDelta));
+    view.zoom = clampZoom(view.zoom * zoomDelta);
     scheduleDraw();
     markIsomorphicDirty();
     schedulePresetUrlUpdate();
     return;
   }
   const before = screenToWorld({ x: event.offsetX, y: event.offsetY });
-  view.zoom = Math.min(2.2, Math.max(0.5, view.zoom * zoomDelta));
+  view.zoom = clampZoom(view.zoom * zoomDelta);
   const after = screenToWorld({ x: event.offsetX, y: event.offsetY });
 
   view.offsetX += before.x - after.x;
@@ -16416,17 +16455,129 @@ function getAxisPrimeValues() {
   return { x, y, z };
 }
 
+function getAxisExponentRanges() {
+  const centerX = Math.floor(GRID_COLS / 2);
+  const centerY = Math.floor(GRID_ROWS / 2);
+  const centerZ = Math.floor(GRID_DEPTH / 2);
+  const offsetX = Number(latticeExponentOffset.x) || 0;
+  const offsetY = Number(latticeExponentOffset.y) || 0;
+  const offsetZ = Number(latticeExponentOffset.z) || 0;
+  return {
+    xMin: -centerX - offsetX,
+    xMax: GRID_COLS - 1 - centerX - offsetX,
+    yMin: -centerY - offsetY,
+    yMax: GRID_ROWS - 1 - centerY - offsetY,
+    zMin: centerZ - (GRID_DEPTH - 1) - offsetZ,
+    zMax: centerZ - offsetZ,
+  };
+}
+
+function applyAxisExponentRanges(ranges) {
+  const cols = ranges.xMax - ranges.xMin + 1;
+  const rows = ranges.yMax - ranges.yMin + 1;
+  const depth = ranges.zMax - ranges.zMin + 1;
+  GRID_COLS = cols;
+  GRID_ROWS = rows;
+  GRID_DEPTH = depth;
+  const centerX = Math.floor(GRID_COLS / 2);
+  const centerY = Math.floor(GRID_ROWS / 2);
+  const centerZ = Math.floor(GRID_DEPTH / 2);
+  latticeExponentOffset = {
+    x: -centerX - ranges.xMin,
+    y: centerY - ranges.yMax,
+    z: centerZ - ranges.zMax,
+  };
+}
+
+function maybeExpandAxisRangesForActivation(node) {
+  if (
+    !node ||
+    !Number.isFinite(node.exponentX) ||
+    !Number.isFinite(node.exponentY) ||
+    !Number.isFinite(node.exponentZ)
+  ) {
+    return false;
+  }
+  const ranges = getAxisExponentRanges();
+  let changed = false;
+  if (node.exponentX <= ranges.xMin && ranges.xMin > AXIS_MIN_XY_LIMIT) {
+    ranges.xMin -= 1;
+    changed = true;
+  }
+  if (node.exponentX >= ranges.xMax && ranges.xMax < AXIS_MAX_XY_LIMIT) {
+    ranges.xMax += 1;
+    changed = true;
+  }
+  if (node.exponentY <= ranges.yMin && ranges.yMin > AXIS_MIN_XY_LIMIT) {
+    ranges.yMin -= 1;
+    changed = true;
+  }
+  if (node.exponentY >= ranges.yMax && ranges.yMax < AXIS_MAX_XY_LIMIT) {
+    ranges.yMax += 1;
+    changed = true;
+  }
+  if (node.exponentZ <= ranges.zMin && ranges.zMin > AXIS_MIN_Z_LIMIT) {
+    ranges.zMin -= 1;
+    changed = true;
+  }
+  if (node.exponentZ >= ranges.zMax && ranges.zMax < AXIS_MAX_Z_LIMIT) {
+    ranges.zMax += 1;
+    changed = true;
+  }
+  if (!changed) {
+    return false;
+  }
+  applyAxisExponentRanges(ranges);
+  const activeKeys = captureActiveNodeKeys();
+  activeKeys.add(`${node.exponentX},${node.exponentY},${node.exponentZ || 0}`);
+  rebuildLattice(activeKeys);
+  schedulePresetUrlUpdate();
+  return true;
+}
+
 function activateNode(node) {
   if (!node || node.active) {
     return;
+  }
+  if (maybeExpandAxisRangesForActivation(node)) {
+    const key = `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`;
+    node = nodes.find(
+      (candidate) =>
+        `${candidate.exponentX},${candidate.exponentY},${candidate.exponentZ || 0}` === key
+    );
+    if (!node || node.active) {
+      return;
+    }
   }
   node.active = true;
   syncCustomNodesWithSource(node.id, true);
   updatePitchInstances();
   refreshPatternFromActiveNodes();
+  updateUiHint();
   markIsomorphicDirty();
   schedulePresetUrlUpdate();
   draw();
+}
+
+function getNodeByExponentKey(key) {
+  if (!key) {
+    return null;
+  }
+  return nodes.find(
+    (node) => `${node.exponentX},${node.exponentY},${node.exponentZ || 0}` === key
+  );
+}
+
+function activateNodeByExponentKey(key) {
+  const node = getNodeByExponentKey(key);
+  if (!node) {
+    return false;
+  }
+  const wasActive = Boolean(node.active);
+  if (!wasActive) {
+    activateNode(node);
+  }
+  return !wasActive;
 }
 
 function findRatioTargetNode(target) {
@@ -18220,7 +18371,7 @@ function updateLayoutScaleReadout() {
   if (!layoutScaleReadout) {
     return;
   }
-  const clamped = Math.min(2, Math.max(0.5, view.zoom));
+  const clamped = clampZoom(view.zoom);
   layoutScaleReadout.textContent = `${Math.round(clamped * 100)}%`;
 }
 
@@ -18342,7 +18493,7 @@ function syncLayoutScaleInput() {
   if (!layoutScaleInput) {
     return;
   }
-  const clamped = Math.min(2, Math.max(0.5, view.zoom));
+  const clamped = clampZoom(view.zoom);
   layoutScaleInput.value = clamped.toFixed(2);
   updateLayoutScaleReadout();
 }
@@ -18927,9 +19078,9 @@ function applyNavAction(action) {
   } else if (action === "pan-right") {
     view.offsetX += panStep;
   } else if (action === "zoom-in") {
-    view.zoom = Math.min(2.2, view.zoom * 1.1);
+    view.zoom = Math.min(ZOOM_MAX, view.zoom * 1.1);
   } else if (action === "zoom-out") {
-    view.zoom = Math.max(0.5, view.zoom / 1.1);
+    view.zoom = Math.max(ZOOM_MIN, view.zoom / 1.1);
   } else if (action === "reset-view") {
     view.offsetX = 0;
     view.offsetY = 0;
@@ -19001,7 +19152,7 @@ function fitViewToActiveNodes2D() {
   const availableHeight = Math.max(1, canvas.clientHeight - safeTop - safeBottom - padding);
   const zoomX = availableWidth / width;
   const zoomY = availableHeight / height;
-  view.zoom = Math.min(2.2, Math.max(0.5, Math.min(zoomX, zoomY)));
+  view.zoom = clampZoom(Math.min(zoomX, zoomY));
   const centerX = (minX + maxX) / 2;
   const centerY = (minY + maxY) / 2;
   const targetCenterX = safeLeft + (canvas.clientWidth - safeLeft - safeRight) / 2;
@@ -19107,7 +19258,7 @@ function fitViewToProjectedBounds(bounds, { extraLeft = 0 } = {}) {
   );
   const zoomX = availableWidth / width;
   const zoomY = availableHeight / height;
-  view.zoom = Math.min(2.2, Math.max(0.5, Math.min(zoomX, zoomY)));
+  view.zoom = clampZoom(Math.min(zoomX, zoomY));
   const centerX = (bounds.minX + bounds.maxX) / 2;
   const centerY = (bounds.minY + bounds.maxY) / 2;
   const targetCenterX =
@@ -21549,6 +21700,18 @@ function getPresetExponentOffsetState() {
   };
 }
 
+function getPresetAxisRangesState() {
+  const ranges = getAxisExponentRanges();
+  return {
+    xMin: ranges.xMin,
+    xMax: ranges.xMax,
+    yMin: ranges.yMin,
+    yMax: ranges.yMax,
+    zMin: ranges.zMin,
+    zMax: ranges.zMax,
+  };
+}
+
 function getPresetTrianglesState() {
   return Array.from(triangleDiagonals.values()).map((entry) => ({
     plane: entry.plane,
@@ -21614,6 +21777,7 @@ function buildPresetStateSkeleton(active, customState, lineLabelState, distanceS
     circles: showCircles,
     keyMappings: showKeyMappings,
     ratios: getPresetRatiosState(),
+    axisRanges: getPresetAxisRangesState(),
     exponentOffset: getPresetExponentOffsetState(),
     noteSpellings: Array.from(nodeSpellingOverrides.entries()),
     octaveOffsets: Array.from(nodeOctaveOffsets.entries()),
@@ -22171,6 +22335,7 @@ function applyPresetReadoutAndTuningSettings(state) {
       enharmonicsEnabled = value;
     }
   );
+  enharmonicsEnabledPreference = Boolean(enharmonicsEnabled);
   if (Number.isFinite(state.centsPrecision)) {
     centsPrecision = Math.min(2, Math.max(0, Math.round(state.centsPrecision)));
     syncCentsPrecisionControls();
@@ -22660,7 +22825,7 @@ function applyPresetLayoutViewAndModeState(layoutState) {
   } else if (Number.isFinite(layoutState.zoom)) {
     layoutView = {
       ...layoutView,
-      zoom: Math.min(2.2, Math.max(0.5, layoutState.zoom)),
+      zoom: clampZoom(layoutState.zoom),
     };
   }
   const parsedSourceView = parsePresetLayoutViewObject(layoutState.sourceView);
@@ -22669,7 +22834,7 @@ function applyPresetLayoutViewAndModeState(layoutState) {
   }
   if (Number.isFinite(layoutState.zoom)) {
     if (layoutMode && layoutLockPosition) {
-      view.zoom = Math.min(2.2, Math.max(0.5, layoutState.zoom));
+      view.zoom = clampZoom(layoutState.zoom);
       syncLayoutScaleInput();
     }
   }
@@ -22910,7 +23075,7 @@ function applyPresetViewState(viewState) {
     return;
   }
   if (Number.isFinite(viewState.zoom)) {
-    view.zoom = Math.min(2.2, Math.max(0.5, viewState.zoom));
+    view.zoom = clampZoom(viewState.zoom);
   }
   if (Number.isFinite(viewState.offsetX)) {
     view.offsetX = viewState.offsetX;
@@ -23049,6 +23214,46 @@ function applyPresetCoreTuningState(state) {
     if (Number.isFinite(z) && ratioZSelect) {
       ratioZSelect.value = String(z);
     }
+  }
+  if (state.axisRanges && typeof state.axisRanges === "object") {
+    const xMin = Math.trunc(Number(state.axisRanges.xMin));
+    const xMax = Math.trunc(Number(state.axisRanges.xMax));
+    const yMin = Math.trunc(Number(state.axisRanges.yMin));
+    const yMax = Math.trunc(Number(state.axisRanges.yMax));
+    const zMin = Math.trunc(Number(state.axisRanges.zMin));
+    const zMax = Math.trunc(Number(state.axisRanges.zMax));
+    const cols = xMax - xMin + 1;
+    const rows = yMax - yMin + 1;
+    const depth = zMax - zMin + 1;
+    if (
+      Number.isFinite(xMin) &&
+      Number.isFinite(xMax) &&
+      Number.isFinite(yMin) &&
+      Number.isFinite(yMax) &&
+      Number.isFinite(zMin) &&
+      Number.isFinite(zMax) &&
+      xMin <= xMax &&
+      yMin <= yMax &&
+      zMin <= zMax &&
+      cols >= 1 &&
+      rows >= 1 &&
+      depth >= 1 &&
+      cols <= AXIS_RANGE_MAX_COLS &&
+      rows <= AXIS_RANGE_MAX_ROWS &&
+      depth <= AXIS_RANGE_MAX_DEPTH
+    ) {
+      GRID_COLS = cols;
+      GRID_ROWS = rows;
+      GRID_DEPTH = depth;
+    } else {
+      GRID_COLS = DEFAULT_GRID_COLS;
+      GRID_ROWS = DEFAULT_GRID_ROWS;
+      GRID_DEPTH = DEFAULT_GRID_DEPTH;
+    }
+  } else {
+    GRID_COLS = DEFAULT_GRID_COLS;
+    GRID_ROWS = DEFAULT_GRID_ROWS;
+    GRID_DEPTH = DEFAULT_GRID_DEPTH;
   }
   if (state.exponentOffset && typeof state.exponentOffset === "object") {
     latticeExponentOffset = {
@@ -25436,6 +25641,9 @@ function resetLattice() {
   view.rotX = 0;
   view.rotY = 0;
   cameraDistance = 0;
+  GRID_COLS = DEFAULT_GRID_COLS;
+  GRID_ROWS = DEFAULT_GRID_ROWS;
+  GRID_DEPTH = DEFAULT_GRID_DEPTH;
   latticeExponentOffset = { x: 0, y: 0, z: 0 };
   hoverNodeId = null;
   set3DMode(false, { preserveDepth: false });
@@ -25512,6 +25720,7 @@ setControlChecked(showRatioCentsToggle, showRatioCents);
 setControlChecked(layoutShowRatioCentsToggle, showRatioCents);
 setControlChecked(showCentsDeviationToggle, showCentsDeviation);
 setControlChecked(layoutShowCentsDeviationToggle, showCentsDeviation);
+enharmonicsEnabledPreference = Boolean(enharmonicsEnabled);
 enforceCentsDisplayMode();
 setControlChecked(showCentsSignToggle, showCentsSign);
 setControlChecked(directionalRatioLabelsToggle, directionalRatioLabels);
@@ -26331,7 +26540,9 @@ bindMirroredBooleanToggles(
   enharmonicsEnabledToggle,
   layoutEnharmonicsEnabledToggle,
   (checked) => {
-    enharmonicsEnabled = checked;
+    const next = Boolean(checked);
+    enharmonicsEnabledPreference = next;
+    enharmonicsEnabled = showCentsDeviation ? next : false;
   },
   { refreshCustom: true }
 );

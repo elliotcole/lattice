@@ -497,6 +497,14 @@ body.theme-dark .banner-message:not([hidden]) {
   align-items: center;
 }
 
+.subordinate-control {
+  margin-left: 0;
+}
+
+.subordinate-control.is-disabled {
+  opacity: 0.45;
+}
+
 .fundamental-inline {
   gap: 6px;
 }

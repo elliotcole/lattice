@@ -1429,6 +1429,17 @@ function getOctaveReducedDisplayRatioLabel(ratio) {
   return `${reduced.numerator}/${reduced.denominator}`;
 }
 
+function getOctavePowerRatioLabel(semitone) {
+  const octaveStep = Math.round(semitone / 12);
+  if (Math.abs(semitone - octaveStep * 12) > 0.02) {
+    return null;
+  }
+  if (octaveStep >= 0) {
+    return `${2 ** octaveStep}/1`;
+  }
+  return `1/${2 ** Math.abs(octaveStep)}`;
+}
+
 function getFundamentalNoteNames() {
   return fundamentalSpelling === "flat" ? noteNamesFlat : noteNamesSharp;
 }
@@ -2059,12 +2070,9 @@ function refreshMarkers() {
       const baseLabel = getOctaveReducedDisplayRatioLabel(ratio);
       let ratioLabel = baseLabel;
       if (isUnisonRatio || isOctaveRatio) {
-        const octaveStep = Math.round(semi / 12);
-        if (Math.abs(semi - octaveStep * 12) <= 0.02) {
-          const octaveOrdinal = octaveStep + 1;
-          if (octaveOrdinal >= 1) {
-            ratioLabel = `${octaveOrdinal}/1`;
-          }
+        const octaveLabel = getOctavePowerRatioLabel(semi);
+        if (octaveLabel) {
+          ratioLabel = octaveLabel;
         }
       }
       markers.push({
@@ -2086,12 +2094,9 @@ function getRatioLabelForSemitone(ratio, semitone) {
   const isUnisonRatio = ratio.numerator === 1 && ratio.denominator === 1;
   const isOctaveRatio = ratio.numerator === 2 && ratio.denominator === 1;
   if (isUnisonRatio || isOctaveRatio) {
-    const octaveStep = Math.round(semitone / 12);
-    if (Math.abs(semitone - octaveStep * 12) <= 0.02) {
-      const octaveOrdinal = octaveStep + 1;
-      if (octaveOrdinal >= 1) {
-        return `${octaveOrdinal}/1`;
-      }
+    const octaveLabel = getOctavePowerRatioLabel(semitone);
+    if (octaveLabel) {
+      return octaveLabel;
     }
   }
   return getOctaveReducedDisplayRatioLabel(ratio) || ratio.label || "--";

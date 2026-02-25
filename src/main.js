@@ -221,6 +221,7 @@ const showCentsDeviationToggle = document.getElementById("show-cents-deviation")
 const showCentsSignToggle = document.getElementById("show-cents-sign");
 const directionalRatioLabelsToggle = document.getElementById("directional-ratio-labels");
 const connectOrphansToggle = document.getElementById("connect-orphans");
+const show3DShadingToggle = document.getElementById("show-3d-shading");
 const hejiEnabledToggle = document.getElementById("heji-enabled");
 const enharmonicsEnabledToggle = document.getElementById("enharmonics-enabled");
 const enharmonicsGroup = document.getElementById("enharmonics-group");
@@ -1654,6 +1655,7 @@ let snapshotConnectCommonTones = false;
 let snapshotRestoreView = true;
 let snapshotRestoreSequence = true;
 let snapshotRestoreSynthSettings = true;
+let snapshotRestoreKeyboardMode = true;
 let snapshotRestoreLfos = true;
 let snapshotRestoreLfoPhase = false;
 let snapshotKeyboardMode = false;
@@ -1776,6 +1778,7 @@ let enharmonicsEnabled = true;
 let enharmonicsEnabledPreference = true;
 let centsPrecision = 0;
 let showCircles = true;
+let show3DShading = true;
 let showLineLabels = true;
 let showKeyMappings = true;
 let layoutKeyMappingMode = "hide";
@@ -2839,6 +2842,7 @@ function applyPendingSnapshotForPattern(nextSnapshot, nextIndex, nextLetter) {
     skipLayoutModeSwitch: true,
     skipStopVoices: true,
     preserveViewMode: true,
+    preserveActiveVoicesOnSynthChange: true,
   });
   updateSnapshotUi();
   if (snapshotRestoreSequence) {
@@ -3229,8 +3233,23 @@ function prepareSnapshotStateForRecall(snapshotState) {
   if (!snapshotRestoreView && nextState.view) {
     delete nextState.view;
   }
+  const keyboardModeValue =
+    nextState.synth && typeof nextState.synth.keyboardMode === "string"
+      ? nextState.synth.keyboardMode
+      : null;
   if (!snapshotRestoreSynthSettings && nextState.synth) {
     delete nextState.synth;
+  }
+  if (snapshotRestoreKeyboardMode && typeof keyboardModeValue === "string") {
+    if (!nextState.synth || typeof nextState.synth !== "object") {
+      nextState.synth = {};
+    }
+    nextState.synth.keyboardMode = keyboardModeValue;
+  } else if (nextState.synth && typeof nextState.synth === "object") {
+    delete nextState.synth.keyboardMode;
+    if (!Object.keys(nextState.synth).length) {
+      delete nextState.synth;
+    }
   }
   return nextState;
 }
@@ -3587,6 +3606,7 @@ function buildSnapshotSetPayload({ compact = true } = {}) {
       restoreView: snapshotRestoreView,
       restoreSequence: snapshotRestoreSequence,
       restoreSynthSettings: snapshotRestoreSynthSettings,
+      restoreKeyboardMode: snapshotRestoreKeyboardMode,
       restoreLfos: snapshotRestoreLfos,
       restoreLfoPhase: snapshotRestoreLfoPhase,
       useLetterKeys: snapshotKeyboardMode,
@@ -3621,6 +3641,9 @@ function applySnapshotSetPayload(payload) {
     snapshotRestoreSequence = Boolean(settings.restoreSequence);
     if (typeof settings.restoreSynthSettings === "boolean") {
       snapshotRestoreSynthSettings = settings.restoreSynthSettings;
+    }
+    if (typeof settings.restoreKeyboardMode === "boolean") {
+      snapshotRestoreKeyboardMode = settings.restoreKeyboardMode;
     }
     snapshotRestoreLfos = Boolean(settings.restoreLfos);
     snapshotRestoreLfoPhase = Boolean(settings.restoreLfoPhase);
@@ -3858,6 +3881,7 @@ function recallSnapshotLetter(letter, index) {
     skipLayoutModeSwitch: true,
     skipStopVoices: true,
     preserveViewMode: true,
+    preserveActiveVoicesOnSynthChange: true,
   });
   if (snapshotRestoreSequence) {
     if (snapshot.pattern) {
@@ -3905,6 +3929,7 @@ function recallSnapshot(index) {
     skipLayoutModeSwitch: true,
     skipStopVoices: true,
     preserveViewMode: true,
+    preserveActiveVoicesOnSynthChange: true,
   });
   if (snapshotRestoreSequence) {
     if (snapshot.pattern) {
@@ -6809,7 +6834,8 @@ function syncOneShotForWaveform(type) {
   updatePatternLengthAvailability();
 }
 
-function handleSynthTypeChange() {
+function handleSynthTypeChange(options = {}) {
+  const replaceActiveVoices = options.replaceActiveVoices !== false;
   const nextType = getCurrentWaveformType();
   syncOneShotForWaveform(nextType);
   if (nextType === SOUNDFONT_WAVEFORM) {
@@ -6826,24 +6852,26 @@ function handleSynthTypeChange() {
     return;
   }
   currentSynthWaveform = nextType;
-  const snapshot = [...voices];
-  snapshot.forEach((voice) => {
-    const wasBase = nodes.find((node) => node.baseVoiceId === voice.id);
-    stopVoice(voice, true);
-    const newVoice = startVoice({
-      nodeId: voice.nodeId,
-      octave: voice.octave,
-      freq: voice.freq,
-      lfoActive: voice.lfoActive,
-      lfoHalfPeriod: voice.lfoHalfPeriod,
-      lfoStartMs: voice.lfoStartMs,
-      lfoCurve: voice.lfoCurve,
-      source: voice.source,
+  if (replaceActiveVoices) {
+    const snapshot = [...voices];
+    snapshot.forEach((voice) => {
+      const wasBase = nodes.find((node) => node.baseVoiceId === voice.id);
+      stopVoice(voice, true);
+      const newVoice = startVoice({
+        nodeId: voice.nodeId,
+        octave: voice.octave,
+        freq: voice.freq,
+        lfoActive: voice.lfoActive,
+        lfoHalfPeriod: voice.lfoHalfPeriod,
+        lfoStartMs: voice.lfoStartMs,
+        lfoCurve: voice.lfoCurve,
+        source: voice.source,
+      });
+      if (newVoice && wasBase) {
+        wasBase.baseVoiceId = newVoice.id;
+      }
     });
-    if (newVoice && wasBase) {
-      wasBase.baseVoiceId = newVoice.id;
-    }
-  });
+  }
   schedulePresetUrlUpdate();
 }
 
@@ -12367,7 +12395,7 @@ function draw() {
             : node.isCustom
             ? "rgba(220, 220, 220, 0.25)"
             : "rgba(255, 255, 255, 0.35)";
-        if (reducedEffects) {
+        if (reducedEffects || !show3DShading) {
           ctx.shadowColor = "transparent";
           ctx.shadowBlur = 0;
           ctx.shadowOffsetX = 0;
@@ -19444,7 +19472,7 @@ function set3DMode(enabled, { preserveDepth = false } = {}) {
   updateAddModeFromShift();
   updateUiHint();
   if (enabled && !had3DNodes) {
-    rebuildLattice(activeKeys);
+    rebuildLattice(activeKeys, { stopVoices: false });
   } else {
     draw();
   }
@@ -22189,6 +22217,7 @@ function buildPresetStateSkeleton(active, customState, lineLabelState, distanceS
     distanceEdges: distanceState.distanceEdgesState,
     distanceEdgeOverrides: distanceState.distanceOverridesState,
     circles: showCircles,
+    shading3d: show3DShading,
     keyMappings: showKeyMappings,
     ratios: getPresetRatiosState(),
     axisRanges: getPresetAxisRangesState(),
@@ -22450,6 +22479,7 @@ function syncSnapshotSettingsControls() {
   setControlChecked(snapshotRestoreViewToggle, snapshotRestoreView);
   setControlChecked(snapshotRestoreSequenceToggle, snapshotRestoreSequence);
   setControlChecked(snapshotRestoreSynthToggle, snapshotRestoreSynthSettings);
+  setControlChecked(snapshotRestoreKeyboardModeToggle, snapshotRestoreKeyboardMode);
   setControlChecked(snapshotRestoreLfosToggle, snapshotRestoreLfos);
   setControlChecked(snapshotKeyboardModeToggle, snapshotKeyboardMode);
   setControlChecked(snapshotConnectToggle, snapshotConnectCommonTones);
@@ -22481,6 +22511,9 @@ function applyPresetSnapshotSettings(settings) {
   }
   if (typeof settings.restoreSynthSettings === "boolean") {
     snapshotRestoreSynthSettings = settings.restoreSynthSettings;
+  }
+  if (typeof settings.restoreKeyboardMode === "boolean") {
+    snapshotRestoreKeyboardMode = settings.restoreKeyboardMode;
   }
   if (typeof settings.restoreLfos === "boolean") {
     snapshotRestoreLfos = settings.restoreLfos;
@@ -22630,6 +22663,15 @@ function applyPresetDisplayToggleState(state) {
   applyPresetBooleanField(state, "circles", [navCirclesToggle, layoutCirclesToggle], (value) => {
     showCircles = value;
   });
+  applyPresetBooleanField(
+    state,
+    "shading3d",
+    [show3DShadingToggle],
+    (value) => {
+      show3DShading = value;
+    },
+    true
+  );
   applyPresetBooleanField(
     state,
     "keyMappings",
@@ -23415,7 +23457,7 @@ function applyPendingPresetLayoutState() {
   );
 }
 
-function applyPresetSynthState(synthState) {
+function applyPresetSynthState(synthState, options = {}) {
   if (!synthState || typeof synthState !== "object") {
     return;
   }
@@ -23448,10 +23490,10 @@ function applyPresetSynthState(synthState) {
     }
     markIsomorphicDirty();
   }
-  if (Array.isArray(synthState.customPianoMap)) {
-    pendingCustomPianoMap = synthState.customPianoMap;
-  } else {
-    pendingCustomPianoMap = [];
+  if (Object.prototype.hasOwnProperty.call(synthState, "customPianoMap")) {
+    pendingCustomPianoMap = Array.isArray(synthState.customPianoMap)
+      ? synthState.customPianoMap
+      : [];
   }
   if (typeof synthState.mode === "string") {
     synthMode = synthState.mode;
@@ -23466,7 +23508,9 @@ function applyPresetSynthState(synthState) {
     soundfontPresetIndex = Math.trunc(synthState.soundfontPreset);
   }
   syncSynthModeUI();
-  handleSynthTypeChange();
+  handleSynthTypeChange({
+    replaceActiveVoices: !options.preserveActiveVoicesOnSynthChange,
+  });
   [
     ["attack", attackSlider],
     ["decay", decaySlider],
@@ -23742,10 +23786,10 @@ function rebuildFromPresetActiveKeys(activeKeys, options) {
   });
 }
 
-function applyPresetPreRebuildPipeline(state, presetContext) {
+function applyPresetPreRebuildPipeline(state, presetContext, options) {
   applyPresetCoreTuningState(state);
   applyPresetSpellingAndOctaveState(state);
-  applyPresetSynthState(state.synth);
+  applyPresetSynthState(state.synth, options);
   applyPresetViewState(presetContext.viewState);
   return applyPresetPreRebuildState(state, presetContext);
 }
@@ -23755,7 +23799,7 @@ function applyPresetPostRebuildPipeline(state, presetContext) {
 }
 
 function runPresetApplyPipeline(state, options, presetContext) {
-  const activeKeys = applyPresetPreRebuildPipeline(state, presetContext);
+  const activeKeys = applyPresetPreRebuildPipeline(state, presetContext, options);
   rebuildFromPresetActiveKeys(activeKeys, options);
   applyPresetPostRebuildPipeline(state, presetContext);
 }
@@ -25935,6 +25979,13 @@ function rebuildLattice(
   activeKeys = null,
   { remapTriangles = true, remapLayoutOffsets = true, stopVoices = true } = {}
 ) {
+  const previousNodeSnapshotKeys = new Map();
+  nodes.forEach((node) => {
+    const key = getSnapshotNodeKey(node);
+    if (key) {
+      previousNodeSnapshotKeys.set(node.id, key);
+    }
+  });
   if (stopVoices) {
     stopAllVoices();
   }
@@ -25980,6 +26031,81 @@ function rebuildLattice(
     remapTrianglesForGridCenter(prevCenterZ, gridCenterZ);
   }
   nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const nextNodeIdsBySnapshotKey = new Map();
+  nodes.forEach((node) => {
+    const key = getSnapshotNodeKey(node);
+    if (key) {
+      nextNodeIdsBySnapshotKey.set(key, node.id);
+    }
+  });
+  const nodeIdRemap = new Map();
+  previousNodeSnapshotKeys.forEach((key, previousId) => {
+    const nextId = nextNodeIdsBySnapshotKey.get(key);
+    if (Number.isFinite(nextId)) {
+      nodeIdRemap.set(previousId, nextId);
+    }
+  });
+  const remapNodeId = (nodeId) => {
+    if (!Number.isFinite(nodeId)) {
+      return null;
+    }
+    if (nodeIdRemap.has(nodeId)) {
+      return nodeIdRemap.get(nodeId);
+    }
+    return nodeById.has(nodeId) ? nodeId : null;
+  };
+  voices.forEach((voice) => {
+    if (!voice || !Number.isFinite(voice.nodeId)) {
+      return;
+    }
+    const nextId = remapNodeId(voice.nodeId);
+    if (Number.isFinite(nextId)) {
+      voice.nodeId = nextId;
+    }
+  });
+  if (Array.isArray(looperEvents) && looperEvents.length) {
+    looperEvents = looperEvents.map((event) => {
+      if (!event || !Number.isFinite(event.nodeId)) {
+        return event;
+      }
+      const nextId = remapNodeId(event.nodeId);
+      return Number.isFinite(nextId)
+        ? {
+            ...event,
+            nodeId: nextId,
+          }
+        : event;
+    });
+  }
+  if (Array.isArray(patternActiveNodes) && patternActiveNodes.length) {
+    patternActiveNodes = patternActiveNodes
+      .map((nodeId) => remapNodeId(nodeId))
+      .filter((nodeId) => Number.isFinite(nodeId));
+  }
+  if (looperVoicesByNode && looperVoicesByNode.size) {
+    const remappedLooperVoices = new Map();
+    looperVoicesByNode.forEach((voiceList, nodeId) => {
+      const nextId = remapNodeId(nodeId);
+      if (!Number.isFinite(nextId)) {
+        return;
+      }
+      const existing = remappedLooperVoices.get(nextId) || [];
+      remappedLooperVoices.set(nextId, existing.concat(voiceList || []));
+    });
+    looperVoicesByNode = remappedLooperVoices;
+  }
+  nodes.forEach((node) => {
+    node.baseVoiceId = null;
+  });
+  voices.forEach((voice) => {
+    if (!voice || voice.releasing || !Number.isFinite(voice.nodeId)) {
+      return;
+    }
+    const node = nodeById.get(voice.nodeId);
+    if (node && !node.baseVoiceId) {
+      node.baseVoiceId = voice.id;
+    }
+  });
   applyNodeOctaveOffsets();
   if (layoutMode) {
     nodes.forEach((node) => ensureLayoutPosition(node));
@@ -26141,6 +26267,7 @@ enforceCentsDisplayMode();
 setControlChecked(showCentsSignToggle, showCentsSign);
 setControlChecked(directionalRatioLabelsToggle, directionalRatioLabels);
 setControlChecked(connectOrphansToggle, connectOrphansEnabled);
+setControlChecked(show3DShadingToggle, show3DShading);
 setLatticeTilt(latticeTiltDeg);
 setControlChecked(hejiEnabledToggle, hejiEnabled);
 setControlChecked(layoutHejiEnabledToggle, hejiEnabled);
@@ -26455,6 +26582,12 @@ const snapshotRestoreSynthToggle = document.getElementById("snapshot-restore-syn
 bindSingleBooleanToggle(snapshotRestoreSynthToggle, (checked) => {
   snapshotRestoreSynthSettings = checked;
 });
+const snapshotRestoreKeyboardModeToggle = document.getElementById(
+  "snapshot-restore-keyboard-mode"
+);
+bindSingleBooleanToggle(snapshotRestoreKeyboardModeToggle, (checked) => {
+  snapshotRestoreKeyboardMode = checked;
+});
 const snapshotRestoreLfosToggle = document.getElementById("snapshot-restore-lfos");
 const snapshotRestoreLfoPhaseToggle = document.getElementById("snapshot-restore-lfo-phase");
 bindSingleBooleanToggle(snapshotRestoreLfosToggle, (checked) => {
@@ -26644,6 +26777,9 @@ bindSingleBooleanDrawToggle(directionalRatioLabelsToggle, (checked) => {
 });
 bindSingleBooleanDrawToggle(connectOrphansToggle, (checked) => {
   connectOrphansEnabled = checked;
+});
+bindSingleBooleanDrawToggle(show3DShadingToggle, (checked) => {
+  show3DShading = checked;
 });
 bindOptionalClick(layoutFreezeButton, () => {
     if (!layoutLockPosition) {

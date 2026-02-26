@@ -7,19 +7,26 @@ Tuning Lattice is an interactive tool for exploring just‑intonation lattices, 
 ### Visual lattice & navigation
 - 2D and 3D lattice views with zoom, pan, and rotation.
 - Customizable axis ratios (X/Y/Z) for primes up to 97, plus Custom Nodes for more dimensions.
-- Layout mode for print‑style positioning with editable spacing and label placement.
+- Layout mode for fine-tuning PDF and SVG exports.
 
 ### Nodes, ratios, and intervals
-- Add nodes by ratio, interval, or direct lattice connections from existing nodes.
+- Add nodes by direct lattice connections from existing nodes.
+- Find nodes by ratio or interval.
 - Draw distance lines between nodes to calculate and label any relationship.
+- Draw and label tonnetz-style triangles.
 - Microtonal interval overlay reveals common interval names between nodes.
+
+### Input & interaction
+- Fast keyboard gestures to add intervals, set axes, assign LFOs, and more.
+- Keyboard input modes map letters to 2 octave piano layout, isomorphic shapes, or custom layouts.
+- MIDI input
 
 ### Audio and playback
 - Built‑in synth with tone selection and envelope controls.
 - Per‑node playback, LFO assignment, and playback octave shifts.
 - Pattern/sequence generator for rhythmic playback and traversal of active nodes.
 - Tempo, rhythm, and octave pattern controls for automated playback.
-- MIDI Out with per-note pitchbend for controlling software synths with accurate tuning.
+- MIDI Out with per-note pitchbend for controlling software synths with accurate tuning (MPE required).
 
 ### Snapshots & live switching
 - Save and recall multiple lattice snapshots for composition and performance
@@ -29,12 +36,6 @@ Tuning Lattice is an interactive tool for exploring just‑intonation lattices, 
 - Page Layout mode for print‑ready designs with typography controls.
 - SVG and PDF export aligned with on‑screen layout styling.
 
-### Input & interaction
-- Fast keyboard gestures to add intervals, set axes, assign LFOs, and more.
-- Keyboard input modes map letters to 2 octave piano layout, isomorphic shapes, or custom layouts.
-- MIDI input
-- Contextual help/banner hints for active modes and editing states.
-- Undo/redo support for layout edits and axis legend adjustments.
 
 ## Who it’s for
 - Composers and performers working with just intonation or microtonal systems.

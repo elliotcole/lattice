@@ -8,6 +8,7 @@ export default {
         main: resolve(__dirname, "index.html"),
         tuner: resolve(__dirname, "tuner/index.html"),
         tunerMobile: resolve(__dirname, "tuner/mobile/index.html"),
+        overtones: resolve(__dirname, "overtones/index.html"),
       },
     },
   },

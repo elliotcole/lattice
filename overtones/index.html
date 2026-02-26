@@ -25,7 +25,7 @@
 
     <main class="left-rail panel">
       <section class="control-group">
-        <label for="notes-input">Notes</label>
+        <label for="notes-input">Notes (ratios, midi, or hz)</label>
         <textarea id="notes-input" spellcheck="false">1/1, 5/4, 3/2, 7/4
 57, 61, 64, 67</textarea>
         <small>
@@ -51,6 +51,14 @@
         <select id="y-scale">
           <option value="log" selected>Log</option>
           <option value="linear">Linear</option>
+        </select>
+
+        <label for="harmonic-scaling">Harmonic scaling</label>
+        <select id="harmonic-scaling">
+          <option value="pink" selected>1/f (Pink)</option>
+          <option value="sqrt">1/sqrt(f)</option>
+          <option value="flat">Flat</option>
+          <option value="steep">1/f^1.4</option>
         </select>
       </section>
 
@@ -102,8 +110,14 @@
           <span>Fusion column</span>
         </label>
         <div class="two-col">
+          <label for="fusion-mode">Fusion mode</label>
+          <select id="fusion-mode">
+            <option value="align" selected>Alignments only</option>
+            <option value="all">All</option>
+          </select>
+
           <label for="fusion-cluster-cents">Fusion tol</label>
-          <input id="fusion-cluster-cents" type="range" min="1" max="4" step="0.1" value="1" />
+          <input id="fusion-cluster-cents" type="range" min="0" max="4" step="0.1" value="1" />
           <output id="fusion-cluster-cents-readout" for="fusion-cluster-cents">1.0c</output>
         </div>
       </section>

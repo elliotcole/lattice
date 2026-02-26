@@ -10,6 +10,7 @@ const a4HzInput = document.getElementById("a4-hz");
 const overtoneCountInput = document.getElementById("overtone-count");
 const overtoneCountReadout = document.getElementById("overtone-count-readout");
 const yScaleInput = document.getElementById("y-scale");
+const harmonicScalingInput = document.getElementById("harmonic-scaling");
 const autoRangeInput = document.getElementById("auto-range");
 const rangeMinInput = document.getElementById("range-min");
 const rangeMaxInput = document.getElementById("range-max");
@@ -22,6 +23,7 @@ const showOvertoneNumbersInput = document.getElementById("show-overtone-numbers"
 const showCombinationInput = document.getElementById("show-combination");
 const fusionControls = document.getElementById("fusion-controls");
 const showFusionInput = document.getElementById("show-fusion");
+const fusionModeInput = document.getElementById("fusion-mode");
 const fusionClusterCentsInput = document.getElementById("fusion-cluster-cents");
 const fusionClusterCentsReadout = document.getElementById("fusion-cluster-cents-readout");
 const roughnessControls = document.getElementById("roughness-controls");
@@ -54,6 +56,7 @@ const state = {
   a4Hz: Number(a4HzInput.value) || 440,
   overtoneCount: Number(overtoneCountInput.value) || 16,
   yScale: yScaleInput.value === "linear" ? "linear" : "log",
+  harmonicScalingMode: harmonicScalingInput?.value || "pink",
   autoRange: autoRangeInput.checked,
   rangeMin: Number(rangeMinInput.value) || 40,
   rangeMax: Number(rangeMaxInput.value) || 6000,
@@ -64,6 +67,7 @@ const state = {
   showOvertoneNumbers: showOvertoneNumbersInput ? showOvertoneNumbersInput.checked : true,
   showCombination: showCombinationInput.checked,
   showFusion: showFusionInput ? showFusionInput.checked : true,
+  fusionMode: fusionModeInput?.value || "align",
   fusionClusterCents: Number(fusionClusterCentsInput?.value ?? 1) || 1,
   showRoughness: showRoughnessInput ? showRoughnessInput.checked : true,
   roughnessAnimate: roughnessAnimateInput ? roughnessAnimateInput.checked : true,
@@ -136,6 +140,7 @@ function getSerializedState() {
     a4Hz: state.a4Hz,
     overtoneCount: state.overtoneCount,
     yScale: state.yScale,
+    harmonicScalingMode: state.harmonicScalingMode,
     autoRange: state.autoRange,
     rangeMin: state.rangeMin,
     rangeMax: state.rangeMax,
@@ -146,6 +151,7 @@ function getSerializedState() {
     showOvertoneNumbers: state.showOvertoneNumbers,
     showCombination: state.showCombination,
     showFusion: state.showFusion,
+    fusionMode: state.fusionMode,
     fusionClusterCents: state.fusionClusterCents,
     showRoughness: state.showRoughness,
     roughnessAnimate: state.roughnessAnimate,
@@ -237,6 +243,17 @@ function applyStateSnapshot(snapshot) {
       state.yScale = snapshot.yScale;
       yScaleInput.value = state.yScale;
     }
+    if (
+      snapshot.harmonicScalingMode === "pink" ||
+      snapshot.harmonicScalingMode === "sqrt" ||
+      snapshot.harmonicScalingMode === "flat" ||
+      snapshot.harmonicScalingMode === "steep"
+    ) {
+      state.harmonicScalingMode = snapshot.harmonicScalingMode;
+      if (harmonicScalingInput) {
+        harmonicScalingInput.value = state.harmonicScalingMode;
+      }
+    }
     if (typeof snapshot.autoRange === "boolean") {
       state.autoRange = snapshot.autoRange;
       autoRangeInput.checked = snapshot.autoRange;
@@ -277,8 +294,12 @@ function applyStateSnapshot(snapshot) {
       state.showFusion = snapshot.showFusion;
       showFusionInput.checked = snapshot.showFusion;
     }
+    if ((snapshot.fusionMode === "align" || snapshot.fusionMode === "all") && fusionModeInput) {
+      state.fusionMode = snapshot.fusionMode;
+      fusionModeInput.value = snapshot.fusionMode;
+    }
     if (Number.isFinite(snapshot.fusionClusterCents) && fusionClusterCentsInput) {
-      state.fusionClusterCents = clamp(Number(snapshot.fusionClusterCents), 1, 4);
+      state.fusionClusterCents = clamp(Number(snapshot.fusionClusterCents), 0, 4);
       fusionClusterCentsInput.value = String(state.fusionClusterCents);
     }
     if (typeof snapshot.showRoughness === "boolean" && showRoughnessInput) {
@@ -398,6 +419,34 @@ function lfoRateFromControl(value) {
   return 0.1 * 100 ** normalized;
 }
 
+function harmonicScalingGain(harmonic, mode = state.harmonicScalingMode) {
+  const h = Math.max(1, Number(harmonic) || 1);
+  if (mode === "flat") {
+    return 1;
+  }
+  if (mode === "sqrt") {
+    return 1 / Math.sqrt(h);
+  }
+  if (mode === "steep") {
+    return 1 / h ** 1.4;
+  }
+  // Default pink-like rolloff
+  return 1 / h;
+}
+
+function targetAmplitudeScale(target) {
+  if (!target) {
+    return 0.35;
+  }
+  if (target.kind === "harmonic") {
+    return clamp(harmonicScalingGain(target.harmonic), 0.04, 1);
+  }
+  if (target.kind === "combo") {
+    return 0.18;
+  }
+  return 0.35;
+}
+
 function ensureAudioContext() {
   if (!audioCtx) {
     audioCtx = new AudioContext();
@@ -439,7 +488,7 @@ function setVoiceLfoForKey(key, lfoState) {
   }
   const now = audioCtx.currentTime;
   const depth = clamp(state.lfoDepth, 0, 1);
-  const sustainLevel = Math.max(0.0001, 0.2 * clamp(state.synthSustain, 0, 1));
+  const sustainLevel = Math.max(0.0001, voice.baseGain * clamp(state.synthSustain, 0, 1));
   if (!lfoState || lfoState.mode === "off") {
     if (voice.lfoOsc) {
       try {
@@ -523,6 +572,8 @@ function startVoiceForTarget(key, target, { lfoState = null } = {}) {
   const now = audioCtx.currentTime;
   const osc = audioCtx.createOscillator();
   const ampGain = audioCtx.createGain();
+  const ampScale = targetAmplitudeScale(target);
+  const baseGain = 0.2 * ampScale;
   osc.type = state.synthWaveform;
   osc.frequency.setValueAtTime(freq, now);
   ampGain.gain.setValueAtTime(0.0001, now);
@@ -533,10 +584,10 @@ function startVoiceForTarget(key, target, { lfoState = null } = {}) {
   const attack = Math.max(0.005, state.synthAttack);
   const decay = Math.max(0.01, state.synthDecay);
   const sustain = clamp(state.synthSustain, 0, 1);
-  ampGain.gain.exponentialRampToValueAtTime(0.2, now + attack);
-  ampGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.2 * sustain), now + attack + decay);
+  ampGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, baseGain), now + attack);
+  ampGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, baseGain * sustain), now + attack + decay);
 
-  activeVoices.set(key, { key, osc, ampGain, lfoOsc: null, lfoDepthGain: null });
+  activeVoices.set(key, { key, osc, ampGain, lfoOsc: null, lfoDepthGain: null, baseGain, target });
   if (lfoState) {
     setVoiceLfoForKey(key, lfoState);
   }
@@ -577,6 +628,14 @@ function refreshActiveVoicesFromState() {
     const voice = activeVoices.get(key);
     if (voice) {
       voice.osc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.02);
+      const baseGain = 0.2 * targetAmplitudeScale(target);
+      voice.baseGain = baseGain;
+      voice.target = target;
+      voice.ampGain.gain.setTargetAtTime(
+        Math.max(0.0001, baseGain * clamp(state.synthSustain, 0, 1)),
+        audioCtx.currentTime,
+        0.05
+      );
       setVoiceLfoForKey(key, lfoState);
     }
   });
@@ -1026,12 +1085,14 @@ function computeAlignmentClusters(points, toleranceCents) {
   const clusters = [];
   let current = [];
   let logSum = 0;
+  let weightSum = 0;
   let noteSet = new Set();
 
   function finalizeCurrent() {
     if (current.length < 2 || noteSet.size < 2) {
       current = [];
       logSum = 0;
+      weightSum = 0;
       noteSet = new Set();
       return;
     }
@@ -1040,9 +1101,11 @@ function computeAlignmentClusters(points, toleranceCents) {
       centerFreq: center,
       points: current,
       uniqueNotes: noteSet.size,
+      weightSum,
     });
     current = [];
     logSum = 0;
+    weightSum = 0;
     noteSet = new Set();
   }
 
@@ -1051,6 +1114,7 @@ function computeAlignmentClusters(points, toleranceCents) {
     if (!current.length) {
       current.push(point);
       logSum = Math.log(point.freq);
+      weightSum = Math.max(0.0001, Number(point.weight) || 1);
       pointNotes.forEach((index) => noteSet.add(index));
       continue;
     }
@@ -1059,12 +1123,14 @@ function computeAlignmentClusters(points, toleranceCents) {
     if (cents <= toleranceCents) {
       current.push(point);
       logSum += Math.log(point.freq);
+      weightSum += Math.max(0.0001, Number(point.weight) || 1);
       pointNotes.forEach((index) => noteSet.add(index));
       continue;
     }
     finalizeCurrent();
     current.push(point);
     logSum = Math.log(point.freq);
+    weightSum = Math.max(0.0001, Number(point.weight) || 1);
     pointNotes.forEach((index) => noteSet.add(index));
   }
   finalizeCurrent();
@@ -1077,15 +1143,15 @@ function fusionPointWeight(point) {
     return 0;
   }
   if (point.kind === "overtone") {
-    const harmonic = Math.max(1, Number(point.harmonic) || 1);
-    return 1 / harmonic ** 0.88;
+    return harmonicScalingGain(point.harmonic);
   }
   if (point.kind === "combo") {
-    if (point.type === "difference") return 0.42;
-    if (point.type === "sum") return 0.3;
-    return 0.24;
+    // Keep combo/difference tones perceptually secondary to natural partials.
+    if (point.type === "difference") return 0.2;
+    if (point.type === "sum") return 0.14;
+    return 0.1;
   }
-  return 0.35;
+  return 0.18;
 }
 
 function buildFusionDensityClusters(points, toleranceCents) {
@@ -1097,6 +1163,8 @@ function buildFusionDensityClusters(points, toleranceCents) {
   let current = [];
   let weightedLogSum = 0;
   let weightSum = 0;
+  let naturalWeight = 0;
+  let comboWeight = 0;
   let noteSet = new Set();
 
   function finalize() {
@@ -1104,19 +1172,27 @@ function buildFusionDensityClusters(points, toleranceCents) {
       current = [];
       weightedLogSum = 0;
       weightSum = 0;
+      naturalWeight = 0;
+      comboWeight = 0;
       noteSet = new Set();
       return;
     }
     const centerFreq = Math.exp(weightedLogSum / weightSum);
+    const naturalShare = naturalWeight / Math.max(1e-6, naturalWeight + comboWeight);
     clusters.push({
       centerFreq,
       strengthRaw: weightSum,
       count: current.length,
       uniqueNotes: noteSet.size,
+      naturalWeight,
+      comboWeight,
+      naturalShare,
     });
     current = [];
     weightedLogSum = 0;
     weightSum = 0;
+    naturalWeight = 0;
+    comboWeight = 0;
     noteSet = new Set();
   }
 
@@ -1129,6 +1205,11 @@ function buildFusionDensityClusters(points, toleranceCents) {
       current.push(point);
       weightedLogSum = Math.log(point.freq) * weight;
       weightSum = weight;
+      if (point.kind === "overtone") {
+        naturalWeight += weight;
+      } else {
+        comboWeight += weight;
+      }
       (point.noteIndexes || []).forEach((idx) => noteSet.add(idx));
       continue;
     }
@@ -1137,6 +1218,11 @@ function buildFusionDensityClusters(points, toleranceCents) {
       current.push(point);
       weightedLogSum += Math.log(point.freq) * weight;
       weightSum += weight;
+      if (point.kind === "overtone") {
+        naturalWeight += weight;
+      } else {
+        comboWeight += weight;
+      }
       (point.noteIndexes || []).forEach((idx) => noteSet.add(idx));
       continue;
     }
@@ -1144,6 +1230,11 @@ function buildFusionDensityClusters(points, toleranceCents) {
     current.push(point);
     weightedLogSum = Math.log(point.freq) * weight;
     weightSum = weight;
+    if (point.kind === "overtone") {
+      naturalWeight += weight;
+    } else {
+      comboWeight += weight;
+    }
     (point.noteIndexes || []).forEach((idx) => noteSet.add(idx));
   }
   finalize();
@@ -1156,9 +1247,155 @@ function buildFusionDensityClusters(points, toleranceCents) {
       strength: cluster.strengthRaw / maxStrength,
       tip: `Fusion density
 ${cluster.count} components near ${formatHz(cluster.centerFreq)}
-${cluster.uniqueNotes} source notes`,
+${cluster.uniqueNotes} source notes
+Natural share: ${(cluster.naturalShare * 100).toFixed(0)}%`,
     }))
     .slice(0, 220);
+}
+
+function pointsShareSourceNote(a, b) {
+  const aNotes = a?.noteIndexes || [];
+  const bNotes = b?.noteIndexes || [];
+  if (!aNotes.length || !bNotes.length) {
+    return false;
+  }
+  const bSet = new Set(bNotes);
+  return aNotes.some((noteIndex) => bSet.has(noteIndex));
+}
+
+function filterFusionCoincidentPoints(points, coincidenceCents, beatMinHz, beatMaxHz) {
+  if (!points.length) {
+    return [];
+  }
+  const coincCents = Math.max(0, Number(coincidenceCents) || 0);
+  const minBeat = Math.max(0.01, Number(beatMinHz) || 0.5);
+  const maxBeat = Math.max(minBeat + 0.01, Number(beatMaxHz) || 20);
+  const support = new Array(points.length).fill(0);
+
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    for (let j = i + 1; j < points.length; j += 1) {
+      const b = points[j];
+      if (a.playKey && b.playKey && a.playKey === b.playKey) {
+        continue;
+      }
+      if (pointsShareSourceNote(a, b)) {
+        continue;
+      }
+      const deltaHz = Math.abs(a.freq - b.freq);
+      const cents = Math.abs(centsBetween(a.freq, b.freq));
+      const isCoincident = cents <= coincCents;
+      const isBeatRange = deltaHz >= minBeat && deltaHz <= maxBeat;
+      if (!isCoincident || isBeatRange) {
+        continue;
+      }
+      support[i] += b.weight;
+      support[j] += a.weight;
+    }
+  }
+
+  const maxSupport = Math.max(1e-6, ...support);
+  return points
+    .map((point, index) => ({
+      ...point,
+      fusionSupport: support[index],
+    }))
+    .filter((point) => point.fusionSupport > 0)
+    .map((point) => ({
+      ...point,
+      weight: point.weight * (1 + point.fusionSupport / maxSupport),
+    }));
+}
+
+function buildFusionAllModeNodes(points, toleranceCents) {
+  if (!points.length) {
+    return [];
+  }
+  const tol = Math.max(0, Number(toleranceCents) || 0);
+  const support = new Array(points.length).fill(0);
+  for (let i = 0; i < points.length; i += 1) {
+    for (let j = i + 1; j < points.length; j += 1) {
+      const a = points[i];
+      const b = points[j];
+      if (a.playKey && b.playKey && a.playKey === b.playKey) {
+        continue;
+      }
+      if (pointsShareSourceNote(a, b)) {
+        continue;
+      }
+      if (Math.abs(centsBetween(a.freq, b.freq)) <= tol) {
+        support[i] += b.weight;
+        support[j] += a.weight;
+      }
+    }
+  }
+  const maxSupport = Math.max(1e-6, ...support);
+  const sorted = points
+    .map((point, index) => ({
+      ...point,
+      alignSupport: support[index] / maxSupport,
+    }))
+    .sort((a, b) => a.freq - b.freq);
+  const groups = [];
+  let current = null;
+  sorted.forEach((point) => {
+    if (!current) {
+      current = [point];
+      return;
+    }
+    const center =
+      current.reduce((sum, item) => sum + Math.log(item.freq) * item.weight, 0) /
+      Math.max(1e-6, current.reduce((sum, item) => sum + item.weight, 0));
+    const centerFreq = Math.exp(center);
+    if (Math.abs(centsBetween(centerFreq, point.freq)) <= tol) {
+      current.push(point);
+    } else {
+      groups.push(current);
+      current = [point];
+    }
+  });
+  if (current && current.length) {
+    groups.push(current);
+  }
+
+  return groups.map((group, index) => {
+    const weightSum = Math.max(1e-6, group.reduce((sum, point) => sum + point.weight, 0));
+    const centerFreq = Math.exp(
+      group.reduce((sum, point) => sum + Math.log(point.freq) * point.weight, 0) / weightSum
+    );
+    const harmonicPoints = group.filter((point) => point.kind === "overtone");
+    const comboPoints = group.filter((point) => point.kind === "combo");
+    const hasHarmonic = harmonicPoints.length > 0;
+    const hasCombo = comboPoints.length > 0;
+    const alignStrength =
+      group.reduce((sum, point) => sum + (point.alignSupport || 0), 0) / Math.max(1, group.length);
+    const naturalShare =
+      harmonicPoints.reduce((sum, point) => sum + point.weight, 0) /
+      Math.max(1e-6, weightSum);
+    const baseRadius = hasHarmonic ? 2.3 : 2.6;
+    const mixBoost = hasHarmonic && hasCombo ? 1.3 : 0;
+    const alignBoost = 4.8 * alignStrength;
+    const densityBoost = Math.min(3.2, Math.log1p(group.length) * 1.35);
+    const allModeRadius = baseRadius + mixBoost + alignBoost + densityBoost;
+    const alignOnlyFloor = 3 + alignStrength * 18;
+    const radius = clamp(Math.max(allModeRadius, alignOnlyFloor), 3, 22);
+    const shape = hasHarmonic ? "circle" : "diamond";
+    return {
+      id: index,
+      centerFreq,
+      shape,
+      radius,
+      alignStrength,
+      naturalShare,
+      hasCombo,
+      hasHarmonic,
+      count: group.length,
+      tip: `Fusion ${shape}
+${group.length} components near ${formatHz(centerFreq)}
+Alignment boost: ${(alignStrength * 100).toFixed(0)}%
+${hasHarmonic && hasCombo ? "Harmonics + combo overlap" : hasCombo ? "Combo/difference only" : "Harmonic only"}`,
+    };
+  });
 }
 
 function computeFusionBeatBands(points, minBeatHz, maxBeatHz, centerToleranceCents) {
@@ -1341,6 +1578,7 @@ function buildModel() {
         harmonic,
         playKey: `harmonic:${noteIndex}:${harmonic}`,
         freq: base * harmonic,
+        weight: harmonicScalingGain(harmonic),
         noteIndexes: [noteIndex],
       });
     }
@@ -1379,6 +1617,7 @@ function buildModel() {
     .map((point) => ({
       ...point,
       playKey: `combo:${point.noteA}:${point.noteB}:${point.type}:${point.freq.toFixed(6)}`,
+      weight: fusionPointWeight(point),
       noteIndexes: [point.noteA, point.noteB],
     }));
   const weightedFusionPoints = [...visibleOvertones, ...visibleComboPoints]
@@ -1394,17 +1633,26 @@ function buildModel() {
     const chordPoints = weightedFusionPoints.filter((point) =>
       (point.noteIndexes || []).some((idx) => noteSet.has(idx))
     );
-    const densityNodes = buildFusionDensityClusters(
+    const fusionCoincidentPoints = filterFusionCoincidentPoints(
       chordPoints,
-      clamp(state.fusionClusterCents, 1, 4)
+      clamp(state.fusionClusterCents, 0, 4),
+      beatMin,
+      beatMax
     );
+    const fusionNodes =
+      state.fusionMode === "all"
+        ? buildFusionAllModeNodes(chordPoints, clamp(state.fusionClusterCents, 0, 4))
+        : buildFusionDensityClusters(
+            fusionCoincidentPoints,
+            clamp(state.fusionClusterCents, 0, 4)
+          );
     const roughnessBands =
       state.showRoughness && chordPoints.length > 1
         ? computeFusionBeatBands(
           chordPoints,
           beatMin,
           beatMax,
-          clamp(state.fusionClusterCents * 0.8, 0.8, 4)
+          clamp(state.fusionClusterCents * 0.8, 0.4, 4)
         )
       : [];
     const chordAlignmentSource = [
@@ -1421,18 +1669,24 @@ function buildModel() {
       1,
       ...chordRawClusters.map((cluster) => cluster.points.length)
     );
+    const chordMaxWeight = Math.max(
+      1e-6,
+      ...chordRawClusters.map((cluster) => cluster.weightSum || 0)
+    );
     const alignmentClusters = chordRawClusters.map((cluster, index) => ({
       ...cluster,
       id: `${chordIndex}:${index}`,
       chordIndex,
-      strength: cluster.points.length / chordMaxPoints,
+      strength:
+        0.35 * (cluster.points.length / chordMaxPoints) +
+        0.65 * ((cluster.weightSum || 0) / chordMaxWeight),
       tip: `Chord ${chordIndex + 1}
 ${cluster.uniqueNotes} notes align near ${formatHz(cluster.centerFreq)}`,
     }));
     return {
       chordIndex,
       noteIndexes: chord.noteIndexes,
-      fusionDensityNodes: densityNodes,
+      fusionNodes,
       roughnessBands,
       sourcePoints: chordPoints,
       alignmentClusters,
@@ -1936,17 +2190,63 @@ function buildChartSvg(model, width, height) {
       if (!Number.isFinite(fusionX)) {
         return;
       }
-      (analysis.fusionDensityNodes || []).forEach((node) => {
+      (analysis.fusionNodes || []).forEach((node) => {
         if (!(node.centerFreq >= model.rangeMin && node.centerFreq <= model.rangeMax)) {
           return;
         }
         const y = yForFreq(node.centerFreq);
+        if (state.fusionMode === "all") {
+          const naturalShare = clamp(Number(node.naturalShare) || 0, 0, 1);
+          const alignStrength = clamp(Number(node.alignStrength) || 0, 0, 1);
+          const radius = clamp(Number(node.radius) || 3, 2, 24);
+          if (node.shape === "diamond") {
+            const hue = Math.round(198 - alignStrength * 26);
+            const sat = Math.round(64 + alignStrength * 22);
+            const light = state.themeDark
+              ? Math.round(58 - alignStrength * 8)
+              : Math.round(48 - alignStrength * 7);
+            const r = radius;
+            fusionLayer.appendChild(
+              createSvgEl("path", {
+                d: `M ${fusionX} ${y - r} L ${fusionX + r} ${y} L ${fusionX} ${y + r} L ${fusionX - r} ${y} Z`,
+                fill: `hsl(${hue}, ${sat}%, ${light}%)`,
+                "fill-opacity": 0.24 + alignStrength * 0.56,
+                stroke: `hsl(${Math.max(150, hue - 18)}, ${Math.min(95, sat + 10)}%, ${Math.max(24, light - 16)}%)`,
+                "stroke-width": 0.9 + alignStrength * 1.2,
+                "stroke-opacity": 0.45 + alignStrength * 0.35,
+                "data-tip": `Chord ${analysis.chordIndex + 1}\n${node.tip}`,
+              })
+            );
+          } else {
+            const hue = Math.round(18 + (1 - naturalShare) * 30 - alignStrength * 6);
+            const sat = Math.round(76 + naturalShare * 18 + alignStrength * 8);
+            const light = state.themeDark
+              ? Math.round(58 - alignStrength * 7 - (1 - naturalShare) * 4)
+              : Math.round(56 - alignStrength * 6 - (1 - naturalShare) * 3);
+            fusionLayer.appendChild(
+              createSvgEl("circle", {
+                cx: fusionX,
+                cy: y,
+                r: radius,
+                fill: `hsl(${hue}, ${sat}%, ${light}%)`,
+                "fill-opacity": 0.22 + alignStrength * 0.6,
+                stroke: `hsl(${Math.max(4, hue - 10)}, ${Math.min(95, sat + 4)}%, ${Math.max(24, light - 18)}%)`,
+                "stroke-opacity": 0.35 + alignStrength * 0.42,
+                "stroke-width": 0.9 + alignStrength * 1.2,
+                "data-tip": `Chord ${analysis.chordIndex + 1}\n${node.tip}`,
+              })
+            );
+          }
+          return;
+        }
+
         const radius = clamp(3 + node.strength * 18, 3, 26);
-        const hue = Math.round(36 - node.strength * 18);
-        const sat = Math.round(82 + node.strength * 12);
+        const naturalShare = clamp(Number(node.naturalShare) || 0, 0, 1);
+        const hue = Math.round(16 + (1 - naturalShare) * 30 - node.strength * 8);
+        const sat = Math.round(74 + naturalShare * 18 + node.strength * 6);
         const light = state.themeDark
-          ? Math.round(58 - node.strength * 9)
-          : Math.round(56 - node.strength * 7);
+          ? Math.round(58 - node.strength * 9 - (1 - naturalShare) * 4)
+          : Math.round(56 - node.strength * 7 - (1 - naturalShare) * 3);
         fusionLayer.appendChild(
           createSvgEl("circle", {
             cx: fusionX,
@@ -2056,10 +2356,11 @@ function buildChartSvg(model, width, height) {
         );
       }
 
-      const alpha = clamp(0.98 - (harmonic - 1) / state.overtoneCount * 0.7, 0.2, 0.98);
+      const harmonicGain = harmonicScalingGain(harmonic);
+      const alpha = clamp(0.14 + 0.84 * harmonicGain, 0.14, 0.98);
       const radius =
         harmonic === 1
-          ? state.pointSize + 1.2
+          ? (state.pointSize + 1.2) * 1.75
           : clamp(state.pointSize * (1 - (harmonic - 1) / (state.overtoneCount * 1.8)), 1.2, 8);
       const playKey = `harmonic:${noteIndex}:${harmonic}`;
       const isPlaying = activeVoices.has(playKey);
@@ -2480,7 +2781,7 @@ function updateStatus(model) {
   ];
   if (state.showFusion && Array.isArray(model.chordAnalyses)) {
     const fusionCount = model.chordAnalyses.reduce(
-      (sum, analysis) => sum + ((analysis.fusionDensityNodes && analysis.fusionDensityNodes.length) || 0),
+      (sum, analysis) => sum + ((analysis.fusionNodes && analysis.fusionNodes.length) || 0),
       0
     );
     summary.push(`${fusionCount} fusion nodes`);
@@ -2654,6 +2955,20 @@ yScaleInput.addEventListener("change", () => {
   scheduleRender();
 });
 
+if (harmonicScalingInput) {
+  harmonicScalingInput.addEventListener("change", () => {
+    const mode = harmonicScalingInput.value;
+    if (mode === "pink" || mode === "sqrt" || mode === "flat" || mode === "steep") {
+      state.harmonicScalingMode = mode;
+    } else {
+      state.harmonicScalingMode = "pink";
+      harmonicScalingInput.value = "pink";
+    }
+    refreshActiveVoicesFromState();
+    scheduleRender();
+  });
+}
+
 autoRangeInput.addEventListener("change", () => {
   state.autoRange = autoRangeInput.checked;
   scheduleRender();
@@ -2716,9 +3031,16 @@ if (showFusionInput) {
   });
 }
 
+if (fusionModeInput) {
+  fusionModeInput.addEventListener("change", () => {
+    state.fusionMode = fusionModeInput.value === "all" ? "all" : "align";
+    scheduleRender();
+  });
+}
+
 if (fusionClusterCentsInput) {
   fusionClusterCentsInput.addEventListener("input", () => {
-    state.fusionClusterCents = clamp(getNumericInputValue(fusionClusterCentsInput, 1), 1, 4);
+    state.fusionClusterCents = clamp(getNumericInputValue(fusionClusterCentsInput, 1), 0, 4);
     scheduleRender();
   });
 }

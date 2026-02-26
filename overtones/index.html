@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tuning Lattice Overtones</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Lexend:wght@200..700&family=Noto+Serif:wght@400..700&family=IBM+Plex+Sans:wght@300..700&display=swap"
+      rel="stylesheet"
+    />
+    <script type="module" crossorigin src="../assets/overtones-Dd5MLxdS.js"></script>
+    <link rel="modulepreload" crossorigin href="../assets/modulepreload-polyfill-B5Qt9EMX.js">
+    <link rel="stylesheet" crossorigin href="../assets/overtones-DA3QiZS_.css">
+  </head>
+  <body>
+    <section class="viz-wrap">
+      <div id="chart-stage" class="chart-stage" aria-label="Overtone chart"></div>
+      <div id="chart-tooltip" class="chart-tooltip" hidden></div>
+    </section>
+
+    <header class="overtones-title">
+      <h1>Overtones</h1>
+      <p>tuning lattice</p>
+    </header>
+
+    <main class="left-rail panel">
+      <section class="control-group">
+        <label for="notes-input">Notes</label>
+        <textarea id="notes-input" spellcheck="false">1/1, 5/4, 3/2, 7/4, 440hz, 69</textarea>
+        <small>
+          MIDI: raw integer <code>0..127</code>. Hz: <code>440hz</code>. Ratios: <code>3/2</code> or
+          <code>3:2</code>.
+        </small>
+      </section>
+
+      <section class="control-group two-col">
+        <label for="ratio-root-hz">Ratio 1/1</label>
+        <input id="ratio-root-hz" type="number" min="1" max="4000" step="0.01" value="220" />
+
+        <label for="a4-hz">A4</label>
+        <input id="a4-hz" type="number" min="380" max="470" step="0.01" value="440" />
+      </section>
+
+      <section class="control-group two-col">
+        <label for="overtone-count">Overtones</label>
+        <input id="overtone-count" type="range" min="2" max="48" step="1" value="16" />
+        <output id="overtone-count-readout" for="overtone-count">16</output>
+
+        <label for="y-scale">Y scale</label>
+        <select id="y-scale">
+          <option value="log" selected>Log</option>
+          <option value="linear">Linear</option>
+        </select>
+      </section>
+
+      <section class="control-group">
+        <label class="checkline" for="auto-range">
+          <input id="auto-range" type="checkbox" checked />
+          <span>Auto range</span>
+        </label>
+        <div class="two-col">
+          <label for="range-min">Min Hz</label>
+          <input id="range-min" type="number" min="1" max="40000" step="0.01" value="40" />
+
+          <label for="range-max">Max Hz</label>
+          <input id="range-max" type="number" min="1" max="40000" step="0.01" value="6000" />
+        </div>
+      </section>
+
+      <section class="control-group two-col">
+        <label for="align-tolerance">Align tol</label>
+        <input id="align-tolerance" type="range" min="1" max="4" step="0.1" value="1" />
+        <output id="align-tolerance-readout" for="align-tolerance">1.0c</output>
+
+        <label for="point-size">Point size</label>
+        <input id="point-size" type="range" min="2" max="10" step="0.5" value="4" />
+      </section>
+
+      <section class="control-group">
+        <label class="checkline" for="show-alignments">
+          <input id="show-alignments" type="checkbox" checked />
+          <span>Alignment bands</span>
+        </label>
+        <label class="checkline" for="show-labels">
+          <input id="show-labels" type="checkbox" checked />
+          <span>Labels</span>
+        </label>
+        <label class="checkline" for="show-overtone-numbers">
+          <input id="show-overtone-numbers" type="checkbox" checked />
+          <span>Overtone numbers</span>
+        </label>
+        <label class="checkline" for="show-combination">
+          <input id="show-combination" type="checkbox" checked />
+          <span>Combination/difference tones</span>
+        </label>
+      </section>
+
+      <section id="fusion-controls" class="control-group">
+        <label class="checkline" for="show-fusion">
+          <input id="show-fusion" type="checkbox" checked />
+          <span>Fusion column</span>
+        </label>
+        <div class="two-col">
+          <label for="fusion-cluster-cents">Fusion tol</label>
+          <input id="fusion-cluster-cents" type="range" min="1" max="4" step="0.1" value="1" />
+          <output id="fusion-cluster-cents-readout" for="fusion-cluster-cents">1.0c</output>
+        </div>
+      </section>
+
+      <section id="roughness-controls" class="control-group">
+        <label class="checkline" for="show-roughness">
+          <input id="show-roughness" type="checkbox" checked />
+          <span>Roughness column</span>
+        </label>
+        <label class="checkline" for="roughness-animate">
+          <input id="roughness-animate" type="checkbox" checked />
+          <span>Animate beating</span>
+        </label>
+        <div class="two-col">
+          <label for="roughness-beat-min">Beat min Hz</label>
+          <input id="roughness-beat-min" type="number" min="0.1" max="40" step="0.1" value="0.5" />
+
+          <label for="roughness-beat-max">Beat max Hz</label>
+          <input id="roughness-beat-max" type="number" min="0.1" max="80" step="0.1" value="20" />
+        </div>
+      </section>
+
+      <section id="combination-controls" class="control-group combo-grid">
+        <label class="checkline compact" for="combo-difference">
+          <input id="combo-difference" type="checkbox" checked />
+          <span>|f2-f1|</span>
+        </label>
+        <label class="checkline compact" for="combo-sum">
+          <input id="combo-sum" type="checkbox" checked />
+          <span>f1+f2</span>
+        </label>
+        <label class="checkline compact" for="combo-order2">
+          <input id="combo-order2" type="checkbox" checked />
+          <span>2f1-f2 / 2f2-f1</span>
+        </label>
+      </section>
+
+      <section class="control-group">
+        <label>Synth</label>
+        <div class="two-col">
+          <label for="volume">Volume</label>
+          <input id="volume" type="range" min="-60" max="0" step="1" value="-12" />
+
+          <label for="waveform">Waveform</label>
+          <select id="waveform">
+            <option value="sine">Sine</option>
+            <option value="triangle">Triangle</option>
+            <option value="sawtooth">Saw</option>
+            <option value="square">Square</option>
+          </select>
+
+          <label for="attack">Attack</label>
+          <input id="attack" type="range" min="0.005" max="3" step="0.005" value="0.02" />
+
+          <label for="decay">Decay</label>
+          <input id="decay" type="range" min="0.01" max="4" step="0.01" value="0.2" />
+
+          <label for="sustain">Sustain</label>
+          <input id="sustain" type="range" min="0" max="1" step="0.01" value="0.6" />
+
+          <label for="release">Release</label>
+          <input id="release" type="range" min="0.01" max="6" step="0.01" value="0.6" />
+        </div>
+        <div class="two-col">
+          <label for="lfo-depth">LFO depth</label>
+          <input id="lfo-depth" type="range" min="0" max="1" step="0.01" value="0.65" />
+
+          <label for="lfo-rate">LFO rate</label>
+          <input id="lfo-rate" type="range" min="0" max="100" step="1" value="50" />
+        </div>
+        <button id="all-notes-off" type="button">All notes off</button>
+        <small>Click a note dot to toggle sound. Hold <code>L</code> and click to toggle LFO.</small>
+      </section>
+
+      <section class="control-group two-col">
+        <label for="export-width">Export W</label>
+        <input id="export-width" type="number" min="400" max="6000" step="10" value="1800" />
+
+        <label for="export-height">Export H</label>
+        <input id="export-height" type="number" min="300" max="6000" step="10" value="1100" />
+      </section>
+
+      <section class="control-group export-buttons">
+        <button id="export-svg" type="button">SVG</button>
+        <button id="export-pdf" type="button">PDF</button>
+      </section>
+
+      <label class="theme-toggle" for="theme-toggle">
+        <input id="theme-toggle" type="checkbox" />
+        <span>Dark mode</span>
+      </label>
+
+      <p id="status" class="status"></p>
+    </main>
+
+  </body>
+</html>

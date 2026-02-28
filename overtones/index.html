@@ -25,6 +25,14 @@
 
     <main class="left-rail panel">
       <section class="control-group">
+        <div class="mode-toggle">
+          <button id="mode-live" type="button" class="is-active">Live</button>
+          <button id="mode-print" type="button">Print</button>
+        </div>
+      </section>
+
+      <section class="control-group">
+        <h3 class="group-title">Input</h3>
         <label for="notes-input">Notes (ratios, midi, or hz)</label>
         <textarea id="notes-input" spellcheck="false">1/1, 5/4, 3/2, 7/4
 57, 61, 64, 67</textarea>
@@ -42,10 +50,27 @@
         <input id="a4-hz" type="number" min="380" max="470" step="0.01" value="440" />
       </section>
 
-      <section class="control-group two-col">
-        <label for="overtone-count">Overtones</label>
-        <input id="overtone-count" type="range" min="2" max="48" step="1" value="16" />
-        <output id="overtone-count-readout" for="overtone-count">16</output>
+      <section class="control-group two-col print-only">
+        <h3 class="group-title two-col-span">View</h3>
+        <label for="view-zoom" class="inline-output-label">
+          <span>Zoom</span>
+          <output id="view-zoom-readout" for="view-zoom">100%</output>
+        </label>
+        <input id="view-zoom" type="range" min="0.3" max="3" step="0.01" value="1" />
+        <label for="layout-scale" class="inline-output-label">
+          <span>Scale</span>
+          <output id="layout-scale-readout" for="layout-scale">100%</output>
+        </label>
+        <input id="layout-scale" type="range" min="0.6" max="1.8" step="0.01" value="1" />
+      </section>
+
+      <section class="control-group graph-grid">
+        <h3 class="group-title two-col-span">Graph</h3>
+        <label for="overtone-count" class="inline-output-label">
+          <span>Overtones</span>
+          <output id="overtone-count-readout" for="overtone-count">8</output>
+        </label>
+        <input id="overtone-count" type="range" min="2" max="48" step="1" value="8" />
 
         <label for="y-scale">Y scale</label>
         <select id="y-scale">
@@ -60,14 +85,28 @@
           <option value="flat">Flat</option>
           <option value="steep">1/f^1.4</option>
         </select>
+
+        <label for="point-size">Harmonic size</label>
+        <input id="point-size" type="range" min="2" max="10" step="0.5" value="4" />
+
+        <label for="color-scheme">Color scheme</label>
+        <select id="color-scheme">
+          <option value="greyscale">Greyscale</option>
+          <option value="hayward-vine" selected>Hayward Vine</option>
+          <option value="ember-cobalt">Ember Cobalt</option>
+          <option value="aurora-mint">Aurora Mint</option>
+          <option value="nocturne-ink">Nocturne Ink</option>
+          <option value="sunset-brass">Sunset Brass</option>
+        </select>
       </section>
 
       <section class="control-group">
+        <h3 class="group-title">Range</h3>
         <label class="checkline" for="auto-range">
           <input id="auto-range" type="checkbox" checked />
           <span>Auto range</span>
         </label>
-        <div class="two-col">
+        <div class="range-row">
           <label for="range-min">Min Hz</label>
           <input id="range-min" type="number" min="1" max="40000" step="0.01" value="40" />
 
@@ -77,37 +116,31 @@
       </section>
 
       <section class="control-group two-col">
-        <label for="align-tolerance">Align tol</label>
-        <input id="align-tolerance" type="range" min="1" max="4" step="0.1" value="1" />
-        <output id="align-tolerance-readout" for="align-tolerance">1.0c</output>
-
-        <label for="point-size">Point size</label>
-        <input id="point-size" type="range" min="2" max="10" step="0.5" value="4" />
-      </section>
-
-      <section class="control-group">
-        <label class="checkline" for="show-alignments">
+        <h3 class="group-title two-col-span">Alignment</h3>
+        <label class="checkline two-col-span" for="show-alignments">
           <input id="show-alignments" type="checkbox" checked />
-          <span>Alignment bands</span>
+          <span>Shown Alignment bands</span>
         </label>
-        <label class="checkline" for="show-labels">
-          <input id="show-labels" type="checkbox" checked />
-          <span>Labels</span>
+        <label for="align-tolerance" class="inline-output-label">
+          <span>Tolerance</span>
+          <output id="align-tolerance-readout" for="align-tolerance">1.0c</output>
         </label>
-        <label class="checkline" for="show-overtone-numbers">
-          <input id="show-overtone-numbers" type="checkbox" checked />
-          <span>Overtone numbers</span>
-        </label>
-        <label class="checkline" for="show-combination">
-          <input id="show-combination" type="checkbox" checked />
-          <span>Combination/difference tones</span>
-        </label>
+        <input id="align-tolerance" type="range" min="1" max="4" step="0.1" value="1" />
       </section>
 
       <section id="fusion-controls" class="control-group">
+        <h3 class="group-title">Fusion</h3>
         <label class="checkline" for="show-fusion">
           <input id="show-fusion" type="checkbox" checked />
           <span>Fusion column</span>
+        </label>
+        <label class="checkline subcheck" for="fusion-readout-ratio">
+          <input id="fusion-readout-ratio" type="checkbox" checked />
+          <span>Fusion readout ratio</span>
+        </label>
+        <label class="checkline subcheck" for="fusion-readout-hz">
+          <input id="fusion-readout-hz" type="checkbox" checked />
+          <span>Fusion readout Hz</span>
         </label>
         <div class="two-col">
           <label for="fusion-mode">Fusion mode</label>
@@ -123,6 +156,7 @@
       </section>
 
       <section id="roughness-controls" class="control-group">
+        <h3 class="group-title">Roughness</h3>
         <label class="checkline" for="show-roughness">
           <input id="show-roughness" type="checkbox" checked />
           <span>Roughness column</span>
@@ -140,23 +174,209 @@
         </div>
       </section>
 
-      <section id="combination-controls" class="control-group combo-grid">
-        <label class="checkline compact" for="combo-difference">
-          <input id="combo-difference" type="checkbox" checked />
-          <span>|f2-f1|</span>
+      <section id="combination-controls" class="control-group">
+        <h3 class="group-title">Combination Tones</h3>
+        <label class="checkline" for="show-combination">
+          <input id="show-combination" type="checkbox" checked />
+          <span>Visible</span>
         </label>
-        <label class="checkline compact" for="combo-sum">
-          <input id="combo-sum" type="checkbox" checked />
-          <span>f1+f2</span>
+        <div class="combo-grid">
+          <label class="checkline compact" for="combo-difference">
+            <input id="combo-difference" type="checkbox" checked />
+            <span>|f2-f1|</span>
+          </label>
+          <label class="checkline compact" for="combo-sum">
+            <input id="combo-sum" type="checkbox" checked />
+            <span>f1+f2</span>
+          </label>
+          <label class="checkline compact" for="combo-order2">
+            <input id="combo-order2" type="checkbox" checked />
+            <span>2f1-f2 / 2f2-f1</span>
+          </label>
+        </div>
+        <div class="two-col">
+          <label for="combo-size">Size</label>
+          <input id="combo-size" type="range" min="2" max="10" step="0.5" value="4" />
+        </div>
+      </section>
+
+      <section class="control-group print-only">
+        <h3 class="group-title">Print Layout</h3>
+        <div class="two-col">
+          <label for="print-paper">Canvas</label>
+          <select id="print-paper">
+            <option value="letter-portrait">Letter Portrait</option>
+            <option value="letter-landscape" selected>Letter Landscape</option>
+            <option value="a4-portrait">A4 Portrait</option>
+            <option value="a4-landscape">A4 Landscape</option>
+          </select>
+
+          <label for="print-margin">Margin px</label>
+          <input id="print-margin" type="number" min="8" max="220" step="1" value="44" />
+        </div>
+      </section>
+
+      <section class="control-group print-only">
+        <h3 class="group-title">Print Content</h3>
+        <label class="checkline" for="print-show-component-label">
+          <input id="print-show-component-label" type="checkbox" checked />
+          <span>Show component readouts</span>
         </label>
-        <label class="checkline compact" for="combo-order2">
-          <input id="combo-order2" type="checkbox" checked />
-          <span>2f1-f2 / 2f2-f1</span>
+        <label class="checkline" for="print-show-component-hz">
+          <input id="print-show-component-hz" type="checkbox" checked />
+          <span>Component Hz</span>
+        </label>
+        <label class="checkline" for="print-show-component-ratio">
+          <input id="print-show-component-ratio" type="checkbox" />
+          <span>Component ratio</span>
+        </label>
+        <label class="checkline" for="print-show-axis-text">
+          <input id="print-show-axis-text" type="checkbox" checked />
+          <span>Axis text (Hz + Y label)</span>
+        </label>
+        <label class="checkline" for="print-show-legend">
+          <input id="print-show-legend" type="checkbox" checked />
+          <span>Summation/difference legend</span>
         </label>
       </section>
 
-      <section class="control-group">
-        <label>Synth</label>
+      <section class="control-group print-only">
+        <h3 class="group-title">Text Styles</h3>
+        <div id="print-text-styles-panel" class="print-text-styles-panel">
+          <label for="print-style-overtone-font">Overtone numbers</label>
+          <div class="two-col">
+            <label for="print-style-overtone-font">Font</label>
+            <select id="print-style-overtone-font">
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Lexend">Lexend</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+              <option value="Lato">Lato</option>
+              <option value="PT Sans">PT Sans</option>
+              <option value="PT Serif">PT Serif</option>
+              <option value="iAWriterDuoS">iAWriterDuoS</option>
+              <option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <label for="print-style-overtone-size" class="inline-output-label">
+              <span>Size</span>
+              <output id="print-style-overtone-size-readout" for="print-style-overtone-size">8.5</output>
+            </label>
+            <input id="print-style-overtone-size" type="range" min="8" max="72" step="0.5" value="8.5" />
+          </div>
+
+          <label for="print-style-component-font">Component labels</label>
+          <div class="two-col">
+            <label for="print-style-component-font">Font</label>
+            <select id="print-style-component-font">
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Lexend">Lexend</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+              <option value="Lato">Lato</option>
+              <option value="PT Sans">PT Sans</option>
+              <option value="PT Serif">PT Serif</option>
+              <option value="iAWriterDuoS">iAWriterDuoS</option>
+              <option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <label for="print-style-component-size" class="inline-output-label">
+              <span>Size</span>
+              <output id="print-style-component-size-readout" for="print-style-component-size">9.5</output>
+            </label>
+            <input id="print-style-component-size" type="range" min="8" max="72" step="0.5" value="9.5" />
+          </div>
+
+          <label for="print-style-axis-font">Axis + X labels</label>
+          <div class="two-col">
+            <label for="print-style-axis-font">Font</label>
+            <select id="print-style-axis-font">
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Lexend">Lexend</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+              <option value="Lato">Lato</option>
+              <option value="PT Sans">PT Sans</option>
+              <option value="PT Serif">PT Serif</option>
+              <option value="iAWriterDuoS">iAWriterDuoS</option>
+              <option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <label for="print-style-axis-size" class="inline-output-label">
+              <span>Size</span>
+              <output id="print-style-axis-size-readout" for="print-style-axis-size">11</output>
+            </label>
+            <input id="print-style-axis-size" type="range" min="8" max="72" step="0.5" value="11" />
+          </div>
+        </div>
+      </section>
+
+      <section class="control-group print-only">
+        <h3 class="group-title">Distance</h3>
+        <label class="checkline" for="print-distance-mode">
+          <input id="print-distance-mode" type="checkbox" />
+          <span>Distance edit mode</span>
+        </label>
+        <div class="two-col">
+          <label for="print-distance-show-ratio">Ratio</label>
+          <input id="print-distance-show-ratio" type="checkbox" checked />
+
+          <label for="print-distance-show-hz">Delta Hz</label>
+          <input id="print-distance-show-hz" type="checkbox" checked />
+
+          <label for="print-distance-show-interval">Interval name</label>
+          <input id="print-distance-show-interval" type="checkbox" checked />
+        </div>
+        <small>
+          In print mode: click two components to create a distance. Option-click any visible element to hide it.
+        </small>
+      </section>
+
+      <section class="control-group print-only">
+        <h3 class="group-title">Reset</h3>
+        <div class="export-buttons">
+          <button id="print-restore-hidden" type="button">Restore Hidden</button>
+          <button id="print-reset-layout" type="button">Reset Layout</button>
+        </div>
+      </section>
+
+      <section class="control-group print-only">
+        <h3 class="group-title">Custom Text</h3>
+        <button id="print-add-custom-text" type="button">Add Custom Text</button>
+        <div id="custom-text-inspector" hidden>
+          <label for="print-custom-selected-text">Selected Text</label>
+          <textarea id="print-custom-selected-text" rows="3" spellcheck="false"></textarea>
+          <div class="two-col">
+            <label for="print-custom-selected-font">Font</label>
+            <select id="print-custom-selected-font">
+              <option value="Noto Serif">Noto Serif</option>
+              <option value="Lexend">Lexend</option>
+              <option value="Inter">Inter</option>
+              <option value="IBM Plex Sans">IBM Plex Sans</option>
+              <option value="Lato">Lato</option>
+              <option value="PT Sans">PT Sans</option>
+              <option value="PT Serif">PT Serif</option>
+              <option value="iAWriterDuoS">iAWriterDuoS</option>
+              <option value="iAWriterMonoS">iAWriterMonoS</option>
+              <option value="Radley">Radley</option>
+              <option value="Alice">Alice</option>
+            </select>
+            <label for="print-custom-selected-size" class="inline-output-label">
+              <span>Size</span>
+              <output id="print-custom-selected-size-readout" for="print-custom-selected-size">18</output>
+            </label>
+            <input id="print-custom-selected-size" type="range" min="8" max="72" step="1" value="18" />
+          </div>
+          <button id="print-custom-delete-selected" type="button">Delete Selected Text</button>
+        </div>
+        <small>Add places text centered; click any custom text to edit it.</small>
+      </section>
+
+      <section class="control-group live-only">
+        <h3 class="group-title">Synth</h3>
         <div class="two-col">
           <label for="volume">Volume</label>
           <input id="volume" type="range" min="-60" max="0" step="1" value="-12" />
@@ -164,6 +384,7 @@
           <label for="waveform">Waveform</label>
           <select id="waveform">
             <option value="sine">Sine</option>
+            <option value="semisine">Semisine</option>
             <option value="triangle">Triangle</option>
             <option value="sawtooth">Saw</option>
             <option value="square">Square</option>
@@ -192,20 +413,12 @@
         <small>Click a note dot to toggle sound. Hold <code>L</code> and click to toggle LFO.</small>
       </section>
 
-      <section class="control-group two-col">
-        <label for="export-width">Export W</label>
-        <input id="export-width" type="number" min="400" max="6000" step="10" value="1800" />
-
-        <label for="export-height">Export H</label>
-        <input id="export-height" type="number" min="300" max="6000" step="10" value="1100" />
-      </section>
-
-      <section class="control-group export-buttons">
+      <section class="control-group export-buttons print-only">
         <button id="export-svg" type="button">SVG</button>
         <button id="export-pdf" type="button">PDF</button>
       </section>
 
-      <label class="theme-toggle" for="theme-toggle">
+      <label class="theme-toggle live-only" for="theme-toggle">
         <input id="theme-toggle" type="checkbox" />
         <span>Dark mode</span>
       </label>
@@ -214,5 +427,38 @@
     </main>
 
     <script type="module" src="./main.js"></script>
+
+    <div id="custom-text-modal" class="custom-text-modal" hidden>
+      <div class="custom-text-card panel" role="dialog" aria-modal="true" aria-label="Custom text">
+        <h3>Custom Text</h3>
+        <label for="custom-text-input">Text</label>
+        <textarea id="custom-text-input" rows="4" spellcheck="false"></textarea>
+        <div class="two-col">
+          <label for="custom-text-font">Font</label>
+          <select id="custom-text-font">
+            <option value="Noto Serif">Noto Serif</option>
+            <option value="Lexend">Lexend</option>
+            <option value="Inter">Inter</option>
+            <option value="IBM Plex Sans">IBM Plex Sans</option>
+            <option value="Lato">Lato</option>
+            <option value="PT Sans">PT Sans</option>
+            <option value="PT Serif">PT Serif</option>
+            <option value="iAWriterDuoS">iAWriterDuoS</option>
+            <option value="iAWriterMonoS">iAWriterMonoS</option>
+            <option value="Radley">Radley</option>
+            <option value="Alice">Alice</option>
+          </select>
+          <label for="custom-text-size" class="inline-output-label">
+            <span>Size</span>
+            <output id="custom-text-size-readout" for="custom-text-size">18</output>
+          </label>
+          <input id="custom-text-size" type="range" min="8" max="72" step="1" value="18" />
+        </div>
+        <div class="custom-text-actions">
+          <button id="custom-text-cancel" type="button">Cancel</button>
+          <button id="custom-text-save" type="button">Add Text</button>
+        </div>
+      </div>
+    </div>
   </body>
 </html>

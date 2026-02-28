@@ -1,28 +1,43 @@
+import { customOscillators } from "../src/custom-oscillators";
+import intervalChartData from "../src/interval-names.json";
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 const chartStage = document.getElementById("chart-stage");
 const tooltipEl = document.getElementById("chart-tooltip");
 const statusEl = document.getElementById("status");
+const modeLiveButton = document.getElementById("mode-live");
+const modePrintButton = document.getElementById("mode-print");
 
 const notesInput = document.getElementById("notes-input");
 const ratioRootHzInput = document.getElementById("ratio-root-hz");
 const a4HzInput = document.getElementById("a4-hz");
+const viewZoomInput = document.getElementById("view-zoom");
+const viewZoomReadout = document.getElementById("view-zoom-readout");
+const layoutScaleInput = document.getElementById("layout-scale");
+const layoutScaleReadout = document.getElementById("layout-scale-readout");
 const overtoneCountInput = document.getElementById("overtone-count");
 const overtoneCountReadout = document.getElementById("overtone-count-readout");
 const yScaleInput = document.getElementById("y-scale");
 const harmonicScalingInput = document.getElementById("harmonic-scaling");
+const colorSchemeInput = document.getElementById("color-scheme");
 const autoRangeInput = document.getElementById("auto-range");
 const rangeMinInput = document.getElementById("range-min");
 const rangeMaxInput = document.getElementById("range-max");
 const alignToleranceInput = document.getElementById("align-tolerance");
 const alignToleranceReadout = document.getElementById("align-tolerance-readout");
 const pointSizeInput = document.getElementById("point-size");
+const comboSizeInput = document.getElementById("combo-size");
 const showAlignmentsInput = document.getElementById("show-alignments");
 const showLabelsInput = document.getElementById("show-labels");
 const showOvertoneNumbersInput = document.getElementById("show-overtone-numbers");
+const showStemsInput = document.getElementById("show-stems");
 const showCombinationInput = document.getElementById("show-combination");
+const showChordControlsInput = document.getElementById("show-chord-controls");
 const fusionControls = document.getElementById("fusion-controls");
 const showFusionInput = document.getElementById("show-fusion");
+const fusionReadoutRatioInput = document.getElementById("fusion-readout-ratio");
+const fusionReadoutHzInput = document.getElementById("fusion-readout-hz");
 const fusionModeInput = document.getElementById("fusion-mode");
 const fusionClusterCentsInput = document.getElementById("fusion-cluster-cents");
 const fusionClusterCentsReadout = document.getElementById("fusion-cluster-cents-readout");
@@ -49,24 +64,82 @@ const exportHeightInput = document.getElementById("export-height");
 const exportSvgButton = document.getElementById("export-svg");
 const exportPdfButton = document.getElementById("export-pdf");
 const themeToggle = document.getElementById("theme-toggle");
+const printPaperInput = document.getElementById("print-paper");
+const printMarginInput = document.getElementById("print-margin");
+const printShowComponentLabelInput = document.getElementById("print-show-component-label");
+const printShowComponentHzInput = document.getElementById("print-show-component-hz");
+const printShowComponentRatioInput = document.getElementById("print-show-component-ratio");
+const printShowAxisTextInput = document.getElementById("print-show-axis-text");
+const printShowLegendInput = document.getElementById("print-show-legend");
+const printDistanceModeInput = document.getElementById("print-distance-mode");
+const printDistanceShowRatioInput = document.getElementById("print-distance-show-ratio");
+const printDistanceShowHzInput = document.getElementById("print-distance-show-hz");
+const printDistanceShowIntervalInput = document.getElementById("print-distance-show-interval");
+const printRestoreHiddenButton = document.getElementById("print-restore-hidden");
+const printResetLayoutButton = document.getElementById("print-reset-layout");
+const printTextStylesPanel = document.getElementById("print-text-styles-panel");
+const printStyleOvertoneFontInput = document.getElementById("print-style-overtone-font");
+const printStyleOvertoneSizeInput = document.getElementById("print-style-overtone-size");
+const printStyleOvertoneSizeReadout = document.getElementById("print-style-overtone-size-readout");
+const printStyleComponentFontInput = document.getElementById("print-style-component-font");
+const printStyleComponentSizeInput = document.getElementById("print-style-component-size");
+const printStyleComponentSizeReadout = document.getElementById("print-style-component-size-readout");
+const printStyleAxisFontInput = document.getElementById("print-style-axis-font");
+const printStyleAxisSizeInput = document.getElementById("print-style-axis-size");
+const printStyleAxisSizeReadout = document.getElementById("print-style-axis-size-readout");
+const printAddCustomTextButton = document.getElementById("print-add-custom-text");
+const customTextInspector = document.getElementById("custom-text-inspector");
+const printCustomSelectedTextInput = document.getElementById("print-custom-selected-text");
+const printCustomSelectedFontInput = document.getElementById("print-custom-selected-font");
+const printCustomSelectedSizeInput = document.getElementById("print-custom-selected-size");
+const printCustomSelectedSizeReadout = document.getElementById("print-custom-selected-size-readout");
+const printCustomDeleteSelectedButton = document.getElementById("print-custom-delete-selected");
+
+const customTextModal = document.getElementById("custom-text-modal");
+const customTextModalTitle = customTextModal?.querySelector("h3") || null;
+const customTextInput = document.getElementById("custom-text-input");
+const customTextFontInput = document.getElementById("custom-text-font");
+const customTextSizeInput = document.getElementById("custom-text-size");
+const customTextSizeReadout = document.getElementById("custom-text-size-readout");
+const customTextSaveButton = document.getElementById("custom-text-save");
+const customTextCancelButton = document.getElementById("custom-text-cancel");
+
+if (customTextModal) {
+  customTextModal.hidden = true;
+  customTextModal.style.display = "none";
+}
+
+const PRINT_AUTO_TEXT_STYLE_DEFAULTS = {
+  overtone: { font: "IBM Plex Sans", size: 8.5 },
+  component: { font: "IBM Plex Sans", size: 9.5 },
+  axis: { font: "Lexend", size: 11 },
+};
 
 const state = {
   notesText: notesInput.value,
   ratioRootHz: Number(ratioRootHzInput.value) || 220,
   a4Hz: Number(a4HzInput.value) || 440,
-  overtoneCount: Number(overtoneCountInput.value) || 16,
+  viewZoom: Number(viewZoomInput?.value) || 1,
+  layoutScale: Number(layoutScaleInput?.value) || 1,
+  overtoneCount: Number(overtoneCountInput.value) || 8,
   yScale: yScaleInput.value === "linear" ? "linear" : "log",
   harmonicScalingMode: harmonicScalingInput?.value || "pink",
+  colorScheme: colorSchemeInput?.value || "hayward-vine",
   autoRange: autoRangeInput.checked,
   rangeMin: Number(rangeMinInput.value) || 40,
   rangeMax: Number(rangeMaxInput.value) || 6000,
   alignToleranceCents: Number(alignToleranceInput.value) || 1,
   pointSize: Number(pointSizeInput.value) || 4,
+  comboSize: Number(comboSizeInput?.value) || 4,
   showAlignments: showAlignmentsInput.checked,
-  showLabels: showLabelsInput.checked,
+  showLabels: showLabelsInput ? showLabelsInput.checked : true,
   showOvertoneNumbers: showOvertoneNumbersInput ? showOvertoneNumbersInput.checked : true,
+  showStems: showStemsInput ? showStemsInput.checked : true,
   showCombination: showCombinationInput.checked,
+  showChordControls: showChordControlsInput ? showChordControlsInput.checked : true,
   showFusion: showFusionInput ? showFusionInput.checked : true,
+  fusionReadoutRatio: fusionReadoutRatioInput ? fusionReadoutRatioInput.checked : true,
+  fusionReadoutHz: fusionReadoutHzInput ? fusionReadoutHzInput.checked : true,
   fusionMode: fusionModeInput?.value || "align",
   fusionClusterCents: Number(fusionClusterCentsInput?.value ?? 1) || 1,
   showRoughness: showRoughnessInput ? showRoughnessInput.checked : true,
@@ -84,12 +157,68 @@ const state = {
   synthRelease: Number(releaseInput?.value ?? 0.6),
   lfoDepth: Number(lfoDepthInput?.value ?? 0.65),
   lfoRateControl: Number(lfoRateInput?.value ?? 50),
-  exportWidth: Number(exportWidthInput.value) || 1800,
-  exportHeight: Number(exportHeightInput.value) || 1100,
+  exportWidth: Number(exportWidthInput?.value) || 1800,
+  exportHeight: Number(exportHeightInput?.value) || 1100,
   themeDark: false,
+  printPaper: printPaperInput?.value || "letter-landscape",
+  printMargin: Number(printMarginInput?.value ?? 44) || 44,
+  printColorMode: "greyscale",
+  printShowComponentLabel: printShowComponentLabelInput
+    ? printShowComponentLabelInput.checked
+    : true,
+  printShowComponentHz: printShowComponentHzInput ? printShowComponentHzInput.checked : true,
+  printShowComponentRatio: printShowComponentRatioInput
+    ? printShowComponentRatioInput.checked
+    : false,
+  printShowAxisText: printShowAxisTextInput ? printShowAxisTextInput.checked : true,
+  printShowLegend: printShowLegendInput ? printShowLegendInput.checked : true,
+  printDistanceMode: printDistanceModeInput ? printDistanceModeInput.checked : false,
+  printCustomLabelFont: customTextFontInput?.value || "Noto Serif",
+  printCustomLabelSize: Number(customTextSizeInput?.value ?? 18) || 18,
+  printAutoTextStyles: cloneJson(PRINT_AUTO_TEXT_STYLE_DEFAULTS, PRINT_AUTO_TEXT_STYLE_DEFAULTS),
+  printSelectedCustomTextId: null,
+  printDistanceShowRatio: printDistanceShowRatioInput ? printDistanceShowRatioInput.checked : true,
+  printDistanceShowHz: printDistanceShowHzInput ? printDistanceShowHzInput.checked : true,
+  printDistanceShowInterval: printDistanceShowIntervalInput
+    ? printDistanceShowIntervalInput.checked
+    : true,
+  printHiddenKeys: {},
+  printColumnOverrides: {},
+  printLabelOffsets: {},
+  printComponentXOverrides: {},
+  printDiagramOffsetX: 0,
+  printDiagramOffsetY: 0,
+  printDistanceAnnotations: [],
+  printCustomTexts: [],
+  printComboLinksVisible: {},
+  printChordTitleOverrides: {},
 };
 
+const intervalNameEntries = Array.isArray(intervalChartData)
+  ? intervalChartData
+      .map((entry) => {
+        const numerator = Number(entry?.numerator);
+        const denominator = Number(entry?.denominator);
+        const name = String(entry?.name || "").trim();
+        if (!(numerator > 0) || !(denominator > 0) || !name) {
+          return null;
+        }
+        const ratio = numerator / denominator;
+        if (!(ratio > 0)) {
+          return null;
+        }
+        return {
+          name,
+          ratio,
+          cents: 1200 * Math.log2(ratio),
+        };
+      })
+      .filter(Boolean)
+  : [];
+
 const OVERTONES_STATE_PARAM = "o";
+const MODE_LIVE = "live";
+const MODE_PRINT = "print";
 
 let chartModel = null;
 let renderTimer = null;
@@ -99,6 +228,20 @@ let lfoArm = null;
 let alignmentFocusMode = false;
 let stateUrlTimer = null;
 let suspendStateUrlSync = false;
+let appMode = MODE_LIVE;
+const modeSnapshots = {
+  [MODE_LIVE]: null,
+  [MODE_PRINT]: null,
+};
+let printDragState = null;
+let printDistancePendingKey = null;
+let printLabelDragFocus = null;
+let canvasPanX = 0;
+let canvasPanY = 0;
+let panDragState = null;
+let lastDiagramCenter = { x: 640, y: 360 };
+let syncingCustomInspector = false;
+let customTextDialogMode = "custom";
 
 let audioCtx = null;
 let masterGain = null;
@@ -133,24 +276,40 @@ function decodeStateBase64Url(encoded) {
   return JSON.parse(decodeURIComponent(escaped));
 }
 
-function getSerializedState() {
+function cloneJson(value, fallback) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return fallback;
+  }
+}
+
+function getStateSnapshotFlat() {
   return {
     notesText: state.notesText,
     ratioRootHz: state.ratioRootHz,
     a4Hz: state.a4Hz,
+    viewZoom: state.viewZoom,
+    layoutScale: state.layoutScale,
     overtoneCount: state.overtoneCount,
     yScale: state.yScale,
     harmonicScalingMode: state.harmonicScalingMode,
+    colorScheme: state.colorScheme,
     autoRange: state.autoRange,
     rangeMin: state.rangeMin,
     rangeMax: state.rangeMax,
     alignToleranceCents: state.alignToleranceCents,
     pointSize: state.pointSize,
+    comboSize: state.comboSize,
     showAlignments: state.showAlignments,
     showLabels: state.showLabels,
     showOvertoneNumbers: state.showOvertoneNumbers,
+    showStems: state.showStems,
     showCombination: state.showCombination,
+    showChordControls: state.showChordControls,
     showFusion: state.showFusion,
+    fusionReadoutRatio: state.fusionReadoutRatio,
+    fusionReadoutHz: state.fusionReadoutHz,
     fusionMode: state.fusionMode,
     fusionClusterCents: state.fusionClusterCents,
     showRoughness: state.showRoughness,
@@ -171,6 +330,50 @@ function getSerializedState() {
     exportWidth: state.exportWidth,
     exportHeight: state.exportHeight,
     themeDark: state.themeDark,
+    printPaper: state.printPaper,
+    printMargin: state.printMargin,
+    printColorMode: state.printColorMode,
+    printShowComponentLabel: state.printShowComponentLabel,
+    printShowComponentHz: state.printShowComponentHz,
+    printShowComponentRatio: state.printShowComponentRatio,
+    printShowAxisText: state.printShowAxisText,
+    printShowLegend: state.printShowLegend,
+    printDistanceMode: state.printDistanceMode,
+    printCustomLabelFont: state.printCustomLabelFont,
+    printCustomLabelSize: state.printCustomLabelSize,
+    printAutoTextStyles: cloneJson(state.printAutoTextStyles, PRINT_AUTO_TEXT_STYLE_DEFAULTS),
+    printSelectedCustomTextId: state.printSelectedCustomTextId,
+    printDistanceShowRatio: state.printDistanceShowRatio,
+    printDistanceShowHz: state.printDistanceShowHz,
+    printDistanceShowInterval: state.printDistanceShowInterval,
+    printHiddenKeys: cloneJson(state.printHiddenKeys, {}),
+    printColumnOverrides: cloneJson(state.printColumnOverrides, {}),
+    printLabelOffsets: cloneJson(state.printLabelOffsets, {}),
+    printComponentXOverrides: cloneJson(state.printComponentXOverrides, {}),
+    printDiagramOffsetX: state.printDiagramOffsetX,
+    printDiagramOffsetY: state.printDiagramOffsetY,
+    printDistanceAnnotations: cloneJson(state.printDistanceAnnotations, []),
+    printCustomTexts: cloneJson(state.printCustomTexts, []),
+    printComboLinksVisible: cloneJson(state.printComboLinksVisible, {}),
+    printChordTitleOverrides: cloneJson(state.printChordTitleOverrides, {}),
+  };
+}
+
+function getSerializedState() {
+  modeSnapshots[appMode] = getStateSnapshotFlat();
+  if (!modeSnapshots[MODE_LIVE]) {
+    modeSnapshots[MODE_LIVE] = getStateSnapshotFlat();
+  }
+  if (!modeSnapshots[MODE_PRINT]) {
+    const seed = getStateSnapshotFlat();
+    seed.themeDark = false;
+    seed.printDistanceMode = false;
+    modeSnapshots[MODE_PRINT] = seed;
+  }
+  return {
+    mode: appMode,
+    live: modeSnapshots[MODE_LIVE],
+    print: modeSnapshots[MODE_PRINT],
   };
 }
 
@@ -235,6 +438,14 @@ function applyStateSnapshot(snapshot) {
       state.a4Hz = Math.max(1, Number(snapshot.a4Hz));
       a4HzInput.value = String(state.a4Hz);
     }
+    if (Number.isFinite(snapshot.viewZoom) && viewZoomInput) {
+      state.viewZoom = clamp(Number(snapshot.viewZoom), 0.3, 3);
+      viewZoomInput.value = String(state.viewZoom);
+    }
+    if (Number.isFinite(snapshot.layoutScale) && layoutScaleInput) {
+      state.layoutScale = clamp(Number(snapshot.layoutScale), 0.6, 1.8);
+      layoutScaleInput.value = String(state.layoutScale);
+    }
     if (Number.isFinite(snapshot.overtoneCount)) {
       state.overtoneCount = clamp(Math.round(Number(snapshot.overtoneCount)), 2, 48);
       overtoneCountInput.value = String(state.overtoneCount);
@@ -252,6 +463,12 @@ function applyStateSnapshot(snapshot) {
       state.harmonicScalingMode = snapshot.harmonicScalingMode;
       if (harmonicScalingInput) {
         harmonicScalingInput.value = state.harmonicScalingMode;
+      }
+    }
+    if (isColorSchemeId(snapshot.colorScheme)) {
+      state.colorScheme = snapshot.colorScheme;
+      if (colorSchemeInput) {
+        colorSchemeInput.value = state.colorScheme;
       }
     }
     if (typeof snapshot.autoRange === "boolean") {
@@ -274,25 +491,51 @@ function applyStateSnapshot(snapshot) {
       state.pointSize = clamp(Number(snapshot.pointSize), 2, 10);
       pointSizeInput.value = String(state.pointSize);
     }
+    if (Number.isFinite(snapshot.comboSize) && comboSizeInput) {
+      state.comboSize = clamp(Number(snapshot.comboSize), 2, 10);
+      comboSizeInput.value = String(state.comboSize);
+    } else if (Number.isFinite(snapshot.pointSize) && comboSizeInput) {
+      // Backward compatibility for older links where combo size followed point size.
+      state.comboSize = clamp(Number(snapshot.pointSize), 2, 10);
+      comboSizeInput.value = String(state.comboSize);
+    }
     if (typeof snapshot.showAlignments === "boolean") {
       state.showAlignments = snapshot.showAlignments;
       showAlignmentsInput.checked = snapshot.showAlignments;
     }
     if (typeof snapshot.showLabels === "boolean") {
       state.showLabels = snapshot.showLabels;
-      showLabelsInput.checked = snapshot.showLabels;
+      if (showLabelsInput) {
+        showLabelsInput.checked = snapshot.showLabels;
+      }
     }
     if (typeof snapshot.showOvertoneNumbers === "boolean" && showOvertoneNumbersInput) {
       state.showOvertoneNumbers = snapshot.showOvertoneNumbers;
       showOvertoneNumbersInput.checked = snapshot.showOvertoneNumbers;
     }
+    if (typeof snapshot.showStems === "boolean" && showStemsInput) {
+      state.showStems = snapshot.showStems;
+      showStemsInput.checked = snapshot.showStems;
+    }
     if (typeof snapshot.showCombination === "boolean") {
       state.showCombination = snapshot.showCombination;
       showCombinationInput.checked = snapshot.showCombination;
     }
+    if (typeof snapshot.showChordControls === "boolean" && showChordControlsInput) {
+      state.showChordControls = snapshot.showChordControls;
+      showChordControlsInput.checked = snapshot.showChordControls;
+    }
     if (typeof snapshot.showFusion === "boolean" && showFusionInput) {
       state.showFusion = snapshot.showFusion;
       showFusionInput.checked = snapshot.showFusion;
+    }
+    if (typeof snapshot.fusionReadoutRatio === "boolean" && fusionReadoutRatioInput) {
+      state.fusionReadoutRatio = snapshot.fusionReadoutRatio;
+      fusionReadoutRatioInput.checked = snapshot.fusionReadoutRatio;
+    }
+    if (typeof snapshot.fusionReadoutHz === "boolean" && fusionReadoutHzInput) {
+      state.fusionReadoutHz = snapshot.fusionReadoutHz;
+      fusionReadoutHzInput.checked = snapshot.fusionReadoutHz;
     }
     if ((snapshot.fusionMode === "align" || snapshot.fusionMode === "all") && fusionModeInput) {
       state.fusionMode = snapshot.fusionMode;
@@ -342,6 +585,7 @@ function applyStateSnapshot(snapshot) {
     }
     if (
       snapshot.synthWaveform === "sine" ||
+      snapshot.synthWaveform === "semisine" ||
       snapshot.synthWaveform === "triangle" ||
       snapshot.synthWaveform === "sawtooth" ||
       snapshot.synthWaveform === "square"
@@ -375,19 +619,244 @@ function applyStateSnapshot(snapshot) {
     }
     if (Number.isFinite(snapshot.exportWidth)) {
       state.exportWidth = clampExportSize(Number(snapshot.exportWidth), 1800);
-      exportWidthInput.value = String(state.exportWidth);
+      if (exportWidthInput) {
+        exportWidthInput.value = String(state.exportWidth);
+      }
     }
     if (Number.isFinite(snapshot.exportHeight)) {
       state.exportHeight = clampExportSize(Number(snapshot.exportHeight), 1100);
-      exportHeightInput.value = String(state.exportHeight);
+      if (exportHeightInput) {
+        exportHeightInput.value = String(state.exportHeight);
+      }
     }
     if (typeof snapshot.themeDark === "boolean") {
       state.themeDark = snapshot.themeDark;
       themeToggle.checked = snapshot.themeDark;
       document.body.classList.toggle("theme-dark", snapshot.themeDark);
     }
+    if (
+      snapshot.printPaper === "letter-portrait" ||
+      snapshot.printPaper === "letter-landscape" ||
+      snapshot.printPaper === "a4-portrait" ||
+      snapshot.printPaper === "a4-landscape"
+    ) {
+      state.printPaper = snapshot.printPaper;
+      if (printPaperInput) {
+        printPaperInput.value = snapshot.printPaper;
+      }
+    }
+    if (Number.isFinite(snapshot.printMargin)) {
+      state.printMargin = clamp(Number(snapshot.printMargin), 8, 220);
+      if (printMarginInput) {
+        printMarginInput.value = String(state.printMargin);
+      }
+    }
+    if (snapshot.printColorMode === "greyscale" || isColorSchemeId(snapshot.printColorMode)) {
+      state.printColorMode = snapshot.printColorMode;
+    } else if (typeof snapshot.printGrayscale === "boolean") {
+      // Backward compatibility for previous boolean print grayscale state.
+      state.printColorMode = snapshot.printGrayscale
+        ? "greyscale"
+        : (isColorSchemeId(state.colorScheme) ? state.colorScheme : "hayward-vine");
+    }
+    if (typeof snapshot.printShowComponentLabel === "boolean") {
+      state.printShowComponentLabel = snapshot.printShowComponentLabel;
+      if (printShowComponentLabelInput) {
+        printShowComponentLabelInput.checked = snapshot.printShowComponentLabel;
+      }
+    }
+    if (typeof snapshot.printShowComponentHz === "boolean") {
+      state.printShowComponentHz = snapshot.printShowComponentHz;
+      if (printShowComponentHzInput) {
+        printShowComponentHzInput.checked = snapshot.printShowComponentHz;
+      }
+    }
+    if (typeof snapshot.printShowComponentRatio === "boolean") {
+      state.printShowComponentRatio = snapshot.printShowComponentRatio;
+      if (printShowComponentRatioInput) {
+        printShowComponentRatioInput.checked = snapshot.printShowComponentRatio;
+      }
+    }
+    if (typeof snapshot.printShowAxisText === "boolean") {
+      state.printShowAxisText = snapshot.printShowAxisText;
+      if (printShowAxisTextInput) {
+        printShowAxisTextInput.checked = snapshot.printShowAxisText;
+      }
+    }
+    if (typeof snapshot.printShowLegend === "boolean") {
+      state.printShowLegend = snapshot.printShowLegend;
+      if (printShowLegendInput) {
+        printShowLegendInput.checked = snapshot.printShowLegend;
+      }
+    }
+    if (typeof snapshot.printDistanceMode === "boolean") {
+      state.printDistanceMode = snapshot.printDistanceMode;
+      if (printDistanceModeInput) {
+        printDistanceModeInput.checked = snapshot.printDistanceMode;
+      }
+    }
+    if (typeof snapshot.printCustomLabelFont === "string") {
+      state.printCustomLabelFont = snapshot.printCustomLabelFont;
+      if (customTextFontInput) {
+        customTextFontInput.value = snapshot.printCustomLabelFont;
+      }
+    }
+    if (Number.isFinite(snapshot.printCustomLabelSize)) {
+      state.printCustomLabelSize = clamp(Number(snapshot.printCustomLabelSize), 8, 72);
+      if (customTextSizeInput) {
+        customTextSizeInput.value = String(state.printCustomLabelSize);
+      }
+      if (customTextSizeReadout) {
+        customTextSizeReadout.textContent = String(state.printCustomLabelSize);
+      }
+    }
+    if (snapshot.printAutoTextStyles && typeof snapshot.printAutoTextStyles === "object") {
+      const next = cloneJson(PRINT_AUTO_TEXT_STYLE_DEFAULTS, PRINT_AUTO_TEXT_STYLE_DEFAULTS);
+      ["overtone", "component", "axis"].forEach((key) => {
+        const incoming = snapshot.printAutoTextStyles[key];
+        if (!incoming || typeof incoming !== "object") {
+          return;
+        }
+        if (typeof incoming.font === "string" && incoming.font.trim()) {
+          next[key].font = incoming.font.trim();
+        }
+        if (Number.isFinite(incoming.size)) {
+          next[key].size = clamp(Number(incoming.size), 8, 72);
+        }
+      });
+      state.printAutoTextStyles = next;
+    }
+    if (typeof snapshot.printSelectedCustomTextId === "string" || snapshot.printSelectedCustomTextId == null) {
+      state.printSelectedCustomTextId = snapshot.printSelectedCustomTextId || null;
+    }
+    if (typeof snapshot.printDistanceShowRatio === "boolean") {
+      state.printDistanceShowRatio = snapshot.printDistanceShowRatio;
+      if (printDistanceShowRatioInput) {
+        printDistanceShowRatioInput.checked = snapshot.printDistanceShowRatio;
+      }
+    }
+    if (typeof snapshot.printDistanceShowHz === "boolean") {
+      state.printDistanceShowHz = snapshot.printDistanceShowHz;
+      if (printDistanceShowHzInput) {
+        printDistanceShowHzInput.checked = snapshot.printDistanceShowHz;
+      }
+    }
+    if (typeof snapshot.printDistanceShowInterval === "boolean") {
+      state.printDistanceShowInterval = snapshot.printDistanceShowInterval;
+      if (printDistanceShowIntervalInput) {
+        printDistanceShowIntervalInput.checked = snapshot.printDistanceShowInterval;
+      }
+    }
+    if (snapshot.printHiddenKeys && typeof snapshot.printHiddenKeys === "object") {
+      state.printHiddenKeys = cloneJson(snapshot.printHiddenKeys, {});
+    }
+    if (snapshot.printColumnOverrides && typeof snapshot.printColumnOverrides === "object") {
+      state.printColumnOverrides = cloneJson(snapshot.printColumnOverrides, {});
+    }
+    if (snapshot.printLabelOffsets && typeof snapshot.printLabelOffsets === "object") {
+      state.printLabelOffsets = cloneJson(snapshot.printLabelOffsets, {});
+    }
+    if (snapshot.printComponentXOverrides && typeof snapshot.printComponentXOverrides === "object") {
+      state.printComponentXOverrides = cloneJson(snapshot.printComponentXOverrides, {});
+    }
+    if (Number.isFinite(snapshot.printDiagramOffsetX)) {
+      state.printDiagramOffsetX = Number(snapshot.printDiagramOffsetX);
+    }
+    if (Number.isFinite(snapshot.printDiagramOffsetY)) {
+      state.printDiagramOffsetY = Number(snapshot.printDiagramOffsetY);
+    }
+    if (Array.isArray(snapshot.printDistanceAnnotations)) {
+      state.printDistanceAnnotations = cloneJson(snapshot.printDistanceAnnotations, []);
+    }
+    if (Array.isArray(snapshot.printCustomTexts)) {
+      state.printCustomTexts = cloneJson(snapshot.printCustomTexts, []);
+    }
+    if (snapshot.printComboLinksVisible && typeof snapshot.printComboLinksVisible === "object") {
+      state.printComboLinksVisible = cloneJson(snapshot.printComboLinksVisible, {});
+    }
+    if (snapshot.printChordTitleOverrides && typeof snapshot.printChordTitleOverrides === "object") {
+      state.printChordTitleOverrides = cloneJson(snapshot.printChordTitleOverrides, {});
+    }
   } finally {
     suspendStateUrlSync = false;
+  }
+}
+
+function isPrintMode() {
+  return appMode === MODE_PRINT;
+}
+
+function syncModeButtons() {
+  if (modeLiveButton) {
+    modeLiveButton.classList.toggle("is-active", appMode === MODE_LIVE);
+  }
+  if (modePrintButton) {
+    modePrintButton.classList.toggle("is-active", appMode === MODE_PRINT);
+  }
+  document.body.classList.toggle("mode-print", appMode === MODE_PRINT);
+}
+
+function syncColorSchemeControl() {
+  if (!colorSchemeInput) {
+    return;
+  }
+  const greyscaleOption = colorSchemeInput.querySelector("option[value='greyscale']");
+  if (greyscaleOption) {
+    greyscaleOption.hidden = !isPrintMode();
+  }
+  if (isPrintMode()) {
+    const mode = state.printColorMode === "greyscale" || isColorSchemeId(state.printColorMode)
+      ? state.printColorMode
+      : "greyscale";
+    colorSchemeInput.value = mode;
+    return;
+  }
+  if (!isColorSchemeId(state.colorScheme)) {
+    state.colorScheme = "hayward-vine";
+  }
+  colorSchemeInput.value = state.colorScheme;
+}
+
+function restorePrintHiddenState() {
+  state.printHiddenKeys = {};
+}
+
+function resetPrintLayoutState() {
+  state.printColumnOverrides = {};
+  state.printLabelOffsets = {};
+  state.printComponentXOverrides = {};
+  state.printDiagramOffsetX = 0;
+  state.printDiagramOffsetY = 0;
+  printDistancePendingKey = null;
+}
+
+function setAppMode(nextMode, { skipRender = false } = {}) {
+  const mode = nextMode === MODE_PRINT ? MODE_PRINT : MODE_LIVE;
+  if (mode === appMode) {
+    syncModeButtons();
+    return;
+  }
+  modeSnapshots[appMode] = getStateSnapshotFlat();
+  appMode = mode;
+  const snap = modeSnapshots[mode];
+  if (snap && typeof snap === "object") {
+    applyStateSnapshot(snap);
+  } else {
+    modeSnapshots[mode] = getStateSnapshotFlat();
+  }
+  if (appMode === MODE_PRINT) {
+    hardAllNotesOff();
+    lKeyHeld = false;
+    state.themeDark = false;
+    themeToggle.checked = false;
+    document.body.classList.remove("theme-dark");
+  } else {
+    printDistancePendingKey = null;
+    closeCustomTextDialog(null);
+  }
+  syncModeButtons();
+  if (!skipRender) {
+    scheduleRender();
   }
 }
 
@@ -399,6 +868,75 @@ function formatHz(freq) {
     return `${freq.toFixed(1)} Hz`;
   }
   return `${freq.toFixed(2)} Hz`;
+}
+
+function formatAxisHzCompact(freq) {
+  if (!Number.isFinite(freq)) {
+    return "";
+  }
+  if (freq >= 1000) {
+    return `${Math.round(freq / 1000)} kHz`;
+  }
+  return `${Math.round(freq)} Hz`;
+}
+
+function gcdInt(a, b) {
+  let x = Math.abs(Math.round(a));
+  let y = Math.abs(Math.round(b));
+  while (y !== 0) {
+    const t = x % y;
+    x = y;
+    y = t;
+  }
+  return x || 1;
+}
+
+function approximateRatio(value, maxDenominator = 1024) {
+  if (!(value > 0) || !Number.isFinite(value)) {
+    return null;
+  }
+  let bestNum = 1;
+  let bestDen = 1;
+  let bestErr = Math.abs(value - 1);
+  for (let den = 1; den <= maxDenominator; den += 1) {
+    const num = Math.max(1, Math.round(value * den));
+    const err = Math.abs(value - num / den);
+    if (err < bestErr) {
+      bestErr = err;
+      bestNum = num;
+      bestDen = den;
+    }
+  }
+  const g = gcdInt(bestNum, bestDen);
+  return { numerator: bestNum / g, denominator: bestDen / g };
+}
+
+function formatRatioApprox(value) {
+  const approx = approximateRatio(value);
+  if (!approx) {
+    return "";
+  }
+  return `${approx.numerator}/${approx.denominator}`;
+}
+
+function nearestIntervalNameForRatio(ratio) {
+  if (!(ratio > 0) || !intervalNameEntries.length) {
+    return "";
+  }
+  const cents = 1200 * Math.log2(ratio);
+  let best = null;
+  let bestDelta = Infinity;
+  intervalNameEntries.forEach((entry) => {
+    const delta = Math.abs(entry.cents - cents);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = entry;
+    }
+  });
+  if (!best) {
+    return "";
+  }
+  return `${best.name} (${bestDelta.toFixed(2)}c)`;
 }
 
 function isEditableTarget(target) {
@@ -440,6 +978,9 @@ function targetAmplitudeScale(target) {
   }
   if (target.kind === "harmonic") {
     return clamp(harmonicScalingGain(target.harmonic), 0.04, 1);
+  }
+  if (target.kind === "fusion") {
+    return clamp(Number(target.ampScale) || 0.2, 0.04, 1);
   }
   if (target.kind === "combo") {
     return 0.18;
@@ -570,11 +1111,16 @@ function startVoiceForTarget(key, target, { lfoState = null } = {}) {
   stopVoiceForKey(key, true);
 
   const now = audioCtx.currentTime;
-  const osc = audioCtx.createOscillator();
+  const osc =
+    state.synthWaveform === "semisine" && customOscillators?.semisine
+      ? customOscillators.semisine(audioCtx)
+      : audioCtx.createOscillator();
   const ampGain = audioCtx.createGain();
   const ampScale = targetAmplitudeScale(target);
   const baseGain = 0.2 * ampScale;
-  osc.type = state.synthWaveform;
+  if (state.synthWaveform !== "semisine") {
+    osc.type = state.synthWaveform;
+  }
   osc.frequency.setValueAtTime(freq, now);
   ampGain.gain.setValueAtTime(0.0001, now);
   osc.connect(ampGain);
@@ -639,6 +1185,205 @@ function refreshActiveVoicesFromState() {
       setVoiceLfoForKey(key, lfoState);
     }
   });
+}
+
+function parseComboPlayKey(key) {
+  if (typeof key !== "string" || !key.startsWith("combo:")) {
+    return null;
+  }
+  const parts = key.split(":");
+  if (parts.length < 4) {
+    return null;
+  }
+  const noteA = Number(parts[1]);
+  const noteB = Number(parts[2]);
+  if (!Number.isFinite(noteA) || !Number.isFinite(noteB)) {
+    return null;
+  }
+  return { noteA, noteB };
+}
+
+function pointToPlaybackTarget(point) {
+  if (!point || !point.playKey) {
+    return null;
+  }
+  if (point.kind === "overtone") {
+    return {
+      key: point.playKey,
+      target: { kind: "harmonic", noteIndex: point.noteIndex, harmonic: point.harmonic },
+    };
+  }
+  if (point.kind === "combo") {
+    return {
+      key: point.playKey,
+      target: { kind: "combo", freq: point.freq },
+    };
+  }
+  return null;
+}
+
+function collectChordTargetGroups(model, chordIndex) {
+  const chord = model?.chords?.[chordIndex];
+  if (!chord || !Array.isArray(chord.noteIndexes)) {
+    return {
+      allChordKeys: new Set(),
+      fundamentals: [],
+      overtones: [],
+      tones: [],
+    };
+  }
+  const noteSet = new Set(chord.noteIndexes);
+  const allChordKeys = new Set();
+  const fundamentals = [];
+  const overtones = [];
+  const tones = [];
+  const pushTarget = (list, key, target) => {
+    if (!key || !target) {
+      return;
+    }
+    list.push({ key, target });
+    allChordKeys.add(key);
+  };
+
+  chord.noteIndexes.forEach((noteIndex) => {
+    const fundamentalKey = `harmonic:${noteIndex}:1`;
+    const fundamentalTarget = { kind: "harmonic", noteIndex, harmonic: 1 };
+    pushTarget(fundamentals, fundamentalKey, fundamentalTarget);
+    pushTarget(tones, fundamentalKey, fundamentalTarget);
+  });
+
+  (model.visibleOvertones || []).forEach((point) => {
+    if (!noteSet.has(point.noteIndex)) {
+      return;
+    }
+    const key = point.playKey || `harmonic:${point.noteIndex}:${point.harmonic}`;
+    const target = { kind: "harmonic", noteIndex: point.noteIndex, harmonic: point.harmonic };
+    pushTarget(overtones, key, target);
+    pushTarget(tones, key, target);
+  });
+
+  if (state.showCombination) {
+    (model.visibleComboPoints || []).forEach((point) => {
+      if (!noteSet.has(point.noteA) || !noteSet.has(point.noteB)) {
+        return;
+      }
+      pushTarget(tones, point.playKey, { kind: "combo", freq: point.freq });
+    });
+  }
+
+  const toneByKey = new Map();
+  tones.forEach((item) => {
+    if (!toneByKey.has(item.key)) {
+      toneByKey.set(item.key, item);
+    }
+  });
+  const overtoneByKey = new Map();
+  overtones.forEach((item) => {
+    if (!overtoneByKey.has(item.key)) {
+      overtoneByKey.set(item.key, item);
+    }
+  });
+  const fundamentalByKey = new Map();
+  fundamentals.forEach((item) => {
+    if (!fundamentalByKey.has(item.key)) {
+      fundamentalByKey.set(item.key, item);
+    }
+  });
+
+  return {
+    allChordKeys,
+    fundamentals: Array.from(fundamentalByKey.values()),
+    overtones: Array.from(overtoneByKey.values()),
+    tones: Array.from(toneByKey.values()),
+  };
+}
+
+function applyChordPlaybackAction(chordIndex, action) {
+  const model = chartModel || buildModel();
+  const chord = model?.chords?.[chordIndex];
+  if (!chord) {
+    return;
+  }
+  const noteSet = new Set(chord.noteIndexes || []);
+  const groups = collectChordTargetGroups(model, chordIndex);
+  const selectedMap = new Map();
+  if (action === "fundamentals") {
+    groups.fundamentals.forEach((item) => selectedMap.set(item.key, item.target));
+  } else if (action === "all-overtones") {
+    groups.overtones.forEach((item) => selectedMap.set(item.key, item.target));
+  } else if (action === "all-tones") {
+    groups.tones.forEach((item) => selectedMap.set(item.key, item.target));
+  }
+  const selectedKeys = Array.from(selectedMap.keys());
+  const playingChordKeys = Array.from(playingTargets.keys()).filter((key) => {
+    if (groups.allChordKeys.has(key)) {
+      return true;
+    }
+    if (typeof key === "string" && key.startsWith("combo:")) {
+      const comboMeta = parseComboPlayKey(key);
+      return !!(comboMeta && noteSet.has(comboMeta.noteA) && noteSet.has(comboMeta.noteB));
+    }
+    return false;
+  });
+  const selectedFullyOn =
+    selectedKeys.length > 0 && selectedKeys.every((key) => playingTargets.has(key));
+  const selectedExclusivelyOn =
+    selectedFullyOn && playingChordKeys.length === selectedKeys.length;
+
+  Array.from(playingTargets.keys()).forEach((key) => {
+    if (groups.allChordKeys.has(key)) {
+      playingTargets.delete(key);
+      lfoTargetStates.delete(key);
+      return;
+    }
+    if (typeof key === "string" && key.startsWith("combo:")) {
+      const comboMeta = parseComboPlayKey(key);
+      if (comboMeta && noteSet.has(comboMeta.noteA) && noteSet.has(comboMeta.noteB)) {
+        playingTargets.delete(key);
+        lfoTargetStates.delete(key);
+      }
+    }
+  });
+
+  if (action !== "off" && !selectedExclusivelyOn) {
+    selectedMap.forEach((target, key) => {
+      playingTargets.set(key, target);
+      lfoTargetStates.delete(key);
+    });
+  }
+
+  spaceMuted = false;
+  refreshActiveVoicesFromState();
+  scheduleRender();
+}
+
+function applyRoughnessBandPlaybackToggle(playItems) {
+  const unique = new Map();
+  (playItems || []).forEach((item) => {
+    if (!item?.key || !item?.target) {
+      return;
+    }
+    unique.set(item.key, item.target);
+  });
+  if (!unique.size) {
+    return;
+  }
+  const entries = Array.from(unique.entries());
+  const allOn = entries.every(([key]) => playingTargets.has(key));
+  if (allOn) {
+    entries.forEach(([key]) => {
+      playingTargets.delete(key);
+      lfoTargetStates.delete(key);
+    });
+  } else {
+    entries.forEach(([key, target]) => {
+      playingTargets.set(key, target);
+      lfoTargetStates.delete(key);
+    });
+  }
+  spaceMuted = false;
+  refreshActiveVoicesFromState();
+  scheduleRender();
 }
 
 function toggleTargetPlayback(key, target) {
@@ -935,12 +1680,52 @@ function parseNotes(text, ratioRootHz, a4Hz) {
   return { notes, errors, chords };
 }
 
+function appendCombinationFamily(tones, noteA, noteB, lower, upper, chordIndex) {
+  tones.push({
+    kind: "combo",
+    type: "difference",
+    freq: Math.abs(upper - lower),
+    noteA,
+    noteB,
+    chordIndex,
+    formula: "|f2-f1|",
+  });
+  tones.push({
+    kind: "combo",
+    type: "sum",
+    freq: upper + lower,
+    noteA,
+    noteB,
+    chordIndex,
+    formula: "f1+f2",
+  });
+  tones.push({
+    kind: "combo",
+    type: "order2a",
+    freq: 2 * lower - upper,
+    noteA,
+    noteB,
+    chordIndex,
+    formula: "2f1-f2",
+  });
+  tones.push({
+    kind: "combo",
+    type: "order2b",
+    freq: 2 * upper - lower,
+    noteA,
+    noteB,
+    chordIndex,
+    formula: "2f2-f1",
+  });
+}
+
 function computeCombinationTones(notes, chords, pairsMode = "adjacent") {
   const tones = [];
   const chordList = Array.isArray(chords) && chords.length
     ? chords
     : [{ index: 0, noteIndexes: notes.map((_, index) => index) }];
-  chordList.forEach((chord) => {
+  chordList.forEach((chord, chordIndexFromLoop) => {
+    const chordIndex = Number.isInteger(chord?.index) ? chord.index : chordIndexFromLoop;
     const chordIndexes = (chord?.noteIndexes || []).filter((idx) => Number.isInteger(idx) && idx >= 0 && idx < notes.length);
     if (chordIndexes.length < 2) {
       return;
@@ -953,39 +1738,7 @@ function computeCombinationTones(notes, chords, pairsMode = "adjacent") {
         const f2 = notes[b].freq;
         const lower = Math.min(f1, f2);
         const upper = Math.max(f1, f2);
-
-        tones.push({
-          kind: "combo",
-          type: "difference",
-          freq: Math.abs(upper - lower),
-          noteA: a,
-          noteB: b,
-          formula: "|f2-f1|",
-        });
-        tones.push({
-          kind: "combo",
-          type: "sum",
-          freq: upper + lower,
-          noteA: a,
-          noteB: b,
-          formula: "f1+f2",
-        });
-        tones.push({
-          kind: "combo",
-          type: "order2a",
-          freq: 2 * lower - upper,
-          noteA: a,
-          noteB: b,
-          formula: "2f1-f2",
-        });
-        tones.push({
-          kind: "combo",
-          type: "order2b",
-          freq: 2 * upper - lower,
-          noteA: a,
-          noteB: b,
-          formula: "2f2-f1",
-        });
+        appendCombinationFamily(tones, a, b, lower, upper, chordIndex);
       }
       return;
     }
@@ -997,39 +1750,7 @@ function computeCombinationTones(notes, chords, pairsMode = "adjacent") {
         const f2 = notes[b].freq;
         const lower = Math.min(f1, f2);
         const upper = Math.max(f1, f2);
-
-        tones.push({
-          kind: "combo",
-          type: "difference",
-          freq: Math.abs(upper - lower),
-          noteA: a,
-          noteB: b,
-          formula: "|f2-f1|",
-        });
-        tones.push({
-          kind: "combo",
-          type: "sum",
-          freq: upper + lower,
-          noteA: a,
-          noteB: b,
-          formula: "f1+f2",
-        });
-        tones.push({
-          kind: "combo",
-          type: "order2a",
-          freq: 2 * lower - upper,
-          noteA: a,
-          noteB: b,
-          formula: "2f1-f2",
-        });
-        tones.push({
-          kind: "combo",
-          type: "order2b",
-          freq: 2 * upper - lower,
-          noteA: a,
-          noteB: b,
-          formula: "2f2-f1",
-        });
+        appendCombinationFamily(tones, a, b, lower, upper, chordIndex);
       }
     }
   });
@@ -1136,6 +1857,54 @@ function computeAlignmentClusters(points, toleranceCents) {
   finalizeCurrent();
 
   return clusters.slice(0, 120);
+}
+
+function annotateFusionNodesWithAlignment(fusionNodes, alignmentClusters, matchToleranceCents) {
+  const nodes = Array.isArray(fusionNodes) ? fusionNodes : [];
+  const clusters = Array.isArray(alignmentClusters) ? alignmentClusters : [];
+  const tol = Math.max(0, Number(matchToleranceCents) || 0);
+  if (!nodes.length) {
+    return [];
+  }
+  return nodes.map((node) => {
+    let best = null;
+    clusters.forEach((cluster) => {
+      if (!(cluster?.centerFreq > 0) || !(node?.centerFreq > 0)) {
+        return;
+      }
+      const delta = Math.abs(centsBetween(cluster.centerFreq, node.centerFreq));
+      if (delta > tol) {
+        return;
+      }
+      const memberCount = Number(cluster.points?.length) || 0;
+      if (
+        !best ||
+        delta < best.delta - 1e-9 ||
+        (Math.abs(delta - best.delta) <= 1e-9 && memberCount > best.memberCount)
+      ) {
+        best = {
+          id: cluster.id,
+          centerFreq: cluster.centerFreq,
+          memberCount,
+          uniqueNotes: Number(cluster.uniqueNotes) || 0,
+          memberPlayKeys: (cluster.points || [])
+            .map((point) => point?.playKey)
+            .filter(Boolean),
+          delta,
+        };
+      }
+    });
+    return {
+      ...node,
+      alignmentClusterId: best?.id || "",
+      alignmentCenterFreq: best?.centerFreq || NaN,
+      alignmentMemberCount: best?.memberCount || 0,
+      alignmentUniqueNotes: best?.uniqueNotes || 0,
+      alignmentMemberPlayKeys: best?.memberPlayKeys || [],
+      alignmentDeltaCents: best?.delta ?? Infinity,
+      labelEligible: (best?.memberCount || 0) > 1,
+    };
+  });
 }
 
 function fusionPointWeight(point) {
@@ -1398,6 +2167,59 @@ ${hasHarmonic && hasCombo ? "Harmonics + combo overlap" : hasCombo ? "Combo/diff
   });
 }
 
+function getFusionNodeVisual(node, fusionMode, themeDark, scheme) {
+  const palette = scheme || activeColorScheme();
+  const harmonicBase = palette?.fusion?.harmonic || "#c56a42";
+  const comboBase = palette?.fusion?.combo || "#4a8f81";
+  if (fusionMode === "all") {
+    const naturalShare = clamp(Number(node.naturalShare) || 0, 0, 1);
+    const alignStrength = clamp(Number(node.alignStrength) || 0, 0, 1);
+    const radius = clamp(Number(node.radius) || 3, 2, 24);
+    if (node.shape === "diamond") {
+      const fillBase = mixHex(comboBase, "#ffffff", themeDark ? 0.1 : 0.18);
+      const fill = mixHex(fillBase, "#ffffff", 0.28 * (1 - alignStrength));
+      const stroke = mixHex(comboBase, "#000000", 0.2 + alignStrength * 0.35);
+      return {
+        shape: "diamond",
+        radius,
+        fill,
+        fillOpacity: 0.24 + alignStrength * 0.56,
+        stroke,
+        strokeOpacity: 0.45 + alignStrength * 0.35,
+        strokeWidth: 0.9 + alignStrength * 1.2,
+      };
+    }
+    const harmonicMix = mixHex(comboBase, harmonicBase, 0.25 + naturalShare * 0.75);
+    const fill = mixHex(harmonicMix, "#ffffff", (themeDark ? 0.18 : 0.24) * (1 - alignStrength));
+    const stroke = mixHex(harmonicMix, "#000000", 0.18 + alignStrength * 0.3);
+    return {
+      shape: "circle",
+      radius,
+      fill,
+      fillOpacity: 0.22 + alignStrength * 0.6,
+      stroke,
+      strokeOpacity: 0.35 + alignStrength * 0.42,
+      strokeWidth: 0.9 + alignStrength * 1.2,
+    };
+  }
+
+  const strength = clamp(Number(node.strength) || 0, 0, 1);
+  const naturalShare = clamp(Number(node.naturalShare) || 0, 0, 1);
+  const radius = clamp(3 + strength * 18, 3, 26);
+  const alignColor = mixHex(comboBase, harmonicBase, 0.32 + naturalShare * 0.68);
+  const fill = mixHex(alignColor, "#ffffff", (themeDark ? 0.15 : 0.22) * (1 - strength));
+  const stroke = mixHex(alignColor, "#000000", 0.2 + strength * 0.32);
+  return {
+    shape: "circle",
+    radius,
+    fill,
+    fillOpacity: 0.22 + strength * 0.62,
+    stroke,
+    strokeOpacity: 0.35 + strength * 0.4,
+    strokeWidth: 0.9 + strength * 1.1,
+  };
+}
+
 function computeFusionBeatBands(points, minBeatHz, maxBeatHz, centerToleranceCents) {
   if (points.length < 2 || !(maxBeatHz > minBeatHz) || !(maxBeatHz > 0)) {
     return [];
@@ -1436,6 +2258,7 @@ function computeFusionBeatBands(points, minBeatHz, maxBeatHz, centerToleranceCen
         deltaHz: delta,
         strengthRaw,
         pairCount: 1,
+        playItems: [pointToPlaybackTarget(a), pointToPlaybackTarget(b)].filter(Boolean),
       });
     }
   }
@@ -1454,6 +2277,7 @@ function computeFusionBeatBands(points, minBeatHz, maxBeatHz, centerToleranceCen
         weightedDeltaSum: entry.deltaHz * entry.strengthRaw,
         strengthRaw: entry.strengthRaw,
         pairCount: entry.pairCount,
+        playItems: [...(entry.playItems || [])],
       };
       continue;
     }
@@ -1463,6 +2287,7 @@ function computeFusionBeatBands(points, minBeatHz, maxBeatHz, centerToleranceCen
       current.weightedDeltaSum += entry.deltaHz * entry.strengthRaw;
       current.strengthRaw += entry.strengthRaw;
       current.pairCount += entry.pairCount;
+      current.playItems.push(...(entry.playItems || []));
       continue;
     }
     merged.push(current);
@@ -1471,6 +2296,7 @@ function computeFusionBeatBands(points, minBeatHz, maxBeatHz, centerToleranceCen
       weightedDeltaSum: entry.deltaHz * entry.strengthRaw,
       strengthRaw: entry.strengthRaw,
       pairCount: entry.pairCount,
+      playItems: [...(entry.playItems || [])],
     };
   }
   if (current) {
@@ -1482,6 +2308,12 @@ function computeFusionBeatBands(points, minBeatHz, maxBeatHz, centerToleranceCen
     .map((item, index) => {
       const centerFreq = Math.exp(item.weightedLogSum / item.strengthRaw);
       const deltaHz = item.weightedDeltaSum / item.strengthRaw;
+      const itemMap = new Map();
+      (item.playItems || []).forEach((playItem) => {
+        if (playItem?.key && playItem?.target) {
+          itemMap.set(playItem.key, playItem.target);
+        }
+      });
       return {
         id: index,
         centerFreq,
@@ -1489,6 +2321,7 @@ function computeFusionBeatBands(points, minBeatHz, maxBeatHz, centerToleranceCen
         pairCount: item.pairCount,
         strengthRaw: item.strengthRaw,
         strength: item.strengthRaw / maxStrength,
+        playItems: Array.from(itemMap.entries()).map(([key, target]) => ({ key, target })),
         tip: `Beat-friction band
 Center: ${formatHz(centerFreq)}
 Typical |f2-f1|: ${deltaHz.toFixed(2)} Hz
@@ -1498,11 +2331,175 @@ Interacting pairs: ${item.pairCount}`,
     .slice(0, 140);
 }
 
-function noteColor(index, darkMode) {
-  const hue = Math.round((205 + index * 137.508) % 360);
-  const sat = 68;
-  const light = darkMode ? 64 : 44;
-  return `hsl(${hue}, ${sat}%, ${light}%)`;
+const COLOR_SCHEMES = {
+  "hayward-vine": {
+    overtonePrimeColors: {
+      1: "#0f0f0f",
+      2: "#4a4a4a",
+      3: "#6fb6ff",
+      5: "#d54848",
+      7: "#1f3f8f",
+      11: "#e58a2a",
+      13: "#7b4cc9",
+      17: "#2f8a45",
+      19: "#d4b022",
+      23: "#2a8c8a",
+    },
+    combo: { difference: "#d45d4c", sum: "#b6802e", order2: "#6e58b4" },
+    fusion: { harmonic: "#c56a42", combo: "#4a8f81" },
+    roughness: { base: "#cf5f34" },
+  },
+  "ember-cobalt": {
+    overtonePrimeColors: {
+      1: "#2b0f08",
+      2: "#5f3a33",
+      3: "#2f6fff",
+      5: "#ff5a36",
+      7: "#0a2f9c",
+      11: "#ff9f1c",
+      13: "#6b2fb8",
+      17: "#1f8f6b",
+      19: "#f5cc00",
+      23: "#0f7c96",
+    },
+    combo: { difference: "#ff2f1f", sum: "#ffc400", order2: "#1764ff" },
+    fusion: { harmonic: "#ff7b39", combo: "#3f86ff" },
+    roughness: { base: "#e53a1f" },
+  },
+  "aurora-mint": {
+    overtonePrimeColors: {
+      1: "#063b35",
+      2: "#3f6f69",
+      3: "#00c9c8",
+      5: "#ff2fa1",
+      7: "#3b4dff",
+      11: "#8bf000",
+      13: "#a14dff",
+      17: "#00a86b",
+      19: "#f7ff4f",
+      23: "#1dd6ff",
+    },
+    combo: { difference: "#ff1493", sum: "#00e676", order2: "#00b0ff" },
+    fusion: { harmonic: "#00bf84", combo: "#00d2ff" },
+    roughness: { base: "#ff3ea0" },
+  },
+  "nocturne-ink": {
+    overtonePrimeColors: {
+      1: "#0a0f2e",
+      2: "#424c7a",
+      3: "#7ea8ff",
+      5: "#f45b93",
+      7: "#3041b5",
+      11: "#d27a1f",
+      13: "#b38bff",
+      17: "#4d9f8a",
+      19: "#c6da57",
+      23: "#3aa0d8",
+    },
+    combo: { difference: "#ff4d94", sum: "#ff9d00", order2: "#7f5bff" },
+    fusion: { harmonic: "#8b93ff", combo: "#4db7d9" },
+    roughness: { base: "#d65a87" },
+  },
+  "sunset-brass": {
+    overtonePrimeColors: {
+      1: "#2d2104",
+      2: "#7a6532",
+      3: "#4f8dff",
+      5: "#d45500",
+      7: "#1f4780",
+      11: "#ffb300",
+      13: "#9156a9",
+      17: "#5f8d1e",
+      19: "#ffd54a",
+      23: "#00897b",
+    },
+    combo: { difference: "#b45309", sum: "#eab308", order2: "#0f766e" },
+    fusion: { harmonic: "#d97706", combo: "#6d28d9" },
+    roughness: { base: "#c2410c" },
+  },
+};
+
+function isColorSchemeId(value) {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(COLOR_SCHEMES, value);
+}
+
+function activeColorScheme() {
+  if (isColorSchemeId(state.colorScheme)) {
+    return COLOR_SCHEMES[state.colorScheme];
+  }
+  return COLOR_SCHEMES["hayward-vine"];
+}
+
+function activeRenderColorScheme(inPrintMode) {
+  if (inPrintMode && isColorSchemeId(state.printColorMode)) {
+    return COLOR_SCHEMES[state.printColorMode];
+  }
+  return activeColorScheme();
+}
+
+function hexToRgb(hex) {
+  const cleaned = String(hex || "").trim().replace(/^#/, "");
+  if (!/^[0-9a-f]{6}$/i.test(cleaned)) {
+    return { r: 0, g: 0, b: 0 };
+  }
+  return {
+    r: parseInt(cleaned.slice(0, 2), 16),
+    g: parseInt(cleaned.slice(2, 4), 16),
+    b: parseInt(cleaned.slice(4, 6), 16),
+  };
+}
+
+function rgbToHex({ r, g, b }) {
+  const toHex = (v) => clamp(Math.round(v), 0, 255).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function mixHex(colorA, colorB, t) {
+  const a = hexToRgb(colorA);
+  const b = hexToRgb(colorB);
+  const m = clamp(Number(t) || 0, 0, 1);
+  return rgbToHex({
+    r: a.r + (b.r - a.r) * m,
+    g: a.g + (b.g - a.g) * m,
+    b: a.b + (b.b - a.b) * m,
+  });
+}
+
+function greatestPrimeFactor(value) {
+  let n = Math.max(1, Math.floor(Math.abs(Number(value) || 1)));
+  if (n <= 1) {
+    return 1;
+  }
+  let last = 1;
+  while (n % 2 === 0) {
+    last = 2;
+    n /= 2;
+  }
+  let factor = 3;
+  while (factor * factor <= n) {
+    while (n % factor === 0) {
+      last = factor;
+      n /= factor;
+    }
+    factor += 2;
+  }
+  if (n > 1) {
+    last = n;
+  }
+  return last || 1;
+}
+
+function liveOvertoneColor(harmonic) {
+  const scheme = activeColorScheme();
+  const primeColors = scheme.overtonePrimeColors || COLOR_SCHEMES["hayward-vine"].overtonePrimeColors;
+  const gpf = greatestPrimeFactor(harmonic);
+  if (primeColors[gpf]) {
+    return primeColors[gpf];
+  }
+  if (gpf > 23) {
+    return primeColors[23];
+  }
+  return primeColors[2];
 }
 
 function createSvgEl(tag, attrs = {}) {
@@ -1514,6 +2511,137 @@ function createSvgEl(tag, attrs = {}) {
     node.setAttribute(key, String(value));
   });
   return node;
+}
+
+function labelDragFocusFromElement(labelEl, labelId) {
+  if (!(labelEl instanceof Element) || !labelId) {
+    return null;
+  }
+  const parentKeys = [];
+  const directParentKey = labelEl.getAttribute("data-label-parent-key");
+  if (directParentKey) {
+    parentKeys.push(directParentKey);
+  }
+  const parentAKey = labelEl.getAttribute("data-label-parent-a-key");
+  const parentBKey = labelEl.getAttribute("data-label-parent-b-key");
+  if (parentAKey) {
+    parentKeys.push(parentAKey);
+  }
+  if (parentBKey) {
+    parentKeys.push(parentBKey);
+  }
+  const alignId = labelEl.getAttribute("data-label-parent-align-id") || "";
+  return {
+    labelId,
+    parentKeys: Array.from(new Set(parentKeys)),
+    alignId,
+  };
+}
+
+function collectPrintLabelHazards(root) {
+  if (!root) {
+    return [];
+  }
+  const hazards = [];
+  const pushHazards = (selector, weight, pad = 2) => {
+    root.querySelectorAll(selector).forEach((el) => {
+      if (!(el instanceof SVGGraphicsElement)) {
+        return;
+      }
+      const box = el.getBBox();
+      if (!(box.width > 0 || box.height > 0)) {
+        return;
+      }
+      hazards.push({
+        x: box.x - pad,
+        y: box.y - pad,
+        w: box.width + pad * 2,
+        h: box.height + pad * 2,
+        weight,
+      });
+    });
+  };
+  // Highest priority: avoid covering nodes.
+  pushHazards("circle[data-component-key],path[data-component-key],rect[data-component-key]", 120, 4);
+  // Next: avoid covering lines/bands.
+  pushHazards("line[data-align-band],rect[data-align-band],line[data-hide-key^='comboparent:'],line", 22, 2);
+  // Finally: avoid axis/grid text.
+  pushHazards("text:not([data-print-label-id])", 10, 2);
+  return hazards;
+}
+
+function nudgePrintLabelsToReduceCollisions(labels, minY, maxY, hazards = []) {
+  if (!Array.isArray(labels) || labels.length < 2) {
+    return;
+  }
+  const working = labels
+    .filter((item) => item?.el && !item.manual)
+    .sort((a, b) => (a.baseX - b.baseX) || (a.baseY - b.baseY));
+  const placed = [];
+
+  const intersects = (a, b) =>
+    a.x < b.x + b.w &&
+    a.x + a.w > b.x &&
+    a.y < b.y + b.h &&
+    a.y + a.h > b.y;
+
+  const setCandidatePlacement = (item, candidate) => {
+    const dx = Number(candidate?.dx || 0);
+    const dy = Number(candidate?.dy || 0);
+    const x = item.baseX + dx;
+    const y = item.baseY + dy;
+    item.el.setAttribute("x", String(x));
+    item.el.setAttribute("y", String(y));
+    item.el.setAttribute("text-anchor", candidate?.anchor || item.defaultAnchor || "start");
+    item.el.setAttribute("data-print-default-dx", String(dx));
+    item.el.setAttribute("data-print-default-dy", String(dy));
+    item.el.querySelectorAll("tspan").forEach((span) => {
+      span.setAttribute("x", String(x));
+    });
+  };
+
+  working.forEach((item) => {
+    const el = item.el;
+    const candidates = Array.isArray(item.candidates) && item.candidates.length
+      ? item.candidates
+      : [{ dx: 0, dy: 0, anchor: item.defaultAnchor || "start" }];
+    let bestRect = null;
+    let bestScore = Infinity;
+    let bestCandidate = candidates[0];
+
+    candidates.forEach((candidate, index) => {
+      setCandidatePlacement(item, candidate);
+      const rect = el.getBBox();
+      const box = { x: rect.x - 2, y: rect.y - 1, w: rect.width + 4, h: rect.height + 2 };
+      const outOfBoundsPenalty =
+        (box.y < minY ? (minY - box.y) : 0) +
+        (box.y + box.h > maxY ? (box.y + box.h - maxY) : 0);
+      const overlapCount = placed.reduce(
+        (count, p) => count + (Math.abs(p.x - box.x) < 240 && intersects(box, p) ? 1 : 0),
+        0
+      );
+      const hazardPenalty = hazards.reduce((sum, hazard) => {
+        if (Math.abs(hazard.x - box.x) > 320) {
+          return sum;
+        }
+        return sum + (intersects(box, hazard) ? (hazard.weight || 1) : 0);
+      }, 0);
+      const score = overlapCount * 1000 + hazardPenalty * 40 + outOfBoundsPenalty * 10 + index;
+      if (score < bestScore) {
+        bestScore = score;
+        bestRect = box;
+        bestCandidate = candidate;
+      }
+    });
+
+    setCandidatePlacement(item, bestCandidate);
+    if (bestRect) {
+      placed.push(bestRect);
+    } else {
+      const rect = el.getBBox();
+      placed.push({ x: rect.x - 2, y: rect.y - 1, w: rect.width + 4, h: rect.height + 2 });
+    }
+  });
 }
 
 function niceLinearStep(range, targetTicks = 8) {
@@ -1561,9 +2689,127 @@ function getNumericInputValue(input, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function getPrintAutoTextStyle(classKey) {
+  const defaults = PRINT_AUTO_TEXT_STYLE_DEFAULTS[classKey] || PRINT_AUTO_TEXT_STYLE_DEFAULTS.component;
+  const style = state.printAutoTextStyles?.[classKey];
+  const font = (style && typeof style.font === "string" && style.font.trim())
+    ? style.font.trim()
+    : defaults.font;
+  const size = clamp(Number(style?.size ?? defaults.size), 8, 72);
+  return { font, size };
+}
+
+function setPrintAutoTextStyle(classKey, patch) {
+  const current = getPrintAutoTextStyle(classKey);
+  const next = {
+    font: typeof patch?.font === "string" && patch.font.trim() ? patch.font.trim() : current.font,
+    size: Number.isFinite(patch?.size) ? clamp(Number(patch.size), 8, 72) : current.size,
+  };
+  state.printAutoTextStyles = {
+    ...(state.printAutoTextStyles || cloneJson(PRINT_AUTO_TEXT_STYLE_DEFAULTS, PRINT_AUTO_TEXT_STYLE_DEFAULTS)),
+    [classKey]: next,
+  };
+}
+
+let customTextDialogResolver = null;
+
+function openCustomTextDialog(initialText = "", options = {}) {
+  if (!isPrintMode() || !customTextModal || !customTextInput) {
+    return Promise.resolve(null);
+  }
+  if (customTextDialogResolver) {
+    customTextDialogResolver(null);
+    customTextDialogResolver = null;
+  }
+  customTextDialogMode = options.mode === "style" ? "style" : "custom";
+  customTextInput.value = String(initialText || "");
+  const modalFont = String(options.font || state.printCustomLabelFont || "Noto Serif");
+  const modalSize = clamp(
+    Number(options.size ?? state.printCustomLabelSize ?? 18),
+    8,
+    72
+  );
+  const modalTitle = typeof options.title === "string" && options.title.trim()
+    ? options.title.trim()
+    : customTextDialogMode === "style" ? "Text Style" : "Custom Text";
+  const modalSaveText = typeof options.saveText === "string" && options.saveText.trim()
+    ? options.saveText.trim()
+    : customTextDialogMode === "style" ? "Apply" : "Add Text";
+  if (customTextModalTitle) {
+    customTextModalTitle.textContent = modalTitle;
+  }
+  if (customTextSaveButton) {
+    customTextSaveButton.textContent = modalSaveText;
+  }
+  if (customTextInput) {
+    customTextInput.disabled = customTextDialogMode === "style";
+  }
+  if (customTextFontInput) {
+    customTextFontInput.value = modalFont;
+  }
+  if (customTextSizeInput) {
+    customTextSizeInput.value = String(modalSize);
+  }
+  if (customTextSizeReadout) {
+    customTextSizeReadout.textContent = String(modalSize);
+  }
+  customTextModal.hidden = false;
+  customTextModal.style.display = "grid";
+  if (customTextDialogMode === "style") {
+    customTextFontInput?.focus();
+  } else {
+    customTextInput.focus();
+    customTextInput.select();
+  }
+  return new Promise((resolve) => {
+    customTextDialogResolver = resolve;
+  });
+}
+
+function closeCustomTextDialog(result) {
+  if (!customTextModal) {
+    return;
+  }
+  customTextModal.hidden = true;
+  customTextModal.style.display = "none";
+  customTextDialogMode = "custom";
+  if (customTextInput) {
+    customTextInput.disabled = false;
+  }
+  const resolver = customTextDialogResolver;
+  customTextDialogResolver = null;
+  if (resolver) {
+    resolver(result || null);
+  }
+}
+
+function getSelectedCustomTextItem() {
+  const id = state.printSelectedCustomTextId;
+  if (!id) {
+    return null;
+  }
+  return (state.printCustomTexts || []).find((item) => item.id === id) || null;
+}
+
+function updateSelectedCustomTextItem(patch) {
+  const selected = getSelectedCustomTextItem();
+  if (!selected) {
+    return false;
+  }
+  state.printCustomTexts = (state.printCustomTexts || []).map((item) =>
+    item.id === selected.id ? { ...item, ...patch } : item
+  );
+  return true;
+}
+
 function buildModel() {
   const parsed = parseNotes(state.notesText, state.ratioRootHz, state.a4Hz);
   const notes = parsed.notes;
+  const effectiveOvertoneCount = clamp(
+    Math.round((Number(state.overtoneCount) || 8) / Math.max(0.01, Number(state.layoutScale) || 1)),
+    2,
+    48
+  );
   const chords = parsed.chords && parsed.chords.length
     ? parsed.chords
     : (notes.length ? [{ index: 0, noteIndexes: notes.map((_, index) => index) }] : []);
@@ -1571,7 +2817,7 @@ function buildModel() {
   const overtones = [];
   for (let noteIndex = 0; noteIndex < notes.length; noteIndex += 1) {
     const base = notes[noteIndex].freq;
-    for (let harmonic = 1; harmonic <= state.overtoneCount; harmonic += 1) {
+    for (let harmonic = 1; harmonic <= effectiveOvertoneCount; harmonic += 1) {
       overtones.push({
         kind: "overtone",
         noteIndex,
@@ -1628,6 +2874,11 @@ function buildModel() {
     .filter((point) => point.weight > 0);
   const beatMin = clamp(state.roughnessBeatMinHz, 0.1, 40);
   const beatMax = clamp(state.roughnessBeatMaxHz, beatMin + 0.1, 80);
+  const fusionAlignmentMatchCents = Math.max(
+    2,
+    (Number(state.alignToleranceCents) || 1) * 1.5,
+    (Number(state.fusionClusterCents) || 0) * 1.5
+  );
   const chordAnalyses = chords.map((chord, chordIndex) => {
     const noteSet = new Set(chord.noteIndexes);
     const chordPoints = weightedFusionPoints.filter((point) =>
@@ -1639,7 +2890,7 @@ function buildModel() {
       beatMin,
       beatMax
     );
-    const fusionNodes =
+    const rawFusionNodes =
       state.fusionMode === "all"
         ? buildFusionAllModeNodes(chordPoints, clamp(state.fusionClusterCents, 0, 4))
         : buildFusionDensityClusters(
@@ -1683,6 +2934,11 @@ function buildModel() {
       tip: `Chord ${chordIndex + 1}
 ${cluster.uniqueNotes} notes align near ${formatHz(cluster.centerFreq)}`,
     }));
+    const fusionNodes = annotateFusionNodesWithAlignment(
+      rawFusionNodes,
+      alignmentClusters,
+      fusionAlignmentMatchCents
+    );
     return {
       chordIndex,
       noteIndexes: chord.noteIndexes,
@@ -1711,6 +2967,7 @@ ${cluster.uniqueNotes} notes align near ${formatHz(cluster.centerFreq)}`,
     visibleOvertones,
     visibleCombinations,
     visibleComboPoints,
+    effectiveOvertoneCount,
     roughnessBeatMinHz: beatMin,
     roughnessBeatMaxHz: beatMax,
     clusters,
@@ -1743,12 +3000,79 @@ function computeNoteBand(noteCount, xLeft, xRight) {
     return { left: xLeft, right: xRight };
   }
 
-  const idealWidth = noteCount * 46;
-  const minWidth = Math.min(totalWidth * 0.68, noteCount * 54);
-  const maxWidth = totalWidth * 0.88;
+  const print = isPrintMode();
+  const idealWidth = noteCount * (print ? 64 : 46);
+  const minWidth = Math.min(totalWidth * (print ? 0.82 : 0.68), noteCount * (print ? 74 : 54));
+  const maxWidth = totalWidth * (print ? 0.95 : 0.88);
   const bandWidth = clamp(idealWidth, minWidth, maxWidth);
-  const left = xLeft + (totalWidth - bandWidth) / 2;
+  const leftPad = print ? Math.min(8, totalWidth * 0.02) : 0;
+  const left = xLeft + leftPad;
   return { left, right: left + bandWidth };
+}
+
+function resolvePageRect(width, height, inPrintMode) {
+  const pageRatioMap = {
+    "letter-portrait": 8.5 / 11,
+    "letter-landscape": 11 / 8.5,
+    "a4-portrait": 210 / 297,
+    "a4-landscape": 297 / 210,
+  };
+  const pageRatio = pageRatioMap[state.printPaper] || pageRatioMap["letter-landscape"];
+  const pagePadding = inPrintMode ? 18 : 0;
+  let pageWidth = width - pagePadding * 2;
+  let pageHeight = height - pagePadding * 2;
+  if (inPrintMode) {
+    if (pageWidth / pageHeight > pageRatio) {
+      pageWidth = pageHeight * pageRatio;
+    } else {
+      pageHeight = pageWidth / pageRatio;
+    }
+  }
+  const pageX = inPrintMode ? (width - pageWidth) / 2 : 0;
+  const pageY = inPrintMode ? (height - pageHeight) / 2 : 0;
+  return { pageX, pageY, pageWidth, pageHeight };
+}
+
+function resolveFrameBounds(width, height, inPrintMode, pageRect, printMargin) {
+  const stageLeft = chartStage?.getBoundingClientRect?.().left || 0;
+  const liveAxisTargetAbsX = 340;
+  const liveAxisTargetLocalX = liveAxisTargetAbsX - stageLeft;
+  if (!inPrintMode) {
+    return {
+      frameLeft: clamp(liveAxisTargetLocalX, 24, width - 220),
+      frameRight: width - 22,
+      pageInnerLeft: 0,
+      pageInnerRight: width,
+      pageInnerTop: 0,
+      pageInnerBottom: height,
+    };
+  }
+  const printAxisReserve = clamp(pageRect.pageWidth * 0.085, 56, 96);
+  const printRightReserve = clamp(pageRect.pageWidth * 0.02, 12, 26);
+  const pageInnerLeft = pageRect.pageX + printMargin;
+  const pageInnerRight = pageRect.pageX + pageRect.pageWidth - printMargin;
+  const pageInnerTop = pageRect.pageY + printMargin;
+  const pageInnerBottom = pageRect.pageY + pageRect.pageHeight - printMargin;
+  return {
+    frameLeft: pageInnerLeft + printAxisReserve,
+    frameRight: pageInnerRight - printRightReserve,
+    pageInnerLeft,
+    pageInnerRight,
+    pageInnerTop,
+    pageInnerBottom,
+  };
+}
+
+function resolveBottomReserve(inPrintMode, xLabelMode, noteCount, showChordControls) {
+  const baseReserve =
+    xLabelMode === "full"
+      ? (noteCount > 10 ? 86 : 74)
+      : xLabelMode === "compact"
+        ? 92
+        : 100;
+  const chordControlReserve = showChordControls && noteCount > 0 ? (inPrintMode ? 44 : 62) : 0;
+  const printBuffer = inPrintMode ? 8 : 0;
+  return baseReserve + chordControlReserve + printBuffer;
 }
 
 function xForNote(noteIndex, noteCount, xLeft, xRight) {
@@ -1789,27 +3113,45 @@ Result: ${formatHz(point.freq)}`;
 
 function buildChartSvg(model, width, height) {
   const rootStyle = getComputedStyle(document.body);
+  const inPrintMode = isPrintMode();
+  const printIsGreyscale = inPrintMode && state.printColorMode === "greyscale";
+  const colorScheme = activeRenderColorScheme(inPrintMode);
   const axisColor = rootStyle.getPropertyValue("--viz-axis").trim() || "rgba(20,20,20,0.8)";
   const gridColor = rootStyle.getPropertyValue("--viz-grid").trim() || "rgba(0,0,0,0.08)";
   const gridStrongColor = rootStyle.getPropertyValue("--viz-grid-strong").trim() || "rgba(0,0,0,0.16)";
   const textPrimary = rootStyle.getPropertyValue("--text-primary").trim() || "#111";
   const textSecondary = rootStyle.getPropertyValue("--muted-ink").trim() || "#444";
   const vizBg = rootStyle.getPropertyValue("--viz-bg").trim() || "#fff";
-  const alignBandColor = rootStyle.getPropertyValue("--align-band").trim() || "rgba(70,119,160,0.15)";
-  const comboDiffColor = rootStyle.getPropertyValue("--combo-diff").trim() || "#d45d4c";
-  const comboSumColor = rootStyle.getPropertyValue("--combo-sum").trim() || "#b6802e";
-  const comboOrder2Color = rootStyle.getPropertyValue("--combo-order2").trim() || "#6e58b4";
+  const comboDiffColor = colorScheme?.combo?.difference || "#d45d4c";
+  const comboSumColor = colorScheme?.combo?.sum || "#b6802e";
+  const comboOrder2Color = colorScheme?.combo?.order2 || "#6e58b4";
+  const axisStrokeW = inPrintMode ? 1.8 : 1.4;
+  const columnStrokeW = inPrintMode ? 0.7 : 1;
+  const stemStrokeW = inPrintMode ? 0.8 : 1;
+  const stemOpacity = inPrintMode ? 0.18 : 0.26;
 
-  const frameLeft = 86;
-  const frameRight = width - 22;
+  const { pageX, pageY, pageWidth, pageHeight } = resolvePageRect(width, height, inPrintMode);
+  const printMargin = inPrintMode ? clamp(Number(state.printMargin) || 44, 8, 220) : 0;
+  const {
+    frameLeft,
+    frameRight,
+    pageInnerLeft,
+    pageInnerRight,
+    pageInnerTop,
+    pageInnerBottom,
+  } = resolveFrameBounds(width, height, inPrintMode, { pageX, pageY, pageWidth, pageHeight }, printMargin);
   const chordsForLayout = model.chords && model.chords.length
     ? model.chords
     : (model.notes.length ? [{ index: 0, noteIndexes: model.notes.map((_, i) => i) }] : []);
+  const useAlignmentLabelLane = state.showAlignments && !state.showFusion && !state.showRoughness;
   const slotEntries = [];
   chordsForLayout.forEach((chord, chordIndex) => {
     chord.noteIndexes.forEach((noteIndex) => {
       slotEntries.push({ type: "note", chordIndex, noteIndex, width: 1 });
     });
+    if (useAlignmentLabelLane) {
+      slotEntries.push({ type: "alignlabel", chordIndex, width: 1.15 });
+    }
     if (state.showFusion) {
       slotEntries.push({ type: "fusion", chordIndex, width: 0.92 });
     }
@@ -1817,7 +3159,7 @@ function buildChartSvg(model, width, height) {
       slotEntries.push({ type: "rough", chordIndex, width: 0.92 });
     }
     if (chordIndex < chordsForLayout.length - 1) {
-      slotEntries.push({ type: "gap", width: 0.68 });
+      slotEntries.push({ type: "gap", width: useAlignmentLabelLane ? 0.9 : 0.68 });
     }
   });
   const layoutCount = Math.max(model.notes.length, slotEntries.length || model.notes.length);
@@ -1830,16 +3172,28 @@ function buildChartSvg(model, width, height) {
   const noteXByIndex = {};
   const fusionXByChord = {};
   const roughnessXByChord = {};
+  const alignLabelLaneXByChord = {};
   let unitCursor = 0;
   slotEntries.forEach((entry) => {
     const widthUnits = entry.width || 1;
     const x = noteBand.left + (unitCursor + widthUnits / 2) * slotUnitWidth;
     if (entry.type === "note") {
-      noteXByIndex[entry.noteIndex] = x;
+      const key = `note:${entry.noteIndex}`;
+      noteXByIndex[entry.noteIndex] = inPrintMode && Number.isFinite(state.printColumnOverrides?.[key])
+        ? Number(state.printColumnOverrides[key])
+        : x;
     } else if (entry.type === "fusion") {
-      fusionXByChord[entry.chordIndex] = x;
+      const key = `fusion:${entry.chordIndex}`;
+      fusionXByChord[entry.chordIndex] = inPrintMode && Number.isFinite(state.printColumnOverrides?.[key])
+        ? Number(state.printColumnOverrides[key])
+        : x;
     } else if (entry.type === "rough") {
-      roughnessXByChord[entry.chordIndex] = x;
+      const key = `rough:${entry.chordIndex}`;
+      roughnessXByChord[entry.chordIndex] = inPrintMode && Number.isFinite(state.printColumnOverrides?.[key])
+        ? Number(state.printColumnOverrides[key])
+        : x;
+    } else if (entry.type === "alignlabel") {
+      alignLabelLaneXByChord[entry.chordIndex] = x;
     }
     unitCursor += widthUnits;
   });
@@ -1847,6 +3201,19 @@ function buildChartSvg(model, width, height) {
   const noteXs = Object.values(noteXByIndex);
   const fusionXs = Object.values(fusionXByChord);
   const roughnessXs = Object.values(roughnessXByChord);
+  const chordNoteXBounds = {};
+  chordsForLayout.forEach((chord, chordIndex) => {
+    const xs = (chord.noteIndexes || [])
+      .map((idx) => noteXByIndex[idx])
+      .filter((x) => Number.isFinite(x));
+    if (!xs.length) {
+      return;
+    }
+    chordNoteXBounds[chordIndex] = {
+      min: Math.min(...xs),
+      max: Math.max(...xs),
+    };
+  });
   const chordRegions = chordsForLayout.map((chord, chordIndex) => {
     const xs = [
       ...chord.noteIndexes.map((idx) => noteXByIndex[idx]).filter((x) => Number.isFinite(x)),
@@ -1875,20 +3242,33 @@ function buildChartSvg(model, width, height) {
   const columnStep =
     model.notes.length > 0 ? (noteBand.right - noteBand.left) / model.notes.length : Infinity;
   const baseXLabelMode = columnStep >= 84 ? "full" : columnStep >= 58 ? "compact" : "sparse";
-  const xLabelMode = baseXLabelMode;
-  const plotTop = 24;
-  const bottomMargin =
-    xLabelMode === "full" ? (model.notes.length > 10 ? 88 : 74) : xLabelMode === "compact" ? 94 : 102;
-  const plotBottom = height - bottomMargin;
+  const xLabelMode = inPrintMode ? "full" : baseXLabelMode;
+  const showChordControls = state.showChordControls;
+  const plotTop = inPrintMode ? pageInnerTop + clamp(pageHeight * 0.01, 8, 16) : 24;
+  const bottomReserve = resolveBottomReserve(
+    inPrintMode,
+    xLabelMode,
+    model.notes.length,
+    showChordControls
+  );
+  const rawPlotBottom = (inPrintMode ? pageInnerBottom : height) - bottomReserve;
+  const maxPlotBottom = inPrintMode ? pageInnerBottom : height - 8;
+  const plotBottom = Math.min(maxPlotBottom, Math.max(plotTop + 64, rawPlotBottom));
   const noteBandWidth = Math.max(0, rightmostDataX - leftmostDataX);
   const horizontalPad = clamp(noteBandWidth * 0.1, 30, 68);
-  const plotLeft = Math.max(76, leftmostDataX - horizontalPad);
+  const plotLeft = frameLeft;
   const fusionReserve = state.showFusion ? clamp(columnStep * 1.15, 56, 96) : 0;
   const roughReserve = state.showRoughness ? clamp(columnStep * 1.15, 56, 96) : 0;
   const rightGutter = clamp(noteBandWidth * 0.2, 80, 180) + fusionReserve + roughReserve;
-  const plotRight = Math.min(width - 12, rightmostDataX + horizontalPad + rightGutter);
+  const desiredPlotRight = rightmostDataX + horizontalPad + rightGutter;
+  const maxPlotRight = inPrintMode ? pageInnerRight : width - 12;
+  const plotRight = clamp(desiredPlotRight, plotLeft + 100, Math.max(plotLeft + 100, maxPlotRight));
   const plotWidth = Math.max(100, plotRight - plotLeft);
-  const plotHeight = Math.max(80, plotBottom - plotTop);
+  const plotHeight = Math.max(1, plotBottom - plotTop);
+  lastDiagramCenter = {
+    x: plotLeft + plotWidth / 2,
+    y: plotTop + plotHeight / 2,
+  };
   const fusionColumnWidth = clamp(columnStep * 0.78, 22, 42);
   const roughnessColumnWidth = clamp(columnStep * 0.78, 22, 42);
   const defaultFusionX = state.showFusion
@@ -1913,9 +3293,19 @@ function buildChartSvg(model, width, height) {
     Number.isFinite(defaultRoughnessX) ? defaultRoughnessX : -Infinity
   );
   const isAlignmentFocus = alignmentFocusMode && state.showAlignments;
+  const printComponentMeta = {};
+  const maxFusionRadiusByChord = {};
+  const isPrintHidden = (key) =>
+    inPrintMode && key && typeof state.printHiddenKeys === "object" && state.printHiddenKeys[key];
 
   const yForFreq = yMapper(model.rangeMin, model.rangeMax, plotTop, plotBottom, state.yScale);
   const ticks = state.yScale === "log" ? logTicks(model.rangeMin, model.rangeMax) : linearTicks(model.rangeMin, model.rangeMax);
+  const showPrintAxisText = !inPrintMode || state.printShowAxisText;
+  const sceneScale = clamp(Number(state.layoutScale) || 1, 0.6, 1.8);
+  const sceneAnchorX = plotLeft;
+  const sceneAnchorY = plotTop;
+  const sceneShiftX = sceneAnchorX * (1 - sceneScale);
+  const sceneShiftY = sceneAnchorY * (1 - sceneScale);
 
   const svg = createSvgEl("svg", {
     width,
@@ -1923,6 +3313,8 @@ function buildChartSvg(model, width, height) {
     viewBox: `0 0 ${width} ${height}`,
     "aria-label": "Overtones chart",
     role: "img",
+    "data-scene-shift-x": sceneShiftX,
+    "data-scene-shift-y": sceneShiftY,
   });
 
   svg.appendChild(
@@ -1931,28 +3323,54 @@ function buildChartSvg(model, width, height) {
       y: 0,
       width,
       height,
-      fill: vizBg,
+      fill: inPrintMode ? "#ececec" : vizBg,
     })
   );
 
-  const gridLayer = createSvgEl("g");
-  ticks.forEach((tick) => {
-    const y = yForFreq(tick.freq);
-    if (y < plotTop - 0.5 || y > plotBottom + 0.5) {
-      return;
-    }
-    gridLayer.appendChild(
-      createSvgEl("text", {
-        x: plotLeft - 8,
-        y: y + 4,
-        fill: textSecondary,
-        "font-size": 11,
-        "font-family": "Lexend, IBM Plex Sans, sans-serif",
-        "text-anchor": "end",
+  if (inPrintMode) {
+    svg.appendChild(
+      createSvgEl("rect", {
+        x: pageX,
+        y: pageY,
+        width: pageWidth,
+        height: pageHeight,
+        fill: "#ffffff",
+        stroke: "rgba(0,0,0,0.28)",
+        "stroke-width": 1,
       })
-    ).textContent = formatHz(tick.freq);
+    );
+  }
+  const diagramRoot = createSvgEl("g", {
+    "data-diagram-root": "1",
+    transform: `translate(${sceneShiftX}, ${sceneShiftY}) scale(${sceneScale})`,
   });
-  svg.appendChild(gridLayer);
+  const axisTextStyle = inPrintMode ? getPrintAutoTextStyle("axis") : null;
+  const overtoneTextStyle = inPrintMode ? getPrintAutoTextStyle("overtone") : null;
+  const componentTextStyle = inPrintMode ? getPrintAutoTextStyle("component") : null;
+
+  const gridLayer = createSvgEl("g");
+  if (showPrintAxisText) {
+    ticks.forEach((tick) => {
+      const y = yForFreq(tick.freq);
+      if (y < plotTop - 0.5 || y > plotBottom + 0.5) {
+        return;
+      }
+      gridLayer.appendChild(
+        createSvgEl("text", {
+          x: plotLeft - 8,
+          y: y + 4,
+          fill: textSecondary,
+          "font-size": axisTextStyle ? axisTextStyle.size : 11,
+          "font-family": axisTextStyle
+            ? `${axisTextStyle.font}, Lexend, IBM Plex Sans, sans-serif`
+            : "Lexend, IBM Plex Sans, sans-serif",
+          "text-anchor": "end",
+          "data-auto-text-class": inPrintMode ? "axis" : null,
+        })
+      ).textContent = formatAxisHzCompact(tick.freq);
+    });
+  }
+  diagramRoot.appendChild(gridLayer);
 
   const axisLayer = createSvgEl("g");
   axisLayer.appendChild(
@@ -1962,7 +3380,7 @@ function buildChartSvg(model, width, height) {
       x2: plotLeft,
       y2: plotBottom,
       stroke: axisColor,
-      "stroke-width": 1.4,
+      "stroke-width": axisStrokeW,
     })
   );
   axisLayer.appendChild(
@@ -1972,35 +3390,32 @@ function buildChartSvg(model, width, height) {
       x2: plotRight,
       y2: plotBottom,
       stroke: axisColor,
-      "stroke-width": 1.4,
+      "stroke-width": axisStrokeW,
     })
   );
-  const yLabel = createSvgEl("text", {
-    x: Math.max(12, plotLeft - 102),
-    y: plotTop + plotHeight / 2,
-    fill: textSecondary,
-    "font-size": 12,
-    "font-family": "Lexend, IBM Plex Sans, sans-serif",
-    transform: `rotate(-90 ${Math.max(12, plotLeft - 102)} ${plotTop + plotHeight / 2})`,
-    "text-anchor": "middle",
-  });
-  yLabel.textContent = `Frequency spectrum (${state.yScale})`;
-  axisLayer.appendChild(yLabel);
+  const yLabelX = plotLeft - 62;
+  if (showPrintAxisText) {
+    const yLabel = createSvgEl("text", {
+      x: yLabelX,
+      y: plotTop + plotHeight / 2,
+      fill: textSecondary,
+      "font-size": axisTextStyle ? axisTextStyle.size : 12,
+      "font-family": axisTextStyle
+        ? `${axisTextStyle.font}, Lexend, IBM Plex Sans, sans-serif`
+        : "Lexend, IBM Plex Sans, sans-serif",
+      transform: `rotate(-90 ${yLabelX} ${plotTop + plotHeight / 2})`,
+      "text-anchor": "middle",
+      "data-auto-text-class": inPrintMode ? "axis" : null,
+    });
+    yLabel.textContent = `Frequency spectrum (${state.yScale})`;
+    axisLayer.appendChild(yLabel);
+  }
 
-  const xLabel = createSvgEl("text", {
-    x: plotLeft + plotWidth / 2,
-    y: plotBottom + (xLabelMode === "full" ? 50 : 54),
-    fill: textSecondary,
-    "font-size": 12,
-    "font-family": "Lexend, IBM Plex Sans, sans-serif",
-    "text-anchor": "middle",
-  });
-  xLabel.textContent = "Input notes";
-  axisLayer.appendChild(xLabel);
-  svg.appendChild(axisLayer);
+  diagramRoot.appendChild(axisLayer);
 
   const noteX = [];
   const noteLayer = createSvgEl("g");
+  const dragHitLayer = inPrintMode ? createSvgEl("g") : null;
   const drawHzLineForNotes = state.showLabels && xLabelMode === "full";
   for (let noteIndex = 0; noteIndex < model.notes.length; noteIndex += 1) {
     const x = Number.isFinite(noteXByIndex[noteIndex])
@@ -2015,7 +3430,7 @@ function buildChartSvg(model, width, height) {
         x2: x,
         y2: plotBottom,
         stroke: gridColor,
-        "stroke-width": 1,
+        "stroke-width": columnStrokeW,
       })
     );
 
@@ -2026,15 +3441,33 @@ function buildChartSvg(model, width, height) {
         x,
         y: tokenY,
         fill: textPrimary,
-        "font-size": xLabelMode === "full" ? 11 : 10,
-        "font-family": "IBM Plex Sans, Lexend, sans-serif",
+        "font-size": axisTextStyle ? axisTextStyle.size : xLabelMode === "full" ? 11 : 10,
+        "font-family": axisTextStyle
+          ? `${axisTextStyle.font}, IBM Plex Sans, Lexend, sans-serif`
+          : "IBM Plex Sans, Lexend, sans-serif",
         "text-anchor": xLabelMode === "full" ? "middle" : "end",
+        "data-auto-text-class": inPrintMode ? "axis" : null,
       });
       if (xLabelMode !== "full") {
         labelTop.setAttribute("transform", `rotate(-32 ${x} ${tokenY})`);
       }
       labelTop.textContent = token;
       noteLayer.appendChild(labelTop);
+      if (dragHitLayer) {
+        dragHitLayer.appendChild(
+          createSvgEl("rect", {
+            x: x - 28,
+            y: tokenY - 24,
+            width: 56,
+            height: 30,
+            fill: "rgba(0,0,0,0)",
+              stroke: "rgba(0,0,0,0)",
+              style: "cursor:ew-resize",
+              "data-column-id": `note:${noteIndex}`,
+              "data-column-origin": x,
+            })
+        );
+      }
     }
 
     if (drawHzLineForNotes) {
@@ -2042,11 +3475,14 @@ function buildChartSvg(model, width, height) {
         x,
         y: plotBottom + 32,
         fill: textSecondary,
-        "font-size": 10,
-        "font-family": "Lexend, IBM Plex Sans, sans-serif",
+        "font-size": axisTextStyle ? axisTextStyle.size : 10,
+        "font-family": axisTextStyle
+          ? `${axisTextStyle.font}, Lexend, IBM Plex Sans, sans-serif`
+          : "Lexend, IBM Plex Sans, sans-serif",
         "text-anchor": "middle",
+        "data-auto-text-class": inPrintMode ? "axis" : null,
       });
-      labelBottom.textContent = formatHz(model.notes[noteIndex].freq);
+      labelBottom.textContent = formatAxisHzCompact(model.notes[noteIndex].freq);
       noteLayer.appendChild(labelBottom);
     }
   }
@@ -2063,7 +3499,7 @@ function buildChartSvg(model, width, height) {
           x2: fusionX,
           y2: plotBottom,
           stroke: gridStrongColor,
-          "stroke-width": 1.2,
+          "stroke-width": inPrintMode ? 0.8 : 1.2,
           "stroke-dasharray": "4 3",
         })
       );
@@ -2073,12 +3509,30 @@ function buildChartSvg(model, width, height) {
           x: fusionX,
           y: tokenY,
           fill: textPrimary,
-          "font-size": xLabelMode === "full" ? 11 : 10,
-          "font-family": "IBM Plex Sans, Lexend, sans-serif",
+          "font-size": axisTextStyle ? axisTextStyle.size : xLabelMode === "full" ? 11 : 10,
+          "font-family": axisTextStyle
+            ? `${axisTextStyle.font}, IBM Plex Sans, Lexend, sans-serif`
+            : "IBM Plex Sans, Lexend, sans-serif",
           "text-anchor": "middle",
+          "data-auto-text-class": inPrintMode ? "axis" : null,
         });
         label.textContent = "Fusion";
         noteLayer.appendChild(label);
+        if (dragHitLayer) {
+          dragHitLayer.appendChild(
+            createSvgEl("rect", {
+              x: fusionX - 32,
+              y: tokenY - 18,
+              width: 64,
+              height: 24,
+              fill: "rgba(0,0,0,0)",
+              stroke: "rgba(0,0,0,0)",
+              style: "cursor:ew-resize",
+              "data-column-id": `fusion:${chordIndex}`,
+              "data-column-origin": fusionX,
+            })
+          );
+        }
       }
     });
   }
@@ -2095,7 +3549,7 @@ function buildChartSvg(model, width, height) {
           x2: roughnessX,
           y2: plotBottom,
           stroke: gridStrongColor,
-          "stroke-width": 1.2,
+          "stroke-width": inPrintMode ? 0.8 : 1.2,
           "stroke-dasharray": "2 4",
         })
       );
@@ -2105,20 +3559,135 @@ function buildChartSvg(model, width, height) {
           x: roughnessX,
           y: tokenY,
           fill: textPrimary,
-          "font-size": xLabelMode === "full" ? 11 : 10,
-          "font-family": "IBM Plex Sans, Lexend, sans-serif",
+          "font-size": axisTextStyle ? axisTextStyle.size : xLabelMode === "full" ? 11 : 10,
+          "font-family": axisTextStyle
+            ? `${axisTextStyle.font}, IBM Plex Sans, Lexend, sans-serif`
+            : "IBM Plex Sans, Lexend, sans-serif",
           "text-anchor": "middle",
+          "data-auto-text-class": inPrintMode ? "axis" : null,
         });
         label.textContent = "Roughness";
         noteLayer.appendChild(label);
+        if (dragHitLayer) {
+          dragHitLayer.appendChild(
+            createSvgEl("rect", {
+              x: roughnessX - 38,
+              y: tokenY - 18,
+              width: 76,
+              height: 24,
+              fill: "rgba(0,0,0,0)",
+              stroke: "rgba(0,0,0,0)",
+              style: "cursor:ew-resize",
+              "data-column-id": `rough:${chordIndex}`,
+              "data-column-origin": roughnessX,
+            })
+          );
+        }
       }
     });
   }
-  svg.appendChild(noteLayer);
 
+  if (showChordControls && chordsForLayout.length) {
+    const controlsLayer = createSvgEl("g");
+    const braceY = plotBottom + 44;
+    const labelY = plotBottom + 62;
+    const buttonY = plotBottom + 76;
+    const buttonDefs = [
+      { label: "Fundamentals", action: "fundamentals" },
+      { label: "All Overtones", action: "all-overtones" },
+      { label: "All Tones", action: "all-tones" },
+      { label: "Off", action: "off" },
+    ];
+    chordsForLayout.forEach((chord, chordIndex) => {
+      const chordNoteXs = (chord.noteIndexes || [])
+        .map((noteIndex) => noteXByIndex[noteIndex])
+        .filter((x) => Number.isFinite(x));
+      if (!chordNoteXs.length) {
+        return;
+      }
+      const chordLeft = Math.min(...chordNoteXs) - 10;
+      const chordRight = Math.max(...chordNoteXs) + 10;
+      const width = Math.max(84, chordRight - chordLeft);
+      const left = (chordLeft + chordRight) / 2 - width / 2;
+      const right = left + width;
+      const center = (left + right) / 2;
+
+      controlsLayer.appendChild(
+        createSvgEl("path", {
+          d: `M ${left} ${braceY} L ${left} ${braceY + 7} L ${right} ${braceY + 7} L ${right} ${braceY}`,
+          fill: "none",
+          stroke: gridStrongColor,
+          "stroke-width": 1.1,
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+        })
+      );
+
+      const title = createSvgEl("text", {
+        x: center,
+        y: labelY,
+        fill: textSecondary,
+        "font-size": 10,
+        "font-family": "Lexend, IBM Plex Sans, sans-serif",
+        "text-anchor": "middle",
+        "data-print-chord-title-index": inPrintMode ? String(chordIndex) : null,
+        style: inPrintMode ? "cursor:text" : null,
+      });
+      const defaultChordTitle = `Chord ${chordIndex + 1}`;
+      const overriddenChordTitle = String(state.printChordTitleOverrides?.[chordIndex] || "").trim();
+      title.textContent = inPrintMode
+        ? (overriddenChordTitle || defaultChordTitle)
+        : `Play ${defaultChordTitle}`;
+      controlsLayer.appendChild(title);
+
+      if (inPrintMode) {
+        return;
+      }
+
+      const widths = buttonDefs.map((def) => def.label.length * 6.2 + 6);
+      const linkGap = 5;
+      const totalWidth = widths.reduce((sum, w) => sum + w, 0) + (buttonDefs.length - 1) * linkGap;
+      let cursor = center - totalWidth / 2;
+      buttonDefs.forEach((def, index) => {
+        const w = widths[index];
+        const x = cursor;
+        const text = createSvgEl("text", {
+          x,
+          y: buttonY,
+          fill: textPrimary,
+          "font-size": 10,
+          "font-family": "IBM Plex Sans, Lexend, sans-serif",
+          "text-anchor": "start",
+          "text-decoration": "underline",
+          style: "cursor:pointer",
+          "data-chord-index": String(chordIndex),
+          "data-chord-action": def.action,
+          "data-tip": `${def.label} for chord ${chordIndex + 1}`,
+        });
+        text.textContent = def.label;
+        controlsLayer.appendChild(text);
+        cursor += w + linkGap;
+      });
+    });
+    noteLayer.appendChild(controlsLayer);
+  }
+  if (dragHitLayer) {
+    noteLayer.appendChild(dragHitLayer);
+  }
+  diagramRoot.appendChild(noteLayer);
+
+  const alignmentBandLabelData = [];
   if (state.showAlignments && model.clusters.length) {
     const alignLayer = createSvgEl("g");
     const regionByChord = new Map(chordRegions.map((region) => [region.chordIndex, region]));
+    const fusionByChord = new Map(
+      (model.chordAnalyses || []).map((analysis) => [analysis.chordIndex, analysis.fusionNodes || []])
+    );
+    const alignFusionMatchCents = Math.max(
+      2,
+      (Number(state.alignToleranceCents) || 1) * 1.5,
+      (Number(state.fusionClusterCents) || 0) * 1.5
+    );
     model.clusters.forEach((cluster, idx) => {
       const centerY = yForFreq(cluster.centerFreq);
       if (!(centerY >= plotTop && centerY <= plotBottom)) {
@@ -2128,8 +3697,43 @@ function buildChartSvg(model, width, height) {
       if (!region) {
         return;
       }
-      const xLeft = clamp(region.left, plotLeft, plotRight - 2);
-      const xRight = clamp(region.right, xLeft + 1, plotRight);
+      const fusionX = Number.isFinite(fusionXByChord[cluster.chordIndex])
+        ? fusionXByChord[cluster.chordIndex]
+        : NaN;
+      const pointXForClusterItem = (point) => {
+        if (!point || !Number.isFinite(point.freq)) {
+          return NaN;
+        }
+        if (Number.isInteger(point.noteIndex) && Number.isFinite(noteXByIndex[point.noteIndex])) {
+          return noteXByIndex[point.noteIndex];
+        }
+        if (Number.isInteger(point.noteA) && Number.isInteger(point.noteB)) {
+          const xA = noteXByIndex[point.noteA];
+          const xB = noteXByIndex[point.noteB];
+          if (Number.isFinite(xA) && Number.isFinite(xB)) {
+            return (xA + xB) / 2 + comboOffset(point.type);
+          }
+        }
+        return NaN;
+      };
+      const clusterPointXs = (cluster.points || [])
+        .map((point) => pointXForClusterItem(point))
+        .filter((x) => Number.isFinite(x));
+      const leftmostAlignedX = clusterPointXs.length ? Math.min(...clusterPointXs) : region.left;
+      const targetRight = Number.isFinite(fusionX) ? fusionX : region.right;
+      const useLabelLaneForCluster =
+        useAlignmentLabelLane && Number.isFinite(alignLabelLaneXByChord[cluster.chordIndex]);
+      const minBandLabelGutter = useLabelLaneForCluster
+        ? Math.max(6, columnStep / 3)
+        : !state.showFusion && !state.showRoughness
+          ? Math.max(8, columnStep * 0.5)
+          : 2;
+      const laneLabelX = useLabelLaneForCluster
+        ? alignLabelLaneXByChord[cluster.chordIndex] + minBandLabelGutter
+        : NaN;
+      const xRightBase = useLabelLaneForCluster ? laneLabelX - 1 : targetRight;
+      const xRight = clamp(xRightBase, plotLeft + 2, plotRight);
+      const xLeft = clamp(Math.min(leftmostAlignedX, xRight - 1), plotLeft, xRight - 1);
       const halfBand = state.alignToleranceCents > 0 ? state.alignToleranceCents / 2 : 0;
       const topFreq = cluster.centerFreq * 2 ** (halfBand / 1200);
       const bottomFreq = cluster.centerFreq / 2 ** (halfBand / 1200);
@@ -2137,39 +3741,77 @@ function buildChartSvg(model, width, height) {
       const y2 = yForFreq(bottomFreq);
       const bandTop = Math.min(y1, y2);
       const bandHeight = Math.abs(y2 - y1);
+      const fusionNodes = fusionByChord.get(cluster.chordIndex) || [];
+      let matchedFusionNode = null;
+      let matchedDeltaCents = Infinity;
+      fusionNodes.forEach((node) => {
+        if (!(node.centerFreq > 0)) {
+          return;
+        }
+        const deltaCents = Math.abs(centsBetween(cluster.centerFreq, node.centerFreq));
+        if (deltaCents < matchedDeltaCents) {
+          matchedDeltaCents = deltaCents;
+          matchedFusionNode = node;
+        }
+      });
+      const matchedFusionVisual =
+        matchedFusionNode && matchedDeltaCents <= alignFusionMatchCents
+          ? getFusionNodeVisual(matchedFusionNode, state.fusionMode, state.themeDark, colorScheme)
+          : null;
+      const fusionRadius = state.showFusion && matchedFusionVisual ? matchedFusionVisual.radius : 0;
+      const labelX = useLabelLaneForCluster
+        ? laneLabelX
+        : Number.isFinite(fusionX)
+          ? Math.max(xRight + 2, fusionX + fusionRadius + 7)
+          : xRight + minBandLabelGutter;
+      alignmentBandLabelData.push({
+        id: cluster.id,
+        chordIndex: cluster.chordIndex,
+        freq: cluster.centerFreq,
+        xLeft,
+        xRight,
+        y: centerY,
+        labelX,
+        members: Array.isArray(cluster.points) ? cluster.points.map((point) => point.playKey).filter(Boolean) : [],
+      });
+      const alignFillColor =
+        printIsGreyscale
+          ? "rgba(0,0,0,0.24)"
+          : matchedFusionVisual?.fill || (state.themeDark ? "#9f8be8" : "#7a56de");
+      const alignLineColor =
+        printIsGreyscale
+          ? "rgba(0,0,0,0.72)"
+          : matchedFusionVisual?.fill || (state.themeDark ? "#b6a6f2" : "#6e4fdf");
 
       if (bandHeight > 0.75) {
-        const hue = Math.round(278 - cluster.strength * 272);
-        const sat = Math.round(72 + cluster.strength * 16);
-        const light = state.themeDark
-          ? Math.round(56 - cluster.strength * 10)
-          : Math.round(58 - cluster.strength * 8);
         alignLayer.appendChild(
           createSvgEl("rect", {
             x: xLeft,
             y: bandTop,
             width: Math.max(1, xRight - xLeft),
             height: bandHeight,
-            fill: `hsl(${hue}, ${sat}%, ${light}%)`,
-            "fill-opacity": state.themeDark ? 0.2 : 0.17,
+            fill: alignFillColor,
+            "fill-opacity": matchedFusionVisual
+              ? clamp(matchedFusionVisual.fillOpacity * 0.58, 0.12, 0.52)
+              : state.themeDark
+                ? 0.2
+                : 0.17,
             "data-align-band": "1",
             "data-align-id": cluster.id,
           })
         );
       }
-      const lineHue = Math.round(278 - cluster.strength * 272);
-      const lineSat = Math.round(78 + cluster.strength * 14);
-      const lineLight = state.themeDark
-        ? Math.round(68 - cluster.strength * 12)
-        : Math.round(50 - cluster.strength * 6);
       alignLayer.appendChild(
         createSvgEl("line", {
           x1: xLeft,
           y1: centerY,
           x2: xRight,
           y2: centerY,
-          stroke: `hsl(${lineHue}, ${lineSat}%, ${lineLight}%)`,
-          "stroke-width": 1,
+          stroke: alignLineColor,
+          "stroke-opacity": matchedFusionVisual
+            ? clamp(matchedFusionVisual.fillOpacity, 0.18, 0.92)
+            : 1,
+          "stroke-width": inPrintMode ? 0.8 : 1,
           "data-align-band": "1",
           "data-align-id": cluster.id,
           "data-tip": cluster.tip,
@@ -2180,7 +3822,7 @@ function buildChartSvg(model, width, height) {
       }
     });
 
-    svg.appendChild(alignLayer);
+    diagramRoot.appendChild(alignLayer);
   }
 
   if (state.showFusion) {
@@ -2195,75 +3837,116 @@ function buildChartSvg(model, width, height) {
           return;
         }
         const y = yForFreq(node.centerFreq);
-        if (state.fusionMode === "all") {
-          const naturalShare = clamp(Number(node.naturalShare) || 0, 0, 1);
-          const alignStrength = clamp(Number(node.alignStrength) || 0, 0, 1);
-          const radius = clamp(Number(node.radius) || 3, 2, 24);
-          if (node.shape === "diamond") {
-            const hue = Math.round(198 - alignStrength * 26);
-            const sat = Math.round(64 + alignStrength * 22);
-            const light = state.themeDark
-              ? Math.round(58 - alignStrength * 8)
-              : Math.round(48 - alignStrength * 7);
-            const r = radius;
-            fusionLayer.appendChild(
-              createSvgEl("path", {
-                d: `M ${fusionX} ${y - r} L ${fusionX + r} ${y} L ${fusionX} ${y + r} L ${fusionX - r} ${y} Z`,
-                fill: `hsl(${hue}, ${sat}%, ${light}%)`,
-                "fill-opacity": 0.24 + alignStrength * 0.56,
-                stroke: `hsl(${Math.max(150, hue - 18)}, ${Math.min(95, sat + 10)}%, ${Math.max(24, light - 16)}%)`,
-                "stroke-width": 0.9 + alignStrength * 1.2,
-                "stroke-opacity": 0.45 + alignStrength * 0.35,
-                "data-tip": `Chord ${analysis.chordIndex + 1}\n${node.tip}`,
-              })
-            );
-          } else {
-            const hue = Math.round(18 + (1 - naturalShare) * 30 - alignStrength * 6);
-            const sat = Math.round(76 + naturalShare * 18 + alignStrength * 8);
-            const light = state.themeDark
-              ? Math.round(58 - alignStrength * 7 - (1 - naturalShare) * 4)
-              : Math.round(56 - alignStrength * 6 - (1 - naturalShare) * 3);
+        const visual = getFusionNodeVisual(node, state.fusionMode, state.themeDark, colorScheme);
+        const playKey = `fusion:${analysis.chordIndex}:${node.id}:${node.centerFreq.toFixed(6)}`;
+        if (isPrintHidden(playKey)) {
+          return;
+        }
+        const isPlaying = activeVoices.has(playKey);
+        const minRadius = state.fusionMode === "all" ? 2 : 3;
+        const maxRadius = state.fusionMode === "all" ? 24 : 26;
+        const ampScale = clamp((visual.radius - minRadius) / Math.max(1e-6, maxRadius - minRadius), 0, 1);
+        maxFusionRadiusByChord[analysis.chordIndex] = Math.max(
+          maxFusionRadiusByChord[analysis.chordIndex] || 0,
+          visual.radius
+        );
+        const fusionFill =
+          printIsGreyscale
+            ? `rgba(0,0,0,${clamp(0.18 + ampScale * 0.7, 0.15, 0.88)})`
+            : visual.fill;
+        const fusionStroke =
+          printIsGreyscale ? "rgba(0,0,0,0.85)" : visual.stroke;
+        printComponentMeta[playKey] = {
+          x: fusionX,
+          y,
+          freq: node.centerFreq,
+          playKey,
+          kind: "fusion",
+          alignmentMemberCount: Number(node.alignmentMemberCount) || 0,
+          alignmentLabelFreq: Number.isFinite(node.alignmentCenterFreq)
+            ? Number(node.alignmentCenterFreq)
+            : NaN,
+          labelEligible: Boolean(node.labelEligible),
+          chordIndex: analysis.chordIndex,
+        };
+        if (visual.shape === "diamond") {
+          const r = visual.radius;
+          const commonFusionAttrs = {
+            "data-play-key": playKey,
+            "data-play-freq": node.centerFreq,
+            "data-play-kind": "fusion",
+            "data-play-scale": ampScale,
+            "data-component-key": playKey,
+            "data-hide-key": playKey,
+            "data-playing": isPlaying ? "1" : "0",
+            "data-tip": `Chord ${analysis.chordIndex + 1}\n${node.tip}`,
+          };
+          fusionLayer.appendChild(
+            createSvgEl("path", {
+              d: `M ${fusionX} ${y - r} L ${fusionX + r} ${y} L ${fusionX} ${y + r} L ${fusionX - r} ${y} Z`,
+              fill: fusionFill,
+              "fill-opacity": visual.fillOpacity,
+              stroke: isPlaying ? "#f4de58" : fusionStroke,
+              "stroke-width": isPlaying ? 2.4 : visual.strokeWidth,
+              "stroke-opacity": visual.strokeOpacity,
+              ...commonFusionAttrs,
+            })
+          );
+          if (!inPrintMode) {
             fusionLayer.appendChild(
               createSvgEl("circle", {
                 cx: fusionX,
                 cy: y,
-                r: radius,
-                fill: `hsl(${hue}, ${sat}%, ${light}%)`,
-                "fill-opacity": 0.22 + alignStrength * 0.6,
-                stroke: `hsl(${Math.max(4, hue - 10)}, ${Math.min(95, sat + 4)}%, ${Math.max(24, light - 18)}%)`,
-                "stroke-opacity": 0.35 + alignStrength * 0.42,
-                "stroke-width": 0.9 + alignStrength * 1.2,
-                "data-tip": `Chord ${analysis.chordIndex + 1}\n${node.tip}`,
+                r: r + Math.max(5, state.pointSize * 1.2),
+                fill: "rgba(0,0,0,0.001)",
+                stroke: "rgba(0,0,0,0)",
+                "stroke-width": 0,
+                ...commonFusionAttrs,
               })
             );
           }
           return;
         }
-
-        const radius = clamp(3 + node.strength * 18, 3, 26);
-        const naturalShare = clamp(Number(node.naturalShare) || 0, 0, 1);
-        const hue = Math.round(16 + (1 - naturalShare) * 30 - node.strength * 8);
-        const sat = Math.round(74 + naturalShare * 18 + node.strength * 6);
-        const light = state.themeDark
-          ? Math.round(58 - node.strength * 9 - (1 - naturalShare) * 4)
-          : Math.round(56 - node.strength * 7 - (1 - naturalShare) * 3);
+        const commonFusionAttrs = {
+          "data-play-key": playKey,
+          "data-play-freq": node.centerFreq,
+          "data-play-kind": "fusion",
+          "data-play-scale": ampScale,
+          "data-component-key": playKey,
+          "data-hide-key": playKey,
+          "data-playing": isPlaying ? "1" : "0",
+          "data-tip": `Chord ${analysis.chordIndex + 1}\n${node.tip}`,
+        };
         fusionLayer.appendChild(
           createSvgEl("circle", {
             cx: fusionX,
             cy: y,
-            r: radius,
-            fill: `hsl(${hue}, ${sat}%, ${light}%)`,
-            "fill-opacity": 0.22 + node.strength * 0.62,
-            stroke: `hsl(${Math.max(4, hue - 10)}, ${Math.min(95, sat + 4)}%, ${Math.max(24, light - 18)}%)`,
-            "stroke-opacity": 0.35 + node.strength * 0.4,
-            "stroke-width": 0.9 + node.strength * 1.1,
-            "data-tip": `Chord ${analysis.chordIndex + 1}\n${node.tip}`,
+            r: visual.radius,
+            fill: fusionFill,
+            "fill-opacity": visual.fillOpacity,
+            stroke: isPlaying ? "#f4de58" : fusionStroke,
+            "stroke-opacity": visual.strokeOpacity,
+            "stroke-width": isPlaying ? 2.4 : visual.strokeWidth,
+            ...commonFusionAttrs,
           })
         );
+        if (!inPrintMode) {
+          fusionLayer.appendChild(
+            createSvgEl("circle", {
+              cx: fusionX,
+              cy: y,
+              r: visual.radius + Math.max(5, state.pointSize * 1.2),
+              fill: "rgba(0,0,0,0.001)",
+              stroke: "rgba(0,0,0,0)",
+              "stroke-width": 0,
+              ...commonFusionAttrs,
+            })
+          );
+        }
       });
     });
 
-    svg.appendChild(fusionLayer);
+    diagramRoot.appendChild(fusionLayer);
   }
 
   if (state.showRoughness) {
@@ -2276,6 +3959,10 @@ function buildChartSvg(model, width, height) {
       const bandLeft = roughnessX - roughnessColumnWidth * 0.66;
       const bandWidth = roughnessColumnWidth * 1.32;
       (analysis.roughnessBands || []).forEach((band) => {
+        const bandKey = `roughband:${analysis.chordIndex}:${band.id}`;
+        if (isPrintHidden(bandKey)) {
+          return;
+        }
         const halfDelta = Math.max(0.05, band.deltaHz / 2);
         const lowFreq = Math.max(model.rangeMin, band.centerFreq - halfDelta);
         const highFreq = Math.min(model.rangeMax, band.centerFreq + halfDelta);
@@ -2289,11 +3976,19 @@ function buildChartSvg(model, width, height) {
         if (h < 0.7) {
           return;
         }
-        const hue = Math.round(16 - band.strength * 10);
-        const sat = Math.round(84 + band.strength * 10);
-        const light = state.themeDark
-          ? Math.round(56 - band.strength * 8)
-          : Math.round(52 - band.strength * 8);
+        const roughBase = colorScheme?.roughness?.base || "#cf5f34";
+        const roughMid = mixHex(roughBase, "#ffffff", state.themeDark ? 0.12 : 0.2);
+        const roughFillColor = mixHex(roughMid, "#ffffff", (1 - band.strength) * 0.22);
+        const roughStrokeColor = mixHex(roughBase, "#000000", 0.2 + band.strength * 0.35);
+        const roughFill =
+          printIsGreyscale
+            ? `rgba(0,0,0,${clamp(0.08 + band.strength * 0.28, 0.08, 0.5)})`
+            : roughFillColor;
+        const roughStroke =
+          printIsGreyscale
+            ? "rgba(0,0,0,0.75)"
+            : roughStrokeColor;
+        const roughPlayPayload = encodeURIComponent(JSON.stringify(band.playItems || []));
         roughLayer.appendChild(
           createSvgEl("rect", {
             x: bandLeft,
@@ -2301,12 +3996,14 @@ function buildChartSvg(model, width, height) {
             width: bandWidth,
             height: h,
             rx: 4,
-            fill: `hsl(${hue}, ${sat}%, ${light}%)`,
+            fill: roughFill,
             "fill-opacity": 0.12 + band.strength * 0.18,
             "data-tip": `Chord ${analysis.chordIndex + 1}\n${band.tip}`,
             "data-rough-animate": state.roughnessAnimate ? "1" : "0",
             "data-rough-rate": band.deltaHz,
             "data-rough-base-opacity": String(0.12 + band.strength * 0.18),
+            "data-rough-play-items": roughPlayPayload,
+            "data-hide-key": bandKey,
           })
         );
         roughLayer.appendChild(
@@ -2315,133 +4012,721 @@ function buildChartSvg(model, width, height) {
             y1: yForFreq(band.centerFreq),
             x2: bandLeft + bandWidth,
             y2: yForFreq(band.centerFreq),
-            stroke: `hsl(${hue}, ${sat}%, ${Math.max(30, light - 14)}%)`,
+            stroke: roughStroke,
             "stroke-width": 1.1,
             "stroke-opacity": 0.45 + band.strength * 0.35,
             "data-tip": `Chord ${analysis.chordIndex + 1}\n${band.tip}`,
             "data-rough-animate": state.roughnessAnimate ? "1" : "0",
             "data-rough-rate": band.deltaHz,
             "data-rough-base-opacity": String(0.45 + band.strength * 0.35),
+            "data-rough-play-items": roughPlayPayload,
+            "data-hide-key": bandKey,
           })
         );
       });
     });
-    svg.appendChild(roughLayer);
+    diagramRoot.appendChild(roughLayer);
   }
 
   const overtoneLayer = createSvgEl("g");
+  const harmonicCount = Number(model.effectiveOvertoneCount) || state.overtoneCount;
+  const fundamentalRadius = (state.pointSize + 1.2) * 1.75;
+  const smallestRadius = clamp(
+    state.pointSize * (1 - (harmonicCount - 1) / (harmonicCount * 1.8)),
+    1.2,
+    8
+  );
+  const maxOvertoneGain = harmonicScalingGain(1);
+  const minOvertoneGain = harmonicScalingGain(harmonicCount);
+  const overtoneGainSpan = Math.max(1e-6, maxOvertoneGain - minOvertoneGain);
+  const overtoneFlatSizing = Math.abs(maxOvertoneGain - minOvertoneGain) < 1e-5;
   for (let noteIndex = 0; noteIndex < model.notes.length; noteIndex += 1) {
-    const color = noteColor(noteIndex, state.themeDark);
     const x = noteX[noteIndex];
     const baseFreq = model.notes[noteIndex].freq;
     const baseY = yForFreq(baseFreq);
 
-    for (let harmonic = 1; harmonic <= state.overtoneCount; harmonic += 1) {
+    for (let harmonic = 1; harmonic <= harmonicCount; harmonic += 1) {
+      const color = liveOvertoneColor(harmonic);
       const freq = baseFreq * harmonic;
       if (freq < model.rangeMin || freq > model.rangeMax) {
         continue;
       }
       const y = yForFreq(freq);
-      if (harmonic > 1 && baseY >= plotTop && baseY <= plotBottom) {
+      if (state.showStems && harmonic > 1 && baseY >= plotTop && baseY <= plotBottom) {
+        const stemColor =
+          printIsGreyscale ? "rgba(0,0,0,0.55)" : color;
         overtoneLayer.appendChild(
           createSvgEl("line", {
             x1: x,
             y1: baseY,
             x2: x,
             y2: y,
-            stroke: color,
-            "stroke-opacity": 0.26,
-            "stroke-width": 1,
+            stroke: stemColor,
+            "stroke-opacity": stemOpacity,
+            "stroke-width": stemStrokeW,
           })
         );
       }
 
       const harmonicGain = harmonicScalingGain(harmonic);
       const alpha = clamp(0.14 + 0.84 * harmonicGain, 0.14, 0.98);
-      const radius =
-        harmonic === 1
-          ? (state.pointSize + 1.2) * 1.75
-          : clamp(state.pointSize * (1 - (harmonic - 1) / (state.overtoneCount * 1.8)), 1.2, 8);
+      const gainNorm = overtoneFlatSizing
+        ? 1
+        : clamp((harmonicGain - minOvertoneGain) / overtoneGainSpan, 0, 1);
+      const radius = smallestRadius + (fundamentalRadius - smallestRadius) * gainNorm;
       const playKey = `harmonic:${noteIndex}:${harmonic}`;
+      if (isPrintHidden(playKey)) {
+        continue;
+      }
       const isPlaying = activeVoices.has(playKey);
       const isAlignmentMember = model.alignmentMemberPlayKeys.has(playKey);
+      const printFill =
+        printIsGreyscale
+          ? `rgba(0,0,0,${alpha})`
+          : color;
+      printComponentMeta[playKey] = {
+        x,
+        y,
+        freq,
+        playKey,
+        kind: "harmonic",
+        noteIndex,
+        harmonic,
+      };
       const circle = createSvgEl("circle", {
         cx: x,
         cy: y,
         r: radius,
-        fill: color,
+        fill: printFill,
         "fill-opacity": alpha,
-        stroke: isPlaying ? "#f4de58" : color,
+        stroke: isPlaying ? "#f4de58" : printIsGreyscale ? "#222" : color,
         "stroke-width": isPlaying ? 2.4 : 0.45,
         "data-play-key": playKey,
         "data-play-freq": freq,
         "data-play-kind": "harmonic",
         "data-play-note-index": noteIndex,
         "data-play-harmonic": harmonic,
+        "data-component-key": playKey,
+        "data-hide-key": playKey,
         "data-align-member": isAlignmentMember ? "1" : "0",
         "data-playing": isPlaying ? "1" : "0",
         "data-note-index": noteIndex,
         "data-harmonic": harmonic,
-        "data-tip": `${model.notes[noteIndex].input}
-Harmonic ${harmonic}
+        "data-tip": `${harmonic}
 ${formatHz(freq)}`,
       });
       if (isAlignmentFocus && !isAlignmentMember) {
         circle.setAttribute("opacity", "0.4");
       }
       overtoneLayer.appendChild(circle);
+      if (!inPrintMode) {
+        overtoneLayer.appendChild(
+          createSvgEl("circle", {
+            cx: x,
+            cy: y,
+            r: radius + Math.max(4, state.pointSize * 1.2),
+            fill: "rgba(0,0,0,0.001)",
+            stroke: "rgba(0,0,0,0)",
+            "stroke-width": 0,
+            "data-play-key": playKey,
+            "data-play-freq": freq,
+            "data-play-kind": "harmonic",
+            "data-play-note-index": noteIndex,
+            "data-play-harmonic": harmonic,
+            "data-component-key": playKey,
+            "data-note-index": noteIndex,
+            "data-harmonic": harmonic,
+            "data-tip": `${harmonic}
+${formatHz(freq)}`,
+          })
+        );
+      }
 
       if (state.showOvertoneNumbers) {
         const hText = createSvgEl("text", {
-          x: x + radius + 2.5,
-          y: y + 3,
+          x: x - radius - 2,
+          y: y - radius - 2,
           fill: textSecondary,
-          "font-size": 9,
-          "font-family": "IBM Plex Sans, Lexend, sans-serif",
-          "text-anchor": "start",
+          "font-size": overtoneTextStyle ? overtoneTextStyle.size : 8.5,
+          "font-family": overtoneTextStyle
+            ? `${overtoneTextStyle.font}, IBM Plex Sans, Lexend, sans-serif`
+            : "IBM Plex Sans, Lexend, sans-serif",
+          "text-anchor": "end",
+          "data-auto-text-class": inPrintMode ? "overtone" : null,
         });
         hText.textContent = String(harmonic);
         overtoneLayer.appendChild(hText);
       }
     }
   }
-  svg.appendChild(overtoneLayer);
+  diagramRoot.appendChild(overtoneLayer);
 
   if (state.showCombination && model.visibleComboPoints.length) {
     const comboLayer = createSvgEl("g");
     model.visibleComboPoints.forEach((point) => {
-      const xMid = (noteX[point.noteA] + noteX[point.noteB]) / 2 + comboOffset(point.type);
+      const comboDefaultX = (noteX[point.noteA] + noteX[point.noteB]) / 2 + comboOffset(point.type);
+      const comboOverride = Number(state.printComponentXOverrides?.[point.playKey]);
+      const chordBounds = chordNoteXBounds[point.chordIndex] || null;
+      let xMid = comboDefaultX;
+      if (inPrintMode && Number.isFinite(comboOverride) && chordBounds) {
+        xMid = clamp(comboOverride, chordBounds.min, chordBounds.max);
+      }
       const y = yForFreq(point.freq);
       let color = comboDiffColor;
       if (point.type === "sum") color = comboSumColor;
       if (point.type === "order2a" || point.type === "order2b") color = comboOrder2Color;
 
-      const r = state.pointSize + 1.2;
+      const r = state.comboSize + 1.2;
       const playKey = point.playKey;
+      if (isPrintHidden(playKey)) {
+        return;
+      }
+      const sourceSpecs =
+        point.type === "order2a"
+          ? [
+              { noteIndex: point.noteA, harmonic: 2 },
+              { noteIndex: point.noteB, harmonic: 1 },
+            ]
+          : point.type === "order2b"
+            ? [
+                { noteIndex: point.noteB, harmonic: 2 },
+                { noteIndex: point.noteA, harmonic: 1 },
+              ]
+            : [
+                { noteIndex: point.noteA, harmonic: 1 },
+                { noteIndex: point.noteB, harmonic: 1 },
+              ];
+      const parentKeys = sourceSpecs.map(
+        (spec) => `harmonic:${spec.noteIndex}:${spec.harmonic}`
+      );
       const isPlaying = activeVoices.has(playKey);
       const isAlignmentMember = model.alignmentMemberPlayKeys.has(playKey);
-      const diamond = createSvgEl("path", {
-        d: `M ${xMid} ${y - r} L ${xMid + r} ${y} L ${xMid} ${y + r} L ${xMid - r} ${y} Z`,
-        fill: color,
+      const comboFill =
+        printIsGreyscale ? "rgba(0,0,0,0.84)" : color;
+      printComponentMeta[playKey] = {
+        x: xMid,
+        y,
+        freq: point.freq,
+        playKey,
+        kind: "combo",
+        comboType: point.type,
+        parentKeys,
+        chordIndex: point.chordIndex,
+      };
+      const commonAttrs = {
+        fill: comboFill,
         "fill-opacity": 0.88,
-        stroke: isPlaying ? "#f4de58" : color,
+        stroke: isPlaying ? "#f4de58" : printIsGreyscale ? "#222" : color,
         "stroke-width": isPlaying ? 2.4 : 0.8,
         "data-play-key": playKey,
         "data-play-freq": point.freq,
         "data-play-kind": "combo",
+        "data-component-key": playKey,
+        "data-hide-key": playKey,
         "data-align-member": isAlignmentMember ? "1" : "0",
         "data-playing": isPlaying ? "1" : "0",
         "data-combo-source-a": point.noteA,
         "data-combo-source-b": point.noteB,
         "data-combo-type": point.type,
+        "data-combo-drag-min": chordBounds ? chordBounds.min : "",
+        "data-combo-drag-max": chordBounds ? chordBounds.max : "",
         "data-tip": describeComboTone(point, model.notes),
-      });
+        style: inPrintMode ? "cursor:ew-resize" : null,
+      };
+      const shapeNode =
+        point.type === "difference"
+          ? createSvgEl("rect", {
+              ...commonAttrs,
+              x: xMid - r * 1.35,
+              y: y - r * 0.5,
+              width: r * 2.7,
+              height: r,
+              rx: Math.max(0.6, r * 0.2),
+            })
+          : createSvgEl("path", {
+              ...commonAttrs,
+              d: `M ${xMid} ${y - r} L ${xMid + r} ${y} L ${xMid} ${y + r} L ${xMid - r} ${y} Z`,
+            });
       if (isAlignmentFocus && !isAlignmentMember) {
-        diamond.setAttribute("opacity", "0.4");
+        shapeNode.setAttribute("opacity", "0.4");
       }
-      comboLayer.appendChild(diamond);
+      comboLayer.appendChild(shapeNode);
+      if (!inPrintMode) {
+        const hitAttrs = {
+          "data-play-key": playKey,
+          "data-play-freq": point.freq,
+          "data-play-kind": "combo",
+          "data-component-key": playKey,
+          "data-combo-source-a": point.noteA,
+          "data-combo-source-b": point.noteB,
+          "data-combo-type": point.type,
+          "data-combo-drag-min": chordBounds ? chordBounds.min : "",
+          "data-combo-drag-max": chordBounds ? chordBounds.max : "",
+          "data-tip": describeComboTone(point, model.notes),
+        };
+        comboLayer.appendChild(
+          createSvgEl("circle", {
+            cx: xMid,
+            cy: y,
+            r: r + Math.max(5, state.comboSize * 1.25),
+            fill: "rgba(0,0,0,0.001)",
+            stroke: "rgba(0,0,0,0)",
+            "stroke-width": 0,
+            ...hitAttrs,
+          })
+        );
+      }
     });
-    svg.appendChild(comboLayer);
+    diagramRoot.appendChild(comboLayer);
+  }
+
+  if (inPrintMode) {
+    const printLayer = createSvgEl("g");
+    const autoRelaxLabels = [];
+    const lowestFundamental = model.notes.length
+      ? Math.min(...model.notes.map((note) => note.freq).filter((freq) => freq > 0))
+      : Math.max(1e-9, state.ratioRootHz);
+    const alignedPlayKeys = model.alignmentMemberPlayKeys || new Set();
+    const componentLabelFont = componentTextStyle
+      ? `${componentTextStyle.font}, IBM Plex Sans, Lexend, sans-serif`
+      : "IBM Plex Sans, Lexend, sans-serif";
+    const componentLabelSize = componentTextStyle ? componentTextStyle.size : 9.5;
+    const buildComponentLabelLines = (freq, { useFusionToggles = false } = {}) => {
+      const showHz = useFusionToggles ? state.fusionReadoutHz : state.printShowComponentHz;
+      const showRatio = useFusionToggles ? state.fusionReadoutRatio : state.printShowComponentRatio;
+      const ratioBase = useFusionToggles
+        ? Math.max(1e-9, lowestFundamental)
+        : Math.max(1e-9, state.ratioRootHz);
+      const ratio = showRatio ? formatRatioApprox(freq / ratioBase) : "";
+      const hzText = showHz ? formatHz(freq) : "";
+      const lines = [];
+      if (showRatio && showHz) {
+        if (ratio && hzText) lines.push(`${ratio} ${hzText}`);
+        else if (ratio) lines.push(ratio);
+        else if (hzText) lines.push(hzText);
+        return lines;
+      }
+      if (showRatio && ratio) lines.push(ratio);
+      if (showHz && hzText) lines.push(hzText);
+      return lines;
+    };
+    const defaultLabelPos = (meta) => {
+      if (meta.kind === "harmonic") {
+        const laneX = (noteXByIndex[meta.noteIndex] || meta.x) + 10;
+        return { dx: laneX - meta.x, dy: -7 };
+      }
+      if (meta.kind === "combo") {
+        return { dx: 10, dy: -10 };
+      }
+      return { dx: 9, dy: -7 };
+    };
+    Object.values(printComponentMeta).forEach((meta) => {
+      if (!state.printShowComponentLabel) {
+        return;
+      }
+      if (meta.kind === "fusion") {
+        return;
+      }
+      if (state.showAlignments && alignedPlayKeys.has(meta.playKey)) {
+        return;
+      }
+      const labelLines = buildComponentLabelLines(meta.freq, { useFusionToggles: false });
+      if (!labelLines.length) {
+        return;
+      }
+      const labelId = `component:${meta.playKey}`;
+      if (isPrintHidden(`label:${labelId}`)) {
+        return;
+      }
+      const offset = state.printLabelOffsets?.[labelId] || {};
+      const defaults = defaultLabelPos(meta);
+      const labelAnchorY = meta.y;
+      const labelX = meta.x + (Number.isFinite(offset.dx) ? offset.dx : defaults.dx);
+      const labelY = labelAnchorY + (Number.isFinite(offset.dy) ? offset.dy : defaults.dy);
+      const isManual = Number.isFinite(offset.dx) || Number.isFinite(offset.dy);
+      const text = createSvgEl("text", {
+        x: labelX,
+        y: labelY,
+        fill: "#111",
+        "font-size": componentLabelSize,
+        "font-family": componentLabelFont,
+        "text-anchor": "start",
+        "data-print-label-id": labelId,
+        "data-print-default-dx": String(defaults.dx),
+        "data-print-default-dy": String(defaults.dy),
+        "data-hide-key": `label:${labelId}`,
+        "data-label-parent-key": meta.playKey,
+        "data-auto-text-class": "component",
+        style: "cursor:move",
+      });
+      labelLines.forEach((line, index) => {
+        const span = createSvgEl("tspan", {
+          x: labelX,
+          dy: index === 0 ? 0 : 10,
+        });
+        span.textContent = line;
+        text.appendChild(span);
+      });
+      printLayer.appendChild(text);
+      const componentCandidates = [
+        { dx: 10, dy: -8, anchor: "start" }, // top-right
+        { dx: -10, dy: -8, anchor: "end" }, // top-left
+        { dx: 10, dy: 14, anchor: "start" }, // bottom-right
+        { dx: -10, dy: 14, anchor: "end" }, // bottom-left
+      ];
+      autoRelaxLabels.push({
+        el: text,
+        baseX: meta.x,
+        baseY: meta.y,
+        defaultAnchor: "start",
+        candidates: componentCandidates,
+        manual: isManual,
+      });
+    });
+    if (state.printShowComponentLabel && state.showAlignments) {
+      alignmentBandLabelData.forEach((band) => {
+        const labelLines = buildComponentLabelLines(band.freq, { useFusionToggles: true });
+        if (!labelLines.length) {
+          return;
+        }
+        const labelId = `alignment:${band.id}`;
+        if (isPrintHidden(`label:${labelId}`)) {
+          return;
+        }
+        const offset = state.printLabelOffsets?.[labelId] || {};
+        const defaultDx = 2;
+        const defaultDy = 0;
+        const labelX = band.labelX + (Number.isFinite(offset.dx) ? offset.dx : defaultDx);
+        const labelY = band.y + (Number.isFinite(offset.dy) ? offset.dy : defaultDy);
+        const isManual = Number.isFinite(offset.dx) || Number.isFinite(offset.dy);
+        const text = createSvgEl("text", {
+          x: labelX,
+          y: labelY,
+          fill: "#111",
+          "font-size": componentLabelSize,
+          "font-family": componentLabelFont,
+          "text-anchor": "start",
+          "dominant-baseline": "middle",
+          "data-print-label-id": labelId,
+          "data-print-default-dx": String(defaultDx),
+          "data-print-default-dy": String(defaultDy),
+          "data-hide-key": `label:${labelId}`,
+          "data-label-parent-align-id": band.id,
+          "data-auto-text-class": "component",
+          style: "cursor:move",
+        });
+        text.textContent = labelLines.join(" ");
+        printLayer.appendChild(text);
+        autoRelaxLabels.push({
+          el: text,
+          baseX: band.labelX,
+          baseY: band.y,
+          defaultAnchor: "start",
+          candidates: [
+            { dx: 2, dy: 0, anchor: "start" },
+            { dx: 2, dy: -12, anchor: "start" },
+            { dx: 2, dy: 12, anchor: "start" },
+          ],
+          manual: isManual,
+        });
+      });
+    }
+
+    Object.entries(printComponentMeta).forEach(([key, meta]) => {
+      if (meta.kind !== "combo" || !state.printComboLinksVisible?.[key]) {
+        return;
+      }
+      if (isPrintHidden(`comboparent:${key}`)) {
+        return;
+      }
+      const parents = (meta.parentKeys || [])
+        .map((parentKey) => printComponentMeta[parentKey])
+        .filter(Boolean);
+      if (!parents.length) {
+        return;
+      }
+      parents.forEach((parent) => {
+        printLayer.appendChild(
+          createSvgEl("line", {
+            x1: meta.x,
+            y1: meta.y,
+            x2: parent.x,
+            y2: parent.y,
+            stroke: "rgba(0,0,0,0.55)",
+            "stroke-width": 1,
+            "stroke-dasharray": "4 3",
+            "data-hide-key": `comboparent:${key}`,
+          })
+        );
+      });
+      const comboLabelId = `comboexpr:${key}`;
+      const comboOffset = state.printLabelOffsets?.[comboLabelId] || {};
+      const comboDefaultDx = 10;
+      const comboDefaultDy = -10;
+      const comboX = meta.x + (Number.isFinite(comboOffset.dx) ? comboOffset.dx : comboDefaultDx);
+      const comboY = meta.y + (Number.isFinite(comboOffset.dy) ? comboOffset.dy : comboDefaultDy);
+      printLayer.appendChild(
+        createSvgEl("text", {
+          x: comboX,
+          y: comboY,
+          fill: "#111",
+          "font-size": 9.5,
+          "font-family": "IBM Plex Sans, Lexend, sans-serif",
+          "text-anchor": "start",
+          "data-print-label-id": comboLabelId,
+          "data-print-default-dx": String(comboDefaultDx),
+          "data-print-default-dy": String(comboDefaultDy),
+          "data-hide-key": `comboparent:${key}`,
+          "data-label-parent-key": key,
+          style: "cursor:move",
+        })
+      ).textContent = (() => {
+        const p1 = parents[0]?.freq || 0;
+        const p2 = parents[1]?.freq || 0;
+        if (meta.comboType === "sum") {
+          return `${p1.toFixed(2)} + ${p2.toFixed(2)} = ${meta.freq.toFixed(2)} Hz`;
+        }
+        if (meta.comboType === "order2a") {
+          return `(${p1.toFixed(2)}) - (${p2.toFixed(2)}) = ${meta.freq.toFixed(2)} Hz`;
+        }
+        if (meta.comboType === "order2b") {
+          return `(${p1.toFixed(2)}) - (${p2.toFixed(2)}) = ${meta.freq.toFixed(2)} Hz`;
+        }
+        return `|${p1.toFixed(2)} - ${p2.toFixed(2)}| = ${meta.freq.toFixed(2)} Hz`;
+      })();
+      autoRelaxLabels.push({
+        el: printLayer.lastChild,
+        baseX: comboX,
+        baseY: comboY,
+        manual: Number.isFinite(comboOffset.dx) || Number.isFinite(comboOffset.dy),
+      });
+    });
+
+    (state.printDistanceAnnotations || []).forEach((annotation) => {
+      const a = printComponentMeta[annotation.aKey];
+      const b = printComponentMeta[annotation.bKey];
+      if (!a || !b) {
+        return;
+      }
+      const distanceHideKey = `distance:${annotation.id}`;
+      if (isPrintHidden(distanceHideKey)) {
+        return;
+      }
+      printLayer.appendChild(
+        createSvgEl("line", {
+          x1: a.x,
+          y1: a.y,
+          x2: b.x,
+          y2: b.y,
+          stroke: "rgba(0,0,0,0.72)",
+          "stroke-width": 1,
+          "data-hide-key": distanceHideKey,
+        })
+      );
+      const ratioValue = Math.max(a.freq, b.freq) / Math.max(1e-9, Math.min(a.freq, b.freq));
+      const parts = [];
+      if (state.printDistanceShowRatio) {
+        const ratioLabel = formatRatioApprox(ratioValue);
+        if (ratioLabel) {
+          parts.push(ratioLabel);
+        }
+      }
+      if (state.printDistanceShowHz) {
+        parts.push(`Δ ${Math.abs(a.freq - b.freq).toFixed(2)} Hz`);
+      }
+      if (state.printDistanceShowInterval) {
+        const intervalLabel = nearestIntervalNameForRatio(ratioValue);
+        if (intervalLabel) {
+          parts.push(intervalLabel);
+        }
+      }
+      if (!parts.length) {
+        return;
+      }
+      const labelId = `distance:${annotation.id}`;
+      const offset = state.printLabelOffsets?.[labelId] || {};
+      const baseX = (a.x + b.x) / 2 + (Number.isFinite(offset.dx) ? offset.dx : 9);
+      const baseY = (a.y + b.y) / 2 + (Number.isFinite(offset.dy) ? offset.dy : -8);
+      const label = createSvgEl("text", {
+        x: baseX,
+        y: baseY,
+        fill: "#111",
+        "font-size": 9.5,
+        "font-family": "IBM Plex Sans, Lexend, sans-serif",
+        "text-anchor": "start",
+        "data-print-label-id": labelId,
+        "data-print-default-dx": "9",
+        "data-print-default-dy": "-8",
+        "data-hide-key": distanceHideKey,
+        "data-label-parent-a-key": annotation.aKey,
+        "data-label-parent-b-key": annotation.bKey,
+        style: "cursor:move",
+      });
+      parts.forEach((line, index) => {
+        const span = createSvgEl("tspan", {
+          x: baseX,
+          dy: index === 0 ? 0 : 10,
+        });
+        span.textContent = line;
+        label.appendChild(span);
+      });
+      printLayer.appendChild(label);
+      autoRelaxLabels.push({
+        el: label,
+        baseX,
+        baseY,
+        manual: Number.isFinite(offset.dx) || Number.isFinite(offset.dy),
+      });
+    });
+
+    (state.printCustomTexts || []).forEach((item) => {
+      if (!item || typeof item !== "object" || !item.id) {
+        return;
+      }
+      const x = Number(item.x);
+      const y = Number(item.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return;
+      }
+      const textValue = String(item.text || "");
+      if (!textValue.trim()) {
+        return;
+      }
+      const fontFamily = String(item.font || "Noto Serif");
+      const fontSize = clamp(Number(item.size) || 18, 8, 72);
+      const hideKey = `customtext:${item.id}`;
+      if (isPrintHidden(hideKey)) {
+        return;
+      }
+      const textEl = createSvgEl("text", {
+        x,
+        y,
+        fill: "#111",
+        "font-size": fontSize,
+        "font-family": `${fontFamily}, Lexend, sans-serif`,
+        "text-anchor": "start",
+        "dominant-baseline": "hanging",
+        "data-custom-text-id": item.id,
+        "data-custom-text-selected": state.printSelectedCustomTextId === item.id ? "1" : "0",
+        "data-hide-key": hideKey,
+        style: "cursor:move",
+      });
+      const lines = textValue.split(/\r?\n/);
+      lines.forEach((line, index) => {
+        const span = createSvgEl("tspan", {
+          x,
+          dy: index === 0 ? 0 : Math.max(10, fontSize * 1.2),
+        });
+        span.textContent = line;
+        textEl.appendChild(span);
+      });
+      printLayer.appendChild(textEl);
+      if (state.printSelectedCustomTextId === item.id) {
+        const box = textEl.getBBox();
+        printLayer.insertBefore(
+          createSvgEl("rect", {
+            x: box.x - 4,
+            y: box.y - 3,
+            width: box.width + 8,
+            height: box.height + 6,
+            fill: "none",
+            stroke: "rgba(0,0,0,0.45)",
+            "stroke-width": 0.9,
+            "stroke-dasharray": "3 2",
+            "pointer-events": "none",
+          }),
+          textEl
+        );
+      }
+    });
+
+    if (state.printDistanceMode && printDistancePendingKey && printComponentMeta[printDistancePendingKey]) {
+      const pending = printComponentMeta[printDistancePendingKey];
+      printLayer.appendChild(
+        createSvgEl("circle", {
+          cx: pending.x,
+          cy: pending.y,
+          r: 8,
+          fill: "none",
+          stroke: "rgba(0,0,0,0.72)",
+          "stroke-width": 1.2,
+          "stroke-dasharray": "2 2",
+          "pointer-events": "none",
+        })
+      );
+    }
+
+    if (state.printShowLegend) {
+      const legendX = plotRight - 172;
+      const legendY = plotTop + 18;
+      const legendLabelId = "legend:combo-diff";
+      const legendOffset = state.printLabelOffsets?.[legendLabelId] || {};
+      const legendDx = Number.isFinite(legendOffset.dx) ? legendOffset.dx : 0;
+      const legendDy = Number.isFinite(legendOffset.dy) ? legendOffset.dy : 0;
+      const legend = createSvgEl("g", {
+        transform: `translate(${legendDx}, ${legendDy})`,
+        "data-print-label-id": legendLabelId,
+        "data-print-default-dx": "0",
+        "data-print-default-dy": "0",
+        style: "cursor:move",
+      });
+      legend.appendChild(
+        createSvgEl("path", {
+          d: `M ${legendX} ${legendY} L ${legendX + 5} ${legendY + 5} L ${legendX} ${legendY + 10} L ${legendX - 5} ${legendY + 5} Z`,
+          fill: "rgba(0,0,0,0.8)",
+        })
+      );
+      const comboLegend = createSvgEl("text", {
+        x: legendX + 11,
+        y: legendY + 8,
+        fill: "#111",
+        "font-size": 9.5,
+        "font-family": "IBM Plex Sans, Lexend, sans-serif",
+        "text-anchor": "start",
+      });
+      comboLegend.textContent = "Summation";
+      legend.appendChild(comboLegend);
+      legend.appendChild(
+        createSvgEl("rect", {
+          x: legendX - 6,
+          y: legendY + 20,
+          width: 12,
+          height: 6,
+          rx: 1.4,
+          fill: "rgba(0,0,0,0.8)",
+        })
+      );
+      const diffLegend = createSvgEl("text", {
+        x: legendX + 11,
+        y: legendY + 27,
+        fill: "#111",
+        "font-size": 9.5,
+        "font-family": "IBM Plex Sans, Lexend, sans-serif",
+        "text-anchor": "start",
+      });
+      diffLegend.textContent = "Difference";
+      legend.appendChild(diffLegend);
+      printLayer.appendChild(legend);
+      const legendContentBox = legend.getBBox();
+      const legendPad = 8;
+      legend.insertBefore(
+        createSvgEl("rect", {
+          x: legendContentBox.x - legendPad,
+          y: legendContentBox.y - legendPad,
+          width: legendContentBox.width + legendPad * 2,
+          height: legendContentBox.height + legendPad * 2,
+          rx: 4,
+          fill: "rgba(255,255,255,0.86)",
+          stroke: "rgba(0,0,0,0.25)",
+          "stroke-width": 0.8,
+        }),
+        legend.firstChild
+      );
+    }
+
+    diagramRoot.appendChild(printLayer);
+    const printHazards = collectPrintLabelHazards(diagramRoot);
+    nudgePrintLabelsToReduceCollisions(autoRelaxLabels, plotTop + 4, plotBottom - 6, printHazards);
   }
 
   if (!model.notes.length) {
@@ -2454,7 +4739,7 @@ ${formatHz(freq)}`,
       "text-anchor": "middle",
     });
     emptyTitle.textContent = "Enter notes to visualize overtones";
-    svg.appendChild(emptyTitle);
+    diagramRoot.appendChild(emptyTitle);
 
     const emptyHint = createSvgEl("text", {
       x: plotLeft + plotWidth / 2,
@@ -2465,8 +4750,9 @@ ${formatHz(freq)}`,
       "text-anchor": "middle",
     });
     emptyHint.textContent = "Formats: 69  |  440hz  |  3/2  |  7:4";
-    svg.appendChild(emptyHint);
+    diagramRoot.appendChild(emptyHint);
   }
+  svg.appendChild(diagramRoot);
 
   if (isAlignmentFocus) {
     const all = svg.querySelectorAll("line,path,circle,text,rect,polyline,polygon,ellipse");
@@ -2480,14 +4766,164 @@ ${formatHz(freq)}`,
       member.setAttribute("opacity", "1");
     });
   }
+  if (inPrintMode && printLabelDragFocus?.labelId) {
+    const all = svg.querySelectorAll("line,path,circle,text,rect,polyline,polygon,ellipse");
+    all.forEach((element) => {
+      element.setAttribute("opacity", "0.22");
+    });
+    svg.querySelectorAll(`[data-print-label-id="${printLabelDragFocus.labelId}"]`).forEach((el) => {
+      el.setAttribute("opacity", "1");
+    });
+    (printLabelDragFocus.parentKeys || []).forEach((key) => {
+      svg.querySelectorAll(`[data-component-key="${key}"]`).forEach((el) => {
+        el.setAttribute("opacity", "1");
+      });
+    });
+    if (printLabelDragFocus.alignId) {
+      svg.querySelectorAll(`[data-align-id="${printLabelDragFocus.alignId}"]`).forEach((el) => {
+        el.setAttribute("opacity", "1");
+      });
+    }
+  }
 
   return svg;
 }
 
 function attachTooltip(svg) {
+  const printMode = isPrintMode();
   let dimmedElements = [];
   let highlightedComboTarget = null;
   let highlightedLinkLines = [];
+  const applyCanvasPan = () => {
+    const zoom = clamp(Number(state.viewZoom) || 1, 0.3, 3);
+    svg.style.transform = `translate(${canvasPanX}px, ${canvasPanY}px) scale(${zoom})`;
+    svg.style.transformOrigin = "0 0";
+    svg.style.willChange = "transform";
+    svg.style.cursor = panDragState ? "grabbing" : "grab";
+    svg.style.userSelect = panDragState ? "none" : "";
+    svg.style.webkitUserSelect = panDragState ? "none" : "";
+    svg.style.touchAction = "none";
+  };
+  const clearDragSelectionBlock = () => {
+    document.body.style.userSelect = "";
+    document.body.style.webkitUserSelect = "";
+    svg.style.userSelect = "";
+    svg.style.webkitUserSelect = "";
+  };
+  const beginPrintDrag = (nextState, event) => {
+    printDragState = nextState;
+    document.body.style.userSelect = "none";
+    document.body.style.webkitUserSelect = "none";
+    svg.style.userSelect = "none";
+    svg.style.webkitUserSelect = "none";
+    if (event?.target && typeof event.target.setPointerCapture === "function") {
+      try {
+        event.target.setPointerCapture(event.pointerId);
+      } catch {}
+    }
+  };
+  const endPrintDrag = (event, { cancelled = false } = {}) => {
+    if (!printDragState) {
+      clearDragSelectionBlock();
+      return false;
+    }
+    if (event && printDragState.pointerId !== event.pointerId) {
+      return false;
+    }
+    if (event?.target && typeof event.target.releasePointerCapture === "function") {
+      try {
+        if (event.target.hasPointerCapture?.(event.pointerId)) {
+          event.target.releasePointerCapture(event.pointerId);
+        }
+      } catch {}
+    }
+    const finishedState = printDragState;
+    printDragState = null;
+    if (finishedState.kind === "label") {
+      printLabelDragFocus = null;
+    }
+    clearDragSelectionBlock();
+    if (!cancelled && finishedState.kind === "combo-x" && !finishedState.moved) {
+      const comboKey = finishedState.id;
+      const next = { ...(state.printComboLinksVisible || {}) };
+      next[comboKey] = !next[comboKey];
+      state.printComboLinksVisible = next;
+    }
+    scheduleRender();
+    scheduleStateUrlUpdate();
+    return true;
+  };
+  const isPanEligibleTarget = (target) => {
+    if (!(target instanceof Element)) {
+      return false;
+    }
+    return !target.closest(
+      "[data-play-key],[data-print-label-id],[data-custom-text-id],[data-column-id],[data-component-key],[data-rough-play-items],[data-align-band='1'],[data-chord-action]"
+    );
+  };
+  const clientToDiagramPoint = (clientX, clientY) => {
+    const root = svg.querySelector("[data-diagram-root='1']");
+    if (!(root instanceof SVGGraphicsElement)) {
+      return null;
+    }
+    const ctm = root.getScreenCTM();
+    if (!ctm || typeof svg.createSVGPoint !== "function") {
+      return null;
+    }
+    const point = svg.createSVGPoint();
+    point.x = clientX;
+    point.y = clientY;
+    const local = point.matrixTransform(ctm.inverse());
+    return {
+      x: local.x,
+      y: local.y,
+    };
+  };
+  const beginCanvasPan = (event) => {
+    const startPanX = canvasPanX;
+    const startPanY = canvasPanY;
+    panDragState = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startPanX,
+      startPanY,
+      moved: false,
+    };
+    document.body.style.userSelect = "none";
+    document.body.style.webkitUserSelect = "none";
+    svg.style.userSelect = "none";
+    svg.style.webkitUserSelect = "none";
+    if (event?.target && typeof event.target.setPointerCapture === "function") {
+      try {
+        event.target.setPointerCapture(event.pointerId);
+      } catch {}
+    }
+    applyCanvasPan();
+  };
+  const endCanvasPan = (event) => {
+    if (!panDragState) {
+      return false;
+    }
+    if (event && panDragState.pointerId !== event.pointerId) {
+      return false;
+    }
+    if (event?.target && typeof event.target.releasePointerCapture === "function") {
+      try {
+        if (event.target.hasPointerCapture?.(event.pointerId)) {
+          event.target.releasePointerCapture(event.pointerId);
+        }
+      } catch {}
+    }
+    panDragState = null;
+    clearDragSelectionBlock();
+    applyCanvasPan();
+    return true;
+  };
+  applyCanvasPan();
+  if (printMode) {
+    tooltipEl.hidden = true;
+  }
 
   const DIM_SELECTOR = "line,path,circle,text,rect,polyline,polygon,ellipse";
 
@@ -2675,6 +5111,77 @@ function attachTooltip(svg) {
   };
 
   svg.addEventListener("pointermove", (event) => {
+    if (panDragState && panDragState.pointerId === event.pointerId) {
+      event.preventDefault();
+      const dx = event.clientX - panDragState.startClientX;
+      const dy = event.clientY - panDragState.startClientY;
+      canvasPanX = panDragState.startPanX + dx;
+      canvasPanY = panDragState.startPanY + dy;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+        panDragState.moved = true;
+      }
+      applyCanvasPan();
+      return;
+    }
+    if (printMode) {
+      if (
+        printDragState &&
+        printDragState.pointerId === event.pointerId &&
+        (
+          printDragState.kind === "column" ||
+          printDragState.kind === "label" ||
+          printDragState.kind === "combo-x" ||
+          printDragState.kind === "custom-text"
+        )
+      ) {
+        event.preventDefault();
+        const dx = event.clientX - printDragState.startClientX;
+        const dy = event.clientY - printDragState.startClientY;
+        if (printDragState.kind === "column") {
+          state.printColumnOverrides = {
+            ...(state.printColumnOverrides || {}),
+            [printDragState.id]: printDragState.startX + dx,
+          };
+          scheduleRender(0);
+        } else if (printDragState.kind === "label") {
+          state.printLabelOffsets = {
+            ...(state.printLabelOffsets || {}),
+            [printDragState.id]: {
+              dx: printDragState.startDx + dx,
+              dy: printDragState.startDy + dy,
+            },
+          };
+          scheduleRender(0);
+        } else if (printDragState.kind === "combo-x") {
+          const nextX = clamp(printDragState.startX + dx, printDragState.minX, printDragState.maxX);
+          state.printComponentXOverrides = {
+            ...(state.printComponentXOverrides || {}),
+            [printDragState.id]: nextX,
+          };
+          if (printDragState.dragElement) {
+            const previewDx = nextX - printDragState.startX;
+            printDragState.dragElement.setAttribute("transform", `translate(${previewDx},0)`);
+          }
+          if (Math.abs(dx) > 2) {
+            printDragState.moved = true;
+          }
+        } else if (printDragState.kind === "custom-text") {
+          const currentLocal = clientToDiagramPoint(event.clientX, event.clientY);
+          if (!currentLocal) {
+            return;
+          }
+          const nextX = printDragState.startX + (currentLocal.x - printDragState.startLocalX);
+          const nextY = printDragState.startY + (currentLocal.y - printDragState.startLocalY);
+          state.printCustomTexts = (state.printCustomTexts || []).map((item) =>
+            item.id === printDragState.id
+              ? { ...item, x: nextX, y: nextY }
+              : item
+          );
+          scheduleRender(0);
+        }
+      }
+      return;
+    }
     if (!(event.target instanceof Element)) {
       clearHighlightedSourceDots();
       tooltipEl.hidden = true;
@@ -2696,9 +5203,47 @@ function attachTooltip(svg) {
     placeTooltip(event);
   });
 
+  svg.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+      const factor = Math.exp(-event.deltaY * 0.0015);
+      state.viewZoom = clamp((Number(state.viewZoom) || 1) * factor, 0.3, 3);
+      if (viewZoomInput) {
+        viewZoomInput.value = String(state.viewZoom);
+      }
+      if (viewZoomReadout) {
+        viewZoomReadout.textContent = `${Math.round(state.viewZoom * 100)}%`;
+      }
+      applyCanvasPan();
+      scheduleStateUrlUpdate();
+    },
+    { passive: false }
+  );
+
   svg.addEventListener("pointerleave", () => {
-    clearHighlightedSourceDots();
-    tooltipEl.hidden = true;
+    if (!printMode) {
+      clearHighlightedSourceDots();
+      tooltipEl.hidden = true;
+    }
+  });
+
+  svg.addEventListener("pointerup", (event) => {
+    if (endCanvasPan(event)) {
+      return;
+    }
+    if (!printMode) {
+      return;
+    }
+    endPrintDrag(event, { cancelled: false });
+  });
+
+  svg.addEventListener("pointercancel", (event) => {
+    endCanvasPan(event);
+    if (!printMode) {
+      return;
+    }
+    endPrintDrag(event, { cancelled: true });
   });
 
   svg.addEventListener("pointerdown", (event) => {
@@ -2707,6 +5252,204 @@ function attachTooltip(svg) {
     }
     if (!(event.target instanceof Element)) {
       return;
+    }
+    if (printMode) {
+      const hideTarget = event.target.closest("[data-hide-key]");
+      if (event.altKey && hideTarget) {
+        const hideKey = hideTarget.getAttribute("data-hide-key");
+        if (hideKey) {
+          const next = { ...(state.printHiddenKeys || {}) };
+          next[hideKey] = !next[hideKey];
+          state.printHiddenKeys = next;
+          event.preventDefault();
+          scheduleRender();
+          return;
+        }
+      }
+      const labelTarget = event.target.closest("[data-print-label-id]");
+      if (labelTarget) {
+        const labelId = labelTarget.getAttribute("data-print-label-id");
+        if (labelId) {
+          printLabelDragFocus = labelDragFocusFromElement(labelTarget, labelId);
+          const offset = state.printLabelOffsets?.[labelId] || {};
+          const fallbackDx = Number(labelTarget.getAttribute("data-print-default-dx"));
+          const fallbackDy = Number(labelTarget.getAttribute("data-print-default-dy"));
+          beginPrintDrag({
+            kind: "label",
+            id: labelId,
+            pointerId: event.pointerId,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            startDx: Number.isFinite(offset.dx)
+              ? offset.dx
+              : Number.isFinite(fallbackDx)
+                ? fallbackDx
+                : 9,
+            startDy: Number.isFinite(offset.dy)
+              ? offset.dy
+              : Number.isFinite(fallbackDy)
+                ? fallbackDy
+                : -7,
+          }, event);
+          event.preventDefault();
+          return;
+        }
+      }
+      const customTextTarget = event.target.closest("[data-custom-text-id]");
+      if (customTextTarget) {
+        if (event.detail > 1) {
+          event.preventDefault();
+          return;
+        }
+        const customId = customTextTarget.getAttribute("data-custom-text-id");
+        const customItem = (state.printCustomTexts || []).find((item) => item.id === customId);
+        const startLocal = clientToDiagramPoint(event.clientX, event.clientY);
+        if (customId && customItem) {
+          state.printSelectedCustomTextId = customId;
+          beginPrintDrag({
+            kind: "custom-text",
+            id: customId,
+            pointerId: event.pointerId,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            startX: Number(customItem.x) || 0,
+            startY: Number(customItem.y) || 0,
+            startLocalX: Number(startLocal?.x) || 0,
+            startLocalY: Number(startLocal?.y) || 0,
+          }, event);
+          event.preventDefault();
+          scheduleRender(0);
+          return;
+        }
+      }
+      const chordTitleTarget = event.target.closest("[data-print-chord-title-index]");
+      if (chordTitleTarget && event.detail > 1) {
+        event.preventDefault();
+        return;
+      }
+      const columnTarget = event.target.closest("[data-column-id]");
+      if (columnTarget) {
+        const columnId = columnTarget.getAttribute("data-column-id");
+        if (columnId) {
+          const currentX = Number(state.printColumnOverrides?.[columnId]);
+          let startX = currentX;
+          if (!Number.isFinite(startX)) {
+            const origin = Number(columnTarget.getAttribute("data-column-origin"));
+            if (Number.isFinite(origin)) {
+              startX = origin;
+            } else {
+              const bounds = columnTarget.getBBox();
+              startX = bounds.x + bounds.width / 2;
+            }
+          }
+          beginPrintDrag({
+            kind: "column",
+            id: columnId,
+            pointerId: event.pointerId,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            startX,
+          }, event);
+          event.preventDefault();
+          return;
+        }
+      }
+      const componentTarget = event.target.closest("[data-component-key]");
+      const comboTarget = event.target.closest("[data-play-kind='combo'][data-play-key]");
+      if (comboTarget && !state.printDistanceMode) {
+        const comboKey = comboTarget.getAttribute("data-play-key");
+        const minX = Number(comboTarget.getAttribute("data-combo-drag-min"));
+        const maxX = Number(comboTarget.getAttribute("data-combo-drag-max"));
+        const freq = Number(comboTarget.getAttribute("data-play-freq"));
+        if (comboKey && Number.isFinite(minX) && Number.isFinite(maxX) && minX < maxX) {
+          const currentX = Number(state.printComponentXOverrides?.[comboKey]);
+          const startX = Number.isFinite(currentX)
+            ? currentX
+            : (() => {
+                const box = comboTarget.getBBox();
+                return box.x + box.width / 2;
+              })();
+          beginPrintDrag({
+            kind: "combo-x",
+            id: comboKey,
+            pointerId: event.pointerId,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            startX,
+            minX,
+            maxX,
+            dragElement: comboTarget,
+            moved: false,
+            freq,
+          }, event);
+          event.preventDefault();
+          return;
+        }
+      }
+      if (componentTarget && state.printDistanceMode) {
+        const componentKey = componentTarget.getAttribute("data-component-key");
+        if (componentKey) {
+          if (!printDistancePendingKey) {
+            printDistancePendingKey = componentKey;
+          } else if (printDistancePendingKey === componentKey) {
+            printDistancePendingKey = null;
+          } else {
+            const annotations = Array.isArray(state.printDistanceAnnotations)
+              ? [...state.printDistanceAnnotations]
+              : [];
+            const exists = annotations.some(
+              (item) =>
+                (item.aKey === printDistancePendingKey && item.bKey === componentKey) ||
+                (item.aKey === componentKey && item.bKey === printDistancePendingKey)
+            );
+            if (!exists) {
+              annotations.push({
+                id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                aKey: printDistancePendingKey,
+                bKey: componentKey,
+              });
+              state.printDistanceAnnotations = annotations;
+            }
+            printDistancePendingKey = null;
+          }
+          event.preventDefault();
+          scheduleRender();
+          return;
+        }
+      }
+      if (isPanEligibleTarget(event.target)) {
+        if (state.printSelectedCustomTextId) {
+          state.printSelectedCustomTextId = null;
+          scheduleRender(0);
+        }
+        beginCanvasPan(event);
+        event.preventDefault();
+      }
+      return;
+    }
+    const chordActionTarget = event.target.closest("[data-chord-action][data-chord-index]");
+    if (chordActionTarget) {
+      const chordIndex = Number(chordActionTarget.getAttribute("data-chord-index"));
+      const action = chordActionTarget.getAttribute("data-chord-action");
+      if (Number.isFinite(chordIndex) && action) {
+        event.preventDefault();
+        applyChordPlaybackAction(chordIndex, action);
+      }
+      return;
+    }
+    const roughnessTarget = event.target.closest("[data-rough-play-items]");
+    if (roughnessTarget) {
+      const encoded = roughnessTarget.getAttribute("data-rough-play-items") || "";
+      if (encoded) {
+        try {
+          const payload = JSON.parse(decodeURIComponent(encoded));
+          if (Array.isArray(payload) && payload.length) {
+            event.preventDefault();
+            applyRoughnessBandPlaybackToggle(payload);
+            return;
+          }
+        } catch {}
+      }
     }
     const alignTarget = event.target.closest("[data-align-band='1']");
     const playTarget = event.target.closest("[data-play-key][data-play-freq]");
@@ -2721,6 +5464,10 @@ function attachTooltip(svg) {
       scheduleRender();
     }
     if (!playTarget) {
+      if (isPanEligibleTarget(event.target)) {
+        beginCanvasPan(event);
+        event.preventDefault();
+      }
       return;
     }
     const key = playTarget.getAttribute("data-play-key");
@@ -2737,6 +5484,12 @@ function attachTooltip(svg) {
             noteIndex: Number(playTarget.getAttribute("data-play-note-index")),
             harmonic: Number(playTarget.getAttribute("data-play-harmonic")),
           }
+        : kind === "fusion"
+          ? {
+              kind: "fusion",
+              freq,
+              ampScale: clamp(Number(playTarget.getAttribute("data-play-scale")) || 0.2, 0.04, 1),
+            }
         : { kind: "combo", freq };
     if (lKeyHeld) {
       armTargetLfoCycle(key, targetMeta);
@@ -2749,9 +5502,91 @@ function attachTooltip(svg) {
       }
     }
   });
+
+  svg.addEventListener("dblclick", (event) => {
+    if (!printMode || !(event.target instanceof Element)) {
+      return;
+    }
+    const customTextTarget = event.target.closest("[data-custom-text-id]");
+    if (customTextTarget) {
+      const customId = customTextTarget.getAttribute("data-custom-text-id");
+      const customItem = (state.printCustomTexts || []).find((item) => item.id === customId);
+      if (!customId || !customItem) {
+        return;
+      }
+      event.preventDefault();
+      state.printSelectedCustomTextId = customId;
+      openCustomTextDialog(String(customItem.text || ""), {
+        font: customItem.font || "Noto Serif",
+        size: customItem.size ?? 18,
+      }).then((result) => {
+        if (!result) {
+          scheduleRender(0);
+          return;
+        }
+        const nextText = String(result.text || "").trim();
+        if (!nextText) {
+          scheduleRender(0);
+          return;
+        }
+        state.printCustomTexts = (state.printCustomTexts || []).map((item) =>
+          item.id === customId
+            ? {
+                ...item,
+                text: nextText,
+                font: String(result.font || item.font || "Noto Serif"),
+                size: clamp(Number(result.size ?? item.size ?? 18), 8, 72),
+              }
+            : item
+        );
+        scheduleRender();
+        scheduleStateUrlUpdate();
+      });
+      return;
+    }
+    const chordTitleTarget = event.target.closest("[data-print-chord-title-index]");
+    if (chordTitleTarget) {
+      const chordIndex = Number(chordTitleTarget.getAttribute("data-print-chord-title-index"));
+      if (!Number.isInteger(chordIndex) || chordIndex < 0) {
+        return;
+      }
+      event.preventDefault();
+      const defaultChordTitle = `Chord ${chordIndex + 1}`;
+      const currentTitle = String(state.printChordTitleOverrides?.[chordIndex] || "").trim() || defaultChordTitle;
+      openCustomTextDialog(currentTitle, {
+        title: `Edit ${defaultChordTitle}`,
+        saveText: "Save",
+        font: state.printCustomLabelFont || "Noto Serif",
+        size: state.printCustomLabelSize || 18,
+      }).then((result) => {
+        if (!result) {
+          return;
+        }
+        const next = String(result.text || "").trim();
+        const overrides = { ...(state.printChordTitleOverrides || {}) };
+        if (!next || next === defaultChordTitle) {
+          delete overrides[chordIndex];
+        } else {
+          overrides[chordIndex] = next;
+        }
+        state.printChordTitleOverrides = overrides;
+        scheduleRender();
+        scheduleStateUrlUpdate();
+      });
+      return;
+    }
+  });
 }
 
 function syncControlReadouts() {
+  syncModeButtons();
+  syncColorSchemeControl();
+  if (viewZoomReadout) {
+    viewZoomReadout.textContent = `${Math.round((Number(state.viewZoom) || 1) * 100)}%`;
+  }
+  if (layoutScaleReadout) {
+    layoutScaleReadout.textContent = `${Math.round((Number(state.layoutScale) || 1) * 100)}%`;
+  }
   overtoneCountReadout.textContent = String(state.overtoneCount);
   alignToleranceReadout.textContent = `${state.alignToleranceCents.toFixed(1)}c`;
   if (fusionClusterCentsReadout) {
@@ -2760,11 +5595,89 @@ function syncControlReadouts() {
   rangeMinInput.disabled = state.autoRange;
   rangeMaxInput.disabled = state.autoRange;
   combinationControls.style.opacity = state.showCombination ? "1" : "0.6";
+  comboDifferenceInput.disabled = !state.showCombination;
+  comboSumInput.disabled = !state.showCombination;
+  comboOrder2Input.disabled = !state.showCombination;
+  if (comboSizeInput) {
+    comboSizeInput.disabled = !state.showCombination;
+  }
   if (fusionControls) {
     fusionControls.style.opacity = state.showFusion ? "1" : "0.78";
   }
+  if (fusionReadoutRatioInput) {
+    fusionReadoutRatioInput.disabled = !state.showFusion;
+  }
+  if (fusionReadoutHzInput) {
+    fusionReadoutHzInput.disabled = !state.showFusion;
+  }
   if (roughnessControls) {
     roughnessControls.style.opacity = state.showRoughness ? "1" : "0.78";
+  }
+  if (printShowComponentHzInput) {
+    printShowComponentHzInput.disabled = !state.printShowComponentLabel;
+  }
+  if (printShowComponentRatioInput) {
+    printShowComponentRatioInput.disabled = !state.printShowComponentLabel;
+  }
+  if (printShowLegendInput) {
+    printShowLegendInput.disabled = !state.showCombination;
+  }
+  if (printDistanceModeInput) {
+    printDistanceModeInput.disabled = !isPrintMode();
+  }
+  if (printTextStylesPanel) {
+    printTextStylesPanel.hidden = !isPrintMode();
+  }
+  const styleOvertone = getPrintAutoTextStyle("overtone");
+  const styleComponent = getPrintAutoTextStyle("component");
+  const styleAxis = getPrintAutoTextStyle("axis");
+  if (printStyleOvertoneFontInput) printStyleOvertoneFontInput.value = styleOvertone.font;
+  if (printStyleOvertoneSizeInput) printStyleOvertoneSizeInput.value = String(styleOvertone.size);
+  if (printStyleOvertoneSizeReadout) printStyleOvertoneSizeReadout.textContent = `${styleOvertone.size}`;
+  if (printStyleComponentFontInput) printStyleComponentFontInput.value = styleComponent.font;
+  if (printStyleComponentSizeInput) printStyleComponentSizeInput.value = String(styleComponent.size);
+  if (printStyleComponentSizeReadout) printStyleComponentSizeReadout.textContent = `${styleComponent.size}`;
+  if (printStyleAxisFontInput) printStyleAxisFontInput.value = styleAxis.font;
+  if (printStyleAxisSizeInput) printStyleAxisSizeInput.value = String(styleAxis.size);
+  if (printStyleAxisSizeReadout) printStyleAxisSizeReadout.textContent = `${styleAxis.size}`;
+  if (printAddCustomTextButton) {
+    printAddCustomTextButton.textContent = "Add Custom Text";
+  }
+  let selectedCustom = getSelectedCustomTextItem();
+  if (!selectedCustom && state.printSelectedCustomTextId) {
+    state.printSelectedCustomTextId = null;
+    selectedCustom = null;
+  }
+  if (customTextInspector) {
+    customTextInspector.hidden = !selectedCustom || !isPrintMode();
+  }
+  syncingCustomInspector = true;
+  try {
+    if (printCustomSelectedTextInput) {
+      printCustomSelectedTextInput.value = selectedCustom ? String(selectedCustom.text || "") : "";
+      printCustomSelectedTextInput.disabled = !selectedCustom || !isPrintMode();
+    }
+    if (printCustomSelectedFontInput) {
+      printCustomSelectedFontInput.value = selectedCustom
+        ? String(selectedCustom.font || "Noto Serif")
+        : "Noto Serif";
+      printCustomSelectedFontInput.disabled = !selectedCustom || !isPrintMode();
+    }
+    if (printCustomSelectedSizeInput) {
+      const size = selectedCustom
+        ? clamp(Number(selectedCustom.size) || 18, 8, 72)
+        : 18;
+      printCustomSelectedSizeInput.value = String(size);
+      printCustomSelectedSizeInput.disabled = !selectedCustom || !isPrintMode();
+      if (printCustomSelectedSizeReadout) {
+        printCustomSelectedSizeReadout.textContent = String(size);
+      }
+    }
+    if (printCustomDeleteSelectedButton) {
+      printCustomDeleteSelectedButton.disabled = !selectedCustom || !isPrintMode();
+    }
+  } finally {
+    syncingCustomInspector = false;
   }
 }
 
@@ -2819,8 +5732,14 @@ function renderChart() {
   const svg = buildChartSvg(chartModel, width, height);
   chartStage.replaceChildren(svg);
   attachTooltip(svg);
-  startVisualAnimationLoop(svg);
-  refreshActiveVoicesFromState();
+  if (!isPrintMode()) {
+    startVisualAnimationLoop(svg);
+  }
+  if (isPrintMode()) {
+    hardAllNotesOff();
+  } else {
+    refreshActiveVoicesFromState();
+  }
 
   updateStatus(chartModel);
 }
@@ -2851,6 +5770,16 @@ function clampExportSize(value, fallback) {
   return clamp(Math.round(value), 300, 6000);
 }
 
+function exportSizeFromPaperPreset() {
+  const presets = {
+    "letter-portrait": { width: 1700, height: 2200 },
+    "letter-landscape": { width: 2200, height: 1700 },
+    "a4-portrait": { width: 1654, height: 2339 },
+    "a4-landscape": { width: 2339, height: 1654 },
+  };
+  return presets[state.printPaper] || presets["letter-landscape"];
+}
+
 function buildExportSvgString(width, height, options = {}) {
   const model = buildModel();
   const svg = buildChartSvg(model, width, height);
@@ -2878,8 +5807,13 @@ function escapeHtml(value) {
 }
 
 function exportSvg() {
-  const width = clampExportSize(state.exportWidth, 1800);
-  const height = clampExportSize(state.exportHeight, 1100);
+  const paperSize = exportSizeFromPaperPreset();
+  const width = isPrintMode()
+    ? paperSize.width
+    : clampExportSize(state.exportWidth, 1800);
+  const height = isPrintMode()
+    ? paperSize.height
+    : clampExportSize(state.exportHeight, 1100);
   const svgText = buildExportSvgString(width, height, { withXmlHeader: true });
   downloadBlob(
     `overtones-${new Date().toISOString().slice(0, 10)}.svg`,
@@ -2888,8 +5822,13 @@ function exportSvg() {
 }
 
 function exportPdf() {
-  const width = clampExportSize(state.exportWidth, 1800);
-  const height = clampExportSize(state.exportHeight, 1100);
+  const paperSize = exportSizeFromPaperPreset();
+  const width = isPrintMode()
+    ? paperSize.width
+    : clampExportSize(state.exportWidth, 1800);
+  const height = isPrintMode()
+    ? paperSize.height
+    : clampExportSize(state.exportHeight, 1100);
   const svgText = buildExportSvgString(width, height, { withXmlHeader: false });
   const win = window.open("", "_blank");
   if (!win) {
@@ -2945,8 +5884,28 @@ a4HzInput.addEventListener("input", () => {
   scheduleRender();
 });
 
+if (viewZoomInput) {
+  viewZoomInput.addEventListener("input", () => {
+    state.viewZoom = clamp(getNumericInputValue(viewZoomInput, 1), 0.3, 3);
+    if (viewZoomReadout) {
+      viewZoomReadout.textContent = `${Math.round(state.viewZoom * 100)}%`;
+    }
+    scheduleRender(0);
+  });
+}
+
+if (layoutScaleInput) {
+  layoutScaleInput.addEventListener("input", () => {
+    state.layoutScale = clamp(getNumericInputValue(layoutScaleInput, 1), 0.6, 1.8);
+    if (layoutScaleReadout) {
+      layoutScaleReadout.textContent = `${Math.round(state.layoutScale * 100)}%`;
+    }
+    scheduleRender();
+  });
+}
+
 overtoneCountInput.addEventListener("input", () => {
-  state.overtoneCount = clamp(Math.round(getNumericInputValue(overtoneCountInput, 16)), 2, 48);
+  state.overtoneCount = clamp(Math.round(getNumericInputValue(overtoneCountInput, 8)), 2, 48);
   scheduleRender();
 });
 
@@ -2965,6 +5924,28 @@ if (harmonicScalingInput) {
       harmonicScalingInput.value = "pink";
     }
     refreshActiveVoicesFromState();
+    scheduleRender();
+  });
+}
+
+if (colorSchemeInput) {
+  colorSchemeInput.addEventListener("change", () => {
+    const next = colorSchemeInput.value;
+    if (isPrintMode()) {
+      if (next === "greyscale" || isColorSchemeId(next)) {
+        state.printColorMode = next;
+      } else {
+        state.printColorMode = "greyscale";
+        colorSchemeInput.value = "greyscale";
+      }
+    } else {
+      if (isColorSchemeId(next)) {
+        state.colorScheme = next;
+      } else {
+        state.colorScheme = "hayward-vine";
+        colorSchemeInput.value = state.colorScheme;
+      }
+    }
     scheduleRender();
   });
 }
@@ -3002,19 +5983,35 @@ pointSizeInput.addEventListener("input", () => {
   scheduleRender();
 });
 
+if (comboSizeInput) {
+  comboSizeInput.addEventListener("input", () => {
+    state.comboSize = clamp(getNumericInputValue(comboSizeInput, 4), 2, 10);
+    scheduleRender();
+  });
+}
+
 showAlignmentsInput.addEventListener("change", () => {
   state.showAlignments = showAlignmentsInput.checked;
   scheduleRender();
 });
 
-showLabelsInput.addEventListener("change", () => {
-  state.showLabels = showLabelsInput.checked;
-  scheduleRender();
-});
+if (showLabelsInput) {
+  showLabelsInput.addEventListener("change", () => {
+    state.showLabels = showLabelsInput.checked;
+    scheduleRender();
+  });
+}
 
 if (showOvertoneNumbersInput) {
   showOvertoneNumbersInput.addEventListener("change", () => {
     state.showOvertoneNumbers = showOvertoneNumbersInput.checked;
+    scheduleRender();
+  });
+}
+
+if (showStemsInput) {
+  showStemsInput.addEventListener("change", () => {
+    state.showStems = showStemsInput.checked;
     scheduleRender();
   });
 }
@@ -3024,9 +6021,30 @@ showCombinationInput.addEventListener("change", () => {
   scheduleRender();
 });
 
+if (showChordControlsInput) {
+  showChordControlsInput.addEventListener("change", () => {
+    state.showChordControls = showChordControlsInput.checked;
+    scheduleRender();
+  });
+}
+
 if (showFusionInput) {
   showFusionInput.addEventListener("change", () => {
     state.showFusion = showFusionInput.checked;
+    scheduleRender();
+  });
+}
+
+if (fusionReadoutRatioInput) {
+  fusionReadoutRatioInput.addEventListener("change", () => {
+    state.fusionReadoutRatio = fusionReadoutRatioInput.checked;
+    scheduleRender();
+  });
+}
+
+if (fusionReadoutHzInput) {
+  fusionReadoutHzInput.addEventListener("change", () => {
+    state.fusionReadoutHz = fusionReadoutHzInput.checked;
     scheduleRender();
   });
 }
@@ -3164,17 +6182,28 @@ if (allNotesOffButton) {
   });
 }
 
-exportWidthInput.addEventListener("input", () => {
-  state.exportWidth = clampExportSize(getNumericInputValue(exportWidthInput, 1800), 1800);
-  scheduleStateUrlUpdate();
-});
+if (exportWidthInput) {
+  exportWidthInput.addEventListener("input", () => {
+    state.exportWidth = clampExportSize(getNumericInputValue(exportWidthInput, 1800), 1800);
+    scheduleStateUrlUpdate();
+  });
+}
 
-exportHeightInput.addEventListener("input", () => {
-  state.exportHeight = clampExportSize(getNumericInputValue(exportHeightInput, 1100), 1100);
-  scheduleStateUrlUpdate();
-});
+if (exportHeightInput) {
+  exportHeightInput.addEventListener("input", () => {
+    state.exportHeight = clampExportSize(getNumericInputValue(exportHeightInput, 1100), 1100);
+    scheduleStateUrlUpdate();
+  });
+}
 
 themeToggle.addEventListener("change", () => {
+  if (isPrintMode()) {
+    themeToggle.checked = false;
+    state.themeDark = false;
+    document.body.classList.remove("theme-dark");
+    scheduleRender();
+    return;
+  }
   state.themeDark = themeToggle.checked;
   document.body.classList.toggle("theme-dark", state.themeDark);
   scheduleRender();
@@ -3183,11 +6212,314 @@ themeToggle.addEventListener("change", () => {
 exportSvgButton.addEventListener("click", exportSvg);
 exportPdfButton.addEventListener("click", exportPdf);
 
+if (modeLiveButton) {
+  modeLiveButton.addEventListener("click", () => {
+    setAppMode(MODE_LIVE);
+  });
+}
+
+if (modePrintButton) {
+  modePrintButton.addEventListener("click", () => {
+    setAppMode(MODE_PRINT);
+  });
+}
+
+if (printPaperInput) {
+  printPaperInput.addEventListener("change", () => {
+    state.printPaper = printPaperInput.value || "letter-landscape";
+    scheduleRender();
+  });
+}
+
+if (printMarginInput) {
+  printMarginInput.addEventListener("input", () => {
+    state.printMargin = clamp(getNumericInputValue(printMarginInput, 44), 8, 220);
+    scheduleRender();
+  });
+}
+
+if (printShowComponentLabelInput) {
+  printShowComponentLabelInput.addEventListener("change", () => {
+    state.printShowComponentLabel = printShowComponentLabelInput.checked;
+    scheduleRender();
+  });
+}
+
+if (printShowComponentHzInput) {
+  printShowComponentHzInput.addEventListener("change", () => {
+    state.printShowComponentHz = printShowComponentHzInput.checked;
+    scheduleRender();
+  });
+}
+
+if (printShowComponentRatioInput) {
+  printShowComponentRatioInput.addEventListener("change", () => {
+    state.printShowComponentRatio = printShowComponentRatioInput.checked;
+    scheduleRender();
+  });
+}
+
+if (printShowAxisTextInput) {
+  printShowAxisTextInput.addEventListener("change", () => {
+    state.printShowAxisText = printShowAxisTextInput.checked;
+    scheduleRender();
+  });
+}
+
+if (printShowLegendInput) {
+  printShowLegendInput.addEventListener("change", () => {
+    state.printShowLegend = printShowLegendInput.checked;
+    scheduleRender();
+  });
+}
+
+if (printDistanceModeInput) {
+  printDistanceModeInput.addEventListener("change", () => {
+    state.printDistanceMode = printDistanceModeInput.checked;
+    if (!state.printDistanceMode) {
+      printDistancePendingKey = null;
+    }
+    scheduleRender();
+  });
+}
+
+if (printAddCustomTextButton) {
+  printAddCustomTextButton.addEventListener("click", () => {
+    if (!isPrintMode()) {
+      return;
+    }
+    openCustomTextDialog("").then((result) => {
+      if (!result || !result.text?.trim()) {
+        return;
+      }
+      state.printDistanceMode = false;
+      printDistancePendingKey = null;
+      if (printDistanceModeInput) {
+        printDistanceModeInput.checked = false;
+      }
+      const item = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        text: String(result.text || ""),
+        font: String(result.font || state.printCustomLabelFont || "Noto Serif"),
+        size: clamp(Number(result.size ?? state.printCustomLabelSize ?? 18), 8, 72),
+        x: Number.isFinite(lastDiagramCenter.x) ? lastDiagramCenter.x : 640,
+        y: Number.isFinite(lastDiagramCenter.y) ? lastDiagramCenter.y : 360,
+      };
+      state.printCustomTexts = [...(state.printCustomTexts || []), item];
+      state.printSelectedCustomTextId = item.id;
+      scheduleRender();
+      scheduleStateUrlUpdate();
+    });
+  });
+}
+
+if (printCustomSelectedTextInput) {
+  printCustomSelectedTextInput.addEventListener("input", () => {
+    if (!isPrintMode() || syncingCustomInspector) {
+      return;
+    }
+    if (updateSelectedCustomTextItem({ text: String(printCustomSelectedTextInput.value || "") })) {
+      scheduleRender(0);
+      scheduleStateUrlUpdate();
+    }
+  });
+}
+
+if (printCustomSelectedFontInput) {
+  printCustomSelectedFontInput.addEventListener("change", () => {
+    if (!isPrintMode() || syncingCustomInspector) {
+      return;
+    }
+    const font = printCustomSelectedFontInput.value || "Noto Serif";
+    if (updateSelectedCustomTextItem({ font })) {
+      scheduleRender();
+      scheduleStateUrlUpdate();
+    }
+  });
+}
+
+if (printCustomSelectedSizeInput) {
+  printCustomSelectedSizeInput.addEventListener("input", () => {
+    if (!isPrintMode() || syncingCustomInspector) {
+      return;
+    }
+    const size = clamp(getNumericInputValue(printCustomSelectedSizeInput, 18), 8, 72);
+    if (printCustomSelectedSizeReadout) {
+      printCustomSelectedSizeReadout.textContent = String(size);
+    }
+    if (updateSelectedCustomTextItem({ size })) {
+      scheduleRender(0);
+      scheduleStateUrlUpdate();
+    }
+  });
+}
+
+if (printCustomDeleteSelectedButton) {
+  printCustomDeleteSelectedButton.addEventListener("click", () => {
+    if (!isPrintMode()) {
+      return;
+    }
+    const selected = getSelectedCustomTextItem();
+    if (!selected) {
+      return;
+    }
+    state.printCustomTexts = (state.printCustomTexts || []).filter((item) => item.id !== selected.id);
+    state.printSelectedCustomTextId = null;
+    scheduleRender();
+    scheduleStateUrlUpdate();
+  });
+}
+
+if (customTextSaveButton) {
+  customTextSaveButton.addEventListener("click", () => {
+    if (!isPrintMode()) {
+      closeCustomTextDialog(null);
+      return;
+    }
+    const text = String(customTextInput?.value || "");
+    const font = String(customTextFontInput?.value || "Noto Serif");
+    const size = clamp(Number(customTextSizeInput?.value) || 18, 8, 72);
+    if (customTextDialogMode === "custom") {
+      state.printCustomLabelFont = font;
+      state.printCustomLabelSize = size;
+    }
+    closeCustomTextDialog({ text, font, size });
+  });
+}
+
+if (customTextCancelButton) {
+  customTextCancelButton.addEventListener("click", () => {
+    closeCustomTextDialog(null);
+  });
+}
+
+if (customTextModal) {
+  customTextModal.addEventListener("pointerdown", (event) => {
+    if (event.target === customTextModal) {
+      event.preventDefault();
+      closeCustomTextDialog(null);
+    }
+  });
+}
+
+if (customTextInput) {
+  customTextInput.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "enter") {
+      event.preventDefault();
+      customTextSaveButton?.click();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeCustomTextDialog(null);
+    }
+  });
+}
+
+if (customTextSizeInput) {
+  customTextSizeInput.addEventListener("input", () => {
+    if (!isPrintMode()) {
+      return;
+    }
+    const size = clamp(getNumericInputValue(customTextSizeInput, 18), 8, 72);
+    if (customTextSizeReadout) {
+      customTextSizeReadout.textContent = String(size);
+    }
+  });
+}
+
+if (printDistanceShowRatioInput) {
+  printDistanceShowRatioInput.addEventListener("change", () => {
+    state.printDistanceShowRatio = printDistanceShowRatioInput.checked;
+    scheduleRender();
+  });
+}
+
+if (printDistanceShowHzInput) {
+  printDistanceShowHzInput.addEventListener("change", () => {
+    state.printDistanceShowHz = printDistanceShowHzInput.checked;
+    scheduleRender();
+  });
+}
+
+if (printDistanceShowIntervalInput) {
+  printDistanceShowIntervalInput.addEventListener("change", () => {
+    state.printDistanceShowInterval = printDistanceShowIntervalInput.checked;
+    scheduleRender();
+  });
+}
+
+if (printStyleOvertoneFontInput) {
+  printStyleOvertoneFontInput.addEventListener("change", () => {
+    setPrintAutoTextStyle("overtone", { font: printStyleOvertoneFontInput.value });
+    scheduleRender();
+    scheduleStateUrlUpdate();
+  });
+}
+if (printStyleOvertoneSizeInput) {
+  printStyleOvertoneSizeInput.addEventListener("input", () => {
+    const size = clamp(getNumericInputValue(printStyleOvertoneSizeInput, 8.5), 8, 72);
+    if (printStyleOvertoneSizeReadout) printStyleOvertoneSizeReadout.textContent = `${size}`;
+    setPrintAutoTextStyle("overtone", { size });
+    scheduleRender(0);
+    scheduleStateUrlUpdate();
+  });
+}
+if (printStyleComponentFontInput) {
+  printStyleComponentFontInput.addEventListener("change", () => {
+    setPrintAutoTextStyle("component", { font: printStyleComponentFontInput.value });
+    scheduleRender();
+    scheduleStateUrlUpdate();
+  });
+}
+if (printStyleComponentSizeInput) {
+  printStyleComponentSizeInput.addEventListener("input", () => {
+    const size = clamp(getNumericInputValue(printStyleComponentSizeInput, 9.5), 8, 72);
+    if (printStyleComponentSizeReadout) printStyleComponentSizeReadout.textContent = `${size}`;
+    setPrintAutoTextStyle("component", { size });
+    scheduleRender(0);
+    scheduleStateUrlUpdate();
+  });
+}
+if (printStyleAxisFontInput) {
+  printStyleAxisFontInput.addEventListener("change", () => {
+    setPrintAutoTextStyle("axis", { font: printStyleAxisFontInput.value });
+    scheduleRender();
+    scheduleStateUrlUpdate();
+  });
+}
+if (printStyleAxisSizeInput) {
+  printStyleAxisSizeInput.addEventListener("input", () => {
+    const size = clamp(getNumericInputValue(printStyleAxisSizeInput, 11), 8, 72);
+    if (printStyleAxisSizeReadout) printStyleAxisSizeReadout.textContent = `${size}`;
+    setPrintAutoTextStyle("axis", { size });
+    scheduleRender(0);
+    scheduleStateUrlUpdate();
+  });
+}
+
+if (printResetLayoutButton) {
+  printResetLayoutButton.addEventListener("click", () => {
+    resetPrintLayoutState();
+    scheduleRender();
+  });
+}
+
+if (printRestoreHiddenButton) {
+  printRestoreHiddenButton.addEventListener("click", () => {
+    restorePrintHiddenState();
+    scheduleRender();
+  });
+}
+
 window.addEventListener("resize", () => {
   scheduleRender(40);
 });
 
 window.addEventListener("keydown", (event) => {
+  if (isPrintMode()) {
+    return;
+  }
   if (event.key === "l" || event.key === "L") {
     lKeyHeld = true;
     return;
@@ -3202,13 +6534,45 @@ window.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("keyup", (event) => {
+  if (isPrintMode()) {
+    return;
+  }
   if (event.key === "l" || event.key === "L") {
     lKeyHeld = false;
     commitLfoArmIfNeeded();
   }
 });
 
-applyStateSnapshot(readStateFromUrl());
+const initialUrlState = readStateFromUrl();
+if (
+  initialUrlState &&
+  typeof initialUrlState === "object" &&
+  initialUrlState.live &&
+  initialUrlState.print
+) {
+  modeSnapshots[MODE_LIVE] = cloneJson(initialUrlState.live, null);
+  modeSnapshots[MODE_PRINT] = cloneJson(initialUrlState.print, null);
+  applyStateSnapshot(
+    initialUrlState.mode === MODE_PRINT
+      ? modeSnapshots[MODE_PRINT]
+      : modeSnapshots[MODE_LIVE]
+  );
+  appMode = initialUrlState.mode === MODE_PRINT ? MODE_PRINT : MODE_LIVE;
+} else {
+  applyStateSnapshot(initialUrlState);
+  modeSnapshots[MODE_LIVE] = getStateSnapshotFlat();
+  const printSeed = getStateSnapshotFlat();
+  printSeed.themeDark = false;
+  printSeed.printDistanceMode = false;
+  modeSnapshots[MODE_PRINT] = printSeed;
+  appMode = MODE_LIVE;
+}
+if (appMode === MODE_PRINT) {
+  state.themeDark = false;
+  themeToggle.checked = false;
+  document.body.classList.remove("theme-dark");
+}
+syncModeButtons();
 syncControlReadouts();
 renderChart();
 scheduleStateUrlUpdate(0);

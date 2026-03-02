@@ -31,6 +31,7 @@
         </div>
       </section>
 
+      <div class="left-rail-scroll">
       <section class="control-group">
         <h3 class="group-title">Input</h3>
         <label for="notes-input">Notes (ratios, midi, or hz)</label>
@@ -43,11 +44,25 @@
       </section>
 
       <section class="control-group two-col">
-        <label for="ratio-root-hz">Ratio 1/1</label>
+        <label for="ratio-root-note">Ratio 1/1 note</label>
+        <select id="ratio-root-note"></select>
+
+        <label for="ratio-root-hz">Ratio 1/1 Hz</label>
         <input id="ratio-root-hz" type="number" min="1" max="4000" step="0.01" value="220" />
 
         <label for="a4-hz">A4</label>
         <input id="a4-hz" type="number" min="380" max="470" step="0.01" value="440" />
+
+        <div id="ratio-root-note-custom-wrap" class="two-col two-col-span" hidden>
+          <label for="ratio-root-note-custom">Note letter</label>
+          <input
+            id="ratio-root-note-custom"
+            type="text"
+            value="A"
+            placeholder="e.g. A, C#, Eb"
+            spellcheck="false"
+          />
+        </div>
       </section>
 
       <section class="control-group two-col print-only">
@@ -62,6 +77,11 @@
           <output id="layout-scale-readout" for="layout-scale">100%</output>
         </label>
         <input id="layout-scale" type="range" min="0.6" max="1.8" step="0.01" value="1" />
+        <label for="print-height" class="inline-output-label">
+          <span>Height</span>
+          <output id="print-height-readout" for="print-height">100%</output>
+        </label>
+        <input id="print-height" type="range" min="0.45" max="1" step="0.01" value="1" />
       </section>
 
       <section class="control-group graph-grid">
@@ -89,6 +109,17 @@
         <label for="point-size">Harmonic size</label>
         <input id="point-size" type="range" min="2" max="10" step="0.5" value="4" />
 
+        <label for="stack-line-size" class="inline-output-label">
+          <span>Stack line size</span>
+          <output id="stack-line-size-readout" for="stack-line-size">100%</output>
+        </label>
+        <input id="stack-line-size" type="range" min="25" max="300" step="1" value="100" />
+
+        <label class="checkline two-col-span" for="alpha-falloff">
+          <input id="alpha-falloff" type="checkbox" checked />
+          <span>Alpha</span>
+        </label>
+
         <label for="color-scheme">Color scheme</label>
         <select id="color-scheme">
           <option value="greyscale">Greyscale</option>
@@ -113,6 +144,34 @@
           <label for="range-max">Max Hz</label>
           <input id="range-max" type="number" min="1" max="40000" step="0.01" value="6000" />
         </div>
+      </section>
+
+      <section class="control-group print-only">
+        <h3 class="group-title">Labels</h3>
+        <label class="checkline" for="print-show-component-label">
+          <input id="print-show-component-label" type="checkbox" checked />
+          <span>Show component readouts</span>
+        </label>
+        <label class="checkline" for="print-show-component-hz">
+          <input id="print-show-component-hz" type="checkbox" checked />
+          <span>Component Hz</span>
+        </label>
+        <label class="checkline" for="print-show-component-ratio">
+          <input id="print-show-component-ratio" type="checkbox" />
+          <span>Component ratio</span>
+        </label>
+        <label class="checkline" for="print-show-component-note">
+          <input id="print-show-component-note" type="checkbox" />
+          <span>Component note spelling</span>
+        </label>
+        <label class="checkline" for="print-show-axis-text">
+          <input id="print-show-axis-text" type="checkbox" checked />
+          <span>Axis text (Hz + Y label)</span>
+        </label>
+        <label class="checkline" for="print-show-legend">
+          <input id="print-show-legend" type="checkbox" checked />
+          <span>Summation/difference legend</span>
+        </label>
       </section>
 
       <section class="control-group two-col">
@@ -152,6 +211,12 @@
           <label for="fusion-cluster-cents">Fusion tol</label>
           <input id="fusion-cluster-cents" type="range" min="0" max="4" step="0.1" value="1" />
           <output id="fusion-cluster-cents-readout" for="fusion-cluster-cents">1.0c</output>
+
+          <label for="fusion-scale" class="inline-output-label">
+            <span>Fusion scale</span>
+            <output id="fusion-scale-readout" for="fusion-scale">100%</output>
+          </label>
+          <input id="fusion-scale" type="range" min="50" max="150" step="1" value="100" />
         </div>
       </section>
 
@@ -214,30 +279,6 @@
           <label for="print-margin">Margin px</label>
           <input id="print-margin" type="number" min="8" max="220" step="1" value="44" />
         </div>
-      </section>
-
-      <section class="control-group print-only">
-        <h3 class="group-title">Print Content</h3>
-        <label class="checkline" for="print-show-component-label">
-          <input id="print-show-component-label" type="checkbox" checked />
-          <span>Show component readouts</span>
-        </label>
-        <label class="checkline" for="print-show-component-hz">
-          <input id="print-show-component-hz" type="checkbox" checked />
-          <span>Component Hz</span>
-        </label>
-        <label class="checkline" for="print-show-component-ratio">
-          <input id="print-show-component-ratio" type="checkbox" />
-          <span>Component ratio</span>
-        </label>
-        <label class="checkline" for="print-show-axis-text">
-          <input id="print-show-axis-text" type="checkbox" checked />
-          <span>Axis text (Hz + Y label)</span>
-        </label>
-        <label class="checkline" for="print-show-legend">
-          <input id="print-show-legend" type="checkbox" checked />
-          <span>Summation/difference legend</span>
-        </label>
       </section>
 
       <section class="control-group print-only">
@@ -346,6 +387,7 @@
       <section class="control-group print-only">
         <h3 class="group-title">Custom Text</h3>
         <button id="print-add-custom-text" type="button">Add Custom Text</button>
+        <button id="print-add-custom-label" type="button">Add Custom Label</button>
         <div id="custom-text-inspector" hidden>
           <label for="print-custom-selected-text">Selected Text</label>
           <textarea id="print-custom-selected-text" rows="3" spellcheck="false"></textarea>
@@ -418,47 +460,33 @@
         <button id="export-pdf" type="button">PDF</button>
       </section>
 
+      <section class="control-group export-buttons">
+        <button id="save-chart" type="button">Save Chart</button>
+        <button id="open-chart" type="button">Open Chart</button>
+        <input id="open-chart-input" type="file" accept=".json,application/json" hidden />
+      </section>
+
       <label class="theme-toggle live-only" for="theme-toggle">
         <input id="theme-toggle" type="checkbox" />
         <span>Dark mode</span>
       </label>
 
       <p id="status" class="status"></p>
+      </div>
     </main>
-
-    <script type="module" src="./main.js"></script>
 
     <div id="custom-text-modal" class="custom-text-modal" hidden>
       <div class="custom-text-card panel" role="dialog" aria-modal="true" aria-label="Custom text">
         <h3>Custom Text</h3>
         <label for="custom-text-input">Text</label>
         <textarea id="custom-text-input" rows="4" spellcheck="false"></textarea>
-        <div class="two-col">
-          <label for="custom-text-font">Font</label>
-          <select id="custom-text-font">
-            <option value="Noto Serif">Noto Serif</option>
-            <option value="Lexend">Lexend</option>
-            <option value="Inter">Inter</option>
-            <option value="IBM Plex Sans">IBM Plex Sans</option>
-            <option value="Lato">Lato</option>
-            <option value="PT Sans">PT Sans</option>
-            <option value="PT Serif">PT Serif</option>
-            <option value="iAWriterDuoS">iAWriterDuoS</option>
-            <option value="iAWriterMonoS">iAWriterMonoS</option>
-            <option value="Radley">Radley</option>
-            <option value="Alice">Alice</option>
-          </select>
-          <label for="custom-text-size" class="inline-output-label">
-            <span>Size</span>
-            <output id="custom-text-size-readout" for="custom-text-size">18</output>
-          </label>
-          <input id="custom-text-size" type="range" min="8" max="72" step="1" value="18" />
-        </div>
         <div class="custom-text-actions">
           <button id="custom-text-cancel" type="button">Cancel</button>
           <button id="custom-text-save" type="button">Add Text</button>
         </div>
       </div>
     </div>
+
+    <script type="module" src="./main.js"></script>
   </body>
 </html>

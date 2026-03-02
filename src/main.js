@@ -131,6 +131,7 @@ const distanceSelectTriggers = document.querySelectorAll("[data-distance-select]
 const fileToggle = document.getElementById("file-toggle");
 const filePanel = document.getElementById("file-panel");
 const sharePresetButton = document.getElementById("share-preset");
+const openOvertonesButton = document.getElementById("open-overtones");
 const openTunerButton = document.getElementById("open-tuner");
 const fileSharePopover = document.getElementById("file-share-popover");
 const saveLatticeButton = document.getElementById("save-lattice");
@@ -23861,6 +23862,97 @@ function collectActiveNodeRatiosForTuner() {
     .map((item) => `${item.numerator}/${item.denominator}`);
 }
 
+function collectRatiosFromNodeList(nodeList) {
+  const seen = new Set();
+  return (Array.isArray(nodeList) ? nodeList : [])
+    .filter((node) => node && node.active)
+    .map((node) => reduceFraction(node.numerator, node.denominator))
+    .filter((item) => item && item.numerator > 0 && item.denominator > 0)
+    .map((item) => ({
+      numerator: item.numerator,
+      denominator: item.denominator,
+      ratio: item.numerator / item.denominator,
+    }))
+    .sort((a, b) => a.ratio - b.ratio)
+    .filter((item) => {
+      const key = `${item.numerator}/${item.denominator}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .map((item) => `${item.numerator}/${item.denominator}`);
+}
+
+function collectPlayingNodeRatiosForOvertones() {
+  const playingIds = new Set();
+  voices.forEach((voice) => {
+    if (!voice || voice.releasing || !Number.isFinite(voice.nodeId)) {
+      return;
+    }
+    playingIds.add(voice.nodeId);
+  });
+  if (!playingIds.size) {
+    return [];
+  }
+  const playingNodes = [];
+  playingIds.forEach((id) => {
+    const node = nodeById.get(id);
+    if (node) {
+      playingNodes.push(node);
+    }
+  });
+  return collectRatiosFromNodeList(playingNodes);
+}
+
+function collectPreferredOvertonesRatios() {
+  const playingRatios = collectPlayingNodeRatiosForOvertones();
+  if (playingRatios.length) {
+    return playingRatios;
+  }
+  const activeNodeIds = new Set();
+  const activeNodes = [];
+  const addActiveNode = (node) => {
+    if (!node || !node.active) {
+      return;
+    }
+    if (activeNodeIds.has(node.id)) {
+      return;
+    }
+    activeNodeIds.add(node.id);
+    activeNodes.push(node);
+  };
+  nodes.forEach(addActiveNode);
+  customNodes.forEach(addActiveNode);
+  return collectRatiosFromNodeList(activeNodes);
+}
+
+function encodeBase64UrlUtf8(value) {
+  const json = JSON.stringify(value);
+  const utf8 = encodeURIComponent(json).replace(
+    /%([0-9A-F]{2})/g,
+    (_, hex) => String.fromCharCode(parseInt(hex, 16))
+  );
+  return btoa(utf8).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function openOvertonesFromMenu() {
+  const ratios = collectPreferredOvertonesRatios();
+  const notesText = ratios.join(" ");
+  const overtonesStateDoc = {
+    format: "overtones-chart-state",
+    version: 2,
+    savedAt: new Date().toISOString(),
+    data: {
+      notesText,
+    },
+  };
+  const encoded = encodeBase64UrlUtf8(overtonesStateDoc);
+  const target = `./overtones/#o=${encoded}`;
+  window.open(target, "_blank", "noopener,noreferrer");
+}
+
 function openTunerFromFileMenu() {
   const params = new URLSearchParams();
   const fundamental = Number(fundamentalInput && fundamentalInput.value);
@@ -26328,6 +26420,10 @@ bindOptionalClick(sharePresetButton, async () => {
   } catch (error) {
     showFileSharePopover("Couldn't copy the preset URL. Try again.");
   }
+});
+bindOptionalClick(openOvertonesButton, () => {
+  openOvertonesFromMenu();
+  closeFilePanel();
 });
 bindOptionalClick(openTunerButton, () => {
   openTunerFromFileMenu();

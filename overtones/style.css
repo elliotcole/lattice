@@ -75,10 +75,17 @@
   font-style: normal;
 }
 
+@font-face {
+  font-family: "HEJI2Text";
+  src: url("../src/HEJI2Text.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+}
+
 :root {
   color-scheme: light;
   --controls-left: 12px;
-  --controls-top: 58px;
+  --controls-top: 88px;
   --controls-width: 252px;
   --controls-gap: 22px;
   --chart-left: calc(var(--controls-left) + var(--controls-width) + var(--controls-gap));
@@ -240,13 +247,21 @@ code {
   left: var(--controls-left);
   width: min(var(--controls-width), calc(100vw - 24px));
   max-height: calc(100vh - 70px);
-  overflow: auto;
+  overflow: hidden;
   padding: 12px;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   background: color-mix(in srgb, var(--panel), transparent 20%);
   opacity: 0.28;
   transition: opacity 0.2s ease;
+}
+
+.left-rail-scroll {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
 }
 
 .left-rail:hover,
@@ -299,6 +314,14 @@ body.mode-print .chart-tooltip {
   background: color-mix(in srgb, var(--panel-solid), transparent 48%);
 }
 
+.control-group.print-only {
+  display: none;
+}
+
+body.mode-print .control-group.print-only {
+  display: grid;
+}
+
 .control-group .group-title {
   grid-column: 1 / -1;
 }
@@ -326,6 +349,10 @@ body.mode-print .chart-tooltip {
 
 .two-col-span {
   grid-column: 1 / -1;
+}
+
+#ratio-root-note-custom-wrap[hidden] {
+  display: none;
 }
 
 .group-title {

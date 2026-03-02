@@ -10,12 +10,17 @@ const modeLiveButton = document.getElementById("mode-live");
 const modePrintButton = document.getElementById("mode-print");
 
 const notesInput = document.getElementById("notes-input");
+const ratioRootNoteInput = document.getElementById("ratio-root-note");
 const ratioRootHzInput = document.getElementById("ratio-root-hz");
+const ratioRootNoteCustomWrap = document.getElementById("ratio-root-note-custom-wrap");
+const ratioRootNoteCustomInput = document.getElementById("ratio-root-note-custom");
 const a4HzInput = document.getElementById("a4-hz");
 const viewZoomInput = document.getElementById("view-zoom");
 const viewZoomReadout = document.getElementById("view-zoom-readout");
 const layoutScaleInput = document.getElementById("layout-scale");
 const layoutScaleReadout = document.getElementById("layout-scale-readout");
+const printHeightInput = document.getElementById("print-height");
+const printHeightReadout = document.getElementById("print-height-readout");
 const overtoneCountInput = document.getElementById("overtone-count");
 const overtoneCountReadout = document.getElementById("overtone-count-readout");
 const yScaleInput = document.getElementById("y-scale");
@@ -27,6 +32,9 @@ const rangeMaxInput = document.getElementById("range-max");
 const alignToleranceInput = document.getElementById("align-tolerance");
 const alignToleranceReadout = document.getElementById("align-tolerance-readout");
 const pointSizeInput = document.getElementById("point-size");
+const stackLineSizeInput = document.getElementById("stack-line-size");
+const stackLineSizeReadout = document.getElementById("stack-line-size-readout");
+const alphaFalloffInput = document.getElementById("alpha-falloff");
 const comboSizeInput = document.getElementById("combo-size");
 const showAlignmentsInput = document.getElementById("show-alignments");
 const showLabelsInput = document.getElementById("show-labels");
@@ -41,6 +49,8 @@ const fusionReadoutHzInput = document.getElementById("fusion-readout-hz");
 const fusionModeInput = document.getElementById("fusion-mode");
 const fusionClusterCentsInput = document.getElementById("fusion-cluster-cents");
 const fusionClusterCentsReadout = document.getElementById("fusion-cluster-cents-readout");
+const fusionScaleInput = document.getElementById("fusion-scale");
+const fusionScaleReadout = document.getElementById("fusion-scale-readout");
 const roughnessControls = document.getElementById("roughness-controls");
 const showRoughnessInput = document.getElementById("show-roughness");
 const roughnessAnimateInput = document.getElementById("roughness-animate");
@@ -63,12 +73,16 @@ const exportWidthInput = document.getElementById("export-width");
 const exportHeightInput = document.getElementById("export-height");
 const exportSvgButton = document.getElementById("export-svg");
 const exportPdfButton = document.getElementById("export-pdf");
+const saveChartButton = document.getElementById("save-chart");
+const openChartButton = document.getElementById("open-chart");
+const openChartInput = document.getElementById("open-chart-input");
 const themeToggle = document.getElementById("theme-toggle");
 const printPaperInput = document.getElementById("print-paper");
 const printMarginInput = document.getElementById("print-margin");
 const printShowComponentLabelInput = document.getElementById("print-show-component-label");
 const printShowComponentHzInput = document.getElementById("print-show-component-hz");
 const printShowComponentRatioInput = document.getElementById("print-show-component-ratio");
+const printShowComponentNoteInput = document.getElementById("print-show-component-note");
 const printShowAxisTextInput = document.getElementById("print-show-axis-text");
 const printShowLegendInput = document.getElementById("print-show-legend");
 const printDistanceModeInput = document.getElementById("print-distance-mode");
@@ -88,6 +102,7 @@ const printStyleAxisFontInput = document.getElementById("print-style-axis-font")
 const printStyleAxisSizeInput = document.getElementById("print-style-axis-size");
 const printStyleAxisSizeReadout = document.getElementById("print-style-axis-size-readout");
 const printAddCustomTextButton = document.getElementById("print-add-custom-text");
+const printAddCustomLabelButton = document.getElementById("print-add-custom-label");
 const customTextInspector = document.getElementById("custom-text-inspector");
 const printCustomSelectedTextInput = document.getElementById("print-custom-selected-text");
 const printCustomSelectedFontInput = document.getElementById("print-custom-selected-font");
@@ -98,9 +113,6 @@ const printCustomDeleteSelectedButton = document.getElementById("print-custom-de
 const customTextModal = document.getElementById("custom-text-modal");
 const customTextModalTitle = customTextModal?.querySelector("h3") || null;
 const customTextInput = document.getElementById("custom-text-input");
-const customTextFontInput = document.getElementById("custom-text-font");
-const customTextSizeInput = document.getElementById("custom-text-size");
-const customTextSizeReadout = document.getElementById("custom-text-size-readout");
 const customTextSaveButton = document.getElementById("custom-text-save");
 const customTextCancelButton = document.getElementById("custom-text-cancel");
 
@@ -115,12 +127,72 @@ const PRINT_AUTO_TEXT_STYLE_DEFAULTS = {
   axis: { font: "Lexend", size: 11 },
 };
 
+const RATIO_ROOT_CUSTOM_VALUE = "hz";
+const noteNamesSharp = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const noteNames = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "G#", "A", "Bb", "B"];
+const LETTERS = ["C", "D", "E", "F", "G", "A", "B"];
+const LETTER_TO_SEMITONE = {
+  C: 0,
+  D: 2,
+  E: 4,
+  F: 5,
+  G: 7,
+  A: 9,
+  B: 11,
+};
+const TRUE_SPELLING_INTERVALS = {
+  3: { letter: 4, semitones: 7 },
+  5: { letter: 2, semitones: 4 },
+  7: { letter: 6, semitones: 10 },
+  11: { letter: 3, semitones: 5 },
+  13: { letter: 5, semitones: 9 },
+  17: { letter: 0, semitones: 1, maxSteps: 2 },
+  19: { letter: 2, semitones: 3 },
+  23: { letter: 3, semitones: 6 },
+  29: { letter: 6, semitones: 10 },
+  31: { letter: 0, semitones: 0, maxSteps: 4 },
+  37: { letter: 1, semitones: 2 },
+  41: { letter: 2, semitones: 4 },
+  43: { letter: 3, semitones: 5 },
+  47: { letter: 3, semitones: 6 },
+};
+const HEJI_RULES = [
+  {
+    mode: "repeatBaseAccidental",
+    ratio: 5,
+    axis: "any",
+    base: 2,
+    posSingle: { none: "m", sharp: "u", doubleSharp: "U", flat: "d", doubleFlat: "D" },
+    negSingle: { none: "o", sharp: "w", doubleSharp: "W", flat: "f", doubleFlat: "F" },
+    posPair: { none: "l", sharp: "t", doubleSharp: "T", flat: "c", doubleFlat: "C" },
+    negPair: { none: "p", sharp: "x", doubleSharp: "X", flat: "g", doubleFlat: "G" },
+    replaceAccidental: true,
+    usePairAsSingle: true,
+    useSingleBeyondPair: true,
+    maxSymbols: 2,
+  },
+  { mode: "repeat", ratio: 17, axis: "any", glyphPos: ":", glyphNeg: ";" },
+  { mode: "repeatBase", ratio: 7, axis: "any", glyphPos: "<", glyphNeg: ">", glyphPosPair: ",", glyphNegPair: ".", base: 2 },
+  { mode: "repeat", ratio: 11, axis: "any", glyphPos: "4", glyphNeg: "5" },
+  { mode: "repeat", ratio: 13, axis: "any", glyphPos: "0", glyphNeg: "9" },
+  { mode: "repeat", ratio: 19, axis: "any", glyphPos: "/", glyphNeg: "\\" },
+  { mode: "repeat", ratio: 23, axis: "any", glyphPos: "3", glyphNeg: "6" },
+  { mode: "repeat", ratio: 29, axis: "any", glyphPos: "2", glyphNeg: "7" },
+  { mode: "repeat", ratio: 31, axis: "any", glyphPos: "1", glyphNeg: "8" },
+  { mode: "repeat", ratio: 37, axis: "any", glyphPos: "á", glyphNeg: "à" },
+  { mode: "repeat", ratio: 41, axis: "any", glyphPos: "+", glyphNeg: "-" },
+  { mode: "repeat", ratio: 43, axis: "any", glyphPos: "é", glyphNeg: "è" },
+  { mode: "repeat", ratio: 47, axis: "any", glyphPos: "í", glyphNeg: "ì" },
+];
+
 const state = {
   notesText: notesInput.value,
+  ratioRootNoteCustom: ratioRootNoteCustomInput?.value || "A",
   ratioRootHz: Number(ratioRootHzInput.value) || 220,
   a4Hz: Number(a4HzInput.value) || 440,
   viewZoom: Number(viewZoomInput?.value) || 1,
   layoutScale: Number(layoutScaleInput?.value) || 1,
+  printGraphHeight: clamp(Number(printHeightInput?.value) || 1, 0.45, 1),
   overtoneCount: Number(overtoneCountInput.value) || 8,
   yScale: yScaleInput.value === "linear" ? "linear" : "log",
   harmonicScalingMode: harmonicScalingInput?.value || "pink",
@@ -130,6 +202,8 @@ const state = {
   rangeMax: Number(rangeMaxInput.value) || 6000,
   alignToleranceCents: Number(alignToleranceInput.value) || 1,
   pointSize: Number(pointSizeInput.value) || 4,
+  stackLineSize: clamp((Number(stackLineSizeInput?.value ?? 100) || 100) / 100, 0.25, 3),
+  alphaFalloff: alphaFalloffInput ? alphaFalloffInput.checked : true,
   comboSize: Number(comboSizeInput?.value) || 4,
   showAlignments: showAlignmentsInput.checked,
   showLabels: showLabelsInput ? showLabelsInput.checked : true,
@@ -142,6 +216,7 @@ const state = {
   fusionReadoutHz: fusionReadoutHzInput ? fusionReadoutHzInput.checked : true,
   fusionMode: fusionModeInput?.value || "align",
   fusionClusterCents: Number(fusionClusterCentsInput?.value ?? 1) || 1,
+  fusionScale: clamp((Number(fusionScaleInput?.value ?? 100) || 100) / 100, 0.5, 1.5),
   showRoughness: showRoughnessInput ? showRoughnessInput.checked : true,
   roughnessAnimate: roughnessAnimateInput ? roughnessAnimateInput.checked : true,
   roughnessBeatMinHz: Number(roughnessBeatMinInput?.value ?? 0.5) || 0.5,
@@ -170,11 +245,14 @@ const state = {
   printShowComponentRatio: printShowComponentRatioInput
     ? printShowComponentRatioInput.checked
     : false,
+  printShowComponentNote: printShowComponentNoteInput
+    ? printShowComponentNoteInput.checked
+    : false,
   printShowAxisText: printShowAxisTextInput ? printShowAxisTextInput.checked : true,
   printShowLegend: printShowLegendInput ? printShowLegendInput.checked : true,
   printDistanceMode: printDistanceModeInput ? printDistanceModeInput.checked : false,
-  printCustomLabelFont: customTextFontInput?.value || "Noto Serif",
-  printCustomLabelSize: Number(customTextSizeInput?.value ?? 18) || 18,
+  printCustomLabelFont: "Noto Serif",
+  printCustomLabelSize: 18,
   printAutoTextStyles: cloneJson(PRINT_AUTO_TEXT_STYLE_DEFAULTS, PRINT_AUTO_TEXT_STYLE_DEFAULTS),
   printSelectedCustomTextId: null,
   printDistanceShowRatio: printDistanceShowRatioInput ? printDistanceShowRatioInput.checked : true,
@@ -190,8 +268,12 @@ const state = {
   printDiagramOffsetY: 0,
   printDistanceAnnotations: [],
   printCustomTexts: [],
+  printCustomLabels: [],
   printComboLinksVisible: {},
   printChordTitleOverrides: {},
+  printAlignmentLabelOverrides: {},
+  printYAxisLabelOverride: "",
+  printYAxisLabelHasOverride: false,
 };
 
 const intervalNameEntries = Array.isArray(intervalChartData)
@@ -217,6 +299,7 @@ const intervalNameEntries = Array.isArray(intervalChartData)
   : [];
 
 const OVERTONES_STATE_PARAM = "o";
+const OVERTONES_STORAGE_KEY = "overtones-state-v2";
 const MODE_LIVE = "live";
 const MODE_PRINT = "print";
 
@@ -242,6 +325,11 @@ let panDragState = null;
 let lastDiagramCenter = { x: 640, y: 360 };
 let syncingCustomInspector = false;
 let customTextDialogMode = "custom";
+let pendingCustomLabelTarget = false;
+let pendingCustomLabelActionId = 0;
+let customActionSequence = 0;
+let customTextDialogResolver = null;
+let customTextDialogOpenedAt = 0;
 
 let audioCtx = null;
 let masterGain = null;
@@ -253,6 +341,11 @@ let spaceMuted = false;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function nextCustomActionId() {
+  customActionSequence += 1;
+  return customActionSequence;
 }
 
 function encodeStateBase64Url(value) {
@@ -284,13 +377,550 @@ function cloneJson(value, fallback) {
   }
 }
 
+function floorDiv(value, divisor) {
+  return Math.floor(value / divisor);
+}
+
+function mod(value, divisor) {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+function midiToFrequency(midi, a4) {
+  return a4 * Math.pow(2, (midi - 69) / 12);
+}
+
+function midiToFundamentalNoteName(midi) {
+  return `${noteNamesSharp[mod(midi, 12)]}${Math.floor(midi / 12) - 1}`;
+}
+
+function getNearestEtInfo(freq, a4) {
+  if (!(freq > 0) || !(a4 > 0)) {
+    return null;
+  }
+  const midiFloat = 69 + 12 * Math.log2(freq / a4);
+  const midi = Math.min(127, Math.max(0, Math.round(midiFloat)));
+  const etFreq = a4 * Math.pow(2, (midi - 69) / 12);
+  const cents = 1200 * Math.log2(freq / etFreq);
+  return { midi, etFreq, cents, pitchClass: noteNamesSharp[mod(midi, 12)] };
+}
+
+function parsePitchClass(pitchClass) {
+  const match = String(pitchClass || "").match(/^([A-G])([#bx]*)$/);
+  if (!match) {
+    return { letterIndex: 0, accidental: 0 };
+  }
+  const letter = match[1];
+  const accidentalText = match[2] || "";
+  let accidental = 0;
+  for (const char of accidentalText) {
+    if (char === "#") {
+      accidental += 1;
+    } else if (char === "b") {
+      accidental -= 1;
+    } else if (char === "x") {
+      accidental += 2;
+    }
+  }
+  return { letterIndex: LETTERS.indexOf(letter), accidental };
+}
+
+function accidentalToString(accidental) {
+  if (!accidental) return "";
+  if (accidental > 0) {
+    if (accidental === 1) return "#";
+    if (accidental === 2) return "x";
+    return "#x";
+  }
+  if (accidental === -1) return "b";
+  if (accidental === -2) return "bb";
+  return "bbb";
+}
+
+function buildPitchClass(letterIndex, accidental) {
+  const letter = LETTERS[mod(letterIndex, LETTERS.length)];
+  const clamped = Math.max(-3, Math.min(3, accidental));
+  return `${letter}${accidentalToString(clamped)}`;
+}
+
+function normalizePitchClassText(value) {
+  const raw = String(value || "")
+    .replace(/♯/g, "#")
+    .replace(/♭/g, "b")
+    .trim();
+  const match = raw.match(/^([A-Ga-g])\s*([#bx]*)/);
+  if (!match) {
+    return "";
+  }
+  return `${match[1].toUpperCase()}${match[2] || ""}`;
+}
+
+function getAccidentalType(noteName) {
+  if (/[#x]/.test(noteName)) return "sharp";
+  if (/b/.test(noteName)) return "flat";
+  return "none";
+}
+
+function axisMatches(rule, axisState) {
+  if (rule.axis !== "any" && rule.axis !== axisState.axis) return false;
+  if (!Number.isFinite(axisState.exponent)) return false;
+  if (Number.isFinite(rule.ratio) && axisState.ratio !== rule.ratio) return false;
+  if (rule.mode === "repeat" || rule.mode === "repeatBase" || rule.mode === "repeatBaseAccidental") {
+    return axisState.exponent !== 0;
+  }
+  if (rule.exponent === "anyNonZero" && axisState.exponent === 0) return false;
+  if (Number.isFinite(rule.exponent) && axisState.exponent !== rule.exponent) return false;
+  return true;
+}
+
+function normalizeRatioToOctave(numerator, denominator) {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return null;
+  }
+  let num = numerator;
+  let den = denominator;
+  let shift = 0;
+  let ratio = num / den;
+  while (ratio < 1) {
+    num *= 2;
+    shift -= 1;
+    ratio = num / den;
+  }
+  while (ratio > 2) {
+    den *= 2;
+    shift += 1;
+    ratio = num / den;
+  }
+  return { numerator: num, denominator: den, shift };
+}
+
+function analyzeRatioForTrueSpelling(numerator, denominator) {
+  const normalized = normalizeRatioToOctave(numerator, denominator);
+  if (!normalized) return null;
+  const reduced = reduceFraction(normalized.numerator, normalized.denominator);
+  let num = Math.abs(reduced.numerator);
+  let den = Math.abs(reduced.denominator);
+  let octaveShift = normalized.shift;
+
+  while (num % 2 === 0 && den % 2 === 0) {
+    num /= 2;
+    den /= 2;
+  }
+  while (num % 2 === 0) {
+    num /= 2;
+    octaveShift += 1;
+  }
+  while (den % 2 === 0) {
+    den /= 2;
+    octaveShift -= 1;
+  }
+
+  const axisRatios = [];
+  for (const primeKey of Object.keys(TRUE_SPELLING_INTERVALS)) {
+    const prime = Number(primeKey);
+    let exponent = 0;
+    while (num % prime === 0) {
+      num /= prime;
+      exponent += 1;
+    }
+    while (den % prime === 0) {
+      den /= prime;
+      exponent -= 1;
+    }
+    if (exponent) {
+      axisRatios.push({ ratio: prime, exp: exponent });
+    }
+  }
+  if (num !== 1 || den !== 1 || !axisRatios.length) {
+    return null;
+  }
+  return { axisRatios, octaveShift };
+}
+
+const trueSpellingLimitCache = new Map();
+
+function getTrueSpellingLimit(ratio) {
+  const key = Number(ratio);
+  if (trueSpellingLimitCache.has(key)) {
+    return trueSpellingLimitCache.get(key);
+  }
+  const spec = TRUE_SPELLING_INTERVALS[key];
+  if (!spec) {
+    trueSpellingLimitCache.set(key, null);
+    return null;
+  }
+  if (Number.isFinite(spec.maxSteps)) {
+    trueSpellingLimitCache.set(key, spec.maxSteps);
+    return spec.maxSteps;
+  }
+  const base = { letterIndex: 0, accidental: 0 };
+  let maxSteps = 0;
+  for (let step = 1; step < 30; step += 1) {
+    const letterShift = step * spec.letter;
+    const semitoneShift = step * spec.semitones;
+    const totalLetter = base.letterIndex + letterShift;
+    const octaveShift = floorDiv(totalLetter, 7);
+    const targetLetterIndex = mod(totalLetter, 7);
+    const targetNatural = LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + octaveShift * 12;
+    const totalSemitone =
+      base.accidental + LETTER_TO_SEMITONE[LETTERS[base.letterIndex]] + semitoneShift;
+    const accidental = totalSemitone - targetNatural;
+    if (Math.abs(accidental) > 3) {
+      break;
+    }
+    maxSteps = step;
+  }
+  trueSpellingLimitCache.set(key, maxSteps);
+  return maxSteps;
+}
+
+function getRatioRootFallbackPitchClass() {
+  const nearest = getNearestEtInfo(Math.max(1e-9, state.ratioRootHz), Math.max(1e-9, state.a4Hz));
+  return nearest?.pitchClass || "A";
+}
+
+function getFundamentalPitchClassForSpelling() {
+  if (ratioRootNoteInput && ratioRootNoteInput.value !== RATIO_ROOT_CUSTOM_VALUE) {
+    const midi = Number(ratioRootNoteInput.value);
+    if (Number.isFinite(midi)) {
+      return noteNamesSharp[mod(midi, 12)];
+    }
+  }
+  const customPitchClass = normalizePitchClassText(state.ratioRootNoteCustom);
+  return customPitchClass || getRatioRootFallbackPitchClass();
+}
+
+function getPitchClassSemitoneValue(pitchClass) {
+  const parsed = parsePitchClass(pitchClass);
+  const letterIndex = Number.isFinite(parsed.letterIndex) ? mod(parsed.letterIndex, 7) : 0;
+  const accidental = Number.isFinite(parsed.accidental) ? parsed.accidental : 0;
+  const natural = LETTER_TO_SEMITONE[LETTERS[letterIndex]];
+  return natural + accidental;
+}
+
+function getHejiAnnotationForAxisRatios(axisRatios, baseText) {
+  const accidentalType = getAccidentalType(baseText || "");
+  const sharpCount = (baseText.match(/#/g) || []).length;
+  const flatCount = (baseText.match(/b/g) || []).length;
+  const doubleSharpCount = (baseText.match(/x/g) || []).length;
+  const axisStates = (axisRatios || []).map((axis) => ({
+    axis: "any",
+    ratio: Number(axis.ratio),
+    exponent: Number(axis.exp),
+  }));
+  const nextBase = String(baseText || "").replace(/[x#b]/g, "");
+  const suffixParts = [];
+
+  for (let i = 0; i < sharpCount; i += 1) {
+    suffixParts.push({ text: "v", expLabel: "", source: "default" });
+  }
+  for (let i = 0; i < flatCount; i += 1) {
+    suffixParts.push({ text: "e", expLabel: "", source: "default" });
+  }
+  for (let i = 0; i < doubleSharpCount; i += 1) {
+    suffixParts.push({ text: "V", expLabel: "", source: "default" });
+  }
+
+  HEJI_RULES.forEach((rule) => {
+    const expected = rule.accidental ?? "any";
+    if (expected !== "any" && expected !== accidentalType) return;
+    const matches = axisStates.some((axisState) => axisMatches(rule, axisState));
+    if (!matches) return;
+
+    if (rule.replaceAccidental) {
+      for (let index = suffixParts.length - 1; index >= 0; index -= 1) {
+        if (suffixParts[index].source !== "default") continue;
+        const part = suffixParts[index];
+        if (part.text !== "v" && part.text !== "e" && part.text !== "V") continue;
+        suffixParts.splice(index, 1);
+      }
+    }
+
+    if (rule.mode === "repeatBaseAccidental") {
+      const base = Number(rule.base) || 2;
+      const accidentalKey =
+        doubleSharpCount > 0
+          ? "doubleSharp"
+          : flatCount > 1
+            ? "doubleFlat"
+            : accidentalType || "none";
+      axisStates.forEach((axisState) => {
+        if (!axisMatches(rule, axisState)) return;
+        const exp = Number(axisState.exponent);
+        if (!exp) return;
+        const absExp = Math.abs(exp);
+        const pairCount = Math.floor(absExp / base);
+        const remainder = absExp % base;
+        const usePairAsSingle = Boolean(rule.usePairAsSingle);
+        const useSingleBeyondPair = Boolean(rule.useSingleBeyondPair);
+        const maxSymbols = Number(rule.maxSymbols ?? (usePairAsSingle ? 1 : 2));
+        const showExponent = absExp > maxSymbols ? String(absExp) : "";
+        const pairGlyph = exp > 0 ? rule.posPair?.[accidentalKey] || "" : rule.negPair?.[accidentalKey] || "";
+        const singleGlyph = exp > 0 ? rule.posSingle?.[accidentalKey] || "" : rule.negSingle?.[accidentalKey] || "";
+        let glyphs = "";
+        if (useSingleBeyondPair && absExp > base) {
+          glyphs = String(singleGlyph);
+        } else if (usePairAsSingle) {
+          glyphs = absExp >= base ? String(pairGlyph) : String(singleGlyph);
+        } else {
+          glyphs = String(pairGlyph).repeat(pairCount);
+          if (remainder) glyphs += String(singleGlyph);
+        }
+        if (glyphs.length > maxSymbols) glyphs = glyphs.slice(0, maxSymbols);
+        if (glyphs) suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+      });
+      return;
+    }
+
+    if (rule.mode === "repeatBase") {
+      const base = Number(rule.base) || 2;
+      axisStates.forEach((axisState) => {
+        if (!axisMatches(rule, axisState)) return;
+        const exp = Number(axisState.exponent);
+        if (!exp) return;
+        const absExp = Math.abs(exp);
+        const pairCount = Math.floor(absExp / base);
+        const remainder = absExp % base;
+        const maxSymbols = Number(rule.maxSymbols ?? 2);
+        const showExponent = absExp > maxSymbols ? String(absExp) : "";
+        let glyphs = "";
+        if (exp > 0) {
+          if (rule.glyphPosPair) glyphs += String(rule.glyphPosPair).repeat(pairCount);
+          if (rule.glyphPos && remainder) glyphs += String(rule.glyphPos);
+        } else {
+          if (rule.glyphNegPair) glyphs += String(rule.glyphNegPair).repeat(pairCount);
+          if (rule.glyphNeg && remainder) glyphs += String(rule.glyphNeg);
+        }
+        if (glyphs.length > maxSymbols) glyphs = glyphs.slice(0, maxSymbols);
+        if (glyphs) suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+      });
+      return;
+    }
+
+    if (rule.mode === "repeat") {
+      axisStates.forEach((axisState) => {
+        if (!axisMatches(rule, axisState)) return;
+        const exp = Number(axisState.exponent);
+        if (!exp) return;
+        const absExp = Math.abs(exp);
+        const maxSymbols = Number(rule.maxSymbols ?? 1);
+        const glyph =
+          exp > 0
+            ? String(rule.glyphPos || "").repeat(Math.min(absExp, maxSymbols))
+            : String(rule.glyphNeg || "").repeat(Math.min(absExp, maxSymbols));
+        const showExponent = absExp > maxSymbols ? String(absExp) : "";
+        if (glyph) suffixParts.push({ text: glyph, expLabel: showExponent, source: "rule" });
+      });
+    }
+  });
+
+  if (suffixParts.length > 1) {
+    const ordered = [];
+    suffixParts.forEach((part) => {
+      if (part.source === "rule") ordered.push(part);
+    });
+    suffixParts.forEach((part) => {
+      if (part.source !== "rule") ordered.push(part);
+    });
+    return { baseText: nextBase, suffixParts: ordered };
+  }
+  return { baseText: nextBase, suffixParts };
+}
+
+function getPitchClassFromRatioValue(ratioValue, freq) {
+  const a4 = Math.max(1e-9, Number(state.a4Hz) || 440);
+  const nearest = getNearestEtInfo(freq, a4);
+  const nearestPitchClass = nearest ? noteNames[mod(nearest.midi, 12)] : "A";
+  if (!(ratioValue > 0) || !Number.isFinite(ratioValue)) {
+    return { pitchClass: nearestPitchClass, axisRatios: [] };
+  }
+  const approx = approximateRatio(ratioValue, 2048);
+  if (!approx) {
+    return { pitchClass: nearestPitchClass, axisRatios: [] };
+  }
+  const approxValue = approx.numerator / approx.denominator;
+  const approxErrorCents = Math.abs(1200 * Math.log2(ratioValue / Math.max(1e-9, approxValue)));
+  if (approxErrorCents > 0.75) {
+    return { pitchClass: nearestPitchClass, axisRatios: [] };
+  }
+
+  const normalized = normalizeRatioToOctave(approx.numerator, approx.denominator);
+  if (normalized) {
+    const reducedNormalized = reduceFraction(normalized.numerator, normalized.denominator);
+    if (reducedNormalized.numerator === reducedNormalized.denominator) {
+      return {
+        pitchClass: getFundamentalPitchClassForSpelling(),
+        axisRatios: [],
+      };
+    }
+  }
+  const analysis = analyzeRatioForTrueSpelling(approx.numerator, approx.denominator);
+  if (!analysis || !analysis.axisRatios.length) {
+    return { pitchClass: nearestPitchClass, axisRatios: [] };
+  }
+  const axisRatios = analysis.axisRatios;
+  const beyondLimit = axisRatios.some((axis) => {
+    if (!axis.exp) return false;
+    const limit = getTrueSpellingLimit(axis.ratio);
+    return Number.isFinite(limit) && Math.abs(axis.exp) > limit;
+  });
+  const hasUnknownInterval = axisRatios.some((axis) => axis.exp && !TRUE_SPELLING_INTERVALS[axis.ratio]);
+  const hasHigherPrime = axisRatios.some((axis) => axis.exp && Number(axis.ratio) >= 53);
+  if (beyondLimit || hasUnknownInterval || hasHigherPrime) {
+    return { pitchClass: nearestPitchClass, axisRatios };
+  }
+  let totalLetterShift = 0;
+  let totalSemitoneShift = 0;
+  axisRatios.forEach((axis) => {
+    if (!axis.exp) return;
+    const spec = TRUE_SPELLING_INTERVALS[axis.ratio];
+    if (!spec) return;
+    totalLetterShift += axis.exp * spec.letter;
+    totalSemitoneShift += axis.exp * spec.semitones;
+  });
+  const basePitchClassText = getFundamentalPitchClassForSpelling();
+  const base = parsePitchClass(basePitchClassText);
+  const baseLetterIndex = Number.isFinite(base.letterIndex) ? base.letterIndex : 0;
+  const baseAccidental = Number.isFinite(base.accidental) ? base.accidental : 0;
+  const totalLetter = baseLetterIndex + totalLetterShift;
+  const octaveShift = floorDiv(totalLetter, 7);
+  const targetLetterIndex = mod(totalLetter, 7);
+  const targetNatural = LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + octaveShift * 12;
+  const totalSemitone =
+    baseAccidental + LETTER_TO_SEMITONE[LETTERS[baseLetterIndex]] + totalSemitoneShift;
+  const accidental = totalSemitone - targetNatural;
+  return {
+    pitchClass: buildPitchClass(targetLetterIndex, accidental),
+    axisRatios,
+  };
+}
+
+function getNearestEtPitchClassForFreq(freq) {
+  const a4 = Math.max(1e-9, Number(state.a4Hz) || 440);
+  const nearest = getNearestEtInfo(freq, a4);
+  return nearest ? noteNames[mod(nearest.midi, 12)] : noteNamesSharp[0];
+}
+
+function buildNoteSpellingInfo(freq, options = {}) {
+  if (!(freq > 0) || !Number.isFinite(freq)) {
+    return null;
+  }
+  const allowHeji = options?.allowHeji !== false;
+  const ratioBase = Math.max(1e-9, state.ratioRootHz);
+  const ratioValue = freq / ratioBase;
+  const spelling = allowHeji
+    ? getPitchClassFromRatioValue(ratioValue, freq)
+    : { pitchClass: getNearestEtPitchClassForFreq(freq), axisRatios: [] };
+  const pitchClassText = spelling.pitchClass || noteNamesSharp[0];
+  const heji = allowHeji
+    ? getHejiAnnotationForAxisRatios(spelling.axisRatios, pitchClassText)
+    : { baseText: pitchClassText, suffixParts: [] };
+  const hejiParts = (heji.suffixParts || [])
+    .filter((part) => part?.source === "rule")
+    .map((part) => ({
+      glyphText: String(part?.text || ""),
+      expText: String(part?.expLabel || ""),
+    }))
+    .filter((part) => part.glyphText || part.expText);
+  const ruleSuffixText = hejiParts.map((part) => `${part.glyphText}${part.expText}`).join("");
+  const a4 = Math.max(1e-9, Number(state.a4Hz) || 440);
+  const baseText = String(heji.baseText || pitchClassText || "");
+  const pitchMatch = baseText.match(/^([A-G])([#bx]*)$/);
+  const letterText = pitchMatch?.[1] || String(pitchClassText || "").slice(0, 1);
+  const accidentalText = pitchMatch?.[2] || "";
+  const pitchPrefixText = `${letterText}${accidentalText}`;
+  const pitchClassForOctave = pitchClassText;
+  const semitoneValue = mod(getPitchClassSemitoneValue(pitchClassForOctave), 12);
+  const midiFloat = 69 + 12 * Math.log2(freq / a4);
+  const midiBase = Math.round((midiFloat - semitoneValue) / 12);
+  const midi = semitoneValue + 12 * midiBase;
+  const octaveText = String(Math.floor(midi / 12) - 1);
+  const text = `${pitchPrefixText}${ruleSuffixText}${octaveText}`;
+  return {
+    pitchClassText,
+    pitchPrefixText,
+    baseText,
+    suffixText: ruleSuffixText,
+    hejiParts,
+    octaveText,
+    text,
+  };
+}
+
+function populateRatioRootNotes() {
+  if (!ratioRootNoteInput) {
+    return;
+  }
+  ratioRootNoteInput.innerHTML = "";
+  const customOption = document.createElement("option");
+  customOption.value = RATIO_ROOT_CUSTOM_VALUE;
+  customOption.textContent = "Specify in Hz";
+  ratioRootNoteInput.appendChild(customOption);
+  for (let midi = 0; midi <= 96; midi += 1) {
+    const option = document.createElement("option");
+    option.value = String(midi);
+    option.textContent = midiToFundamentalNoteName(midi);
+    ratioRootNoteInput.appendChild(option);
+  }
+}
+
+function updateRatioRootNoteOptions() {
+  if (!ratioRootNoteInput) {
+    return;
+  }
+  const a4 = Math.max(1, Number(state.a4Hz) || 440);
+  const selectedValue = ratioRootNoteInput.value || "";
+  Array.from(ratioRootNoteInput.options).forEach((option) => {
+    if (option.value === RATIO_ROOT_CUSTOM_VALUE) {
+      option.textContent = "Specify in Hz";
+      return;
+    }
+    const midi = Number(option.value);
+    const freq = midiToFrequency(midi, a4);
+    option.textContent = `${midiToFundamentalNoteName(midi)} (${formatHz(freq)})`;
+  });
+  if (selectedValue) {
+    ratioRootNoteInput.value = selectedValue;
+  }
+}
+
+function syncRatioRootCustomInputVisibility() {
+  if (!ratioRootNoteCustomWrap || !ratioRootNoteInput) {
+    return;
+  }
+  const show = ratioRootNoteInput.value === RATIO_ROOT_CUSTOM_VALUE;
+  ratioRootNoteCustomWrap.hidden = !show;
+}
+
+function syncRatioRootNoteSelectFromFrequency() {
+  if (!ratioRootNoteInput) {
+    return;
+  }
+  const freq = Number(state.ratioRootHz);
+  const a4 = Math.max(1, Number(state.a4Hz) || 440);
+  const nearest = getNearestEtInfo(freq, a4);
+  if (!nearest) {
+    ratioRootNoteInput.value = RATIO_ROOT_CUSTOM_VALUE;
+    syncRatioRootCustomInputVisibility();
+    return;
+  }
+  const targetFreq = midiToFrequency(nearest.midi, a4);
+  if (Math.abs(targetFreq - freq) <= 0.01) {
+    ratioRootNoteInput.value = String(nearest.midi);
+  } else {
+    ratioRootNoteInput.value = RATIO_ROOT_CUSTOM_VALUE;
+  }
+  syncRatioRootCustomInputVisibility();
+}
+
 function getStateSnapshotFlat() {
   return {
     notesText: state.notesText,
+    ratioRootNoteCustom: state.ratioRootNoteCustom,
     ratioRootHz: state.ratioRootHz,
     a4Hz: state.a4Hz,
     viewZoom: state.viewZoom,
     layoutScale: state.layoutScale,
+    printGraphHeight: state.printGraphHeight,
     overtoneCount: state.overtoneCount,
     yScale: state.yScale,
     harmonicScalingMode: state.harmonicScalingMode,
@@ -300,6 +930,8 @@ function getStateSnapshotFlat() {
     rangeMax: state.rangeMax,
     alignToleranceCents: state.alignToleranceCents,
     pointSize: state.pointSize,
+    stackLineSize: state.stackLineSize,
+    alphaFalloff: state.alphaFalloff,
     comboSize: state.comboSize,
     showAlignments: state.showAlignments,
     showLabels: state.showLabels,
@@ -312,6 +944,7 @@ function getStateSnapshotFlat() {
     fusionReadoutHz: state.fusionReadoutHz,
     fusionMode: state.fusionMode,
     fusionClusterCents: state.fusionClusterCents,
+    fusionScale: state.fusionScale,
     showRoughness: state.showRoughness,
     roughnessAnimate: state.roughnessAnimate,
     roughnessBeatMinHz: state.roughnessBeatMinHz,
@@ -336,6 +969,7 @@ function getStateSnapshotFlat() {
     printShowComponentLabel: state.printShowComponentLabel,
     printShowComponentHz: state.printShowComponentHz,
     printShowComponentRatio: state.printShowComponentRatio,
+    printShowComponentNote: state.printShowComponentNote,
     printShowAxisText: state.printShowAxisText,
     printShowLegend: state.printShowLegend,
     printDistanceMode: state.printDistanceMode,
@@ -354,9 +988,51 @@ function getStateSnapshotFlat() {
     printDiagramOffsetY: state.printDiagramOffsetY,
     printDistanceAnnotations: cloneJson(state.printDistanceAnnotations, []),
     printCustomTexts: cloneJson(state.printCustomTexts, []),
+    printCustomLabels: cloneJson(state.printCustomLabels, []),
     printComboLinksVisible: cloneJson(state.printComboLinksVisible, {}),
     printChordTitleOverrides: cloneJson(state.printChordTitleOverrides, {}),
+    printAlignmentLabelOverrides: cloneJson(state.printAlignmentLabelOverrides, {}),
+    printYAxisLabelOverride: state.printYAxisLabelOverride,
+    printYAxisLabelHasOverride: state.printYAxisLabelHasOverride,
   };
+}
+
+function normalizeSnapshotFlat(snapshot) {
+  const defaults = getStateSnapshotFlat();
+  const incoming = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const merged = { ...defaults, ...incoming };
+  merged.printAutoTextStyles = cloneJson(
+    incoming.printAutoTextStyles && typeof incoming.printAutoTextStyles === "object"
+      ? incoming.printAutoTextStyles
+      : defaults.printAutoTextStyles,
+    defaults.printAutoTextStyles
+  );
+  merged.printHiddenKeys = cloneJson(incoming.printHiddenKeys, defaults.printHiddenKeys);
+  merged.printColumnOverrides = cloneJson(incoming.printColumnOverrides, defaults.printColumnOverrides);
+  merged.printLabelOffsets = cloneJson(incoming.printLabelOffsets, defaults.printLabelOffsets);
+  merged.printComponentXOverrides = cloneJson(incoming.printComponentXOverrides, defaults.printComponentXOverrides);
+  merged.printDistanceAnnotations = cloneJson(incoming.printDistanceAnnotations, defaults.printDistanceAnnotations);
+  merged.printCustomTexts = cloneJson(incoming.printCustomTexts, defaults.printCustomTexts);
+  merged.printCustomLabels = cloneJson(incoming.printCustomLabels, defaults.printCustomLabels);
+  merged.printComboLinksVisible = cloneJson(incoming.printComboLinksVisible, defaults.printComboLinksVisible);
+  merged.printChordTitleOverrides = cloneJson(incoming.printChordTitleOverrides, defaults.printChordTitleOverrides);
+  merged.printAlignmentLabelOverrides = cloneJson(
+    incoming.printAlignmentLabelOverrides,
+    defaults.printAlignmentLabelOverrides
+  );
+  return merged;
+}
+
+function syncSharedNotesAcrossModes() {
+  const sharedNotes = String(state.notesText ?? "");
+  state.notesText = sharedNotes;
+  notesInput.value = sharedNotes;
+  if (modeSnapshots[MODE_LIVE] && typeof modeSnapshots[MODE_LIVE] === "object") {
+    modeSnapshots[MODE_LIVE].notesText = sharedNotes;
+  }
+  if (modeSnapshots[MODE_PRINT] && typeof modeSnapshots[MODE_PRINT] === "object") {
+    modeSnapshots[MODE_PRINT].notesText = sharedNotes;
+  }
 }
 
 function getSerializedState() {
@@ -364,12 +1040,15 @@ function getSerializedState() {
   if (!modeSnapshots[MODE_LIVE]) {
     modeSnapshots[MODE_LIVE] = getStateSnapshotFlat();
   }
+  modeSnapshots[MODE_LIVE] = normalizeSnapshotFlat(modeSnapshots[MODE_LIVE]);
   if (!modeSnapshots[MODE_PRINT]) {
     const seed = getStateSnapshotFlat();
     seed.themeDark = false;
     seed.printDistanceMode = false;
     modeSnapshots[MODE_PRINT] = seed;
   }
+  modeSnapshots[MODE_PRINT] = normalizeSnapshotFlat(modeSnapshots[MODE_PRINT]);
+  syncSharedNotesAcrossModes();
   return {
     mode: appMode,
     live: modeSnapshots[MODE_LIVE],
@@ -377,23 +1056,148 @@ function getSerializedState() {
   };
 }
 
+function toSerializedState(value) {
+  const root = value && typeof value === "object" ? value : null;
+  if (!root) {
+    return null;
+  }
+  const payload = root.data && typeof root.data === "object" ? root.data : root;
+  if (payload.live && payload.print) {
+    return {
+      mode: payload.mode === MODE_PRINT ? MODE_PRINT : MODE_LIVE,
+      live: normalizeSnapshotFlat(cloneJson(payload.live, null)),
+      print: normalizeSnapshotFlat(cloneJson(payload.print, null)),
+    };
+  }
+  if (payload && typeof payload === "object") {
+    const flat = normalizeSnapshotFlat(cloneJson(payload, null));
+    const live = normalizeSnapshotFlat(cloneJson(flat, null));
+    const print = normalizeSnapshotFlat({
+      ...cloneJson(flat, null),
+      themeDark: false,
+      printDistanceMode: false,
+    });
+    return {
+      mode: payload.mode === MODE_PRINT ? MODE_PRINT : MODE_LIVE,
+      live,
+      print,
+    };
+  }
+  return null;
+}
+
+function saveStateToStorage(serialized = null) {
+  try {
+    const next = serialized && typeof serialized === "object" ? serialized : getSerializedState();
+    const wrapped = {
+      format: "overtones-chart-state",
+      version: 2,
+      savedAt: new Date().toISOString(),
+      data: next,
+    };
+    window.localStorage?.setItem(OVERTONES_STORAGE_KEY, JSON.stringify(wrapped));
+  } catch {}
+}
+
+function readStateFromStorage() {
+  try {
+    const raw = window.localStorage?.getItem(OVERTONES_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function applySerializedState(serialized) {
+  const normalized = toSerializedState(serialized);
+  if (!normalized) {
+    return false;
+  }
+  modeSnapshots[MODE_LIVE] = normalizeSnapshotFlat(cloneJson(normalized.live, null));
+  modeSnapshots[MODE_PRINT] = normalizeSnapshotFlat(cloneJson(normalized.print, null));
+  applyStateSnapshot(normalized.mode === MODE_PRINT ? modeSnapshots[MODE_PRINT] : modeSnapshots[MODE_LIVE]);
+  appMode = normalized.mode === MODE_PRINT ? MODE_PRINT : MODE_LIVE;
+  return true;
+}
+
+function getSerializedSavedAtMs(value) {
+  const root = value && typeof value === "object" ? value : null;
+  if (!root) {
+    return 0;
+  }
+  const savedAt = typeof root.savedAt === "string" ? Date.parse(root.savedAt) : NaN;
+  if (Number.isFinite(savedAt) && savedAt > 0) {
+    return savedAt;
+  }
+  return 0;
+}
+
+function chooseInitialSerializedState(urlState, storedState) {
+  const urlNormalized = toSerializedState(urlState);
+  const storedNormalized = toSerializedState(storedState);
+  const hasUrl = Boolean(urlNormalized);
+  const hasStored = Boolean(storedNormalized);
+  if (!hasUrl && !hasStored) {
+    return null;
+  }
+  if (hasUrl && !hasStored) {
+    return urlState;
+  }
+  if (!hasUrl && hasStored) {
+    return storedState;
+  }
+  const urlMs = getSerializedSavedAtMs(urlState);
+  const storedMs = getSerializedSavedAtMs(storedState);
+  if (storedMs > urlMs) {
+    return storedState;
+  }
+  return urlState;
+}
+
 function updateStateUrl() {
   if (suspendStateUrlSync) {
     return;
   }
-  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
-  hashParams.set(OVERTONES_STATE_PARAM, encodeStateBase64Url(getSerializedState()));
-  const nextHash = hashParams.toString();
-  if (location.hash === `#${nextHash}`) {
-    return;
+  const serialized = getSerializedState();
+  saveStateToStorage(serialized);
+  try {
+    const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
+    hashParams.set(OVERTONES_STATE_PARAM, encodeStateBase64Url(buildChartSaveDocument(serialized)));
+    const nextHash = hashParams.toString();
+    if (location.hash === `#${nextHash}`) {
+      return;
+    }
+    history.replaceState(null, "", `${location.pathname}${location.search}#${nextHash}`);
+  } catch {}
+}
+
+function finalizeLoadedState() {
+  if (appMode === MODE_PRINT) {
+    state.themeDark = false;
+    themeToggle.checked = false;
+    document.body.classList.remove("theme-dark");
   }
-  history.replaceState(null, "", `${location.pathname}${location.search}#${nextHash}`);
+  updateRatioRootNoteOptions();
+  syncRatioRootNoteSelectFromFrequency();
+  if (ratioRootNoteCustomInput) {
+    ratioRootNoteCustomInput.value = state.ratioRootNoteCustom;
+  }
+  syncSharedNotesAcrossModes();
+  syncModeButtons();
+  syncControlReadouts();
+  renderChart();
+  scheduleStateUrlUpdate(0);
 }
 
 function scheduleStateUrlUpdate(delay = 220) {
   if (suspendStateUrlSync) {
     return;
   }
+  // Persist immediately so rapid refresh/navigation doesn't lose recent edits.
+  saveStateToStorage();
   if (stateUrlTimer) {
     clearTimeout(stateUrlTimer);
   }
@@ -430,13 +1234,22 @@ function applyStateSnapshot(snapshot) {
       state.notesText = snapshot.notesText;
       notesInput.value = snapshot.notesText;
     }
+    if (typeof snapshot.ratioRootNoteCustom === "string") {
+      state.ratioRootNoteCustom = snapshot.ratioRootNoteCustom || "A";
+      if (ratioRootNoteCustomInput) {
+        ratioRootNoteCustomInput.value = state.ratioRootNoteCustom;
+      }
+    }
     if (Number.isFinite(snapshot.ratioRootHz)) {
       state.ratioRootHz = Math.max(0.01, Number(snapshot.ratioRootHz));
       ratioRootHzInput.value = String(state.ratioRootHz);
+      syncRatioRootNoteSelectFromFrequency();
     }
     if (Number.isFinite(snapshot.a4Hz)) {
       state.a4Hz = Math.max(1, Number(snapshot.a4Hz));
       a4HzInput.value = String(state.a4Hz);
+      updateRatioRootNoteOptions();
+      syncRatioRootNoteSelectFromFrequency();
     }
     if (Number.isFinite(snapshot.viewZoom) && viewZoomInput) {
       state.viewZoom = clamp(Number(snapshot.viewZoom), 0.3, 3);
@@ -445,6 +1258,12 @@ function applyStateSnapshot(snapshot) {
     if (Number.isFinite(snapshot.layoutScale) && layoutScaleInput) {
       state.layoutScale = clamp(Number(snapshot.layoutScale), 0.6, 1.8);
       layoutScaleInput.value = String(state.layoutScale);
+    }
+    if (Number.isFinite(snapshot.printGraphHeight)) {
+      state.printGraphHeight = clamp(Number(snapshot.printGraphHeight), 0.45, 1);
+      if (printHeightInput) {
+        printHeightInput.value = String(state.printGraphHeight);
+      }
     }
     if (Number.isFinite(snapshot.overtoneCount)) {
       state.overtoneCount = clamp(Math.round(Number(snapshot.overtoneCount)), 2, 48);
@@ -490,6 +1309,14 @@ function applyStateSnapshot(snapshot) {
     if (Number.isFinite(snapshot.pointSize)) {
       state.pointSize = clamp(Number(snapshot.pointSize), 2, 10);
       pointSizeInput.value = String(state.pointSize);
+    }
+    if (Number.isFinite(snapshot.stackLineSize) && stackLineSizeInput) {
+      state.stackLineSize = clamp(Number(snapshot.stackLineSize), 0.25, 3);
+      stackLineSizeInput.value = String(Math.round(state.stackLineSize * 100));
+    }
+    if (typeof snapshot.alphaFalloff === "boolean" && alphaFalloffInput) {
+      state.alphaFalloff = snapshot.alphaFalloff;
+      alphaFalloffInput.checked = snapshot.alphaFalloff;
     }
     if (Number.isFinite(snapshot.comboSize) && comboSizeInput) {
       state.comboSize = clamp(Number(snapshot.comboSize), 2, 10);
@@ -544,6 +1371,12 @@ function applyStateSnapshot(snapshot) {
     if (Number.isFinite(snapshot.fusionClusterCents) && fusionClusterCentsInput) {
       state.fusionClusterCents = clamp(Number(snapshot.fusionClusterCents), 0, 4);
       fusionClusterCentsInput.value = String(state.fusionClusterCents);
+    }
+    if (Number.isFinite(snapshot.fusionScale)) {
+      state.fusionScale = clamp(Number(snapshot.fusionScale), 0.5, 1.5);
+      if (fusionScaleInput) {
+        fusionScaleInput.value = String(Math.round(state.fusionScale * 100));
+      }
     }
     if (typeof snapshot.showRoughness === "boolean" && showRoughnessInput) {
       state.showRoughness = snapshot.showRoughness;
@@ -677,6 +1510,12 @@ function applyStateSnapshot(snapshot) {
         printShowComponentRatioInput.checked = snapshot.printShowComponentRatio;
       }
     }
+    if (typeof snapshot.printShowComponentNote === "boolean") {
+      state.printShowComponentNote = snapshot.printShowComponentNote;
+      if (printShowComponentNoteInput) {
+        printShowComponentNoteInput.checked = snapshot.printShowComponentNote;
+      }
+    }
     if (typeof snapshot.printShowAxisText === "boolean") {
       state.printShowAxisText = snapshot.printShowAxisText;
       if (printShowAxisTextInput) {
@@ -697,18 +1536,9 @@ function applyStateSnapshot(snapshot) {
     }
     if (typeof snapshot.printCustomLabelFont === "string") {
       state.printCustomLabelFont = snapshot.printCustomLabelFont;
-      if (customTextFontInput) {
-        customTextFontInput.value = snapshot.printCustomLabelFont;
-      }
     }
     if (Number.isFinite(snapshot.printCustomLabelSize)) {
       state.printCustomLabelSize = clamp(Number(snapshot.printCustomLabelSize), 8, 72);
-      if (customTextSizeInput) {
-        customTextSizeInput.value = String(state.printCustomLabelSize);
-      }
-      if (customTextSizeReadout) {
-        customTextSizeReadout.textContent = String(state.printCustomLabelSize);
-      }
     }
     if (snapshot.printAutoTextStyles && typeof snapshot.printAutoTextStyles === "object") {
       const next = cloneJson(PRINT_AUTO_TEXT_STYLE_DEFAULTS, PRINT_AUTO_TEXT_STYLE_DEFAULTS);
@@ -771,12 +1601,36 @@ function applyStateSnapshot(snapshot) {
     if (Array.isArray(snapshot.printCustomTexts)) {
       state.printCustomTexts = cloneJson(snapshot.printCustomTexts, []);
     }
+    if (Array.isArray(snapshot.printCustomLabels)) {
+      state.printCustomLabels = cloneJson(snapshot.printCustomLabels, []);
+    }
     if (snapshot.printComboLinksVisible && typeof snapshot.printComboLinksVisible === "object") {
       state.printComboLinksVisible = cloneJson(snapshot.printComboLinksVisible, {});
     }
     if (snapshot.printChordTitleOverrides && typeof snapshot.printChordTitleOverrides === "object") {
       state.printChordTitleOverrides = cloneJson(snapshot.printChordTitleOverrides, {});
     }
+    if (
+      snapshot.printAlignmentLabelOverrides &&
+      typeof snapshot.printAlignmentLabelOverrides === "object"
+    ) {
+      state.printAlignmentLabelOverrides = cloneJson(snapshot.printAlignmentLabelOverrides, {});
+    }
+    if (typeof snapshot.printYAxisLabelOverride === "string") {
+      state.printYAxisLabelOverride = snapshot.printYAxisLabelOverride;
+    }
+    if (typeof snapshot.printYAxisLabelHasOverride === "boolean") {
+      state.printYAxisLabelHasOverride = snapshot.printYAxisLabelHasOverride;
+    } else if (
+      typeof snapshot.printYAxisLabelOverride === "string" &&
+      snapshot.printYAxisLabelOverride.trim().length > 0
+    ) {
+      // Backward compatibility: non-empty previous override implies customized.
+      state.printYAxisLabelHasOverride = true;
+    } else {
+      state.printYAxisLabelHasOverride = false;
+    }
+    enforceComboLegendVisibility();
   } finally {
     suspendStateUrlSync = false;
   }
@@ -827,7 +1681,25 @@ function resetPrintLayoutState() {
   state.printComponentXOverrides = {};
   state.printDiagramOffsetX = 0;
   state.printDiagramOffsetY = 0;
+  state.printYAxisLabelOverride = "";
+  state.printYAxisLabelHasOverride = false;
   printDistancePendingKey = null;
+  pendingCustomLabelTarget = false;
+  pendingCustomLabelActionId = 0;
+}
+
+function hasAnyVisibleComboTypes() {
+  return Boolean(state.showComboDifference || state.showComboSum || state.showComboOrder2);
+}
+
+function enforceComboLegendVisibility() {
+  if (state.showCombination && hasAnyVisibleComboTypes()) {
+    return;
+  }
+  state.printShowLegend = false;
+  if (printShowLegendInput) {
+    printShowLegendInput.checked = false;
+  }
 }
 
 function setAppMode(nextMode, { skipRender = false } = {}) {
@@ -836,6 +1708,7 @@ function setAppMode(nextMode, { skipRender = false } = {}) {
     syncModeButtons();
     return;
   }
+  const sharedNotes = String(state.notesText ?? "");
   modeSnapshots[appMode] = getStateSnapshotFlat();
   appMode = mode;
   const snap = modeSnapshots[mode];
@@ -844,6 +1717,8 @@ function setAppMode(nextMode, { skipRender = false } = {}) {
   } else {
     modeSnapshots[mode] = getStateSnapshotFlat();
   }
+  state.notesText = sharedNotes;
+  syncSharedNotesAcrossModes();
   if (appMode === MODE_PRINT) {
     hardAllNotesOff();
     lKeyHeld = false;
@@ -852,22 +1727,85 @@ function setAppMode(nextMode, { skipRender = false } = {}) {
     document.body.classList.remove("theme-dark");
   } else {
     printDistancePendingKey = null;
-    closeCustomTextDialog(null);
+    pendingCustomLabelTarget = false;
+    pendingCustomLabelActionId = 0;
+    closeCustomTextDialog(null, "mode-switch-to-live");
   }
   syncModeButtons();
   if (!skipRender) {
     scheduleRender();
   }
+  scheduleStateUrlUpdate(0);
+}
+
+function waitAnimationFrame() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
+async function ensurePrintModeReadyForPanelAction(context = {}) {
+  const wasPrintMode = isPrintMode();
+  if (!isPrintMode()) {
+    setAppMode(MODE_PRINT);
+  }
+  if (!wasPrintMode) {
+    // Allow mode class/render scheduling to settle before panel action opens UI.
+    await waitAnimationFrame();
+    await waitAnimationFrame();
+  }
+}
+
+function forceResetCustomTextDialog(reason = "force-reset") {
+  const modalVisible = Boolean(customTextModal && !customTextModal.hidden);
+  const resolverSet = Boolean(customTextDialogResolver);
+  if (!modalVisible && !resolverSet) {
+    return;
+  }
+  closeCustomTextDialog(null, reason);
 }
 
 function formatHz(freq) {
   if (!Number.isFinite(freq)) {
     return "--";
   }
-  if (freq >= 1000) {
-    return `${freq.toFixed(1)} Hz`;
+  return `${formatHzValue(freq)} Hz`;
+}
+
+function formatHzValue(freq) {
+  if (!Number.isFinite(freq)) {
+    return "--";
   }
-  return `${freq.toFixed(2)} Hz`;
+  const roundedTenths = Math.round(freq * 10) / 10;
+  const roundedInt = Math.round(roundedTenths);
+  return Math.abs(roundedTenths - roundedInt) < 1e-9
+    ? String(roundedInt)
+    : roundedTenths.toFixed(1);
+}
+
+function formatHzForCalculation(freq) {
+  if (!Number.isFinite(freq)) {
+    return "--";
+  }
+  return `${formatHzValue(freq)} Hz`;
+}
+
+function describeComboCalculation(pointType, lowerFreq, upperFreq) {
+  const lower = formatHzForCalculation(lowerFreq);
+  const upper = formatHzForCalculation(upperFreq);
+  if (pointType === "difference") {
+    return `${upper} - ${lower}`;
+  }
+  if (pointType === "sum") {
+    return `${lower} + ${upper}`;
+  }
+  if (pointType === "order2a") {
+    return `2 * ${lower} - ${upper}`;
+  }
+  if (pointType === "order2b") {
+    return `2 * ${upper} - ${lower}`;
+  }
+  return `${lower} + ${upper}`;
 }
 
 function formatAxisHzCompact(freq) {
@@ -875,9 +1813,15 @@ function formatAxisHzCompact(freq) {
     return "";
   }
   if (freq >= 1000) {
-    return `${Math.round(freq / 1000)} kHz`;
+    const khz = freq / 1000;
+    const roundedTenths = Math.round(khz * 10) / 10;
+    const roundedInt = Math.round(roundedTenths);
+    const valueText = Math.abs(roundedTenths - roundedInt) < 1e-9
+      ? String(roundedInt)
+      : roundedTenths.toFixed(1);
+    return `${valueText} kHz`;
   }
-  return `${Math.round(freq)} Hz`;
+  return `${formatHzValue(freq)} Hz`;
 }
 
 function gcdInt(a, b) {
@@ -889,6 +1833,23 @@ function gcdInt(a, b) {
     y = t;
   }
   return x || 1;
+}
+
+function reduceFraction(numerator, denominator) {
+  const num = Math.round(Number(numerator) || 0);
+  const den = Math.round(Number(denominator) || 0);
+  if (den === 0) {
+    return { numerator: 0, denominator: 1 };
+  }
+  if (num === 0) {
+    return { numerator: 0, denominator: 1 };
+  }
+  const sign = den < 0 ? -1 : 1;
+  const g = gcdInt(num, den);
+  return {
+    numerator: (num / g) * sign,
+    denominator: Math.abs(den / g),
+  };
 }
 
 function approximateRatio(value, maxDenominator = 1024) {
@@ -1330,20 +2291,30 @@ function applyChordPlaybackAction(chordIndex, action) {
   const selectedExclusivelyOn =
     selectedFullyOn && playingChordKeys.length === selectedKeys.length;
 
-  Array.from(playingTargets.keys()).forEach((key) => {
-    if (groups.allChordKeys.has(key)) {
+  const removeChordPlaybackTargets = (includeFusion = false) => {
+    Array.from(playingTargets.entries()).forEach(([key, target]) => {
+      let belongsToChord = false;
+      if (groups.allChordKeys.has(key)) {
+        belongsToChord = true;
+      } else if (target?.kind === "harmonic" && Number.isFinite(target.noteIndex)) {
+        belongsToChord = noteSet.has(target.noteIndex);
+      } else if (typeof key === "string" && key.startsWith("combo:")) {
+        const comboMeta = parseComboPlayKey(key);
+        belongsToChord = !!(comboMeta && noteSet.has(comboMeta.noteA) && noteSet.has(comboMeta.noteB));
+      } else if (includeFusion && typeof key === "string" && key.startsWith("fusion:")) {
+        const parts = key.split(":");
+        const keyChordIndex = Number(parts[1]);
+        belongsToChord = Number.isFinite(keyChordIndex) && keyChordIndex === chordIndex;
+      }
+      if (!belongsToChord) {
+        return;
+      }
       playingTargets.delete(key);
       lfoTargetStates.delete(key);
-      return;
-    }
-    if (typeof key === "string" && key.startsWith("combo:")) {
-      const comboMeta = parseComboPlayKey(key);
-      if (comboMeta && noteSet.has(comboMeta.noteA) && noteSet.has(comboMeta.noteB)) {
-        playingTargets.delete(key);
-        lfoTargetStates.delete(key);
-      }
-    }
-  });
+    });
+  };
+
+  removeChordPlaybackTargets(action === "off");
 
   if (action !== "off" && !selectedExclusivelyOn) {
     selectedMap.forEach((target, key) => {
@@ -1859,14 +2830,228 @@ function computeAlignmentClusters(points, toleranceCents) {
   return clusters.slice(0, 120);
 }
 
+function computeOvertoneRenderGeometry(harmonic, harmonicCountHint = state.overtoneCount) {
+  const harmonicCount = clamp(Math.round(Number(harmonicCountHint) || 8), 2, 48);
+  const fundamentalRadius = (state.pointSize + 1.2) * 1.75;
+  const smallestRadius = clamp(
+    state.pointSize * (1 - (harmonicCount - 1) / (harmonicCount * 1.8)),
+    1.2,
+    8
+  );
+  const maxOvertoneGain = harmonicScalingGain(1);
+  const minOvertoneGain = harmonicScalingGain(harmonicCount);
+  const overtoneGainSpan = Math.max(1e-6, maxOvertoneGain - minOvertoneGain);
+  const overtoneFlatSizing = Math.abs(maxOvertoneGain - minOvertoneGain) < 1e-5;
+  const harmonicIndex = clamp(Math.round(Number(harmonic) || 1), 1, harmonicCount);
+  const harmonicGain = harmonicScalingGain(harmonicIndex);
+  const gainNorm = overtoneFlatSizing
+    ? 1
+    : clamp((harmonicGain - minOvertoneGain) / overtoneGainSpan, 0, 1);
+  return {
+    radius: smallestRadius + (fundamentalRadius - smallestRadius) * gainNorm,
+    fillOpacity: clamp(0.14 + 0.84 * harmonicGain, 0.14, 0.98),
+  };
+}
+
+function computeComboRenderGeometry(comboType) {
+  const radius = state.comboSize + 1.2;
+  const isSummation = comboType === "sum";
+  const isSecondOrder = comboType === "order2a" || comboType === "order2b";
+  return {
+    shape: isSummation ? "diamond" : "rect",
+    radius,
+    width: isSummation ? radius * 2 : radius * 2.7,
+    fillOpacity: isSecondOrder ? (0.88 * (2 / 3)) : 0.88,
+  };
+}
+
+function fusionAggregationScaleForCount(count) {
+  const n = Math.max(1, Math.round(Number(count) || 1));
+  if (n <= 2) {
+    return 1;
+  }
+  return clamp(1 - 0.1 * (n - 2), 0.45, 1);
+}
+
+function aggregateFusionComponentGeometry(points, harmonicCountHint = state.overtoneCount) {
+  const entries = Array.isArray(points) ? points : [];
+  let equivalentDiameterTotal = 0;
+  let rectWidthTotal = 0;
+  let diamondDiameterTotal = 0;
+  entries.forEach((point) => {
+    if (!point || typeof point !== "object") {
+      return;
+    }
+    if (point.kind === "overtone") {
+      const overtone = computeOvertoneRenderGeometry(point.harmonic, harmonicCountHint);
+      const diameter = overtone.radius * 2;
+      equivalentDiameterTotal += diameter;
+      return;
+    }
+    if (point.kind === "combo") {
+      const combo = computeComboRenderGeometry(point.type);
+      equivalentDiameterTotal += combo.width;
+      if (combo.shape === "rect") {
+        rectWidthTotal += combo.width;
+      } else {
+        diamondDiameterTotal += combo.width;
+      }
+    }
+  });
+  if (entries.length > 1) {
+    const aggregationScale = fusionAggregationScaleForCount(entries.length);
+    equivalentDiameterTotal *= aggregationScale;
+    rectWidthTotal *= aggregationScale;
+    diamondDiameterTotal *= aggregationScale;
+  }
+  let singletonRadius = NaN;
+  let singletonFillOpacity = NaN;
+  if (entries.length === 1) {
+    const only = entries[0];
+    if (only?.kind === "overtone") {
+      const overtone = computeOvertoneRenderGeometry(only.harmonic, harmonicCountHint);
+      singletonRadius = overtone.radius;
+      singletonFillOpacity = overtone.fillOpacity;
+    } else if (only?.kind === "combo") {
+      const combo = computeComboRenderGeometry(only.type);
+      singletonRadius = combo.radius;
+      singletonFillOpacity = combo.fillOpacity;
+    }
+  }
+  return {
+    equivalentDiameterTotal,
+    rectWidthTotal,
+    diamondDiameterTotal,
+    singletonRadius,
+    singletonFillOpacity,
+  };
+}
+
+function normalizeComboTypeForFusion(pointType) {
+  if (pointType === "sum") {
+    return "sum";
+  }
+  if (pointType === "order2a" || pointType === "order2b") {
+    return "order2";
+  }
+  return "difference";
+}
+
+function emptyFusionComboTypeCounts() {
+  return { difference: 0, sum: 0, order2: 0 };
+}
+
+function tallyFusionComboTypeCounts(points) {
+  const counts = emptyFusionComboTypeCounts();
+  (Array.isArray(points) ? points : []).forEach((point) => {
+    if (!point || point.kind !== "combo") {
+      return;
+    }
+    const key = normalizeComboTypeForFusion(point.type);
+    counts[key] += 1;
+  });
+  return counts;
+}
+
+function resolveFusionShape(hasHarmonic, hasDifference, hasSummation) {
+  if (hasHarmonic) {
+    return "circle";
+  }
+  if (hasDifference && hasSummation) return "circle";
+  if (hasDifference) return "rect";
+  if (hasSummation) return "diamond";
+  return "circle";
+}
+
+function fusionShapeIncludesCircle(shape) {
+  return (
+    shape === "circle" ||
+    shape === "circle-rect" ||
+    shape === "circle-diamond" ||
+    shape === "circle-rect-diamond"
+  );
+}
+
+function fusionShapeIncludesRect(shape) {
+  return (
+    shape === "rect" ||
+    shape === "rect-diamond" ||
+    shape === "circle-rect" ||
+    shape === "circle-rect-diamond"
+  );
+}
+
+function fusionShapeIncludesDiamond(shape) {
+  return (
+    shape === "diamond" ||
+    shape === "rect-diamond" ||
+    shape === "circle-diamond" ||
+    shape === "circle-rect-diamond"
+  );
+}
+
+function fusionVisualHalfSpan(visual) {
+  if (!visual || typeof visual !== "object") {
+    return 0;
+  }
+  const circleExtent = fusionShapeIncludesCircle(visual.shape) ? Number(visual.radius) || 0 : 0;
+  const rectExtent = fusionShapeIncludesRect(visual.shape) && Number.isFinite(visual.rectRadius)
+    ? Number(visual.rectRadius) * 1.35
+    : fusionShapeIncludesRect(visual.shape)
+      ? (Number(visual.radius) || 0) * 1.35
+      : 0;
+  const diamondExtent = fusionShapeIncludesDiamond(visual.shape) && Number.isFinite(visual.diamondRadius)
+    ? Number(visual.diamondRadius)
+    : fusionShapeIncludesDiamond(visual.shape)
+      ? Number(visual.radius) || 0
+      : 0;
+  return Math.max(0, circleExtent, rectExtent, diamondExtent);
+}
+
 function annotateFusionNodesWithAlignment(fusionNodes, alignmentClusters, matchToleranceCents) {
   const nodes = Array.isArray(fusionNodes) ? fusionNodes : [];
   const clusters = Array.isArray(alignmentClusters) ? alignmentClusters : [];
   const tol = Math.max(0, Number(matchToleranceCents) || 0);
-  if (!nodes.length) {
-    return [];
-  }
-  return nodes.map((node) => {
+  const classifyClusterComposition = (cluster) => {
+    const points = Array.isArray(cluster?.points) ? cluster.points : [];
+    let harmonicCount = 0;
+    let differenceCount = 0;
+    let sumCount = 0;
+    points.forEach((point) => {
+      if (!point || typeof point !== "object") {
+        return;
+      }
+      if (point.kind === "overtone") {
+        harmonicCount += 1;
+        return;
+      }
+      if (point.kind === "combo") {
+        if (point.type === "sum") {
+          sumCount += 1;
+        } else {
+          differenceCount += 1;
+        }
+      }
+    });
+    const memberCount = points.length;
+    const hasHarmonic = harmonicCount > 0;
+    const hasDifference = differenceCount > 0;
+    const hasSummation = sumCount > 0;
+    const comboTypeCounts = tallyFusionComboTypeCounts(points);
+    const shape = memberCount > 1
+      ? resolveFusionShape(hasHarmonic, hasDifference, hasSummation)
+      : "";
+    return {
+      memberCount,
+      hasHarmonic,
+      hasDifference,
+      hasSummation,
+      comboTypeCounts,
+      shape,
+    };
+  };
+  const matchedClusterIds = new Set();
+  const annotated = nodes.map((node) => {
     let best = null;
     clusters.forEach((cluster) => {
       if (!(cluster?.centerFreq > 0) || !(node?.centerFreq > 0)) {
@@ -1882,18 +3067,27 @@ function annotateFusionNodesWithAlignment(fusionNodes, alignmentClusters, matchT
         delta < best.delta - 1e-9 ||
         (Math.abs(delta - best.delta) <= 1e-9 && memberCount > best.memberCount)
       ) {
+        const composition = classifyClusterComposition(cluster);
         best = {
           id: cluster.id,
           centerFreq: cluster.centerFreq,
-          memberCount,
+          memberCount: composition.memberCount,
           uniqueNotes: Number(cluster.uniqueNotes) || 0,
           memberPlayKeys: (cluster.points || [])
             .map((point) => point?.playKey)
             .filter(Boolean),
+          hasHarmonic: composition.hasHarmonic,
+          hasDifference: composition.hasDifference,
+          hasSummation: composition.hasSummation,
+          comboTypeCounts: composition.comboTypeCounts,
+          shape: composition.shape,
           delta,
         };
       }
     });
+    if (best?.id) {
+      matchedClusterIds.add(best.id);
+    }
     return {
       ...node,
       alignmentClusterId: best?.id || "",
@@ -1902,9 +3096,88 @@ function annotateFusionNodesWithAlignment(fusionNodes, alignmentClusters, matchT
       alignmentUniqueNotes: best?.uniqueNotes || 0,
       alignmentMemberPlayKeys: best?.memberPlayKeys || [],
       alignmentDeltaCents: best?.delta ?? Infinity,
+      alignmentHasHarmonic: Boolean(best?.hasHarmonic),
+      alignmentHasDifference: Boolean(best?.hasDifference),
+      alignmentHasSummation: Boolean(best?.hasSummation),
+      alignmentComboTypeCounts: best?.comboTypeCounts || emptyFusionComboTypeCounts(),
+      alignmentShape: best?.shape || "",
       labelEligible: (best?.memberCount || 0) > 1,
     };
   });
+  clusters.forEach((cluster) => {
+    if (!(cluster?.centerFreq > 0) || matchedClusterIds.has(cluster.id)) {
+      return;
+    }
+    const composition = classifyClusterComposition(cluster);
+    if (composition.memberCount <= 1 || !composition.shape) {
+      return;
+    }
+    const strength = clamp(Number(cluster.strength) || 0.38, 0.18, 1);
+    const naturalShare = composition.hasHarmonic ? 1 : 0;
+    const geometry = aggregateFusionComponentGeometry(cluster.points || [], state.overtoneCount);
+    let radius = clamp(3 + strength * 18, 3, 240);
+    let rectRadius = NaN;
+    let diamondRadius = NaN;
+    if (fusionShapeIncludesCircle(composition.shape) && geometry.equivalentDiameterTotal > 0) {
+      radius = clamp(geometry.equivalentDiameterTotal / 2, 1.2, 240);
+    } else if (composition.shape === "rect" && geometry.rectWidthTotal > 0) {
+      radius = clamp(geometry.rectWidthTotal / 2.7, 1.2, 240);
+    } else if (composition.shape === "diamond" && geometry.diamondDiameterTotal > 0) {
+      radius = clamp(geometry.diamondDiameterTotal / 2, 1.2, 240);
+    } else if (fusionShapeIncludesRect(composition.shape) || fusionShapeIncludesDiamond(composition.shape)) {
+      rectRadius = geometry.rectWidthTotal > 0 ? geometry.rectWidthTotal / 2.7 : NaN;
+      diamondRadius = geometry.diamondDiameterTotal > 0 ? geometry.diamondDiameterTotal / 2 : NaN;
+      const maxExtent = Math.max(
+        fusionShapeIncludesCircle(composition.shape) ? radius : 0,
+        Number.isFinite(diamondRadius) ? diamondRadius : 0,
+        Number.isFinite(rectRadius) ? rectRadius * 1.35 : 0
+      );
+      if (maxExtent > 0) {
+        radius = clamp(maxExtent, 1.2, 240);
+      }
+      if (fusionShapeIncludesRect(composition.shape) && !Number.isFinite(rectRadius)) {
+        rectRadius = radius / 1.35;
+      }
+      if (fusionShapeIncludesDiamond(composition.shape) && !Number.isFinite(diamondRadius)) {
+        diamondRadius = radius;
+      }
+    }
+    const tipBase = String(cluster.tip || "").trim();
+    const mixText = composition.hasDifference && composition.hasSummation
+      ? "Difference + summation overlap"
+      : composition.hasDifference
+        ? "Difference-only overlap"
+        : composition.hasSummation
+          ? "Summation-only overlap"
+          : "Alignment overlap";
+    annotated.push({
+      id: `align:${cluster.id}`,
+      centerFreq: Number(cluster.centerFreq),
+      strength,
+      naturalShare,
+      alignStrength: strength,
+      radius,
+      rectRadius,
+      diamondRadius,
+      count: composition.memberCount,
+      tip: tipBase ? `${tipBase}\n${mixText}` : mixText,
+      alignmentClusterId: cluster.id,
+      alignmentCenterFreq: Number(cluster.centerFreq),
+      alignmentMemberCount: composition.memberCount,
+      alignmentUniqueNotes: Number(cluster.uniqueNotes) || 0,
+      alignmentMemberPlayKeys: (cluster.points || [])
+        .map((point) => point?.playKey)
+        .filter(Boolean),
+      alignmentDeltaCents: 0,
+      alignmentHasHarmonic: composition.hasHarmonic,
+      alignmentHasDifference: composition.hasDifference,
+      alignmentHasSummation: composition.hasSummation,
+      alignmentComboTypeCounts: composition.comboTypeCounts,
+      alignmentShape: composition.shape,
+      labelEligible: true,
+    });
+  });
+  return annotated;
 }
 
 function fusionPointWeight(point) {
@@ -2076,10 +3349,11 @@ function filterFusionCoincidentPoints(points, coincidenceCents, beatMinHz, beatM
     }));
 }
 
-function buildFusionAllModeNodes(points, toleranceCents) {
+function buildFusionAllModeNodes(points, toleranceCents, harmonicCountHint = state.overtoneCount) {
   if (!points.length) {
     return [];
   }
+  const harmonicCount = clamp(Math.round(Number(harmonicCountHint) || 8), 2, 48);
   const tol = Math.max(0, Number(toleranceCents) || 0);
   const support = new Array(points.length).fill(0);
   for (let i = 0; i < points.length; i += 1) {
@@ -2135,7 +3409,10 @@ function buildFusionAllModeNodes(points, toleranceCents) {
     const harmonicPoints = group.filter((point) => point.kind === "overtone");
     const comboPoints = group.filter((point) => point.kind === "combo");
     const hasHarmonic = harmonicPoints.length > 0;
+    const hasDifference = comboPoints.some((point) => point.type !== "sum");
+    const hasSummation = comboPoints.some((point) => point.type === "sum");
     const hasCombo = comboPoints.length > 0;
+    const comboTypeCounts = tallyFusionComboTypeCounts(comboPoints);
     const alignStrength =
       group.reduce((sum, point) => sum + (point.alignSupport || 0), 0) / Math.max(1, group.length);
     const naturalShare =
@@ -2147,17 +3424,51 @@ function buildFusionAllModeNodes(points, toleranceCents) {
     const densityBoost = Math.min(3.2, Math.log1p(group.length) * 1.35);
     const allModeRadius = baseRadius + mixBoost + alignBoost + densityBoost;
     const alignOnlyFloor = 3 + alignStrength * 18;
-    const radius = clamp(Math.max(allModeRadius, alignOnlyFloor), 3, 22);
-    const shape = hasHarmonic ? "circle" : "diamond";
+    let radius = clamp(Math.max(allModeRadius, alignOnlyFloor), 3, 240);
+    const shape = resolveFusionShape(hasHarmonic, hasDifference, hasSummation);
+    const geometry = aggregateFusionComponentGeometry(group, harmonicCount);
+    let rectRadius = NaN;
+    let diamondRadius = NaN;
+    if (group.length === 1) {
+      radius = clamp(Number(geometry.singletonRadius) || radius, 1.2, 240);
+    } else if (fusionShapeIncludesCircle(shape) && geometry.equivalentDiameterTotal > 0) {
+      radius = clamp(geometry.equivalentDiameterTotal / 2, 1.2, 240);
+    } else if (shape === "rect" && geometry.rectWidthTotal > 0) {
+      radius = clamp(geometry.rectWidthTotal / 2.7, 1.2, 240);
+    } else if (shape === "diamond" && geometry.diamondDiameterTotal > 0) {
+      radius = clamp(geometry.diamondDiameterTotal / 2, 1.2, 240);
+    } else if (fusionShapeIncludesRect(shape) || fusionShapeIncludesDiamond(shape)) {
+      rectRadius = geometry.rectWidthTotal > 0 ? geometry.rectWidthTotal / 2.7 : NaN;
+      diamondRadius = geometry.diamondDiameterTotal > 0 ? geometry.diamondDiameterTotal / 2 : NaN;
+      const maxExtent = Math.max(
+        fusionShapeIncludesCircle(shape) ? radius : 0,
+        Number.isFinite(diamondRadius) ? diamondRadius : 0,
+        Number.isFinite(rectRadius) ? rectRadius * 1.35 : 0
+      );
+      if (maxExtent > 0) {
+        radius = clamp(maxExtent, 1.2, 240);
+      }
+      if (fusionShapeIncludesRect(shape) && !Number.isFinite(rectRadius)) {
+        rectRadius = radius / 1.35;
+      }
+      if (fusionShapeIncludesDiamond(shape) && !Number.isFinite(diamondRadius)) {
+        diamondRadius = radius;
+      }
+    }
     return {
       id: index,
       centerFreq,
       shape,
       radius,
+      rectRadius,
+      diamondRadius,
+      singletonRadius: geometry.singletonRadius,
+      singletonFillOpacity: geometry.singletonFillOpacity,
       alignStrength,
       naturalShare,
       hasCombo,
       hasHarmonic,
+      comboTypeCounts,
       count: group.length,
       tip: `Fusion ${shape}
 ${group.length} components near ${formatHz(centerFreq)}
@@ -2169,54 +3480,74 @@ ${hasHarmonic && hasCombo ? "Harmonics + combo overlap" : hasCombo ? "Combo/diff
 
 function getFusionNodeVisual(node, fusionMode, themeDark, scheme) {
   const palette = scheme || activeColorScheme();
-  const harmonicBase = palette?.fusion?.harmonic || "#c56a42";
-  const comboBase = palette?.fusion?.combo || "#4a8f81";
-  if (fusionMode === "all") {
-    const naturalShare = clamp(Number(node.naturalShare) || 0, 0, 1);
-    const alignStrength = clamp(Number(node.alignStrength) || 0, 0, 1);
-    const radius = clamp(Number(node.radius) || 3, 2, 24);
-    if (node.shape === "diamond") {
-      const fillBase = mixHex(comboBase, "#ffffff", themeDark ? 0.1 : 0.18);
-      const fill = mixHex(fillBase, "#ffffff", 0.28 * (1 - alignStrength));
-      const stroke = mixHex(comboBase, "#000000", 0.2 + alignStrength * 0.35);
-      return {
-        shape: "diamond",
-        radius,
-        fill,
-        fillOpacity: 0.24 + alignStrength * 0.56,
-        stroke,
-        strokeOpacity: 0.45 + alignStrength * 0.35,
-        strokeWidth: 0.9 + alignStrength * 1.2,
-      };
+  const unifiedBase = palette?.fusion?.harmonic || palette?.fusion?.combo || "#4a8f81";
+  const fusionScale = clamp(Number(state.fusionScale) || 1, 0.5, 1.5);
+  const comboPalette = {
+    difference: palette?.combo?.difference || "#d45d4c",
+    sum: palette?.combo?.sum || "#b6802e",
+    order2: palette?.combo?.order2Rect || palette?.combo?.order2 || "#2f8a45",
+  };
+  const resolveRenderableShape = (shape) => {
+    if (shape === "rect" || shape === "diamond" || shape === "circle") {
+      return shape;
     }
-    const harmonicMix = mixHex(comboBase, harmonicBase, 0.25 + naturalShare * 0.75);
-    const fill = mixHex(harmonicMix, "#ffffff", (themeDark ? 0.18 : 0.24) * (1 - alignStrength));
-    const stroke = mixHex(harmonicMix, "#000000", 0.18 + alignStrength * 0.3);
-    return {
-      shape: "circle",
-      radius,
-      fill,
-      fillOpacity: 0.22 + alignStrength * 0.6,
-      stroke,
-      strokeOpacity: 0.35 + alignStrength * 0.42,
-      strokeWidth: 0.9 + alignStrength * 1.2,
-    };
+    return "circle";
+  };
+  const alignmentShape =
+    typeof node?.alignmentShape === "string"
+      ? resolveRenderableShape(node.alignmentShape)
+      : "";
+  const nodeShape =
+    typeof node?.shape === "string"
+      ? resolveRenderableShape(node.shape)
+      : "";
+  const preferredShape = alignmentShape || nodeShape || "circle";
+  const alignStrength = clamp(Number(node.alignStrength) || Number(node.strength) || 0, 0, 1);
+  const singleton = Number(node.count) === 1;
+  const comboTypeCounts = {
+    ...emptyFusionComboTypeCounts(),
+    ...(node?.comboTypeCounts || {}),
+    ...(node?.alignmentComboTypeCounts || {}),
+  };
+  const comboCountTotal =
+    (Number(comboTypeCounts.difference) || 0) +
+    (Number(comboTypeCounts.sum) || 0) +
+    (Number(comboTypeCounts.order2) || 0);
+  let comboBlend = unifiedBase;
+  if (comboCountTotal > 0) {
+    const diffShare = (Number(comboTypeCounts.difference) || 0) / comboCountTotal;
+    const sumShare = (Number(comboTypeCounts.sum) || 0) / comboCountTotal;
+    const order2Share = (Number(comboTypeCounts.order2) || 0) / comboCountTotal;
+    comboBlend = mixHex(unifiedBase, comboPalette.difference, 0.34 * diffShare);
+    comboBlend = mixHex(comboBlend, comboPalette.sum, 0.34 * sumShare);
+    comboBlend = mixHex(comboBlend, comboPalette.order2, 0.34 * order2Share);
+    comboBlend = mixHex(unifiedBase, comboBlend, 0.62);
   }
-
-  const strength = clamp(Number(node.strength) || 0, 0, 1);
-  const naturalShare = clamp(Number(node.naturalShare) || 0, 0, 1);
-  const radius = clamp(3 + strength * 18, 3, 26);
-  const alignColor = mixHex(comboBase, harmonicBase, 0.32 + naturalShare * 0.68);
-  const fill = mixHex(alignColor, "#ffffff", (themeDark ? 0.15 : 0.22) * (1 - strength));
-  const stroke = mixHex(alignColor, "#000000", 0.2 + strength * 0.32);
+  const colorBase = comboCountTotal > 0 ? comboBlend : unifiedBase;
+  const radius = singleton
+    ? clamp(Number(node.singletonRadius) || Number(node.radius) || 3, 1.2, 240)
+    : clamp(Number(node.radius) || 3, 2, 240);
+  const rectRadius = preferredShape === "rect" && Number.isFinite(node.rectRadius)
+    ? clamp(Number(node.rectRadius), 1.2, 240)
+    : NaN;
+  const diamondRadius = preferredShape === "diamond" && Number.isFinite(node.diamondRadius)
+    ? clamp(Number(node.diamondRadius), 1.2, 240)
+    : NaN;
+  const singletonFillOpacity = singleton
+    ? clamp(Number(node.singletonFillOpacity) || 0.32, 0.08, 1)
+    : null;
+  const fill = mixHex(colorBase, "#ffffff", (themeDark ? 0.18 : 0.24) * (1 - alignStrength));
+  const stroke = mixHex(colorBase, "#000000", 0.18 + alignStrength * 0.3);
   return {
-    shape: "circle",
-    radius,
+    shape: preferredShape,
+    radius: radius * fusionScale,
+    rectRadius: Number.isFinite(rectRadius) ? rectRadius * fusionScale : NaN,
+    diamondRadius: Number.isFinite(diamondRadius) ? diamondRadius * fusionScale : NaN,
     fill,
-    fillOpacity: 0.22 + strength * 0.62,
+    fillOpacity: singleton ? singletonFillOpacity : (0.22 + alignStrength * 0.6),
     stroke,
-    strokeOpacity: 0.35 + strength * 0.4,
-    strokeWidth: 0.9 + strength * 1.1,
+    strokeOpacity: 0.35 + alignStrength * 0.42,
+    strokeWidth: 0.9 + alignStrength * 1.2,
   };
 }
 
@@ -2324,7 +3655,7 @@ function computeFusionBeatBands(points, minBeatHz, maxBeatHz, centerToleranceCen
         playItems: Array.from(itemMap.entries()).map(([key, target]) => ({ key, target })),
         tip: `Beat-friction band
 Center: ${formatHz(centerFreq)}
-Typical |f2-f1|: ${deltaHz.toFixed(2)} Hz
+Typical |f2-f1|: ${formatHz(Math.abs(deltaHz))}
 Interacting pairs: ${item.pairCount}`,
       };
     })
@@ -2345,7 +3676,7 @@ const COLOR_SCHEMES = {
       19: "#d4b022",
       23: "#2a8c8a",
     },
-    combo: { difference: "#d45d4c", sum: "#b6802e", order2: "#6e58b4" },
+    combo: { difference: "#d45d4c", sum: "#b6802e", order2: "#6e58b4", order2Rect: "#2f8a45" },
     fusion: { harmonic: "#c56a42", combo: "#4a8f81" },
     roughness: { base: "#cf5f34" },
   },
@@ -2362,7 +3693,7 @@ const COLOR_SCHEMES = {
       19: "#f5cc00",
       23: "#0f7c96",
     },
-    combo: { difference: "#ff2f1f", sum: "#ffc400", order2: "#1764ff" },
+    combo: { difference: "#ff2f1f", sum: "#ffc400", order2: "#1764ff", order2Rect: "#00a3a3" },
     fusion: { harmonic: "#ff7b39", combo: "#3f86ff" },
     roughness: { base: "#e53a1f" },
   },
@@ -2379,7 +3710,7 @@ const COLOR_SCHEMES = {
       19: "#f7ff4f",
       23: "#1dd6ff",
     },
-    combo: { difference: "#ff1493", sum: "#00e676", order2: "#00b0ff" },
+    combo: { difference: "#ff1493", sum: "#00e676", order2: "#00b0ff", order2Rect: "#ff8c00" },
     fusion: { harmonic: "#00bf84", combo: "#00d2ff" },
     roughness: { base: "#ff3ea0" },
   },
@@ -2396,7 +3727,7 @@ const COLOR_SCHEMES = {
       19: "#c6da57",
       23: "#3aa0d8",
     },
-    combo: { difference: "#ff4d94", sum: "#ff9d00", order2: "#7f5bff" },
+    combo: { difference: "#ff4d94", sum: "#ff9d00", order2: "#7f5bff", order2Rect: "#2ec4b6" },
     fusion: { harmonic: "#8b93ff", combo: "#4db7d9" },
     roughness: { base: "#d65a87" },
   },
@@ -2413,7 +3744,7 @@ const COLOR_SCHEMES = {
       19: "#ffd54a",
       23: "#00897b",
     },
-    combo: { difference: "#b45309", sum: "#eab308", order2: "#0f766e" },
+    combo: { difference: "#b45309", sum: "#eab308", order2: "#0f766e", order2Rect: "#2563eb" },
     fusion: { harmonic: "#d97706", combo: "#6d28d9" },
     roughness: { base: "#c2410c" },
   },
@@ -2596,6 +3927,11 @@ function nudgePrintLabelsToReduceCollisions(labels, minY, maxY, hazards = []) {
     item.el.setAttribute("data-print-default-dx", String(dx));
     item.el.setAttribute("data-print-default-dy", String(dy));
     item.el.querySelectorAll("tspan").forEach((span) => {
+      // Preserve inline glyph/exponent spacing for note labels:
+      // only line-start tspans should track the text anchor x.
+      if (!span.hasAttribute("x")) {
+        return;
+      }
       span.setAttribute("x", String(x));
     });
   };
@@ -2711,10 +4047,15 @@ function setPrintAutoTextStyle(classKey, patch) {
   };
 }
 
-let customTextDialogResolver = null;
-
 function openCustomTextDialog(initialText = "", options = {}) {
-  if (!isPrintMode() || !customTextModal || !customTextInput) {
+  if (!customTextModal || !customTextInput) {
+    if (typeof window !== "undefined" && typeof window.prompt === "function") {
+      const entered = window.prompt(String(options?.title || "Custom Text"), String(initialText || ""));
+      if (entered == null) {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve({ text: String(entered) });
+    }
     return Promise.resolve(null);
   }
   if (customTextDialogResolver) {
@@ -2723,12 +4064,6 @@ function openCustomTextDialog(initialText = "", options = {}) {
   }
   customTextDialogMode = options.mode === "style" ? "style" : "custom";
   customTextInput.value = String(initialText || "");
-  const modalFont = String(options.font || state.printCustomLabelFont || "Noto Serif");
-  const modalSize = clamp(
-    Number(options.size ?? state.printCustomLabelSize ?? 18),
-    8,
-    72
-  );
   const modalTitle = typeof options.title === "string" && options.title.trim()
     ? options.title.trim()
     : customTextDialogMode === "style" ? "Text Style" : "Custom Text";
@@ -2744,35 +4079,24 @@ function openCustomTextDialog(initialText = "", options = {}) {
   if (customTextInput) {
     customTextInput.disabled = customTextDialogMode === "style";
   }
-  if (customTextFontInput) {
-    customTextFontInput.value = modalFont;
-  }
-  if (customTextSizeInput) {
-    customTextSizeInput.value = String(modalSize);
-  }
-  if (customTextSizeReadout) {
-    customTextSizeReadout.textContent = String(modalSize);
-  }
   customTextModal.hidden = false;
   customTextModal.style.display = "grid";
-  if (customTextDialogMode === "style") {
-    customTextFontInput?.focus();
-  } else {
-    customTextInput.focus();
-    customTextInput.select();
-  }
+  customTextDialogOpenedAt = Date.now();
+  customTextInput.focus();
+  customTextInput.select();
   return new Promise((resolve) => {
     customTextDialogResolver = resolve;
   });
 }
 
-function closeCustomTextDialog(result) {
+function closeCustomTextDialog(result, reason = "unknown") {
   if (!customTextModal) {
     return;
   }
   customTextModal.hidden = true;
   customTextModal.style.display = "none";
   customTextDialogMode = "custom";
+  customTextDialogOpenedAt = 0;
   if (customTextInput) {
     customTextInput.disabled = false;
   }
@@ -2884,19 +4208,11 @@ function buildModel() {
     const chordPoints = weightedFusionPoints.filter((point) =>
       (point.noteIndexes || []).some((idx) => noteSet.has(idx))
     );
-    const fusionCoincidentPoints = filterFusionCoincidentPoints(
+    const rawFusionNodes = buildFusionAllModeNodes(
       chordPoints,
       clamp(state.fusionClusterCents, 0, 4),
-      beatMin,
-      beatMax
+      effectiveOvertoneCount
     );
-    const rawFusionNodes =
-      state.fusionMode === "all"
-        ? buildFusionAllModeNodes(chordPoints, clamp(state.fusionClusterCents, 0, 4))
-        : buildFusionDensityClusters(
-            fusionCoincidentPoints,
-            clamp(state.fusionClusterCents, 0, 4)
-          );
     const roughnessBands =
       state.showRoughness && chordPoints.length > 1
         ? computeFusionBeatBands(
@@ -2934,11 +4250,15 @@ function buildModel() {
       tip: `Chord ${chordIndex + 1}
 ${cluster.uniqueNotes} notes align near ${formatHz(cluster.centerFreq)}`,
     }));
-    const fusionNodes = annotateFusionNodesWithAlignment(
+    const annotatedFusionNodes = annotateFusionNodesWithAlignment(
       rawFusionNodes,
       alignmentClusters,
       fusionAlignmentMatchCents
     );
+    const fusionNodes =
+      state.fusionMode === "all"
+        ? annotatedFusionNodes
+        : annotatedFusionNodes.filter((node) => Number(node.count) > 1);
     return {
       chordIndex,
       noteIndexes: chord.noteIndexes,
@@ -3098,6 +4418,9 @@ function describeComboTone(point, notes) {
   const labelB = sourceB ? sourceB.input : `#${point.noteB + 1}`;
   const freqA = sourceA ? sourceA.freq : NaN;
   const freqB = sourceB ? sourceB.freq : NaN;
+  const lowerFreq = Number.isFinite(freqA) && Number.isFinite(freqB) ? Math.min(freqA, freqB) : NaN;
+  const upperFreq = Number.isFinite(freqA) && Number.isFinite(freqB) ? Math.max(freqA, freqB) : NaN;
+  const calculation = describeComboCalculation(point.type, lowerFreq, upperFreq);
 
   let title = "Combination tone";
   if (point.type === "difference") title = "Difference tone";
@@ -3107,7 +4430,7 @@ function describeComboTone(point, notes) {
   return `${title}
 Formula: ${point.formula}
 Source notes: ${labelA} and ${labelB}
-Source freqs: ${formatHz(freqA)} + ${formatHz(freqB)}
+Calculation: ${calculation}
 Result: ${formatHz(point.freq)}`;
 }
 
@@ -3125,10 +4448,13 @@ function buildChartSvg(model, width, height) {
   const comboDiffColor = colorScheme?.combo?.difference || "#d45d4c";
   const comboSumColor = colorScheme?.combo?.sum || "#b6802e";
   const comboOrder2Color = colorScheme?.combo?.order2 || "#6e58b4";
+  const comboOrder2RectColor = colorScheme?.combo?.order2Rect || comboOrder2Color || "#2f8a45";
+  const alphaFalloff = state.alphaFalloff !== false;
+  const stackLineScale = clamp(Number(state.stackLineSize) || 1, 0.25, 3);
   const axisStrokeW = inPrintMode ? 1.8 : 1.4;
   const columnStrokeW = inPrintMode ? 0.7 : 1;
-  const stemStrokeW = inPrintMode ? 0.8 : 1;
-  const stemOpacity = inPrintMode ? 0.18 : 0.26;
+  const stemStrokeW = (inPrintMode ? 0.8 : 1) * stackLineScale;
+  const stemOpacity = alphaFalloff ? (inPrintMode ? 0.18 : 0.26) : 1;
 
   const { pageX, pageY, pageWidth, pageHeight } = resolvePageRect(width, height, inPrintMode);
   const printMargin = inPrintMode ? clamp(Number(state.printMargin) || 44, 8, 220) : 0;
@@ -3144,31 +4470,77 @@ function buildChartSvg(model, width, height) {
     ? model.chords
     : (model.notes.length ? [{ index: 0, noteIndexes: model.notes.map((_, i) => i) }] : []);
   const useAlignmentLabelLane = state.showAlignments && !state.showFusion && !state.showRoughness;
-  const slotEntries = [];
-  chordsForLayout.forEach((chord, chordIndex) => {
-    chord.noteIndexes.forEach((noteIndex) => {
-      slotEntries.push({ type: "note", chordIndex, noteIndex, width: 1 });
+  const buildSlotEntries = (fusionWidthByChord = {}) => {
+    const entries = [];
+    chordsForLayout.forEach((chord, chordIndex) => {
+      chord.noteIndexes.forEach((noteIndex) => {
+        entries.push({ type: "note", chordIndex, noteIndex, width: 1 });
+      });
+      if (useAlignmentLabelLane) {
+        entries.push({ type: "alignlabel", chordIndex, width: 1.15 });
+      }
+      if (state.showFusion) {
+        entries.push({
+          type: "fusion",
+          chordIndex,
+          width: clamp(Number(fusionWidthByChord[chordIndex]) || 0.92, 0.92, 5),
+        });
+      }
+      if (state.showRoughness) {
+        entries.push({ type: "rough", chordIndex, width: 0.92 });
+      }
+      if (chordIndex < chordsForLayout.length - 1) {
+        entries.push({ type: "gap", width: useAlignmentLabelLane ? 0.9 : 0.68 });
+      }
     });
-    if (useAlignmentLabelLane) {
-      slotEntries.push({ type: "alignlabel", chordIndex, width: 1.15 });
-    }
-    if (state.showFusion) {
-      slotEntries.push({ type: "fusion", chordIndex, width: 0.92 });
-    }
-    if (state.showRoughness) {
-      slotEntries.push({ type: "rough", chordIndex, width: 0.92 });
-    }
-    if (chordIndex < chordsForLayout.length - 1) {
-      slotEntries.push({ type: "gap", width: useAlignmentLabelLane ? 0.9 : 0.68 });
-    }
-  });
-  const layoutCount = Math.max(model.notes.length, slotEntries.length || model.notes.length);
-  const noteBand = computeNoteBand(layoutCount, frameLeft, frameRight);
-  const totalSlotUnits = Math.max(
-    1,
-    slotEntries.reduce((sum, entry) => sum + (entry.width || 1), 0)
-  );
-  const slotUnitWidth = (noteBand.right - noteBand.left) / totalSlotUnits;
+    return entries;
+  };
+  const computeLayoutMetrics = (entries) => {
+    const layoutCount = Math.max(model.notes.length, entries.length || model.notes.length);
+    const noteBand = computeNoteBand(layoutCount, frameLeft, frameRight);
+    const totalSlotUnits = Math.max(
+      1,
+      entries.reduce((sum, entry) => sum + (entry.width || 1), 0)
+    );
+    const slotUnitWidth = (noteBand.right - noteBand.left) / totalSlotUnits;
+    return { layoutCount, noteBand, totalSlotUnits, slotUnitWidth };
+  };
+  const provisionalEntries = buildSlotEntries();
+  const provisionalLayout = computeLayoutMetrics(provisionalEntries);
+  const fusionWidthByChord = {};
+  const fusionHalfSpanByChord = {};
+  if (state.showFusion && provisionalLayout.slotUnitWidth > 0) {
+    (model.chordAnalyses || []).forEach((analysis) => {
+      let maxHalfSpan = 0;
+      (analysis.fusionNodes || []).forEach((node) => {
+        if (!(node.centerFreq >= model.rangeMin && node.centerFreq <= model.rangeMax)) {
+          return;
+        }
+        const visual = getFusionNodeVisual(node, state.fusionMode, state.themeDark, colorScheme);
+        const halfSpan = fusionVisualHalfSpan(visual);
+        maxHalfSpan = Math.max(maxHalfSpan, halfSpan);
+      });
+      if (maxHalfSpan > 0) {
+        fusionHalfSpanByChord[analysis.chordIndex] = maxHalfSpan;
+      }
+    });
+    Object.entries(fusionHalfSpanByChord).forEach(([rawChordIndex, halfSpan]) => {
+      const chordIndex = Number(rawChordIndex);
+      if (!Number.isFinite(chordIndex)) {
+        return;
+      }
+      const requiredPx = Math.max(26, halfSpan * 2 + 14);
+      fusionWidthByChord[chordIndex] = requiredPx / provisionalLayout.slotUnitWidth;
+    });
+  }
+  const slotEntries = buildSlotEntries(fusionWidthByChord);
+  const { layoutCount, noteBand, totalSlotUnits, slotUnitWidth } = computeLayoutMetrics(slotEntries);
+  const firstEntryCenterX = noteBand.left + slotUnitWidth * 0.5;
+  const desiredFirstEntryCenterX = frameLeft + slotUnitWidth;
+  const unboundedEntryShiftX = desiredFirstEntryCenterX - firstEntryCenterX;
+  const maxDefaultEntryCenterX = noteBand.left + Math.max(0, totalSlotUnits - 0.5) * slotUnitWidth;
+  const maxShiftRight = Math.max(0, frameRight - maxDefaultEntryCenterX);
+  const entryShiftX = Math.min(unboundedEntryShiftX, maxShiftRight);
   const noteXByIndex = {};
   const fusionXByChord = {};
   const roughnessXByChord = {};
@@ -3176,7 +4548,7 @@ function buildChartSvg(model, width, height) {
   let unitCursor = 0;
   slotEntries.forEach((entry) => {
     const widthUnits = entry.width || 1;
-    const x = noteBand.left + (unitCursor + widthUnits / 2) * slotUnitWidth;
+    const x = noteBand.left + (unitCursor + widthUnits / 2) * slotUnitWidth + entryShiftX;
     if (entry.type === "note") {
       const key = `note:${entry.noteIndex}`;
       noteXByIndex[entry.noteIndex] = inPrintMode && Number.isFinite(state.printColumnOverrides?.[key])
@@ -3244,16 +4616,28 @@ function buildChartSvg(model, width, height) {
   const baseXLabelMode = columnStep >= 84 ? "full" : columnStep >= 58 ? "compact" : "sparse";
   const xLabelMode = inPrintMode ? "full" : baseXLabelMode;
   const showChordControls = state.showChordControls;
-  const plotTop = inPrintMode ? pageInnerTop + clamp(pageHeight * 0.01, 8, 16) : 24;
+  const basePlotTop = inPrintMode ? pageInnerTop + clamp(pageHeight * 0.01, 8, 16) : 24;
   const bottomReserve = resolveBottomReserve(
     inPrintMode,
     xLabelMode,
     model.notes.length,
     showChordControls
   );
-  const rawPlotBottom = (inPrintMode ? pageInnerBottom : height) - bottomReserve;
+  const rawPlotBottom = inPrintMode
+    // In print mode, anchor from the page bottom so the x-axis offset mirrors
+    // the y-axis offset from the left page edge.
+    ? (pageY + pageHeight) - Math.max(0, frameLeft - pageX)
+    : (height - bottomReserve);
   const maxPlotBottom = inPrintMode ? pageInnerBottom : height - 8;
-  const plotBottom = Math.min(maxPlotBottom, Math.max(plotTop + 64, rawPlotBottom));
+  const plotBottom = Math.min(maxPlotBottom, Math.max(basePlotTop + 64, rawPlotBottom));
+  const printGraphHeight = clamp(Number(state.printGraphHeight) || 1, 0.45, 1);
+  const plotTop = inPrintMode
+    ? clamp(
+      plotBottom - (plotBottom - basePlotTop) * printGraphHeight,
+      basePlotTop,
+      plotBottom - 64
+    )
+    : basePlotTop;
   const noteBandWidth = Math.max(0, rightmostDataX - leftmostDataX);
   const horizontalPad = clamp(noteBandWidth * 0.1, 30, 68);
   const plotLeft = frameLeft;
@@ -3269,7 +4653,10 @@ function buildChartSvg(model, width, height) {
     x: plotLeft + plotWidth / 2,
     y: plotTop + plotHeight / 2,
   };
-  const fusionColumnWidth = clamp(columnStep * 0.78, 22, 42);
+  const fusionHalfSpanMax = Math.max(0, ...Object.values(fusionHalfSpanByChord));
+  const fusionColumnWidth = state.showFusion
+    ? clamp(Math.max(columnStep * 0.78, fusionHalfSpanMax * 2 + 14), 22, 340)
+    : clamp(columnStep * 0.78, 22, 340);
   const roughnessColumnWidth = clamp(columnStep * 0.78, 22, 42);
   const defaultFusionX = state.showFusion
     ? clamp(
@@ -3295,6 +4682,7 @@ function buildChartSvg(model, width, height) {
   const isAlignmentFocus = alignmentFocusMode && state.showAlignments;
   const printComponentMeta = {};
   const maxFusionRadiusByChord = {};
+  const stackStemLayer = createSvgEl("g", { "data-stack-stem-layer": "1" });
   const isPrintHidden = (key) =>
     inPrintMode && key && typeof state.printHiddenKeys === "object" && state.printHiddenKeys[key];
 
@@ -3304,8 +4692,12 @@ function buildChartSvg(model, width, height) {
   const sceneScale = clamp(Number(state.layoutScale) || 1, 0.6, 1.8);
   const sceneAnchorX = plotLeft;
   const sceneAnchorY = plotTop;
-  const sceneShiftX = sceneAnchorX * (1 - sceneScale);
-  const sceneShiftY = sceneAnchorY * (1 - sceneScale);
+  const sceneBaseShiftX = sceneAnchorX * (1 - sceneScale);
+  const sceneBaseShiftY = sceneAnchorY * (1 - sceneScale);
+  const printDiagramOffsetX = inPrintMode ? (Number(state.printDiagramOffsetX) || 0) : 0;
+  const printDiagramOffsetY = inPrintMode ? (Number(state.printDiagramOffsetY) || 0) : 0;
+  const sceneShiftX = sceneBaseShiftX + printDiagramOffsetX;
+  const sceneShiftY = sceneBaseShiftY + printDiagramOffsetY;
 
   const svg = createSvgEl("svg", {
     width,
@@ -3315,6 +4707,10 @@ function buildChartSvg(model, width, height) {
     role: "img",
     "data-scene-shift-x": sceneShiftX,
     "data-scene-shift-y": sceneShiftY,
+    "data-export-page-x": pageX,
+    "data-export-page-y": pageY,
+    "data-export-page-width": pageWidth,
+    "data-export-page-height": pageHeight,
   });
 
   svg.appendChild(
@@ -3342,6 +4738,9 @@ function buildChartSvg(model, width, height) {
   }
   const diagramRoot = createSvgEl("g", {
     "data-diagram-root": "1",
+    "data-scene-base-shift-x": String(sceneBaseShiftX),
+    "data-scene-base-shift-y": String(sceneBaseShiftY),
+    "data-scene-scale": String(sceneScale),
     transform: `translate(${sceneShiftX}, ${sceneShiftY}) scale(${sceneScale})`,
   });
   const axisTextStyle = inPrintMode ? getPrintAutoTextStyle("axis") : null;
@@ -3381,20 +4780,25 @@ function buildChartSvg(model, width, height) {
       y2: plotBottom,
       stroke: axisColor,
       "stroke-width": axisStrokeW,
+      "data-export-include": inPrintMode ? "1" : null,
     })
   );
-  axisLayer.appendChild(
-    createSvgEl("line", {
-      x1: plotLeft,
-      y1: plotBottom,
-      x2: plotRight,
-      y2: plotBottom,
-      stroke: axisColor,
-      "stroke-width": axisStrokeW,
-    })
-  );
+  const xAxisLine = createSvgEl("line", {
+    x1: plotLeft,
+    y1: plotBottom,
+    x2: plotRight,
+    y2: plotBottom,
+    stroke: axisColor,
+    "stroke-width": axisStrokeW,
+    "data-export-include": inPrintMode ? "1" : null,
+  });
+  axisLayer.appendChild(xAxisLine);
   const yLabelX = plotLeft - 62;
   if (showPrintAxisText) {
+    const defaultYAxisLabel = `Frequency spectrum (${state.yScale})`;
+    const yAxisLabelText = state.printYAxisLabelHasOverride
+      ? String(state.printYAxisLabelOverride || "").trim()
+      : defaultYAxisLabel;
     const yLabel = createSvgEl("text", {
       x: yLabelX,
       y: plotTop + plotHeight / 2,
@@ -3406,14 +4810,19 @@ function buildChartSvg(model, width, height) {
       transform: `rotate(-90 ${yLabelX} ${plotTop + plotHeight / 2})`,
       "text-anchor": "middle",
       "data-auto-text-class": inPrintMode ? "axis" : null,
+      "data-print-y-axis-label": inPrintMode ? "1" : null,
+      "data-label-default-text": inPrintMode ? defaultYAxisLabel : null,
+      "data-export-include": inPrintMode ? "1" : null,
+      style: inPrintMode ? "cursor:pointer" : null,
     });
-    yLabel.textContent = `Frequency spectrum (${state.yScale})`;
+    yLabel.textContent = yAxisLabelText;
     axisLayer.appendChild(yLabel);
   }
 
   diagramRoot.appendChild(axisLayer);
 
   const noteX = [];
+  const xAxisColumnXs = [];
   const noteLayer = createSvgEl("g");
   const dragHitLayer = inPrintMode ? createSvgEl("g") : null;
   const drawHzLineForNotes = state.showLabels && xLabelMode === "full";
@@ -3422,6 +4831,7 @@ function buildChartSvg(model, width, height) {
       ? noteXByIndex[noteIndex]
       : xForNote(noteIndex, model.notes.length, noteBand.left, noteBand.right);
     noteX[noteIndex] = x;
+    xAxisColumnXs.push(x);
 
     noteLayer.appendChild(
       createSvgEl("line", {
@@ -3445,12 +4855,9 @@ function buildChartSvg(model, width, height) {
         "font-family": axisTextStyle
           ? `${axisTextStyle.font}, IBM Plex Sans, Lexend, sans-serif`
           : "IBM Plex Sans, Lexend, sans-serif",
-        "text-anchor": xLabelMode === "full" ? "middle" : "end",
+        "text-anchor": "middle",
         "data-auto-text-class": inPrintMode ? "axis" : null,
       });
-      if (xLabelMode !== "full") {
-        labelTop.setAttribute("transform", `rotate(-32 ${x} ${tokenY})`);
-      }
       labelTop.textContent = token;
       noteLayer.appendChild(labelTop);
       if (dragHitLayer) {
@@ -3492,6 +4899,7 @@ function buildChartSvg(model, width, height) {
       if (!(fusionX != null)) {
         return;
       }
+      xAxisColumnXs.push(fusionX);
       noteLayer.appendChild(
         createSvgEl("line", {
           x1: fusionX,
@@ -3542,6 +4950,7 @@ function buildChartSvg(model, width, height) {
       if (!(roughnessX != null)) {
         return;
       }
+      xAxisColumnXs.push(roughnessX);
       noteLayer.appendChild(
         createSvgEl("line", {
           x1: roughnessX,
@@ -3586,6 +4995,134 @@ function buildChartSvg(model, width, height) {
       }
     });
   }
+  const xAxisRight = xAxisColumnXs.length
+    ? clamp(Math.max(...xAxisColumnXs), plotLeft, plotRight)
+    : plotRight;
+  const xAxisRightWithGap = clamp(xAxisRight + columnStep * 0.5, plotLeft, plotRight);
+  xAxisLine.setAttribute("x2", String(xAxisRightWithGap));
+  const comboDragMinX = plotLeft;
+  const comboDragMaxX = Math.max(plotLeft, xAxisRightWithGap);
+  const comboXByPlayKey = new Map();
+  if (state.showCombination && model.visibleComboPoints.length) {
+    const comboCollisionNodes = [];
+    model.visibleOvertones.forEach((point) => {
+      const x = noteX[point.noteIndex];
+      const y = yForFreq(point.freq);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return;
+      }
+      const geom = computeOvertoneRenderGeometry(point.harmonic, state.overtoneCount);
+      const radius = Math.max(1.2, Number(geom.radius) || 1.2);
+      comboCollisionNodes.push({
+        x,
+        y,
+        hHalf: radius,
+        vHalf: radius,
+      });
+    });
+    const comboShapeHalfExtents = (comboType) => {
+      const radius = state.comboSize + 1.2;
+      if (comboType === "sum") {
+        return { hHalf: radius, vHalf: radius };
+      }
+      return { hHalf: radius * 1.35, vHalf: radius * 0.5 };
+    };
+    const compareComboCandidateScore = (a, b) => {
+      if (a.nodeOverlapCount !== b.nodeOverlapCount) {
+        return a.nodeOverlapCount - b.nodeOverlapCount;
+      }
+      if (Math.abs(a.nodeOverlapPenalty - b.nodeOverlapPenalty) > 1e-6) {
+        return a.nodeOverlapPenalty - b.nodeOverlapPenalty;
+      }
+      if (Math.abs(a.gridPenalty - b.gridPenalty) > 1e-6) {
+        return a.gridPenalty - b.gridPenalty;
+      }
+      if (Math.abs(a.shift - b.shift) > 1e-6) {
+        return a.shift - b.shift;
+      }
+      return 0;
+    };
+    model.visibleComboPoints.forEach((point) => {
+      const playKey = point.playKey;
+      if (!playKey) {
+        return;
+      }
+      const baseX = (noteX[point.noteA] + noteX[point.noteB]) / 2 + comboOffset(point.type);
+      const minX = comboDragMinX;
+      const maxX = comboDragMaxX;
+      const comboOverride = Number(state.printComponentXOverrides?.[playKey]);
+      if (Number.isFinite(comboOverride)) {
+        comboXByPlayKey.set(playKey, clamp(comboOverride, minX, maxX));
+        return;
+      }
+      const y = yForFreq(point.freq);
+      if (!Number.isFinite(y)) {
+        comboXByPlayKey.set(playKey, clamp(baseX, minX, maxX));
+        return;
+      }
+      const { hHalf, vHalf } = comboShapeHalfExtents(point.type);
+      const safeWidth = Math.max(1, maxX - minX);
+      const shiftStep = 2;
+      const maxShift = clamp(Math.min(safeWidth * 0.45, Math.max(12, columnStep * 0.7)), 10, 84);
+      const candidateShifts = [0];
+      for (let shift = shiftStep; shift <= maxShift + 1e-6; shift += shiftStep) {
+        candidateShifts.push(shift, -shift);
+      }
+      let bestX = clamp(baseX, minX, maxX);
+      let bestScore = {
+        nodeOverlapCount: Infinity,
+        nodeOverlapPenalty: Infinity,
+        gridPenalty: Infinity,
+        shift: Infinity,
+      };
+      candidateShifts.forEach((shift) => {
+        const candidateX = clamp(baseX + shift, minX, maxX);
+        let nodeOverlapCount = 0;
+        let nodeOverlapPenalty = 0;
+        comboCollisionNodes.forEach((node) => {
+          const yAllowance = vHalf + node.vHalf + 1;
+          const yDelta = Math.abs(y - node.y);
+          if (yDelta >= yAllowance) {
+            return;
+          }
+          const xAllowance = hHalf + node.hHalf + 1;
+          const xDelta = Math.abs(candidateX - node.x);
+          if (xDelta >= xAllowance) {
+            return;
+          }
+          nodeOverlapCount += 1;
+          const xPenetration = xAllowance - xDelta;
+          const yPenetration = yAllowance - yDelta;
+          nodeOverlapPenalty += xPenetration * yPenetration;
+        });
+        let gridPenalty = 0;
+        const gridDesiredGap = Math.max(2, Math.min(8, hHalf * 0.45));
+        xAxisColumnXs.forEach((columnX) => {
+          const gap = Math.abs(candidateX - columnX) - hHalf;
+          if (gap < gridDesiredGap) {
+            gridPenalty += gridDesiredGap - gap;
+          }
+        });
+        const score = {
+          nodeOverlapCount,
+          nodeOverlapPenalty,
+          gridPenalty,
+          shift: Math.abs(candidateX - baseX),
+        };
+        if (compareComboCandidateScore(score, bestScore) < 0) {
+          bestScore = score;
+          bestX = candidateX;
+        }
+      });
+      comboXByPlayKey.set(playKey, bestX);
+      comboCollisionNodes.push({
+        x: bestX,
+        y,
+        hHalf,
+        vHalf,
+      });
+    });
+  }
 
   if (showChordControls && chordsForLayout.length) {
     const controlsLayer = createSvgEl("g");
@@ -3620,6 +5157,7 @@ function buildChartSvg(model, width, height) {
           "stroke-width": 1.1,
           "stroke-linecap": "round",
           "stroke-linejoin": "round",
+          "data-export-include": inPrintMode ? "1" : null,
         })
       );
 
@@ -3627,16 +5165,25 @@ function buildChartSvg(model, width, height) {
         x: center,
         y: labelY,
         fill: textSecondary,
-        "font-size": 10,
-        "font-family": "Lexend, IBM Plex Sans, sans-serif",
+        "font-size": inPrintMode && axisTextStyle ? axisTextStyle.size : 10,
+        "font-family": inPrintMode && axisTextStyle
+          ? `${axisTextStyle.font}, Lexend, IBM Plex Sans, sans-serif`
+          : "Lexend, IBM Plex Sans, sans-serif",
         "text-anchor": "middle",
         "data-print-chord-title-index": inPrintMode ? String(chordIndex) : null,
-        style: inPrintMode ? "cursor:text" : null,
+        "data-export-include": inPrintMode ? "1" : null,
+        style: inPrintMode ? "cursor:pointer" : null,
       });
       const defaultChordTitle = `Chord ${chordIndex + 1}`;
-      const overriddenChordTitle = String(state.printChordTitleOverrides?.[chordIndex] || "").trim();
+      const hasChordTitleOverride = Object.prototype.hasOwnProperty.call(
+        state.printChordTitleOverrides || {},
+        chordIndex
+      );
+      const overriddenChordTitle = hasChordTitleOverride
+        ? String(state.printChordTitleOverrides?.[chordIndex] ?? "").trim()
+        : "";
       title.textContent = inPrintMode
-        ? (overriddenChordTitle || defaultChordTitle)
+        ? (hasChordTitleOverride ? overriddenChordTitle : defaultChordTitle)
         : `Play ${defaultChordTitle}`;
       controlsLayer.appendChild(title);
 
@@ -3708,6 +5255,9 @@ function buildChartSvg(model, width, height) {
           return noteXByIndex[point.noteIndex];
         }
         if (Number.isInteger(point.noteA) && Number.isInteger(point.noteB)) {
+          if (point.playKey && Number.isFinite(comboXByPlayKey.get(point.playKey))) {
+            return comboXByPlayKey.get(point.playKey);
+          }
           const xA = noteXByIndex[point.noteA];
           const xB = noteXByIndex[point.noteB];
           if (Number.isFinite(xA) && Number.isFinite(xB)) {
@@ -3720,27 +5270,6 @@ function buildChartSvg(model, width, height) {
         .map((point) => pointXForClusterItem(point))
         .filter((x) => Number.isFinite(x));
       const leftmostAlignedX = clusterPointXs.length ? Math.min(...clusterPointXs) : region.left;
-      const targetRight = Number.isFinite(fusionX) ? fusionX : region.right;
-      const useLabelLaneForCluster =
-        useAlignmentLabelLane && Number.isFinite(alignLabelLaneXByChord[cluster.chordIndex]);
-      const minBandLabelGutter = useLabelLaneForCluster
-        ? Math.max(6, columnStep / 3)
-        : !state.showFusion && !state.showRoughness
-          ? Math.max(8, columnStep * 0.5)
-          : 2;
-      const laneLabelX = useLabelLaneForCluster
-        ? alignLabelLaneXByChord[cluster.chordIndex] + minBandLabelGutter
-        : NaN;
-      const xRightBase = useLabelLaneForCluster ? laneLabelX - 1 : targetRight;
-      const xRight = clamp(xRightBase, plotLeft + 2, plotRight);
-      const xLeft = clamp(Math.min(leftmostAlignedX, xRight - 1), plotLeft, xRight - 1);
-      const halfBand = state.alignToleranceCents > 0 ? state.alignToleranceCents / 2 : 0;
-      const topFreq = cluster.centerFreq * 2 ** (halfBand / 1200);
-      const bottomFreq = cluster.centerFreq / 2 ** (halfBand / 1200);
-      const y1 = yForFreq(topFreq);
-      const y2 = yForFreq(bottomFreq);
-      const bandTop = Math.min(y1, y2);
-      const bandHeight = Math.abs(y2 - y1);
       const fusionNodes = fusionByChord.get(cluster.chordIndex) || [];
       let matchedFusionNode = null;
       let matchedDeltaCents = Infinity;
@@ -3758,7 +5287,43 @@ function buildChartSvg(model, width, height) {
         matchedFusionNode && matchedDeltaCents <= alignFusionMatchCents
           ? getFusionNodeVisual(matchedFusionNode, state.fusionMode, state.themeDark, colorScheme)
           : null;
-      const fusionRadius = state.showFusion && matchedFusionVisual ? matchedFusionVisual.radius : 0;
+      const fusionHalfSpan = state.showFusion && matchedFusionVisual
+        ? fusionVisualHalfSpan(matchedFusionVisual)
+        : 0;
+      const targetRight = Number.isFinite(fusionX)
+        ? (
+            state.showFusion && matchedFusionVisual
+              ? fusionX - fusionHalfSpan
+              : fusionX
+          )
+        : region.right;
+      const useLabelLaneForCluster =
+        useAlignmentLabelLane && Number.isFinite(alignLabelLaneXByChord[cluster.chordIndex]);
+      const minBandLabelGutter = useLabelLaneForCluster
+        ? Math.max(6, columnStep / 3)
+        : !state.showFusion && !state.showRoughness
+          ? Math.max(8, columnStep * 0.5)
+          : 2;
+      const laneLabelX = useLabelLaneForCluster
+        ? alignLabelLaneXByChord[cluster.chordIndex] + minBandLabelGutter
+        : NaN;
+      const xRightBase = useLabelLaneForCluster ? laneLabelX - 1 : targetRight;
+      const alignmentLabelId = `alignment:${cluster.id}`;
+      const alignmentLabelOffset = state.printLabelOffsets?.[alignmentLabelId] || {};
+      // Keep alignment band endpoint attached to label drags along X.
+      const alignmentEndpointDx = Number.isFinite(alignmentLabelOffset.dx)
+        ? Number(alignmentLabelOffset.dx)
+        : 0;
+      const xRight = clamp(xRightBase + alignmentEndpointDx, plotLeft + 2, plotRight);
+      const xLeft = clamp(Math.min(leftmostAlignedX, xRight - 1), plotLeft, xRight - 1);
+      const halfBand = state.alignToleranceCents > 0 ? state.alignToleranceCents / 2 : 0;
+      const topFreq = cluster.centerFreq * 2 ** (halfBand / 1200);
+      const bottomFreq = cluster.centerFreq / 2 ** (halfBand / 1200);
+      const y1 = yForFreq(topFreq);
+      const y2 = yForFreq(bottomFreq);
+      const bandTop = Math.min(y1, y2);
+      const bandHeight = Math.abs(y2 - y1);
+      const fusionRadius = state.showFusion && matchedFusionVisual ? fusionHalfSpan : 0;
       const labelX = useLabelLaneForCluster
         ? laneLabelX
         : Number.isFinite(fusionX)
@@ -3772,6 +5337,7 @@ function buildChartSvg(model, width, height) {
         xRight,
         y: centerY,
         labelX,
+        minLabelX: labelX,
         members: Array.isArray(cluster.points) ? cluster.points.map((point) => point.playKey).filter(Boolean) : [],
       });
       const alignFillColor =
@@ -3822,6 +5388,18 @@ function buildChartSvg(model, width, height) {
       }
     });
 
+    if (alignmentBandLabelData.length) {
+      const sharedAlignmentLabelX = alignmentBandLabelData.reduce((maxX, band) => {
+        const candidate = Number.isFinite(band.minLabelX) ? band.minLabelX : band.labelX;
+        return Number.isFinite(candidate) ? Math.max(maxX, candidate) : maxX;
+      }, -Infinity);
+      if (Number.isFinite(sharedAlignmentLabelX)) {
+        alignmentBandLabelData.forEach((band) => {
+          band.labelX = sharedAlignmentLabelX;
+        });
+      }
+    }
+
     diagramRoot.appendChild(alignLayer);
   }
 
@@ -3843,12 +5421,13 @@ function buildChartSvg(model, width, height) {
           return;
         }
         const isPlaying = activeVoices.has(playKey);
-        const minRadius = state.fusionMode === "all" ? 2 : 3;
-        const maxRadius = state.fusionMode === "all" ? 24 : 26;
+        const minRadius = 2;
+        const maxRadius = 24;
         const ampScale = clamp((visual.radius - minRadius) / Math.max(1e-6, maxRadius - minRadius), 0, 1);
+        const fusionHalfSpanForLayout = fusionVisualHalfSpan(visual);
         maxFusionRadiusByChord[analysis.chordIndex] = Math.max(
           maxFusionRadiusByChord[analysis.chordIndex] || 0,
-          visual.radius
+          fusionHalfSpanForLayout
         );
         const fusionFill =
           printIsGreyscale
@@ -3869,8 +5448,30 @@ function buildChartSvg(model, width, height) {
           labelEligible: Boolean(node.labelEligible),
           chordIndex: analysis.chordIndex,
         };
-        if (visual.shape === "diamond") {
+        if (
+          fusionShapeIncludesRect(visual.shape) ||
+          fusionShapeIncludesDiamond(visual.shape) ||
+          fusionShapeIncludesCircle(visual.shape)
+        ) {
           const r = visual.radius;
+          const hasRect = fusionShapeIncludesRect(visual.shape);
+          const hasDiamond = fusionShapeIncludesDiamond(visual.shape);
+          const hasCircle = fusionShapeIncludesCircle(visual.shape);
+          const rectR = hasRect && Number.isFinite(visual.rectRadius)
+            ? Number(visual.rectRadius)
+            : hasRect
+              ? r / 1.35
+              : NaN;
+          const diamondR = hasDiamond && Number.isFinite(visual.diamondRadius)
+            ? Number(visual.diamondRadius)
+            : hasDiamond
+              ? r
+              : NaN;
+          const hitR = Math.max(
+            hasCircle ? r : 0,
+            hasRect ? rectR * 1.35 : 0,
+            hasDiamond ? diamondR : 0
+          );
           const commonFusionAttrs = {
             "data-play-key": playKey,
             "data-play-freq": node.centerFreq,
@@ -3881,23 +5482,57 @@ function buildChartSvg(model, width, height) {
             "data-playing": isPlaying ? "1" : "0",
             "data-tip": `Chord ${analysis.chordIndex + 1}\n${node.tip}`,
           };
-          fusionLayer.appendChild(
-            createSvgEl("path", {
-              d: `M ${fusionX} ${y - r} L ${fusionX + r} ${y} L ${fusionX} ${y + r} L ${fusionX - r} ${y} Z`,
-              fill: fusionFill,
-              "fill-opacity": visual.fillOpacity,
-              stroke: isPlaying ? "#f4de58" : fusionStroke,
-              "stroke-width": isPlaying ? 2.4 : visual.strokeWidth,
-              "stroke-opacity": visual.strokeOpacity,
-              ...commonFusionAttrs,
-            })
-          );
+          if (hasCircle) {
+            fusionLayer.appendChild(
+              createSvgEl("circle", {
+                cx: fusionX,
+                cy: y,
+                r,
+                fill: fusionFill,
+                "fill-opacity": hasRect || hasDiamond ? visual.fillOpacity * 0.72 : visual.fillOpacity,
+                stroke: isPlaying ? "#f4de58" : fusionStroke,
+                "stroke-opacity": visual.strokeOpacity,
+                "stroke-width": isPlaying ? 2.4 : visual.strokeWidth,
+                ...commonFusionAttrs,
+              })
+            );
+          }
+          if (hasRect) {
+            fusionLayer.appendChild(
+              createSvgEl("rect", {
+                x: fusionX - rectR * 1.35,
+                y: y - rectR * 0.5,
+                width: rectR * 2.7,
+                height: rectR,
+                rx: Math.max(0.9, rectR * 0.22),
+                fill: fusionFill,
+                "fill-opacity": hasDiamond || hasCircle ? visual.fillOpacity * 0.9 : visual.fillOpacity,
+                stroke: isPlaying ? "#f4de58" : fusionStroke,
+                "stroke-width": isPlaying ? 2.4 : visual.strokeWidth,
+                "stroke-opacity": visual.strokeOpacity,
+                ...commonFusionAttrs,
+              })
+            );
+          }
+          if (hasDiamond) {
+            fusionLayer.appendChild(
+              createSvgEl("path", {
+                d: `M ${fusionX} ${y - diamondR} L ${fusionX + diamondR} ${y} L ${fusionX} ${y + diamondR} L ${fusionX - diamondR} ${y} Z`,
+                fill: fusionFill,
+                "fill-opacity": hasRect || hasCircle ? visual.fillOpacity * 0.75 : visual.fillOpacity,
+                stroke: isPlaying ? "#f4de58" : fusionStroke,
+                "stroke-width": isPlaying ? 2.4 : visual.strokeWidth,
+                "stroke-opacity": visual.strokeOpacity,
+                ...commonFusionAttrs,
+              })
+            );
+          }
           if (!inPrintMode) {
             fusionLayer.appendChild(
               createSvgEl("circle", {
                 cx: fusionX,
                 cy: y,
-                r: r + Math.max(5, state.pointSize * 1.2),
+                r: hitR + Math.max(5, state.pointSize * 1.2),
                 fill: "rgba(0,0,0,0.001)",
                 stroke: "rgba(0,0,0,0)",
                 "stroke-width": 0,
@@ -4055,7 +5690,7 @@ function buildChartSvg(model, width, height) {
       if (state.showStems && harmonic > 1 && baseY >= plotTop && baseY <= plotBottom) {
         const stemColor =
           printIsGreyscale ? "rgba(0,0,0,0.55)" : color;
-        overtoneLayer.appendChild(
+        stackStemLayer.appendChild(
           createSvgEl("line", {
             x1: x,
             y1: baseY,
@@ -4069,7 +5704,7 @@ function buildChartSvg(model, width, height) {
       }
 
       const harmonicGain = harmonicScalingGain(harmonic);
-      const alpha = clamp(0.14 + 0.84 * harmonicGain, 0.14, 0.98);
+      const alpha = alphaFalloff ? clamp(0.14 + 0.84 * harmonicGain, 0.14, 0.98) : 1;
       const gainNorm = overtoneFlatSizing
         ? 1
         : clamp((harmonicGain - minOvertoneGain) / overtoneGainSpan, 0, 1);
@@ -4082,7 +5717,9 @@ function buildChartSvg(model, width, height) {
       const isAlignmentMember = model.alignmentMemberPlayKeys.has(playKey);
       const printFill =
         printIsGreyscale
-          ? `rgba(0,0,0,${alpha})`
+          ? alphaFalloff
+            ? `rgba(0,0,0,${alpha})`
+            : "#000000"
           : color;
       printComponentMeta[playKey] = {
         x,
@@ -4166,15 +5803,15 @@ ${formatHz(freq)}`,
     model.visibleComboPoints.forEach((point) => {
       const comboDefaultX = (noteX[point.noteA] + noteX[point.noteB]) / 2 + comboOffset(point.type);
       const comboOverride = Number(state.printComponentXOverrides?.[point.playKey]);
-      const chordBounds = chordNoteXBounds[point.chordIndex] || null;
-      let xMid = comboDefaultX;
-      if (inPrintMode && Number.isFinite(comboOverride) && chordBounds) {
-        xMid = clamp(comboOverride, chordBounds.min, chordBounds.max);
+      const resolvedX = Number(comboXByPlayKey.get(point.playKey));
+      let xMid = Number.isFinite(resolvedX) ? resolvedX : comboDefaultX;
+      if (Number.isFinite(comboOverride)) {
+        xMid = clamp(comboOverride, comboDragMinX, comboDragMaxX);
       }
       const y = yForFreq(point.freq);
       let color = comboDiffColor;
       if (point.type === "sum") color = comboSumColor;
-      if (point.type === "order2a" || point.type === "order2b") color = comboOrder2Color;
+      if (point.type === "order2a" || point.type === "order2b") color = comboOrder2RectColor;
 
       const r = state.comboSize + 1.2;
       const playKey = point.playKey;
@@ -4203,6 +5840,8 @@ ${formatHz(freq)}`,
       const isAlignmentMember = model.alignmentMemberPlayKeys.has(playKey);
       const comboFill =
         printIsGreyscale ? "rgba(0,0,0,0.84)" : color;
+      const isSecondOrderCombo = point.type === "order2a" || point.type === "order2b";
+      const comboFillOpacity = isSecondOrderCombo ? (0.88 * (2 / 3)) : 0.88;
       printComponentMeta[playKey] = {
         x: xMid,
         y,
@@ -4211,11 +5850,12 @@ ${formatHz(freq)}`,
         kind: "combo",
         comboType: point.type,
         parentKeys,
+        noteIndexes: [point.noteA, point.noteB],
         chordIndex: point.chordIndex,
       };
       const commonAttrs = {
         fill: comboFill,
-        "fill-opacity": 0.88,
+        "fill-opacity": comboFillOpacity,
         stroke: isPlaying ? "#f4de58" : printIsGreyscale ? "#222" : color,
         "stroke-width": isPlaying ? 2.4 : 0.8,
         "data-play-key": playKey,
@@ -4228,24 +5868,24 @@ ${formatHz(freq)}`,
         "data-combo-source-a": point.noteA,
         "data-combo-source-b": point.noteB,
         "data-combo-type": point.type,
-        "data-combo-drag-min": chordBounds ? chordBounds.min : "",
-        "data-combo-drag-max": chordBounds ? chordBounds.max : "",
+        "data-combo-drag-min": comboDragMinX,
+        "data-combo-drag-max": comboDragMaxX,
         "data-tip": describeComboTone(point, model.notes),
         style: inPrintMode ? "cursor:ew-resize" : null,
       };
       const shapeNode =
-        point.type === "difference"
-          ? createSvgEl("rect", {
+        point.type === "sum"
+          ? createSvgEl("path", {
+              ...commonAttrs,
+              d: `M ${xMid} ${y - r} L ${xMid + r} ${y} L ${xMid} ${y + r} L ${xMid - r} ${y} Z`,
+            })
+          : createSvgEl("rect", {
               ...commonAttrs,
               x: xMid - r * 1.35,
               y: y - r * 0.5,
               width: r * 2.7,
               height: r,
               rx: Math.max(0.6, r * 0.2),
-            })
-          : createSvgEl("path", {
-              ...commonAttrs,
-              d: `M ${xMid} ${y - r} L ${xMid + r} ${y} L ${xMid} ${y + r} L ${xMid - r} ${y} Z`,
             });
       if (isAlignmentFocus && !isAlignmentMember) {
         shapeNode.setAttribute("opacity", "0.4");
@@ -4260,8 +5900,8 @@ ${formatHz(freq)}`,
           "data-combo-source-a": point.noteA,
           "data-combo-source-b": point.noteB,
           "data-combo-type": point.type,
-          "data-combo-drag-min": chordBounds ? chordBounds.min : "",
-          "data-combo-drag-max": chordBounds ? chordBounds.max : "",
+          "data-combo-drag-min": comboDragMinX,
+          "data-combo-drag-max": comboDragMaxX,
           "data-tip": describeComboTone(point, model.notes),
         };
         comboLayer.appendChild(
@@ -4283,32 +5923,160 @@ ${formatHz(freq)}`,
   if (inPrintMode) {
     const printLayer = createSvgEl("g");
     const autoRelaxLabels = [];
-    const lowestFundamental = model.notes.length
-      ? Math.min(...model.notes.map((note) => note.freq).filter((freq) => freq > 0))
-      : Math.max(1e-9, state.ratioRootHz);
     const alignedPlayKeys = model.alignmentMemberPlayKeys || new Set();
     const componentLabelFont = componentTextStyle
       ? `${componentTextStyle.font}, IBM Plex Sans, Lexend, sans-serif`
       : "IBM Plex Sans, Lexend, sans-serif";
     const componentLabelSize = componentTextStyle ? componentTextStyle.size : 9.5;
-    const buildComponentLabelLines = (freq, { useFusionToggles = false } = {}) => {
-      const showHz = useFusionToggles ? state.fusionReadoutHz : state.printShowComponentHz;
-      const showRatio = useFusionToggles ? state.fusionReadoutRatio : state.printShowComponentRatio;
-      const ratioBase = useFusionToggles
-        ? Math.max(1e-9, lowestFundamental)
-        : Math.max(1e-9, state.ratioRootHz);
-      const ratio = showRatio ? formatRatioApprox(freq / ratioBase) : "";
-      const hzText = showHz ? formatHz(freq) : "";
-      const lines = [];
-      if (showRatio && showHz) {
-        if (ratio && hzText) lines.push(`${ratio} ${hzText}`);
-        else if (ratio) lines.push(ratio);
-        else if (hzText) lines.push(hzText);
-        return lines;
+    const buildComboExprText = (comboMeta, parentA, parentB) => {
+      const p1 = parentA?.freq || 0;
+      const p2 = parentB?.freq || 0;
+      const p1Text = formatHzValue(p1);
+      const p2Text = formatHzValue(p2);
+      const comboText = formatHzValue(comboMeta?.freq || 0);
+      if (comboMeta?.comboType === "sum") {
+        return `${p1Text} + ${p2Text} = ${comboText} Hz`;
       }
-      if (showRatio && ratio) lines.push(ratio);
-      if (showHz && hzText) lines.push(hzText);
+      if (comboMeta?.comboType === "order2a" || comboMeta?.comboType === "order2b") {
+        return `(${p1Text}) - (${p2Text}) = ${comboText} Hz`;
+      }
+      return `|${p1Text} - ${p2Text}| = ${comboText} Hz`;
+    };
+    const isRatioSourceNoteIndex = (noteIndex) => {
+      return model.notes?.[noteIndex]?.type === "ratio";
+    };
+    const parseSourceNoteIndexesFromPlayKey = (playKey) => {
+      const key = String(playKey || "");
+      const harmonicMatch = key.match(/^harmonic:(\d+):\d+$/);
+      if (harmonicMatch) {
+        return [Number(harmonicMatch[1])];
+      }
+      const comboMatch = key.match(/^combo:(\d+):(\d+):/);
+      if (comboMatch) {
+        return [Number(comboMatch[1]), Number(comboMatch[2])];
+      }
+      return [];
+    };
+    const collectSourceNoteIndexesFromMeta = (meta, visited = new Set()) => {
+      if (!meta || typeof meta !== "object") {
+        return [];
+      }
+      const playKey = String(meta.playKey || "");
+      if (playKey && visited.has(playKey)) {
+        return [];
+      }
+      if (playKey) {
+        visited.add(playKey);
+      }
+      if (Number.isInteger(meta.noteIndex) && meta.noteIndex >= 0) {
+        return [meta.noteIndex];
+      }
+      const fromMetaNotes = Array.isArray(meta.noteIndexes)
+        ? meta.noteIndexes.filter((idx) => Number.isInteger(idx) && idx >= 0)
+        : [];
+      if (fromMetaNotes.length) {
+        return Array.from(new Set(fromMetaNotes));
+      }
+      const parentIndexes = [];
+      (meta.parentKeys || []).forEach((parentKey) => {
+        const parentMeta = printComponentMeta[parentKey];
+        if (parentMeta) {
+          parentIndexes.push(...collectSourceNoteIndexesFromMeta(parentMeta, visited));
+        } else {
+          parentIndexes.push(...parseSourceNoteIndexesFromPlayKey(parentKey));
+        }
+      });
+      if (parentIndexes.length) {
+        return Array.from(new Set(parentIndexes));
+      }
+      return Array.from(new Set(parseSourceNoteIndexesFromPlayKey(playKey)));
+    };
+    const collectSourceNoteIndexesFromBand = (band) => {
+      const indexes = [];
+      (band?.members || []).forEach((memberKey) => {
+        const memberMeta = printComponentMeta[memberKey];
+        if (memberMeta) {
+          indexes.push(...collectSourceNoteIndexesFromMeta(memberMeta));
+        } else {
+          indexes.push(...parseSourceNoteIndexesFromPlayKey(memberKey));
+        }
+      });
+      return Array.from(new Set(indexes.filter((idx) => Number.isInteger(idx) && idx >= 0)));
+    };
+    const hasOnlyRatioSourceNotes = (noteIndexes) => {
+      return Array.isArray(noteIndexes) && noteIndexes.length > 0 && noteIndexes.every(isRatioSourceNoteIndex);
+    };
+    const buildComponentLabelLines = (freq, options = {}) => {
+      const lines = [];
+      if (state.printShowComponentNote) {
+        const noteInfo = buildNoteSpellingInfo(freq, { allowHeji: options.allowHeji !== false });
+        if (noteInfo && noteInfo.text) {
+          lines.push({
+            kind: "note",
+            pitchClassText: noteInfo.pitchClassText,
+            pitchPrefixText: noteInfo.pitchPrefixText,
+            baseText: noteInfo.baseText,
+            suffixText: noteInfo.suffixText,
+            hejiParts: noteInfo.hejiParts,
+            octaveText: noteInfo.octaveText,
+            text: noteInfo.text,
+          });
+        }
+      }
+      if (state.printShowComponentRatio) {
+        const ratio = formatRatioApprox(freq / Math.max(1e-9, state.ratioRootHz));
+        if (ratio) {
+          lines.push({ kind: "plain", text: ratio });
+        }
+      }
+      if (state.printShowComponentHz) {
+        const hzText = formatHz(freq);
+        if (hzText) {
+          lines.push({ kind: "plain", text: hzText });
+        }
+      }
       return lines;
+    };
+    const appendComponentLineSpan = (textEl, labelX, line, index) => {
+      const prefixSpan = createSvgEl("tspan", {
+        x: labelX,
+        dy: index === 0 ? 0 : 10,
+      });
+      if (!line || typeof line !== "object" || line.kind !== "note") {
+        prefixSpan.textContent = String(line?.text || "");
+        textEl.appendChild(prefixSpan);
+        return;
+      }
+      prefixSpan.textContent = String(line.pitchPrefixText || line.pitchClassText || line.baseText || "");
+      textEl.appendChild(prefixSpan);
+      const parts = Array.isArray(line.hejiParts) ? line.hejiParts : [];
+      parts.forEach((part, partIndex) => {
+        const glyphText = String(part?.glyphText || "");
+        const expText = String(part?.expText || "");
+        if (glyphText) {
+          const suffixSpan = createSvgEl("tspan", {
+            "font-family": "HEJI2Text, IBM Plex Sans, Lexend, sans-serif",
+            dx: partIndex === 0 ? "0.18em" : "0.06em",
+            "baseline-shift": "0.5em",
+          });
+          suffixSpan.textContent = glyphText;
+          textEl.appendChild(suffixSpan);
+        }
+        if (expText) {
+          const expSpan = createSvgEl("tspan", {
+            "font-family": "IBM Plex Sans, Lexend, sans-serif",
+            dx: "0.04em",
+          });
+          expSpan.textContent = expText;
+          textEl.appendChild(expSpan);
+        }
+      });
+      const octaveSpan = createSvgEl("tspan");
+      if (parts.length) {
+        octaveSpan.setAttribute("dx", "0.16em");
+      }
+      octaveSpan.textContent = String(line.octaveText || "");
+      textEl.appendChild(octaveSpan);
     };
     const defaultLabelPos = (meta) => {
       if (meta.kind === "harmonic") {
@@ -4330,7 +6098,17 @@ ${formatHz(freq)}`,
       if (state.showAlignments && alignedPlayKeys.has(meta.playKey)) {
         return;
       }
-      const labelLines = buildComponentLabelLines(meta.freq, { useFusionToggles: false });
+      const metaSourceNoteIndexes = collectSourceNoteIndexesFromMeta(meta);
+      const allowHeji = hasOnlyRatioSourceNotes(metaSourceNoteIndexes);
+      let labelLines = buildComponentLabelLines(meta.freq, { allowHeji });
+      if (meta.kind === "combo" && state.printComboLinksVisible?.[meta.playKey]) {
+        const parents = (meta.parentKeys || [])
+          .map((parentKey) => printComponentMeta[parentKey])
+          .filter(Boolean);
+        if (parents.length >= 2) {
+          labelLines = [{ kind: "plain", text: buildComboExprText(meta, parents[0], parents[1]) }];
+        }
+      }
       if (!labelLines.length) {
         return;
       }
@@ -4359,14 +6137,7 @@ ${formatHz(freq)}`,
         "data-auto-text-class": "component",
         style: "cursor:move",
       });
-      labelLines.forEach((line, index) => {
-        const span = createSvgEl("tspan", {
-          x: labelX,
-          dy: index === 0 ? 0 : 10,
-        });
-        span.textContent = line;
-        text.appendChild(span);
-      });
+      labelLines.forEach((line, index) => appendComponentLineSpan(text, labelX, line, index));
       printLayer.appendChild(text);
       const componentCandidates = [
         { dx: 10, dy: -8, anchor: "start" }, // top-right
@@ -4385,10 +6156,20 @@ ${formatHz(freq)}`,
     });
     if (state.printShowComponentLabel && state.showAlignments) {
       alignmentBandLabelData.forEach((band) => {
-        const labelLines = buildComponentLabelLines(band.freq, { useFusionToggles: true });
+        const bandSourceNoteIndexes = collectSourceNoteIndexesFromBand(band);
+        const allowHeji = hasOnlyRatioSourceNotes(bandSourceNoteIndexes);
+        const labelLines = buildComponentLabelLines(band.freq, { allowHeji });
         if (!labelLines.length) {
           return;
         }
+        const defaultLabelText = labelLines
+          .map((line) => String(line?.text || "").trim())
+          .filter(Boolean)
+          .join(" ");
+        const overriddenLabelText = String(
+          state.printAlignmentLabelOverrides?.[band.id] || ""
+        ).trim();
+        const hasOverride = Boolean(overriddenLabelText);
         const labelId = `alignment:${band.id}`;
         if (isPrintHidden(`label:${labelId}`)) {
           return;
@@ -4397,7 +6178,13 @@ ${formatHz(freq)}`,
         const defaultDx = 2;
         const defaultDy = 0;
         const labelX = band.labelX + (Number.isFinite(offset.dx) ? offset.dx : defaultDx);
-        const labelY = band.y + (Number.isFinite(offset.dy) ? offset.dy : defaultDy);
+        const lineHeight = 10;
+        const lineCount = hasOverride ? 1 : Math.max(1, labelLines.length);
+        const blockHeight = (lineCount - 1) * lineHeight;
+        const baselineCenterOffset = componentLabelSize * 0.33;
+        const centeredLabelY =
+          band.y - blockHeight / 2 + baselineCenterOffset;
+        const labelY = centeredLabelY + (Number.isFinite(offset.dy) ? offset.dy : defaultDy);
         const isManual = Number.isFinite(offset.dx) || Number.isFinite(offset.dy);
         const text = createSvgEl("text", {
           x: labelX,
@@ -4410,17 +6197,22 @@ ${formatHz(freq)}`,
           "data-print-label-id": labelId,
           "data-print-default-dx": String(defaultDx),
           "data-print-default-dy": String(defaultDy),
+          "data-label-default-text": defaultLabelText,
           "data-hide-key": `label:${labelId}`,
           "data-label-parent-align-id": band.id,
           "data-auto-text-class": "component",
-          style: "cursor:move",
+          style: "cursor:ew-resize",
         });
-        text.textContent = labelLines.join(" ");
+        if (hasOverride) {
+          text.textContent = overriddenLabelText;
+        } else {
+          labelLines.forEach((line, index) => appendComponentLineSpan(text, labelX, line, index));
+        }
         printLayer.appendChild(text);
         autoRelaxLabels.push({
           el: text,
           baseX: band.labelX,
-          baseY: band.y,
+          baseY: centeredLabelY,
           defaultAnchor: "start",
           candidates: [
             { dx: 2, dy: 0, anchor: "start" },
@@ -4431,6 +6223,64 @@ ${formatHz(freq)}`,
         });
       });
     }
+
+    (state.printCustomLabels || []).forEach((item) => {
+      if (!item || typeof item !== "object" || !item.id) {
+        return;
+      }
+      const parentKey = String(item.parentKey || "");
+      const parentMeta = printComponentMeta[parentKey];
+      if (!parentMeta) {
+        return;
+      }
+      const textValue = String(item.text || "");
+      if (!textValue.trim()) {
+        return;
+      }
+      const labelId = `customlabel:${item.id}`;
+      const offset = state.printLabelOffsets?.[labelId] || {};
+      const defaultDx = 10;
+      const defaultDy = -24;
+      const labelX = parentMeta.x + (Number.isFinite(offset.dx) ? offset.dx : defaultDx);
+      const labelY = parentMeta.y + (Number.isFinite(offset.dy) ? offset.dy : defaultDy);
+      const text = createSvgEl("text", {
+        x: labelX,
+        y: labelY,
+        fill: "#111",
+        "font-size": componentLabelSize,
+        "font-family": componentLabelFont,
+        "text-anchor": "start",
+        "data-print-label-id": labelId,
+        "data-custom-label-id": item.id,
+        "data-print-default-dx": String(defaultDx),
+        "data-print-default-dy": String(defaultDy),
+        "data-label-parent-key": parentKey,
+        "data-auto-text-class": "component",
+        style: "cursor:move",
+      });
+      textValue.split(/\r?\n/).forEach((line, index) => {
+        const span = createSvgEl("tspan", {
+          x: labelX,
+          dy: index === 0 ? 0 : 10,
+        });
+        span.textContent = line;
+        text.appendChild(span);
+      });
+      printLayer.appendChild(text);
+      autoRelaxLabels.push({
+        el: text,
+        baseX: parentMeta.x,
+        baseY: parentMeta.y,
+        defaultAnchor: "start",
+        candidates: [
+          { dx: 10, dy: -24, anchor: "start" },
+          { dx: -10, dy: -24, anchor: "end" },
+          { dx: 10, dy: 16, anchor: "start" },
+          { dx: -10, dy: 16, anchor: "end" },
+        ],
+        manual: Number.isFinite(offset.dx) || Number.isFinite(offset.dy),
+      });
+    });
 
     Object.entries(printComponentMeta).forEach(([key, meta]) => {
       if (meta.kind !== "combo" || !state.printComboLinksVisible?.[key]) {
@@ -4458,47 +6308,6 @@ ${formatHz(freq)}`,
             "data-hide-key": `comboparent:${key}`,
           })
         );
-      });
-      const comboLabelId = `comboexpr:${key}`;
-      const comboOffset = state.printLabelOffsets?.[comboLabelId] || {};
-      const comboDefaultDx = 10;
-      const comboDefaultDy = -10;
-      const comboX = meta.x + (Number.isFinite(comboOffset.dx) ? comboOffset.dx : comboDefaultDx);
-      const comboY = meta.y + (Number.isFinite(comboOffset.dy) ? comboOffset.dy : comboDefaultDy);
-      printLayer.appendChild(
-        createSvgEl("text", {
-          x: comboX,
-          y: comboY,
-          fill: "#111",
-          "font-size": 9.5,
-          "font-family": "IBM Plex Sans, Lexend, sans-serif",
-          "text-anchor": "start",
-          "data-print-label-id": comboLabelId,
-          "data-print-default-dx": String(comboDefaultDx),
-          "data-print-default-dy": String(comboDefaultDy),
-          "data-hide-key": `comboparent:${key}`,
-          "data-label-parent-key": key,
-          style: "cursor:move",
-        })
-      ).textContent = (() => {
-        const p1 = parents[0]?.freq || 0;
-        const p2 = parents[1]?.freq || 0;
-        if (meta.comboType === "sum") {
-          return `${p1.toFixed(2)} + ${p2.toFixed(2)} = ${meta.freq.toFixed(2)} Hz`;
-        }
-        if (meta.comboType === "order2a") {
-          return `(${p1.toFixed(2)}) - (${p2.toFixed(2)}) = ${meta.freq.toFixed(2)} Hz`;
-        }
-        if (meta.comboType === "order2b") {
-          return `(${p1.toFixed(2)}) - (${p2.toFixed(2)}) = ${meta.freq.toFixed(2)} Hz`;
-        }
-        return `|${p1.toFixed(2)} - ${p2.toFixed(2)}| = ${meta.freq.toFixed(2)} Hz`;
-      })();
-      autoRelaxLabels.push({
-        el: printLayer.lastChild,
-        baseX: comboX,
-        baseY: comboY,
-        manual: Number.isFinite(comboOffset.dx) || Number.isFinite(comboOffset.dy),
       });
     });
 
@@ -4532,7 +6341,7 @@ ${formatHz(freq)}`,
         }
       }
       if (state.printDistanceShowHz) {
-        parts.push(`Δ ${Math.abs(a.freq - b.freq).toFixed(2)} Hz`);
+        parts.push(`Δ ${formatHz(Math.abs(a.freq - b.freq))}`);
       }
       if (state.printDistanceShowInterval) {
         const intervalLabel = nearestIntervalNameForRatio(ratioValue);
@@ -4656,8 +6465,8 @@ ${formatHz(freq)}`,
       );
     }
 
-    if (state.printShowLegend) {
-      const legendX = plotRight - 172;
+    if (state.printShowLegend && state.showCombination && hasAnyVisibleComboTypes()) {
+      const legendX = plotLeft - 96;
       const legendY = plotTop + 18;
       const legendLabelId = "legend:combo-diff";
       const legendOffset = state.printLabelOffsets?.[legendLabelId] || {};
@@ -4752,7 +6561,48 @@ ${formatHz(freq)}`,
     emptyHint.textContent = "Formats: 69  |  440hz  |  3/2  |  7:4";
     diagramRoot.appendChild(emptyHint);
   }
+  if (stackStemLayer.childNodes.length) {
+    diagramRoot.insertBefore(stackStemLayer, diagramRoot.firstChild || null);
+  }
   svg.appendChild(diagramRoot);
+  const exportFallbackRect = {
+    x: Math.max(0, Math.min(plotLeft, yLabelX - 22)),
+    y: Math.max(0, plotTop - 16),
+    width: Math.max(1, Math.min(width, Math.max(plotRight, xAxisRightWithGap + 24)) - Math.max(0, Math.min(plotLeft, yLabelX - 22))),
+    height: (() => {
+      const exportBaseBottom = drawHzLineForNotes ? plotBottom + 38 : plotBottom + 30;
+      const exportChordBottom = showChordControls && chordsForLayout.length
+        ? plotBottom + (inPrintMode ? 74 : 96)
+        : exportBaseBottom;
+      const bottom = Math.min(height, exportChordBottom);
+      return Math.max(1, bottom - Math.max(0, plotTop - 16));
+    })(),
+  };
+  let exportRect = exportFallbackRect;
+  if (typeof diagramRoot.getBBox === "function") {
+    try {
+      const box = diagramRoot.getBBox();
+      if (Number.isFinite(box.x) && Number.isFinite(box.y) && box.width > 0 && box.height > 0) {
+        const pad = 16;
+        exportRect = unionRects(exportRect, {
+          x: box.x - pad,
+          y: box.y - pad,
+          width: box.width + pad * 2,
+          height: box.height + pad * 2,
+        });
+      }
+    } catch {}
+  }
+  const exportContentLeft = clamp(exportRect.x, 0, width);
+  const exportContentTop = clamp(exportRect.y, 0, height);
+  const exportContentRight = clamp(exportRect.x + exportRect.width, 0, width);
+  const exportContentBottom = clamp(exportRect.y + exportRect.height, 0, height);
+  const exportContentWidth = Math.max(1, exportContentRight - exportContentLeft);
+  const exportContentHeight = Math.max(1, exportContentBottom - exportContentTop);
+  svg.setAttribute("data-export-content-x", String(exportContentLeft));
+  svg.setAttribute("data-export-content-y", String(exportContentTop));
+  svg.setAttribute("data-export-content-width", String(exportContentWidth));
+  svg.setAttribute("data-export-content-height", String(exportContentHeight));
 
   if (isAlignmentFocus) {
     const all = svg.querySelectorAll("line,path,circle,text,rect,polyline,polygon,ellipse");
@@ -4794,7 +6644,18 @@ function attachTooltip(svg) {
   let dimmedElements = [];
   let highlightedComboTarget = null;
   let highlightedLinkLines = [];
+  let printTextEditPending = false;
   const applyCanvasPan = () => {
+    if (printMode) {
+      svg.style.transform = "";
+      svg.style.transformOrigin = "";
+      svg.style.willChange = "";
+      svg.style.cursor = panDragState ? "grabbing" : "";
+      svg.style.userSelect = panDragState ? "none" : "";
+      svg.style.webkitUserSelect = panDragState ? "none" : "";
+      svg.style.touchAction = "none";
+      return;
+    }
     const zoom = clamp(Number(state.viewZoom) || 1, 0.3, 3);
     svg.style.transform = `translate(${canvasPanX}px, ${canvasPanY}px) scale(${zoom})`;
     svg.style.transformOrigin = "0 0";
@@ -4803,6 +6664,24 @@ function attachTooltip(svg) {
     svg.style.userSelect = panDragState ? "none" : "";
     svg.style.webkitUserSelect = panDragState ? "none" : "";
     svg.style.touchAction = "none";
+  };
+  const applyPrintDiagramOffsetPreview = (offsetX, offsetY) => {
+    if (!printMode) {
+      return;
+    }
+    const root = svg.querySelector("[data-diagram-root='1']");
+    if (!(root instanceof SVGElement)) {
+      return;
+    }
+    const baseShiftX = Number(root.getAttribute("data-scene-base-shift-x"));
+    const baseShiftY = Number(root.getAttribute("data-scene-base-shift-y"));
+    const scale = Number(root.getAttribute("data-scene-scale"));
+    if (!Number.isFinite(baseShiftX) || !Number.isFinite(baseShiftY) || !Number.isFinite(scale)) {
+      return;
+    }
+    const tx = baseShiftX + (Number(offsetX) || 0);
+    const ty = baseShiftY + (Number(offsetY) || 0);
+    root.setAttribute("transform", `translate(${tx}, ${ty}) scale(${scale})`);
   };
   const clearDragSelectionBlock = () => {
     document.body.style.userSelect = "";
@@ -4843,11 +6722,27 @@ function attachTooltip(svg) {
       printLabelDragFocus = null;
     }
     clearDragSelectionBlock();
-    if (!cancelled && finishedState.kind === "combo-x" && !finishedState.moved) {
+    if (!cancelled && printMode && finishedState.kind === "combo-x" && !finishedState.moved) {
       const comboKey = finishedState.id;
       const next = { ...(state.printComboLinksVisible || {}) };
       next[comboKey] = !next[comboKey];
       state.printComboLinksVisible = next;
+    } else if (!cancelled && !printMode && finishedState.kind === "combo-x" && !finishedState.moved) {
+      const key = finishedState.id;
+      const freq = Number(finishedState.freq);
+      if (key && freq > 0) {
+        const targetMeta = { kind: "combo", freq };
+        if (lKeyHeld) {
+          armTargetLfoCycle(key, targetMeta);
+        } else {
+          const lfoState = lfoTargetStates.get(key) || null;
+          if (lfoState) {
+            toggleTargetLfo(key, targetMeta);
+          } else {
+            toggleTargetPlayback(key, targetMeta);
+          }
+        }
+      }
     }
     scheduleRender();
     scheduleStateUrlUpdate();
@@ -4858,7 +6753,7 @@ function attachTooltip(svg) {
       return false;
     }
     return !target.closest(
-      "[data-play-key],[data-print-label-id],[data-custom-text-id],[data-column-id],[data-component-key],[data-rough-play-items],[data-align-band='1'],[data-chord-action]"
+      "[data-play-key],[data-print-label-id],[data-custom-text-id],[data-column-id],[data-component-key],[data-rough-play-items],[data-align-band='1'],[data-chord-action],[data-print-chord-title-index]"
     );
   };
   const clientToDiagramPoint = (clientX, clientY) => {
@@ -4880,8 +6775,8 @@ function attachTooltip(svg) {
     };
   };
   const beginCanvasPan = (event) => {
-    const startPanX = canvasPanX;
-    const startPanY = canvasPanY;
+    const startPanX = printMode ? (Number(state.printDiagramOffsetX) || 0) : canvasPanX;
+    const startPanY = printMode ? (Number(state.printDiagramOffsetY) || 0) : canvasPanY;
     panDragState = {
       pointerId: event.pointerId,
       startClientX: event.clientX,
@@ -4915,9 +6810,14 @@ function attachTooltip(svg) {
         }
       } catch {}
     }
+    const finished = panDragState;
     panDragState = null;
     clearDragSelectionBlock();
     applyCanvasPan();
+    if (printMode && finished?.moved) {
+      scheduleRender(0);
+      scheduleStateUrlUpdate();
+    }
     return true;
   };
   applyCanvasPan();
@@ -5110,17 +7010,127 @@ function attachTooltip(svg) {
     tooltipEl.style.top = `${best.y}px`;
   };
 
+  const openChordTitleEditor = (chordIndex) => {
+    if (!Number.isInteger(chordIndex) || chordIndex < 0 || printTextEditPending) {
+      return;
+    }
+    printTextEditPending = true;
+    const defaultChordTitle = `Chord ${chordIndex + 1}`;
+    const overrides = { ...(state.printChordTitleOverrides || {}) };
+    const hasOverride = Object.prototype.hasOwnProperty.call(overrides, chordIndex);
+    const currentTitle = hasOverride ? String(overrides[chordIndex] ?? "") : defaultChordTitle;
+    openCustomTextDialog(currentTitle, {
+      title: `Edit ${defaultChordTitle}`,
+      saveText: "Save",
+    }).then((result) => {
+      if (!result) {
+        return;
+      }
+      const next = String(result.text || "");
+      overrides[chordIndex] = next;
+      state.printChordTitleOverrides = overrides;
+      scheduleRender();
+      scheduleStateUrlUpdate();
+    }).finally(() => {
+      printTextEditPending = false;
+    });
+  };
+  const openYAxisLabelEditor = (labelEl) => {
+    if (printTextEditPending) {
+      return;
+    }
+    const defaultText = String(labelEl?.getAttribute("data-label-default-text") || "").trim()
+      || `Frequency spectrum (${state.yScale})`;
+    const currentText = state.printYAxisLabelHasOverride
+      ? String(state.printYAxisLabelOverride || "")
+      : (String(labelEl?.textContent || "").trim() || defaultText);
+    printTextEditPending = true;
+    openCustomTextDialog(currentText, {
+      title: "Edit Y Axis Label",
+      saveText: "Save",
+    }).then((result) => {
+      if (!result) {
+        return;
+      }
+      const nextText = String(result.text || "");
+      state.printYAxisLabelOverride = nextText;
+      state.printYAxisLabelHasOverride = true;
+      scheduleRender();
+      scheduleStateUrlUpdate();
+    }).finally(() => {
+      printTextEditPending = false;
+    });
+  };
+  const openAlignmentLabelEditor = (labelEl) => {
+    const alignId = String(labelEl?.getAttribute("data-label-parent-align-id") || "").trim();
+    if (!alignId || printTextEditPending) {
+      return;
+    }
+    const defaultText = String(labelEl.getAttribute("data-label-default-text") || "").trim();
+    const currentText = String(state.printAlignmentLabelOverrides?.[alignId] || "").trim()
+      || defaultText
+      || String(labelEl.textContent || "").trim();
+    printTextEditPending = true;
+    openCustomTextDialog(currentText, {
+      title: "Edit Alignment Label",
+      saveText: "Save",
+    }).then((result) => {
+      if (!result) {
+        return;
+      }
+      const nextText = String(result.text || "").trim();
+      const overrides = { ...(state.printAlignmentLabelOverrides || {}) };
+      if (!nextText || (defaultText && nextText === defaultText)) {
+        delete overrides[alignId];
+      } else {
+        overrides[alignId] = nextText;
+      }
+      state.printAlignmentLabelOverrides = overrides;
+      scheduleRender();
+      scheduleStateUrlUpdate();
+    }).finally(() => {
+      printTextEditPending = false;
+    });
+  };
+
   svg.addEventListener("pointermove", (event) => {
     if (panDragState && panDragState.pointerId === event.pointerId) {
       event.preventDefault();
       const dx = event.clientX - panDragState.startClientX;
       const dy = event.clientY - panDragState.startClientY;
-      canvasPanX = panDragState.startPanX + dx;
-      canvasPanY = panDragState.startPanY + dy;
+      if (printMode) {
+        state.printDiagramOffsetX = panDragState.startPanX + dx;
+        state.printDiagramOffsetY = panDragState.startPanY + dy;
+        applyPrintDiagramOffsetPreview(state.printDiagramOffsetX, state.printDiagramOffsetY);
+      } else {
+        canvasPanX = panDragState.startPanX + dx;
+        canvasPanY = panDragState.startPanY + dy;
+      }
       if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
         panDragState.moved = true;
       }
       applyCanvasPan();
+      return;
+    }
+    if (
+      printDragState &&
+      printDragState.pointerId === event.pointerId &&
+      printDragState.kind === "combo-x"
+    ) {
+      event.preventDefault();
+      const dx = event.clientX - printDragState.startClientX;
+      const nextX = clamp(printDragState.startX + dx, printDragState.minX, printDragState.maxX);
+      state.printComponentXOverrides = {
+        ...(state.printComponentXOverrides || {}),
+        [printDragState.id]: nextX,
+      };
+      if (printDragState.dragElement) {
+        const previewDx = nextX - printDragState.startX;
+        printDragState.dragElement.setAttribute("transform", `translate(${previewDx},0)`);
+      }
+      if (Math.abs(dx) > 2) {
+        printDragState.moved = true;
+      }
       return;
     }
     if (printMode) {
@@ -5130,7 +7140,6 @@ function attachTooltip(svg) {
         (
           printDragState.kind === "column" ||
           printDragState.kind === "label" ||
-          printDragState.kind === "combo-x" ||
           printDragState.kind === "custom-text"
         )
       ) {
@@ -5148,23 +7157,10 @@ function attachTooltip(svg) {
             ...(state.printLabelOffsets || {}),
             [printDragState.id]: {
               dx: printDragState.startDx + dx,
-              dy: printDragState.startDy + dy,
+              dy: printDragState.lockY ? printDragState.startDy : printDragState.startDy + dy,
             },
           };
           scheduleRender(0);
-        } else if (printDragState.kind === "combo-x") {
-          const nextX = clamp(printDragState.startX + dx, printDragState.minX, printDragState.maxX);
-          state.printComponentXOverrides = {
-            ...(state.printComponentXOverrides || {}),
-            [printDragState.id]: nextX,
-          };
-          if (printDragState.dragElement) {
-            const previewDx = nextX - printDragState.startX;
-            printDragState.dragElement.setAttribute("transform", `translate(${previewDx},0)`);
-          }
-          if (Math.abs(dx) > 2) {
-            printDragState.moved = true;
-          }
         } else if (printDragState.kind === "custom-text") {
           const currentLocal = clientToDiagramPoint(event.clientX, event.clientY);
           if (!currentLocal) {
@@ -5208,14 +7204,14 @@ function attachTooltip(svg) {
     (event) => {
       event.preventDefault();
       const factor = Math.exp(-event.deltaY * 0.0015);
-      state.viewZoom = clamp((Number(state.viewZoom) || 1) * factor, 0.3, 3);
-      if (viewZoomInput) {
-        viewZoomInput.value = String(state.viewZoom);
+      state.layoutScale = clamp((Number(state.layoutScale) || 1) * factor, 0.6, 1.8);
+      if (layoutScaleInput) {
+        layoutScaleInput.value = String(state.layoutScale);
       }
-      if (viewZoomReadout) {
-        viewZoomReadout.textContent = `${Math.round(state.viewZoom * 100)}%`;
+      if (layoutScaleReadout) {
+        layoutScaleReadout.textContent = `${Math.round(state.layoutScale * 100)}%`;
       }
-      applyCanvasPan();
+      scheduleRender(0);
       scheduleStateUrlUpdate();
     },
     { passive: false }
@@ -5232,7 +7228,7 @@ function attachTooltip(svg) {
     if (endCanvasPan(event)) {
       return;
     }
-    if (!printMode) {
+    if (!printMode && printDragState?.kind !== "combo-x") {
       return;
     }
     endPrintDrag(event, { cancelled: false });
@@ -5240,7 +7236,7 @@ function attachTooltip(svg) {
 
   svg.addEventListener("pointercancel", (event) => {
     endCanvasPan(event);
-    if (!printMode) {
+    if (!printMode && printDragState?.kind !== "combo-x") {
       return;
     }
     endPrintDrag(event, { cancelled: true });
@@ -5253,11 +7249,93 @@ function attachTooltip(svg) {
     if (!(event.target instanceof Element)) {
       return;
     }
+    const activeEl = document.activeElement;
+    if (
+      activeEl instanceof HTMLElement &&
+      activeEl.closest(".left-rail") &&
+      activeEl.matches("input, textarea, select, [contenteditable='true']")
+    ) {
+      activeEl.blur();
+    }
+    if (pendingCustomLabelTarget) {
+      const targetComponent = event.target.closest("[data-component-key]");
+      if (targetComponent) {
+        const parentKey = targetComponent.getAttribute("data-component-key");
+        pendingCustomLabelTarget = false;
+        const actionId = pendingCustomLabelActionId || nextCustomActionId();
+        pendingCustomLabelActionId = 0;
+        event.preventDefault();
+        forceResetCustomTextDialog("add-custom-label:pre-open-reset");
+        openCustomTextDialog("", {
+          title: "Add Custom Label",
+          saveText: "Add Label",
+        }).then((result) => {
+          const text = String(result?.text || "").trim();
+          if (!parentKey || !text) {
+            scheduleRender(0);
+            return;
+          }
+          const item = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            parentKey,
+            text,
+          };
+          state.printCustomLabels = [...(state.printCustomLabels || []), item];
+          state.printLabelOffsets = {
+            ...(state.printLabelOffsets || {}),
+            [`customlabel:${item.id}`]: { dx: 10, dy: -24 },
+          };
+          scheduleRender();
+          scheduleStateUrlUpdate();
+        });
+        scheduleRender(0);
+        return;
+      }
+    }
     if (printMode) {
       const hideTarget = event.target.closest("[data-hide-key]");
+      const customLabelTarget = event.target.closest("[data-custom-label-id]");
+      if (event.altKey && customLabelTarget) {
+        const customLabelId = customLabelTarget.getAttribute("data-custom-label-id");
+        if (customLabelId) {
+          state.printCustomLabels = (state.printCustomLabels || []).filter((item) => item.id !== customLabelId);
+          const labelKey = `customlabel:${customLabelId}`;
+          if (state.printLabelOffsets && labelKey in state.printLabelOffsets) {
+            const nextOffsets = { ...(state.printLabelOffsets || {}) };
+            delete nextOffsets[labelKey];
+            state.printLabelOffsets = nextOffsets;
+          }
+          event.preventDefault();
+          scheduleRender();
+          scheduleStateUrlUpdate();
+          return;
+        }
+      }
       if (event.altKey && hideTarget) {
         const hideKey = hideTarget.getAttribute("data-hide-key");
         if (hideKey) {
+          if (hideKey.startsWith("distance:")) {
+            const distanceId = hideKey.slice("distance:".length).trim();
+            if (distanceId) {
+              state.printDistanceAnnotations = (state.printDistanceAnnotations || []).filter(
+                (item) => String(item?.id || "") !== distanceId
+              );
+              if (state.printLabelOffsets && hideKey in state.printLabelOffsets) {
+                const nextOffsets = { ...(state.printLabelOffsets || {}) };
+                delete nextOffsets[hideKey];
+                state.printLabelOffsets = nextOffsets;
+              }
+              if (state.printHiddenKeys && hideKey in state.printHiddenKeys) {
+                const nextHidden = { ...(state.printHiddenKeys || {}) };
+                delete nextHidden[hideKey];
+                state.printHiddenKeys = nextHidden;
+              }
+              event.preventDefault();
+              scheduleRender();
+              scheduleStateUrlUpdate();
+              return;
+            }
+          }
           const next = { ...(state.printHiddenKeys || {}) };
           next[hideKey] = !next[hideKey];
           state.printHiddenKeys = next;
@@ -5270,6 +7348,39 @@ function attachTooltip(svg) {
       if (labelTarget) {
         const labelId = labelTarget.getAttribute("data-print-label-id");
         if (labelId) {
+          const customLabelId = String(labelTarget.getAttribute("data-custom-label-id") || "").trim();
+          const alignmentId = String(labelTarget.getAttribute("data-label-parent-align-id") || "").trim();
+          if (customLabelId && event.detail > 1) {
+            event.preventDefault();
+            const customLabel = (state.printCustomLabels || []).find((item) => item.id === customLabelId);
+            if (!customLabel || printTextEditPending) {
+              return;
+            }
+            printTextEditPending = true;
+            openCustomTextDialog(String(customLabel.text || ""), {
+              title: "Edit Custom Label",
+              saveText: "Save",
+            }).then((result) => {
+              const nextText = String(result?.text || "").trim();
+              if (nextText) {
+                state.printCustomLabels = (state.printCustomLabels || []).map((item) =>
+                  item.id === customLabelId ? { ...item, text: nextText } : item
+                );
+                scheduleRender();
+                scheduleStateUrlUpdate();
+              } else {
+                scheduleRender(0);
+              }
+            }).finally(() => {
+              printTextEditPending = false;
+            });
+            return;
+          }
+          if (alignmentId && event.detail > 1) {
+            event.preventDefault();
+            openAlignmentLabelEditor(labelTarget);
+            return;
+          }
           printLabelDragFocus = labelDragFocusFromElement(labelTarget, labelId);
           const offset = state.printLabelOffsets?.[labelId] || {};
           const fallbackDx = Number(labelTarget.getAttribute("data-print-default-dx"));
@@ -5290,6 +7401,7 @@ function attachTooltip(svg) {
               : Number.isFinite(fallbackDy)
                 ? fallbackDy
                 : -7,
+            lockY: Boolean(alignmentId),
           }, event);
           event.preventDefault();
           return;
@@ -5323,8 +7435,20 @@ function attachTooltip(svg) {
         }
       }
       const chordTitleTarget = event.target.closest("[data-print-chord-title-index]");
-      if (chordTitleTarget && event.detail > 1) {
-        event.preventDefault();
+      if (chordTitleTarget) {
+        const chordIndex = Number(chordTitleTarget.getAttribute("data-print-chord-title-index"));
+        if (event.detail > 1) {
+          event.preventDefault();
+          openChordTitleEditor(chordIndex);
+        }
+        return;
+      }
+      const yAxisLabelTarget = event.target.closest("[data-print-y-axis-label='1']");
+      if (yAxisLabelTarget) {
+        if (event.detail > 1) {
+          event.preventDefault();
+          openYAxisLabelEditor(yAxisLabelTarget);
+        }
         return;
       }
       const columnTarget = event.target.closest("[data-column-id]");
@@ -5426,6 +7550,37 @@ function attachTooltip(svg) {
         event.preventDefault();
       }
       return;
+    }
+    const comboTarget = event.target.closest("[data-play-kind='combo'][data-play-key]");
+    if (comboTarget) {
+      const comboKey = comboTarget.getAttribute("data-play-key");
+      const minX = Number(comboTarget.getAttribute("data-combo-drag-min"));
+      const maxX = Number(comboTarget.getAttribute("data-combo-drag-max"));
+      const freq = Number(comboTarget.getAttribute("data-play-freq"));
+      if (comboKey && Number.isFinite(minX) && Number.isFinite(maxX) && minX < maxX) {
+        const currentX = Number(state.printComponentXOverrides?.[comboKey]);
+        const startX = Number.isFinite(currentX)
+          ? currentX
+          : (() => {
+              const box = comboTarget.getBBox();
+              return box.x + box.width / 2;
+            })();
+        beginPrintDrag({
+          kind: "combo-x",
+          id: comboKey,
+          pointerId: event.pointerId,
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          startX,
+          minX,
+          maxX,
+          dragElement: comboTarget,
+          moved: false,
+          freq,
+        }, event);
+        event.preventDefault();
+        return;
+      }
     }
     const chordActionTarget = event.target.closest("[data-chord-action][data-chord-index]");
     if (chordActionTarget) {
@@ -5534,8 +7689,8 @@ function attachTooltip(svg) {
             ? {
                 ...item,
                 text: nextText,
-                font: String(result.font || item.font || "Noto Serif"),
-                size: clamp(Number(result.size ?? item.size ?? 18), 8, 72),
+                font: String(item.font || "Noto Serif"),
+                size: clamp(Number(item.size ?? 18), 8, 72),
               }
             : item
         );
@@ -5547,32 +7702,48 @@ function attachTooltip(svg) {
     const chordTitleTarget = event.target.closest("[data-print-chord-title-index]");
     if (chordTitleTarget) {
       const chordIndex = Number(chordTitleTarget.getAttribute("data-print-chord-title-index"));
-      if (!Number.isInteger(chordIndex) || chordIndex < 0) {
+      event.preventDefault();
+      openChordTitleEditor(chordIndex);
+      return;
+    }
+    const yAxisLabelTarget = event.target.closest("[data-print-y-axis-label='1']");
+    if (yAxisLabelTarget) {
+      event.preventDefault();
+      openYAxisLabelEditor(yAxisLabelTarget);
+      return;
+    }
+    const customLabelTarget = event.target.closest("[data-custom-label-id]");
+    if (customLabelTarget) {
+      const customLabelId = customLabelTarget.getAttribute("data-custom-label-id") || "";
+      const customLabel = (state.printCustomLabels || []).find((item) => item.id === customLabelId);
+      if (!customLabel || printTextEditPending) {
         return;
       }
       event.preventDefault();
-      const defaultChordTitle = `Chord ${chordIndex + 1}`;
-      const currentTitle = String(state.printChordTitleOverrides?.[chordIndex] || "").trim() || defaultChordTitle;
-      openCustomTextDialog(currentTitle, {
-        title: `Edit ${defaultChordTitle}`,
+      printTextEditPending = true;
+      openCustomTextDialog(String(customLabel.text || ""), {
+        title: "Edit Custom Label",
         saveText: "Save",
-        font: state.printCustomLabelFont || "Noto Serif",
-        size: state.printCustomLabelSize || 18,
       }).then((result) => {
-        if (!result) {
-          return;
-        }
-        const next = String(result.text || "").trim();
-        const overrides = { ...(state.printChordTitleOverrides || {}) };
-        if (!next || next === defaultChordTitle) {
-          delete overrides[chordIndex];
+        const nextText = String(result?.text || "").trim();
+        if (nextText) {
+          state.printCustomLabels = (state.printCustomLabels || []).map((item) =>
+            item.id === customLabelId ? { ...item, text: nextText } : item
+          );
+          scheduleRender();
+          scheduleStateUrlUpdate();
         } else {
-          overrides[chordIndex] = next;
+          scheduleRender(0);
         }
-        state.printChordTitleOverrides = overrides;
-        scheduleRender();
-        scheduleStateUrlUpdate();
+      }).finally(() => {
+        printTextEditPending = false;
       });
+      return;
+    }
+    const alignmentLabelTarget = event.target.closest("[data-label-parent-align-id]");
+    if (alignmentLabelTarget) {
+      event.preventDefault();
+      openAlignmentLabelEditor(alignmentLabelTarget);
       return;
     }
   });
@@ -5581,16 +7752,40 @@ function attachTooltip(svg) {
 function syncControlReadouts() {
   syncModeButtons();
   syncColorSchemeControl();
+  if (ratioRootNoteCustomInput) {
+    if (ratioRootNoteCustomInput.value !== String(state.ratioRootNoteCustom || "")) {
+      ratioRootNoteCustomInput.value = String(state.ratioRootNoteCustom || "");
+    }
+  }
+  syncRatioRootCustomInputVisibility();
   if (viewZoomReadout) {
     viewZoomReadout.textContent = `${Math.round((Number(state.viewZoom) || 1) * 100)}%`;
   }
   if (layoutScaleReadout) {
     layoutScaleReadout.textContent = `${Math.round((Number(state.layoutScale) || 1) * 100)}%`;
   }
+  if (printHeightReadout) {
+    printHeightReadout.textContent = `${Math.round(clamp(Number(state.printGraphHeight) || 1, 0.45, 1) * 100)}%`;
+  }
   overtoneCountReadout.textContent = String(state.overtoneCount);
   alignToleranceReadout.textContent = `${state.alignToleranceCents.toFixed(1)}c`;
+  if (stackLineSizeInput) {
+    stackLineSizeInput.value = String(Math.round(clamp(state.stackLineSize, 0.25, 3) * 100));
+  }
+  if (stackLineSizeReadout) {
+    stackLineSizeReadout.textContent = `${Math.round(clamp(state.stackLineSize, 0.25, 3) * 100)}%`;
+  }
+  if (alphaFalloffInput) {
+    alphaFalloffInput.checked = Boolean(state.alphaFalloff);
+  }
   if (fusionClusterCentsReadout) {
     fusionClusterCentsReadout.textContent = `${state.fusionClusterCents.toFixed(1)}c`;
+  }
+  if (fusionScaleInput) {
+    fusionScaleInput.value = String(Math.round(clamp(state.fusionScale, 0.5, 1.5) * 100));
+  }
+  if (fusionScaleReadout) {
+    fusionScaleReadout.textContent = `${Math.round(clamp(state.fusionScale, 0.5, 1.5) * 100)}%`;
   }
   rangeMinInput.disabled = state.autoRange;
   rangeMaxInput.disabled = state.autoRange;
@@ -5619,8 +7814,11 @@ function syncControlReadouts() {
   if (printShowComponentRatioInput) {
     printShowComponentRatioInput.disabled = !state.printShowComponentLabel;
   }
+  if (printShowComponentNoteInput) {
+    printShowComponentNoteInput.disabled = !state.printShowComponentLabel;
+  }
   if (printShowLegendInput) {
-    printShowLegendInput.disabled = !state.showCombination;
+    printShowLegendInput.disabled = !state.showCombination || !hasAnyVisibleComboTypes();
   }
   if (printDistanceModeInput) {
     printDistanceModeInput.disabled = !isPrintMode();
@@ -5642,6 +7840,13 @@ function syncControlReadouts() {
   if (printStyleAxisSizeReadout) printStyleAxisSizeReadout.textContent = `${styleAxis.size}`;
   if (printAddCustomTextButton) {
     printAddCustomTextButton.textContent = "Add Custom Text";
+    printAddCustomTextButton.disabled = false;
+  }
+  if (printAddCustomLabelButton) {
+    printAddCustomLabelButton.textContent = pendingCustomLabelTarget
+      ? "Click A Component..."
+      : "Add Custom Label";
+    printAddCustomLabelButton.disabled = false;
   }
   let selectedCustom = getSelectedCustomTextItem();
   if (!selectedCustom && state.printSelectedCustomTextId) {
@@ -5708,13 +7913,19 @@ function updateStatus(model) {
   }
 
   if (!model.errors.length) {
-    statusEl.textContent = summary.join(" · ");
+    const modeHint = isPrintMode() && pendingCustomLabelTarget
+      ? "\nAdd Custom Label: click a component to attach a label."
+      : "";
+    statusEl.textContent = `${summary.join(" · ")}${modeHint}`;
     return;
   }
 
   const message = model.errors.slice(0, 6).join("\n");
   const extra = model.errors.length > 6 ? `\n... ${model.errors.length - 6} more` : "";
-  statusEl.textContent = `${summary.join(" · ")}\n${message}${extra}`;
+  const modeHint = isPrintMode() && pendingCustomLabelTarget
+    ? "\nAdd Custom Label: click a component to attach a label."
+    : "";
+  statusEl.textContent = `${summary.join(" · ")}\n${message}${extra}${modeHint}`;
 }
 
 function renderChart() {
@@ -5756,11 +7967,108 @@ function scheduleRender(delay = 0) {
   }, delay);
 }
 
-function serializeSvg(svg, { withXmlHeader = true } = {}) {
+function normalizeSvgColor(color) {
+  if (color == null) {
+    return { color: "none", opacity: null };
+  }
+  const trimmed = String(color).trim();
+  if (!trimmed) {
+    return { color: "none", opacity: null };
+  }
+  if (trimmed === "none" || trimmed === "transparent") {
+    return { color: "none", opacity: null };
+  }
+  const rgbaMatch = trimmed.match(/^rgba?\(([^)]+)\)$/i);
+  if (rgbaMatch) {
+    const parts = rgbaMatch[1]
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const r = Number(parts[0]);
+    const g = Number(parts[1]);
+    const b = Number(parts[2]);
+    const a = parts.length > 3 ? Number(parts[3]) : 1;
+    if ([r, g, b].every((value) => Number.isFinite(value))) {
+      const rgb = `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+      const opacity = Number.isFinite(a) ? clamp(a, 0, 1) : 1;
+      return { color: rgb, opacity };
+    }
+  }
+  const hexMatch = trimmed.match(/^#([0-9a-f]{4}|[0-9a-f]{8})$/i);
+  if (hexMatch) {
+    const hex = hexMatch[1];
+    const values =
+      hex.length === 4
+        ? hex.split("").map((char) => parseInt(char + char, 16))
+        : [
+            parseInt(hex.slice(0, 2), 16),
+            parseInt(hex.slice(2, 4), 16),
+            parseInt(hex.slice(4, 6), 16),
+            parseInt(hex.slice(6, 8), 16),
+          ];
+    const [r, g, b, a = 255] = values;
+    const rgb = `rgb(${r}, ${g}, ${b})`;
+    return { color: rgb, opacity: clamp(a / 255, 0, 1) };
+  }
+  return { color: trimmed, opacity: null };
+}
+
+function normalizeSvgColorAttributes(root) {
+  const colorAttrs = ["fill", "stroke", "color", "stop-color", "flood-color", "lighting-color"];
+  const normalizeOpacityValue = (value) => {
+    if (value == null) {
+      return null;
+    }
+    const text = String(value).trim();
+    if (!text) {
+      return null;
+    }
+    const numeric = Number(text);
+    if (!Number.isFinite(numeric)) {
+      return null;
+    }
+    return Number(clamp(numeric, 0, 1).toFixed(3));
+  };
+  const applyColorAttr = (el, colorAttr) => {
+    if (!el.hasAttribute(colorAttr)) {
+      return;
+    }
+    const normalized = normalizeSvgColor(el.getAttribute(colorAttr));
+    el.setAttribute(colorAttr, normalized.color);
+    const opacityAttr = `${colorAttr}-opacity`;
+    if (!Number.isFinite(normalized.opacity) || normalized.color === "none") {
+      return;
+    }
+    const existingOpacity = normalizeOpacityValue(el.getAttribute(opacityAttr));
+    const combinedOpacity = existingOpacity == null
+      ? normalized.opacity
+      : clamp(existingOpacity * normalized.opacity, 0, 1);
+    el.setAttribute(opacityAttr, String(Number(combinedOpacity.toFixed(3))));
+  };
+  const nodes = [root, ...Array.from(root.querySelectorAll("*"))];
+  nodes.forEach((el) => {
+    colorAttrs.forEach((colorAttr) => applyColorAttr(el, colorAttr));
+  });
+}
+
+function serializeSvg(
+  svg,
+  { withXmlHeader = true, widthIn = NaN, heightIn = NaN } = {}
+) {
   const clone = svg.cloneNode(true);
   clone.removeAttribute("role");
   clone.removeAttribute("aria-label");
+  clone.setAttribute("version", "1.1");
+  clone.setAttribute("xml:space", "preserve");
   clone.setAttribute("xmlns", SVG_NS);
+  clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+  if (Number.isFinite(widthIn) && widthIn > 0) {
+    clone.setAttribute("width", `${widthIn}in`);
+  }
+  if (Number.isFinite(heightIn) && heightIn > 0) {
+    clone.setAttribute("height", `${heightIn}in`);
+  }
+  normalizeSvgColorAttributes(clone);
   const serialized = new XMLSerializer().serializeToString(clone);
   return withXmlHeader ? `<?xml version="1.0" encoding="UTF-8"?>\n${serialized}` : serialized;
 }
@@ -5772,18 +8080,205 @@ function clampExportSize(value, fallback) {
 
 function exportSizeFromPaperPreset() {
   const presets = {
-    "letter-portrait": { width: 1700, height: 2200 },
-    "letter-landscape": { width: 2200, height: 1700 },
-    "a4-portrait": { width: 1654, height: 2339 },
-    "a4-landscape": { width: 2339, height: 1654 },
+    "letter-portrait": { width: 1700, height: 2200, widthIn: 8.5, heightIn: 11 },
+    "letter-landscape": { width: 2200, height: 1700, widthIn: 11, heightIn: 8.5 },
+    "a4-portrait": { width: 1654, height: 2339, widthIn: 8.27, heightIn: 11.69 },
+    "a4-landscape": { width: 2339, height: 1654, widthIn: 11.69, heightIn: 8.27 },
   };
   return presets[state.printPaper] || presets["letter-landscape"];
 }
 
-function buildExportSvgString(width, height, options = {}) {
-  const model = buildModel();
-  const svg = buildChartSvg(model, width, height);
-  return serializeSvg(svg, options);
+function ensureChartReadyForExport() {
+  if (renderTimer) {
+    clearTimeout(renderTimer);
+    renderTimer = null;
+  }
+  syncControlReadouts();
+  renderChart();
+}
+
+function parseSvgViewBox(svg) {
+  if (!svg) {
+    return null;
+  }
+  const raw = String(svg.getAttribute("viewBox") || "").trim();
+  if (raw) {
+    const parts = raw.split(/[\s,]+/).map((part) => Number(part));
+    if (parts.length >= 4 && parts.every((value) => Number.isFinite(value))) {
+      const [x, y, width, height] = parts;
+      if (width > 0 && height > 0) {
+        return { x, y, width, height };
+      }
+    }
+  }
+  const width = Number.parseFloat(String(svg.getAttribute("width") || ""));
+  const height = Number.parseFloat(String(svg.getAttribute("height") || ""));
+  if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+    return { x: 0, y: 0, width, height };
+  }
+  return null;
+}
+
+function unionRects(a, b) {
+  const left = Math.min(a.x, b.x);
+  const top = Math.min(a.y, b.y);
+  const right = Math.max(a.x + a.width, b.x + b.width);
+  const bottom = Math.max(a.y + a.height, b.y + b.height);
+  return {
+    x: left,
+    y: top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+  };
+}
+
+function clampRectToBounds(rect, bounds) {
+  const left = Math.max(bounds.x, rect.x);
+  const top = Math.max(bounds.y, rect.y);
+  const right = Math.min(bounds.x + bounds.width, rect.x + rect.width);
+  const bottom = Math.min(bounds.y + bounds.height, rect.y + rect.height);
+  if (!(right > left) || !(bottom > top)) {
+    return { ...bounds };
+  }
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+function unionRectWithTaggedExportElements(sourceSvg, baseRect) {
+  if (!(sourceSvg instanceof SVGElement)) {
+    return baseRect;
+  }
+  let result = baseRect;
+  const tagged = Array.from(sourceSvg.querySelectorAll("[data-export-include='1']"));
+  tagged.forEach((node) => {
+    if (!node || typeof node.getBBox !== "function") {
+      return;
+    }
+    try {
+      const box = node.getBBox();
+      if (
+        !Number.isFinite(box.x) ||
+        !Number.isFinite(box.y) ||
+        !Number.isFinite(box.width) ||
+        !Number.isFinite(box.height) ||
+        !(box.width > 0 || box.height > 0)
+      ) {
+        return;
+      }
+      const pad = 10;
+      result = unionRects(result, {
+        x: box.x - pad,
+        y: box.y - pad,
+        width: box.width + pad * 2,
+        height: box.height + pad * 2,
+      });
+    } catch {}
+  });
+  return result;
+}
+
+function resolveExportCropBounds(sourceSvg, inPrintMode) {
+  const fullBounds = parseSvgViewBox(sourceSvg) || { x: 0, y: 0, width: 1200, height: 800 };
+  if (!inPrintMode) {
+    return fullBounds;
+  }
+  const pageX = Number(sourceSvg.getAttribute("data-export-page-x"));
+  const pageY = Number(sourceSvg.getAttribute("data-export-page-y"));
+  const pageWidth = Number(sourceSvg.getAttribute("data-export-page-width"));
+  const pageHeight = Number(sourceSvg.getAttribute("data-export-page-height"));
+  if (
+    Number.isFinite(pageX) &&
+    Number.isFinite(pageY) &&
+    Number.isFinite(pageWidth) &&
+    Number.isFinite(pageHeight) &&
+    pageWidth > 0 &&
+    pageHeight > 0
+  ) {
+    let exportRect = { x: pageX, y: pageY, width: pageWidth, height: pageHeight };
+    const contentX = Number(sourceSvg.getAttribute("data-export-content-x"));
+    const contentY = Number(sourceSvg.getAttribute("data-export-content-y"));
+    const contentWidth = Number(sourceSvg.getAttribute("data-export-content-width"));
+    const contentHeight = Number(sourceSvg.getAttribute("data-export-content-height"));
+    if (
+      Number.isFinite(contentX) &&
+      Number.isFinite(contentY) &&
+      Number.isFinite(contentWidth) &&
+      Number.isFinite(contentHeight) &&
+      contentWidth > 0 &&
+      contentHeight > 0
+    ) {
+      exportRect = unionRects(exportRect, {
+        x: contentX,
+        y: contentY,
+        width: contentWidth,
+        height: contentHeight,
+      });
+    }
+    const diagramRoot = sourceSvg.querySelector("[data-diagram-root]");
+    if (diagramRoot && typeof diagramRoot.getBBox === "function") {
+      try {
+        const box = diagramRoot.getBBox();
+        if (Number.isFinite(box.x) && Number.isFinite(box.y) && box.width > 0 && box.height > 0) {
+          const pad = 12;
+          const diagramRect = {
+            x: box.x - pad,
+            y: box.y - pad,
+            width: box.width + pad * 2,
+            height: box.height + pad * 2,
+          };
+          exportRect = unionRects(exportRect, diagramRect);
+        }
+      } catch {}
+    }
+    exportRect = unionRectWithTaggedExportElements(sourceSvg, exportRect);
+    return clampRectToBounds(exportRect, fullBounds);
+  }
+  return fullBounds;
+}
+
+function sanitizeExportSvgClone(clone) {
+  const nodes = [clone, ...Array.from(clone.querySelectorAll("*"))];
+  nodes.forEach((el) => {
+    el.removeAttribute("style");
+    Array.from(el.attributes).forEach((attr) => {
+      if (attr.name.startsWith("data-")) {
+        el.removeAttribute(attr.name);
+      }
+    });
+  });
+}
+
+function buildExportPayload({ withXmlHeader = true } = {}) {
+  ensureChartReadyForExport();
+  const sourceSvg = chartStage?.querySelector("svg");
+  if (!(sourceSvg instanceof SVGElement)) {
+    return null;
+  }
+  const inPrintMode = isPrintMode();
+  const paperSize = exportSizeFromPaperPreset();
+  const bounds = resolveExportCropBounds(sourceSvg, inPrintMode);
+  const clone = sourceSvg.cloneNode(true);
+  sanitizeExportSvgClone(clone);
+  clone.setAttribute("viewBox", `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`);
+  if (!inPrintMode) {
+    clone.setAttribute("width", String(Math.round(bounds.width)));
+    clone.setAttribute("height", String(Math.round(bounds.height)));
+  }
+  const svgText = serializeSvg(clone, {
+    withXmlHeader,
+    widthIn: inPrintMode ? paperSize.widthIn : NaN,
+    heightIn: inPrintMode ? paperSize.heightIn : NaN,
+  });
+  return {
+    svgText,
+    bounds,
+    inPrintMode,
+    paperSize,
+  };
 }
 
 function downloadBlob(filename, blob) {
@@ -5797,6 +8292,41 @@ function downloadBlob(filename, blob) {
   URL.revokeObjectURL(url);
 }
 
+function buildChartSaveDocument(serialized = null) {
+  const next = serialized && typeof serialized === "object" ? serialized : getSerializedState();
+  return {
+    format: "overtones-chart-state",
+    version: 2,
+    savedAt: new Date().toISOString(),
+    data: next,
+  };
+}
+
+function saveChartToFile() {
+  const documentPayload = buildChartSaveDocument();
+  const text = `${JSON.stringify(documentPayload, null, 2)}\n`;
+  downloadBlob("Overtones.json", new Blob([text], { type: "application/json;charset=utf-8" }));
+}
+
+async function openChartFromFile(file) {
+  if (!(file instanceof File)) {
+    return;
+  }
+  let parsed = null;
+  try {
+    const text = await file.text();
+    parsed = JSON.parse(text);
+  } catch {
+    alert("Could not read that chart file.");
+    return;
+  }
+  if (!applySerializedState(parsed)) {
+    alert("That file is not a valid Overtones chart.");
+    return;
+  }
+  finalizeLoadedState();
+}
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -5807,29 +8337,29 @@ function escapeHtml(value) {
 }
 
 function exportSvg() {
-  const paperSize = exportSizeFromPaperPreset();
-  const width = isPrintMode()
-    ? paperSize.width
-    : clampExportSize(state.exportWidth, 1800);
-  const height = isPrintMode()
-    ? paperSize.height
-    : clampExportSize(state.exportHeight, 1100);
-  const svgText = buildExportSvgString(width, height, { withXmlHeader: true });
+  const payload = buildExportPayload({ withXmlHeader: true });
+  if (!payload) {
+    alert("Nothing to export yet. Render the chart first.");
+    return;
+  }
   downloadBlob(
     `overtones-${new Date().toISOString().slice(0, 10)}.svg`,
-    new Blob([svgText], { type: "image/svg+xml;charset=utf-8" })
+    new Blob([payload.svgText], { type: "image/svg+xml;charset=utf-8" })
   );
 }
 
 function exportPdf() {
-  const paperSize = exportSizeFromPaperPreset();
-  const width = isPrintMode()
-    ? paperSize.width
-    : clampExportSize(state.exportWidth, 1800);
-  const height = isPrintMode()
-    ? paperSize.height
-    : clampExportSize(state.exportHeight, 1100);
-  const svgText = buildExportSvgString(width, height, { withXmlHeader: false });
+  const payload = buildExportPayload({ withXmlHeader: false });
+  if (!payload) {
+    alert("Nothing to export yet. Render the chart first.");
+    return;
+  }
+  const pageWidthCss = payload.inPrintMode && Number.isFinite(payload.paperSize.widthIn)
+    ? `${payload.paperSize.widthIn}in`
+    : `${Math.round(payload.bounds.width)}px`;
+  const pageHeightCss = payload.inPrintMode && Number.isFinite(payload.paperSize.heightIn)
+    ? `${payload.paperSize.heightIn}in`
+    : `${Math.round(payload.bounds.height)}px`;
   const win = window.open("", "_blank");
   if (!win) {
     alert("Pop-up blocked. Allow pop-ups to export PDF.");
@@ -5850,14 +8380,19 @@ function exportPdf() {
       rel="stylesheet"
     />
     <style>
-      @page { size: ${width}px ${height}px; margin: 0; }
-      html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: white; }
-      body { display: grid; place-items: center; }
-      svg { width: ${width}px; height: ${height}px; display: block; }
+      @page { size: ${pageWidthCss} ${pageHeightCss}; margin: 0; }
+      @font-face {
+        font-family: "HEJI2Text";
+        src: url("/src/HEJI2Text.otf") format("opentype");
+        font-display: swap;
+      }
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: white; overflow: hidden; }
+      body { display: block; }
+      svg { width: ${pageWidthCss}; height: ${pageHeightCss}; display: block; }
     </style>
   </head>
   <body>
-    ${svgText}
+    ${payload.svgText}
     <script>
       window.onload = () => {
         const waitFonts = document.fonts ? document.fonts.ready : Promise.resolve();
@@ -5871,16 +8406,48 @@ function exportPdf() {
 
 notesInput.addEventListener("input", () => {
   state.notesText = notesInput.value;
+  syncSharedNotesAcrossModes();
   scheduleRender(90);
 });
 
+if (ratioRootNoteInput) {
+  ratioRootNoteInput.addEventListener("change", () => {
+    if (ratioRootNoteInput.value !== RATIO_ROOT_CUSTOM_VALUE) {
+      const midi = Number(ratioRootNoteInput.value);
+      if (Number.isFinite(midi)) {
+        state.ratioRootHz = midiToFrequency(midi, Math.max(1, state.a4Hz));
+        ratioRootHzInput.value = formatHzValue(state.ratioRootHz);
+      }
+    }
+    syncRatioRootCustomInputVisibility();
+    scheduleRender();
+  });
+}
+
+if (ratioRootNoteCustomInput) {
+  ratioRootNoteCustomInput.addEventListener("input", () => {
+    state.ratioRootNoteCustom = ratioRootNoteCustomInput.value;
+    scheduleRender();
+  });
+}
+
 ratioRootHzInput.addEventListener("input", () => {
   state.ratioRootHz = Math.max(0.01, getNumericInputValue(ratioRootHzInput, 220));
+  syncRatioRootNoteSelectFromFrequency();
   scheduleRender();
 });
 
 a4HzInput.addEventListener("input", () => {
   state.a4Hz = Math.max(1, getNumericInputValue(a4HzInput, 440));
+  if (ratioRootNoteInput && ratioRootNoteInput.value !== RATIO_ROOT_CUSTOM_VALUE) {
+    const midi = Number(ratioRootNoteInput.value);
+    if (Number.isFinite(midi)) {
+      state.ratioRootHz = midiToFrequency(midi, state.a4Hz);
+      ratioRootHzInput.value = formatHzValue(state.ratioRootHz);
+    }
+  }
+  updateRatioRootNoteOptions();
+  syncRatioRootNoteSelectFromFrequency();
   scheduleRender();
 });
 
@@ -5899,6 +8466,16 @@ if (layoutScaleInput) {
     state.layoutScale = clamp(getNumericInputValue(layoutScaleInput, 1), 0.6, 1.8);
     if (layoutScaleReadout) {
       layoutScaleReadout.textContent = `${Math.round(state.layoutScale * 100)}%`;
+    }
+    scheduleRender();
+  });
+}
+
+if (printHeightInput) {
+  printHeightInput.addEventListener("input", () => {
+    state.printGraphHeight = clamp(getNumericInputValue(printHeightInput, 1), 0.45, 1);
+    if (printHeightReadout) {
+      printHeightReadout.textContent = `${Math.round(state.printGraphHeight * 100)}%`;
     }
     scheduleRender();
   });
@@ -5983,6 +8560,20 @@ pointSizeInput.addEventListener("input", () => {
   scheduleRender();
 });
 
+if (stackLineSizeInput) {
+  stackLineSizeInput.addEventListener("input", () => {
+    state.stackLineSize = clamp(getNumericInputValue(stackLineSizeInput, 100) / 100, 0.25, 3);
+    scheduleRender();
+  });
+}
+
+if (alphaFalloffInput) {
+  alphaFalloffInput.addEventListener("change", () => {
+    state.alphaFalloff = alphaFalloffInput.checked;
+    scheduleRender();
+  });
+}
+
 if (comboSizeInput) {
   comboSizeInput.addEventListener("input", () => {
     state.comboSize = clamp(getNumericInputValue(comboSizeInput, 4), 2, 10);
@@ -6018,6 +8609,7 @@ if (showStemsInput) {
 
 showCombinationInput.addEventListener("change", () => {
   state.showCombination = showCombinationInput.checked;
+  enforceComboLegendVisibility();
   scheduleRender();
 });
 
@@ -6063,6 +8655,13 @@ if (fusionClusterCentsInput) {
   });
 }
 
+if (fusionScaleInput) {
+  fusionScaleInput.addEventListener("input", () => {
+    state.fusionScale = clamp(getNumericInputValue(fusionScaleInput, 100) / 100, 0.5, 1.5);
+    scheduleRender(0);
+  });
+}
+
 if (showRoughnessInput) {
   showRoughnessInput.addEventListener("change", () => {
     state.showRoughness = showRoughnessInput.checked;
@@ -6103,16 +8702,19 @@ if (roughnessBeatMaxInput) {
 
 comboDifferenceInput.addEventListener("change", () => {
   state.showComboDifference = comboDifferenceInput.checked;
+  enforceComboLegendVisibility();
   scheduleRender();
 });
 
 comboSumInput.addEventListener("change", () => {
   state.showComboSum = comboSumInput.checked;
+  enforceComboLegendVisibility();
   scheduleRender();
 });
 
 comboOrder2Input.addEventListener("change", () => {
   state.showComboOrder2 = comboOrder2Input.checked;
+  enforceComboLegendVisibility();
   scheduleRender();
 });
 
@@ -6211,6 +8813,26 @@ themeToggle.addEventListener("change", () => {
 
 exportSvgButton.addEventListener("click", exportSvg);
 exportPdfButton.addEventListener("click", exportPdf);
+if (saveChartButton) {
+  saveChartButton.addEventListener("click", () => {
+    saveChartToFile();
+  });
+}
+if (openChartButton) {
+  openChartButton.addEventListener("click", () => {
+    openChartInput?.click();
+  });
+}
+if (openChartInput) {
+  openChartInput.addEventListener("change", async () => {
+    const file = openChartInput.files?.[0] || null;
+    openChartInput.value = "";
+    if (!file) {
+      return;
+    }
+    await openChartFromFile(file);
+  });
+}
 
 if (modeLiveButton) {
   modeLiveButton.addEventListener("click", () => {
@@ -6259,6 +8881,13 @@ if (printShowComponentRatioInput) {
   });
 }
 
+if (printShowComponentNoteInput) {
+  printShowComponentNoteInput.addEventListener("change", () => {
+    state.printShowComponentNote = printShowComponentNoteInput.checked;
+    scheduleRender();
+  });
+}
+
 if (printShowAxisTextInput) {
   printShowAxisTextInput.addEventListener("change", () => {
     state.printShowAxisText = printShowAxisTextInput.checked;
@@ -6283,33 +8912,89 @@ if (printDistanceModeInput) {
   });
 }
 
+async function handleAddCustomTextButtonPress(event, trigger = "unknown") {
+  if (event && Number.isFinite(event.button) && event.button !== 0) {
+    return;
+  }
+  const actionId = nextCustomActionId();
+  event?.preventDefault();
+  event?.stopPropagation();
+  if (customTextModal && !customTextModal.hidden && customTextDialogResolver) {
+    customTextInput?.focus();
+    return;
+  }
+  await ensurePrintModeReadyForPanelAction({ source: "add-custom-text", actionId, trigger });
+  forceResetCustomTextDialog("add-custom-text:pre-open-reset");
+  if (customTextModal && !customTextModal.hidden && customTextDialogResolver) {
+    customTextInput?.focus();
+    return;
+  }
+  pendingCustomLabelTarget = false;
+  pendingCustomLabelActionId = 0;
+  state.printDistanceMode = false;
+  printDistancePendingKey = null;
+  if (printDistanceModeInput) {
+    printDistanceModeInput.checked = false;
+  }
+  syncControlReadouts();
+  const result = await openCustomTextDialog("");
+  if (!result || !result.text?.trim()) {
+    return;
+  }
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    text: String(result.text || ""),
+    font: String(state.printCustomLabelFont || "Noto Serif"),
+    size: clamp(Number(state.printCustomLabelSize ?? 18), 8, 72),
+    x: Number.isFinite(lastDiagramCenter.x) ? lastDiagramCenter.x : 640,
+    y: Number.isFinite(lastDiagramCenter.y) ? lastDiagramCenter.y : 360,
+  };
+  state.printCustomTexts = [...(state.printCustomTexts || []), item];
+  state.printSelectedCustomTextId = item.id;
+  scheduleRender();
+  scheduleStateUrlUpdate();
+}
+
+async function handleAddCustomLabelButtonPress(event, trigger = "unknown") {
+  if (event && Number.isFinite(event.button) && event.button !== 0) {
+    return;
+  }
+  const actionId = nextCustomActionId();
+  event?.preventDefault();
+  event?.stopPropagation();
+  await ensurePrintModeReadyForPanelAction({ source: "add-custom-label", actionId, trigger });
+  pendingCustomLabelTarget = true;
+  pendingCustomLabelActionId = actionId;
+  state.printDistanceMode = false;
+  printDistancePendingKey = null;
+  if (printDistanceModeInput) {
+    printDistanceModeInput.checked = false;
+  }
+  syncControlReadouts();
+  scheduleRender(0);
+}
+
 if (printAddCustomTextButton) {
-  printAddCustomTextButton.addEventListener("click", () => {
-    if (!isPrintMode()) {
+  printAddCustomTextButton.addEventListener("pointerdown", (event) => {
+    void handleAddCustomTextButtonPress(event, "pointerdown");
+  });
+  printAddCustomTextButton.addEventListener("click", (event) => {
+    if (event.detail !== 0) {
       return;
     }
-    openCustomTextDialog("").then((result) => {
-      if (!result || !result.text?.trim()) {
-        return;
-      }
-      state.printDistanceMode = false;
-      printDistancePendingKey = null;
-      if (printDistanceModeInput) {
-        printDistanceModeInput.checked = false;
-      }
-      const item = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        text: String(result.text || ""),
-        font: String(result.font || state.printCustomLabelFont || "Noto Serif"),
-        size: clamp(Number(result.size ?? state.printCustomLabelSize ?? 18), 8, 72),
-        x: Number.isFinite(lastDiagramCenter.x) ? lastDiagramCenter.x : 640,
-        y: Number.isFinite(lastDiagramCenter.y) ? lastDiagramCenter.y : 360,
-      };
-      state.printCustomTexts = [...(state.printCustomTexts || []), item];
-      state.printSelectedCustomTextId = item.id;
-      scheduleRender();
-      scheduleStateUrlUpdate();
-    });
+    void handleAddCustomTextButtonPress(event, "click-keyboard");
+  });
+}
+
+if (printAddCustomLabelButton) {
+  printAddCustomLabelButton.addEventListener("pointerdown", (event) => {
+    void handleAddCustomLabelButtonPress(event, "pointerdown");
+  });
+  printAddCustomLabelButton.addEventListener("click", (event) => {
+    if (event.detail !== 0) {
+      return;
+    }
+    void handleAddCustomLabelButtonPress(event, "click-keyboard");
   });
 }
 
@@ -6372,32 +9057,29 @@ if (printCustomDeleteSelectedButton) {
 
 if (customTextSaveButton) {
   customTextSaveButton.addEventListener("click", () => {
-    if (!isPrintMode()) {
-      closeCustomTextDialog(null);
-      return;
-    }
     const text = String(customTextInput?.value || "");
-    const font = String(customTextFontInput?.value || "Noto Serif");
-    const size = clamp(Number(customTextSizeInput?.value) || 18, 8, 72);
-    if (customTextDialogMode === "custom") {
-      state.printCustomLabelFont = font;
-      state.printCustomLabelSize = size;
-    }
-    closeCustomTextDialog({ text, font, size });
+    closeCustomTextDialog({ text }, "save-button");
   });
 }
 
 if (customTextCancelButton) {
   customTextCancelButton.addEventListener("click", () => {
-    closeCustomTextDialog(null);
+    closeCustomTextDialog(null, "cancel-button");
   });
 }
 
 if (customTextModal) {
   customTextModal.addEventListener("pointerdown", (event) => {
     if (event.target === customTextModal) {
+      const elapsedMs = customTextDialogOpenedAt > 0 ? Date.now() - customTextDialogOpenedAt : Infinity;
+      // Ignore backdrop dismiss in the first moment after opening to avoid
+      // accidental close from rapid clicking while entering this mode.
+      if (elapsedMs < 280) {
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
-      closeCustomTextDialog(null);
+      closeCustomTextDialog(null, "backdrop-pointerdown");
     }
   });
 }
@@ -6411,19 +9093,7 @@ if (customTextInput) {
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      closeCustomTextDialog(null);
-    }
-  });
-}
-
-if (customTextSizeInput) {
-  customTextSizeInput.addEventListener("input", () => {
-    if (!isPrintMode()) {
-      return;
-    }
-    const size = clamp(getNumericInputValue(customTextSizeInput, 18), 8, 72);
-    if (customTextSizeReadout) {
-      customTextSizeReadout.textContent = String(size);
+      closeCustomTextDialog(null, "escape-key");
     }
   });
 }
@@ -6516,8 +9186,32 @@ window.addEventListener("resize", () => {
   scheduleRender(40);
 });
 
+window.addEventListener("pagehide", () => {
+  updateStateUrl();
+});
+
+window.addEventListener("beforeunload", () => {
+  saveStateToStorage();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    saveStateToStorage();
+  }
+});
+
 window.addEventListener("keydown", (event) => {
   if (isPrintMode()) {
+    if (
+      event.key === "Escape" &&
+      pendingCustomLabelTarget &&
+      !(customTextModal && !customTextModal.hidden)
+    ) {
+      pendingCustomLabelTarget = false;
+      pendingCustomLabelActionId = 0;
+      syncControlReadouts();
+      scheduleRender(0);
+    }
     return;
   }
   if (event.key === "l" || event.key === "L") {
@@ -6543,23 +9237,22 @@ window.addEventListener("keyup", (event) => {
   }
 });
 
+populateRatioRootNotes();
+updateRatioRootNoteOptions();
+if (ratioRootNoteCustomInput) {
+  ratioRootNoteCustomInput.value = state.ratioRootNoteCustom;
+}
+syncRatioRootNoteSelectFromFrequency();
+
 const initialUrlState = readStateFromUrl();
+const initialStoredState = readStateFromStorage();
+const preferredInitialState = chooseInitialSerializedState(initialUrlState, initialStoredState);
 if (
-  initialUrlState &&
-  typeof initialUrlState === "object" &&
-  initialUrlState.live &&
-  initialUrlState.print
+  !applySerializedState(preferredInitialState) &&
+  !applySerializedState(initialUrlState) &&
+  !applySerializedState(initialStoredState)
 ) {
-  modeSnapshots[MODE_LIVE] = cloneJson(initialUrlState.live, null);
-  modeSnapshots[MODE_PRINT] = cloneJson(initialUrlState.print, null);
-  applyStateSnapshot(
-    initialUrlState.mode === MODE_PRINT
-      ? modeSnapshots[MODE_PRINT]
-      : modeSnapshots[MODE_LIVE]
-  );
-  appMode = initialUrlState.mode === MODE_PRINT ? MODE_PRINT : MODE_LIVE;
-} else {
-  applyStateSnapshot(initialUrlState);
+  applyStateSnapshot(preferredInitialState || initialUrlState || initialStoredState);
   modeSnapshots[MODE_LIVE] = getStateSnapshotFlat();
   const printSeed = getStateSnapshotFlat();
   printSeed.themeDark = false;
@@ -6567,12 +9260,4 @@ if (
   modeSnapshots[MODE_PRINT] = printSeed;
   appMode = MODE_LIVE;
 }
-if (appMode === MODE_PRINT) {
-  state.themeDark = false;
-  themeToggle.checked = false;
-  document.body.classList.remove("theme-dark");
-}
-syncModeButtons();
-syncControlReadouts();
-renderChart();
-scheduleStateUrlUpdate(0);
+finalizeLoadedState();

@@ -227,6 +227,7 @@ const hejiEnabledToggle = document.getElementById("heji-enabled");
 const enharmonicsEnabledToggle = document.getElementById("enharmonics-enabled");
 const enharmonicsGroup = document.getElementById("enharmonics-group");
 const centsPrecisionButtons = document.querySelectorAll("[data-cents-precision]");
+const hzPrecisionButtons = document.querySelectorAll("[data-hz-precision]");
 const layoutKeyMappingButtons = document.querySelectorAll("[data-layout-key-mapping]");
 const sequencePatternSelect = document.getElementById("sequence-pattern");
 const rhythmPatternSelect = document.getElementById("rhythm-pattern");
@@ -503,16 +504,22 @@ let lastCustomOctaveReduce = true;
 let rHeld = false;
 let tHeld = false;
 let lHeld = false;
+let vHeld = false;
 let customTextHeld = false;
 let fHeld = false;
 let oHeld = false;
 let mHeld = false;
 let suppressClickAfterRespell = false;
+let nodeVolumeAdjustMode = false;
+let nodeVolumeSliderDrag = null;
+let nodeVolumeSliderHitboxes = [];
+const nodeVolumeLimits = new Map();
 
 function resetHeldModifiers() {
   rHeld = false;
   tHeld = false;
   lHeld = false;
+  vHeld = false;
   fHeld = false;
   oHeld = false;
   iHeld = false;
@@ -1778,6 +1785,7 @@ let hejiEnabled = true;
 let enharmonicsEnabled = true;
 let enharmonicsEnabledPreference = true;
 let centsPrecision = 0;
+let hzPrecision = 2;
 let showCircles = true;
 let show3DShading = true;
 let showLineLabels = true;
@@ -1957,6 +1965,17 @@ function syncCentsPrecisionControls() {
   }
   centsPrecisionButtons.forEach((button) => {
     const isActive = Number(button.dataset.centsPrecision) === centsPrecision;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function syncHzPrecisionControls() {
+  if (!hzPrecisionButtons.length) {
+    return;
+  }
+  hzPrecisionButtons.forEach((button) => {
+    const isActive = Number(button.dataset.hzPrecision) === hzPrecision;
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
@@ -4532,6 +4551,7 @@ function createCustomNodeFromSource(sourceNode, slot, factorNumerator, factorDen
     octaveShift: 0,
     octaveShiftManual: false,
     octaveReduce: true,
+    volumeMax: clampNodeVolume(sourceNode.volumeMax),
   };
   layoutNodeShapes.set(node.id, "diamond");
   return node;
@@ -5381,6 +5401,11 @@ function rebaseLatticeFromNode(node) {
     z: (Number(latticeExponentOffset.z) || 0) + deltaZ,
   };
   nodeOctaveOffsets = shiftExponentMap(nodeOctaveOffsets, deltaX, deltaY, deltaZ);
+  const shiftedVolumes = shiftExponentMap(nodeVolumeLimits, deltaX, deltaY, deltaZ);
+  nodeVolumeLimits.clear();
+  if (shiftedVolumes && shiftedVolumes.size) {
+    shiftedVolumes.forEach((value, key) => nodeVolumeLimits.set(key, value));
+  }
   shiftLineLabelOverrides(deltaX, deltaY, deltaZ);
   nodes.forEach((entry) => {
     if (entry.isCustom) {
@@ -6691,7 +6716,7 @@ function updateFundamentalNotes() {
       return;
     }
     const freq = midiToFrequency(midi, a4);
-    option.textContent = `${midiToFundamentalNoteName(midi)} (${freq.toFixed(2)} Hz)`;
+    option.textContent = `${midiToFundamentalNoteName(midi)} (${formatHzReadout(freq)})`;
   });
   fundamentalNoteSelect.value =
     selectedValue === FUNDAMENTAL_CUSTOM_VALUE ? FUNDAMENTAL_CUSTOM_VALUE : String(selectedValue);
@@ -7107,11 +7132,12 @@ function getLayoutPageRect() {
   return { left, top, width: widthPx, height: heightPx };
 }
 
+function getDefaultLayoutNodeShape(node) {
+  return node && node.isCustom ? "diamond" : layoutNodeShape;
+}
+
 function getLayoutNodeShape(node) {
-  if (node.isCustom) {
-    return "diamond";
-  }
-  return layoutNodeShapes.get(node.id) || layoutNodeShape;
+  return layoutNodeShapes.get(node.id) || getDefaultLayoutNodeShape(node);
 }
 
 function getNodeNoteLabel(node) {
@@ -7153,10 +7179,36 @@ function formatCents(value) {
   if (Object.is(rounded, -0)) {
     rounded = 0;
   }
-  const text = precision > 0 ? rounded.toFixed(precision) : String(Math.round(rounded));
+  const text =
+    precision > 0 && Number.isInteger(rounded)
+      ? String(rounded)
+      : precision > 0
+      ? rounded.toFixed(precision)
+      : String(Math.round(rounded));
   const sign = rounded >= 0 ? "+" : "";
   const centsSuffix = showCentsSign ? CENTS_CHAR : "";
   return `${sign}${text}${centsSuffix}`;
+}
+
+function formatHzNumber(value) {
+  const precision = Math.min(2, Math.max(0, Number(hzPrecision) || 0));
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+  const factor = Math.pow(10, precision);
+  let rounded = Math.round(value * factor) / factor;
+  if (Object.is(rounded, -0)) {
+    rounded = 0;
+  }
+  if (precision > 0 && Number.isInteger(rounded)) {
+    return String(rounded);
+  }
+  return precision > 0 ? rounded.toFixed(precision) : String(Math.round(rounded));
+}
+
+function formatHzReadout(value) {
+  const text = formatHzNumber(value);
+  return text ? `${text} Hz` : "";
 }
 
 function getRatioCents(numerator, denominator) {
@@ -7424,6 +7476,7 @@ function getLabelCacheKey() {
     enharmonicsEnabled ? "enharmonics" : "no-enharmonics",
     spellingMode,
     centsPrecision,
+    hzPrecision,
     showCentsSign ? "cents" : "no-cents",
     showHz ? "hz" : "no-hz",
     showRatioCents ? "ratio-cents" : "no-ratio-cents",
@@ -7447,6 +7500,144 @@ function bumpLabelDataVersion() {
 function getNodeOctaveShift(node) {
   const shift = Number(node && node.octaveShift);
   return Number.isFinite(shift) ? shift : 0;
+}
+
+function clampNodeVolume(value) {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.min(1, Math.max(0, value));
+}
+
+function getNodeVolumeKey(node) {
+  if (!node) {
+    return null;
+  }
+  if (node.isCustom) {
+    const source = Array.isArray(node.sourceExponents) ? node.sourceExponents : null;
+    if (!source || source.length < 2 || node.customSlot == null) {
+      return null;
+    }
+    const [x, y, z = 0] = source;
+    return `custom:${x},${y},${z}|${node.customSlot}`;
+  }
+  return `grid:${getOctaveOffsetKey(node)}`;
+}
+
+function getNodeVolumeLimit(node) {
+  if (!node) {
+    return 1;
+  }
+  if (node.isCustom) {
+    return clampNodeVolume(node.volumeMax);
+  }
+  const key = getOctaveOffsetKey(node);
+  return clampNodeVolume(nodeVolumeLimits.get(key));
+}
+
+function setNodeVolumeLimit(node, value) {
+  if (!node) {
+    return;
+  }
+  const normalized = clampNodeVolume(value);
+  if (node.isCustom) {
+    node.volumeMax = normalized;
+    return;
+  }
+  const key = getOctaveOffsetKey(node);
+  if (Math.abs(normalized - 1) < 1e-6) {
+    nodeVolumeLimits.delete(key);
+  } else {
+    nodeVolumeLimits.set(key, normalized);
+  }
+  node.volumeMax = normalized;
+}
+
+function applyNodeVolumeLimits() {
+  nodes.forEach((node) => {
+    node.volumeMax = getNodeVolumeLimit(node);
+  });
+}
+
+function applyNodeVolumeLimitToActiveVoices(node) {
+  if (!node || !audioCtx) {
+    return;
+  }
+  const max = getNodeVolumeLimit(node);
+  voices.forEach((voice) => {
+    if (!voice || voice.nodeId !== node.id) {
+      return;
+    }
+    const oldPeak = Math.max(0.0001, Number(voice.peakGain) || 0.0001);
+    const velocity = Math.max(0, Math.min(1, Number(voice.velocity ?? 1)));
+    const newPeak = Math.max(0.0001, 0.2 * velocity * max);
+    const scale = newPeak / oldPeak;
+    voice.peakGain = newPeak;
+    if (Number.isFinite(voice.releaseStartLevel)) {
+      voice.releaseStartLevel *= scale;
+    }
+    if (voice.envGain && voice.envGain.gain) {
+      const now = audioCtx.currentTime;
+      const current = Math.max(0.0001, (voice.envGain.gain.value || 0.0001) * scale);
+      voice.envGain.gain.cancelScheduledValues(now);
+      voice.envGain.gain.setTargetAtTime(current, now, 0.01);
+    }
+  });
+}
+
+function setNodeVolumeAdjustMode(enabled) {
+  const next = Boolean(enabled);
+  if (nodeVolumeAdjustMode === next) {
+    return;
+  }
+  nodeVolumeAdjustMode = next;
+  if (!next) {
+    nodeVolumeSliderDrag = null;
+    nodeVolumeSliderHitboxes = [];
+  }
+  draw();
+}
+
+function getNodeVolumeModeAlpha(nowMs = performance.now()) {
+  return nodeVolumeAdjustMode ? 1 : 0;
+}
+
+function hitTestNodeVolumeSlider(screenPoint) {
+  if (!nodeVolumeAdjustMode || !screenPoint) {
+    return null;
+  }
+  for (let i = nodeVolumeSliderHitboxes.length - 1; i >= 0; i -= 1) {
+    const box = nodeVolumeSliderHitboxes[i];
+    if (
+      screenPoint.x >= box.left &&
+      screenPoint.x <= box.left + box.width &&
+      screenPoint.y >= box.top &&
+      screenPoint.y <= box.top + box.height
+    ) {
+      return box;
+    }
+  }
+  return null;
+}
+
+function updateNodeVolumeFromSlider(screenPoint, sliderEntry) {
+  if (!screenPoint || !sliderEntry) {
+    return false;
+  }
+  const node = nodeById.get(sliderEntry.nodeId);
+  if (!node || !node.active) {
+    return false;
+  }
+  const t = (sliderEntry.bottom - screenPoint.y) / Math.max(1, sliderEntry.height);
+  const value = clampNodeVolume(t);
+  const prev = getNodeVolumeLimit(node);
+  if (Math.abs(value - prev) < 0.001) {
+    return false;
+  }
+  setNodeVolumeLimit(node, value);
+  applyNodeVolumeLimitToActiveVoices(node);
+  schedulePresetUrlUpdate();
+  return true;
 }
 
 function formatOctaveShiftLabel(shift) {
@@ -7482,7 +7673,15 @@ function formatRatioCentsLabel(node) {
     return "";
   }
   const precision = Math.min(2, Math.max(0, Number(centsPrecision) || 0));
-  return cents.toFixed(precision);
+  const factor = Math.pow(10, precision);
+  let rounded = Math.round(cents * factor) / factor;
+  if (Object.is(rounded, -0)) {
+    rounded = 0;
+  }
+  if (precision > 0 && Number.isInteger(rounded)) {
+    return String(rounded);
+  }
+  return precision > 0 ? rounded.toFixed(precision) : String(Math.round(rounded));
 }
 
 function enforceCentsDisplayMode() {
@@ -12249,6 +12448,8 @@ function draw() {
   drawTriangleHover(nodePosMap, disableScale);
 
   const nowMs = performance.now();
+  const nodeVolumeModeAlpha = getNodeVolumeModeAlpha(nowMs);
+  const nodeVolumeModeVisible = nodeVolumeModeAlpha > 0.001;
   if (addIntervalSelectedRing && nowMs > addIntervalSelectedRing.until) {
     addIntervalSelectedRing = null;
   }
@@ -12296,6 +12497,13 @@ function draw() {
   }
   const reducedEffects = is3DMode && view.reducedEffects;
   const lightDir = getLightDir2D();
+  if (nodeVolumeModeVisible) {
+    ctx.save();
+    ctx.fillStyle = `rgba(0, 0, 0, ${0.08 * nodeVolumeModeAlpha})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  }
+  nodeVolumeSliderHitboxes = [];
   nodeRenderList.forEach(({ node, pos }) => {
     const isHovered = node.id === hoverNodeId;
     const isGuide = guideNodes.has(node.id);
@@ -12450,6 +12658,7 @@ function draw() {
       ctx.restore();
     }
 
+
     if (distanceSelectMode && distanceSelectDrag) {
       const isStart = node.id === distanceSelectDrag.startNodeId;
       const isHover = node.id === distanceSelectDrag.hoverNodeId;
@@ -12590,6 +12799,88 @@ function draw() {
       }
     }
 
+    if (nodeVolumeModeVisible && node.active) {
+      const sliderHeight = Math.max(56, radius * 2.5);
+      const sliderWidth = 9;
+      const sliderGap = Math.max(12, radius * 0.7);
+      const badgeHeight = 16;
+      let x = pos.x - radius - sliderGap;
+      const top = pos.y - sliderHeight / 2;
+      const bottom = top + sliderHeight;
+      const localTop = top - 10;
+      const localBottom = bottom + badgeHeight + 10;
+      for (let i = 0; i < nodeVolumeSliderHitboxes.length; i += 1) {
+        const other = nodeVolumeSliderHitboxes[i];
+        const overlapY = localTop < other.top + other.height && localBottom > other.top;
+        const closeX = Math.abs(x - other.centerX) < 20;
+        if (overlapY && closeX) {
+          x -= 16;
+        }
+      }
+      const value = getNodeVolumeLimit(node);
+      const handleY = top + (1 - value) * sliderHeight;
+      const db = value <= 0.001 ? -60 : 20 * Math.log10(value);
+      const dbLabel = `${Math.round(Math.max(-60, db))} dB`;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0.82, alpha) * nodeVolumeModeAlpha;
+      const trackTop = top;
+      const trackBottom = bottom;
+      const fillTop = handleY;
+      const gradient = ctx.createLinearGradient(0, trackBottom, 0, trackTop);
+      gradient.addColorStop(0, "#f6cc3a");
+      gradient.addColorStop(1, "#f59e0b");
+      ctx.strokeStyle = colorWithAlpha(themeColors.nodeStroke, 0.85);
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.roundRect(
+        x - sliderWidth / 2,
+        trackTop,
+        sliderWidth,
+        sliderHeight,
+        sliderWidth / 2
+      );
+      ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.roundRect(
+        x - sliderWidth / 2,
+        fillTop,
+        sliderWidth,
+        Math.max(2, trackBottom - fillTop),
+        sliderWidth / 2
+      );
+      ctx.fillStyle = gradient;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
+      ctx.lineWidth = 1;
+      ctx.fillStyle = "#f6cc3a";
+      ctx.shadowColor = "rgba(246, 204, 58, 0.55)";
+      ctx.shadowBlur = 8;
+      ctx.arc(x, handleY, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowColor = "transparent";
+      ctx.font = `600 12px "Lexend", sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = colorWithAlpha(themeColors.textPrimary, 0.95);
+      ctx.fillText(dbLabel, x, bottom + 6);
+      ctx.restore();
+
+      nodeVolumeSliderHitboxes.push({
+        nodeId: node.id,
+        left: x - sliderWidth / 2 - 7,
+        top: top - 8,
+        width: sliderWidth + 14,
+        height: sliderHeight + 16 + badgeHeight,
+        bottom: top + sliderHeight,
+        centerX: x,
+      });
+    }
+
+
     if (
       isOrphanGuide ||
       isGuide ||
@@ -12620,16 +12911,14 @@ function draw() {
       const lineWidth = ctx.measureText(ratioText).width;
       const centsWidth = centsLabel ? ctx.measureText(centsLabel).width : 0;
       const ratioCentsWidth = ratioCentsLabel ? ctx.measureText(ratioCentsLabel).width : 0;
-      const hzWidth =
-        showHz && Number.isFinite(node.freq)
-          ? ctx.measureText(`${node.freq.toFixed(2)} Hz`).width
-          : 0;
+      const hzText = showHz ? formatHzReadout(node.freq) : "";
+      const hzWidth = hzText ? ctx.measureText(hzText).width : 0;
       const labelWidth = Math.max(lineWidth, centsWidth, ratioCentsWidth, hzWidth);
       const lineCount =
         1 +
         (centsLabel ? 1 : 0) +
         (ratioCentsLabel ? 1 : 0) +
-        (showHz && Number.isFinite(node.freq) ? 1 : 0);
+        (hzText ? 1 : 0);
       const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
       const rawLabelPos =
         layoutMode && layoutLabelOffsets.has(node.id)
@@ -12688,8 +12977,8 @@ function draw() {
         ctx.fillText(ratioCentsLabel, ratioX, ratioY + lineOffset);
         lineOffset += detailSize + 4;
       }
-      if (showHz && Number.isFinite(node.freq)) {
-        ctx.fillText(`${node.freq.toFixed(2)} Hz`, ratioX, ratioY + lineOffset);
+      if (hzText) {
+        ctx.fillText(hzText, ratioX, ratioY + lineOffset);
       }
       } else {
       ctx.fillStyle = textColorSecondary;
@@ -12717,17 +13006,15 @@ function draw() {
       const centsWidth = hejiEnabled && centsLabel ? ctx.measureText(centsLabel).width : 0;
       const octaveWidth = octaveLabel ? ctx.measureText(octaveLabel).width : 0;
       const ratioCentsWidth = ratioCentsLabel ? ctx.measureText(ratioCentsLabel).width : 0;
-      const hzWidth =
-        showHz && Number.isFinite(node.freq)
-          ? ctx.measureText(`${node.freq.toFixed(2)} Hz`).width
-          : 0;
+      const hzText = showHz ? formatHzReadout(node.freq) : "";
+      const hzWidth = hzText ? ctx.measureText(hzText).width : 0;
       const labelWidth = Math.max(lineWidth, centsWidth, octaveWidth, ratioCentsWidth, hzWidth);
       const lineCount =
         1 +
         (hejiEnabled && centsLabel ? 1 : 0) +
         (octaveLabel ? 1 : 0) +
         (ratioCentsLabel ? 1 : 0) +
-        (showHz && Number.isFinite(node.freq) ? 1 : 0);
+        (hzText ? 1 : 0);
       const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
       const rawLabelPos =
         layoutMode && layoutLabelOffsets.has(node.id)
@@ -12817,14 +13104,14 @@ function draw() {
         ctx.restore();
         lineOffset += detailSize + 4;
       }
-      if (showHz && Number.isFinite(node.freq)) {
+      if (hzText) {
         ctx.save();
         ctx.font = `200 ${detailSize}px "Lexend", sans-serif`;
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
         ctx.fillStyle = textColorSecondary;
         const hzY = labelPos.y + lineOffset;
-        ctx.fillText(`${node.freq.toFixed(2)} Hz`, labelPos.x, hzY);
+        ctx.fillText(hzText, labelPos.x, hzY);
         ctx.restore();
       }
       }
@@ -12976,6 +13263,7 @@ function startVoice(options) {
     ? baseFreq * Math.pow(2, octaveShift)
     : options.freq;
   const velocity = Math.max(0, Math.min(1, Number(options.velocity ?? 1)));
+  const nodeVolumeMax = options.source === "midi" ? 1 : getNodeVolumeLimit(node);
   const waveformType = getCurrentWaveformType();
   let oscillator = null;
   if (waveformType === KARPLUS_WAVEFORM) {
@@ -13076,7 +13364,7 @@ function startVoice(options) {
   const decay = getEnvelopeDecaySeconds() || 0.2;
   const sustain = Number(sustainSlider.value) || 0.6;
   const release = getEnvelopeReleaseSeconds() || 0.6;
-  const peakGain = Math.max(0.0001, 0.2 * velocity);
+  const peakGain = Math.max(0.0001, 0.2 * velocity * nodeVolumeMax);
   envGain.gain.exponentialRampToValueAtTime(peakGain, now + attack);
   envGain.gain.exponentialRampToValueAtTime(
     Math.max(0.0001, peakGain * sustain),
@@ -13086,6 +13374,7 @@ function startVoice(options) {
   const voice = {
     id: nextVoiceId++,
     nodeId: options.nodeId,
+    velocity,
     octave: effectiveOctave,
     freq: effectiveFreq,
     ratioKey: node ? getNodeRatioKey(node) : null,
@@ -13623,6 +13912,16 @@ function onPointerDown(event) {
     draw();
   }
   const hit = hitTestScreen(screenPoint);
+  if (nodeVolumeAdjustMode) {
+    const sliderHit = hitTestNodeVolumeSlider(screenPoint);
+    if (sliderHit) {
+      nodeVolumeSliderDrag = { nodeId: sliderHit.nodeId };
+      updateNodeVolumeFromSlider(screenPoint, sliderHit);
+      canvas.setPointerCapture(event.pointerId);
+      draw();
+      return;
+    }
+  }
   if (addIntervalMode) {
     return;
   }
@@ -14370,8 +14669,9 @@ function onCanvasDoubleClick(event) {
   const current = getLayoutNodeShape(hit);
   const index = shapes.indexOf(current);
   const next = shapes[(index + 1) % shapes.length];
+  const defaultShape = getDefaultLayoutNodeShape(hit);
   pushLayoutUndoState();
-  if (next === layoutNodeShape) {
+  if (next === defaultShape) {
     layoutNodeShapes.delete(hit.id);
   } else {
     layoutNodeShapes.set(hit.id, next);
@@ -14383,6 +14683,16 @@ function onCanvasDoubleClick(event) {
 function onPointerMove(event) {
   view.lastPointer = { x: event.offsetX, y: event.offsetY };
   updateMicrotonalHoverFocus(view.lastPointer);
+  if (nodeVolumeSliderDrag) {
+    const screenPoint = { x: event.offsetX, y: event.offsetY };
+    const slider = nodeVolumeSliderHitboxes.find(
+      (entry) => entry.nodeId === nodeVolumeSliderDrag.nodeId
+    );
+    if (slider && updateNodeVolumeFromSlider(screenPoint, slider)) {
+      draw();
+    }
+    return;
+  }
   if (distanceSelectDrag) {
     const screenPoint = { x: event.offsetX, y: event.offsetY };
     const hit = hitTestScreen(screenPoint);
@@ -14734,6 +15044,10 @@ function onPointerMove(event) {
 }
 
 function onPointerUp(event) {
+  if (nodeVolumeSliderDrag) {
+    nodeVolumeSliderDrag = null;
+    return;
+  }
   if (suppressClickAfterRespell) {
     suppressClickAfterRespell = false;
     return;
@@ -14916,6 +15230,10 @@ function onPointerUp(event) {
       }
     }
     const hit = hitTestScreen(screenPoint);
+    if (nodeVolumeAdjustMode && !hit) {
+      setNodeVolumeAdjustMode(false);
+      return;
+    }
     if (mHeld && hit) {
       const projected = projectPoint(hit.coordinate || { x: 0, y: 0, z: 0 });
       view.offsetX = -projected.x;
@@ -15136,6 +15454,10 @@ function onPointerUp(event) {
       return;
     }
     if (hit) {
+      if (vHeld) {
+        setNodeVolumeAdjustMode(true);
+        return;
+      }
       if (event.altKey) {
         if (hit.active) {
           hit.active = false;
@@ -15248,6 +15570,7 @@ function onPointerLeave() {
   lineLabelDrag = null;
   distanceCurveDrag = null;
   triangleHover = null;
+  nodeVolumeSliderDrag = null;
   view.rotating = false;
   view.lastPointer = null;
   microtonalHoverPairKey = "";
@@ -18054,11 +18377,11 @@ function updateUiHint() {
 
   if (!is3DMode) {
     uiHint.textContent =
-      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO.\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\n\\ cycles looper record/play/overdub. ] clears loop.\nDrag to pan. Scroll to zoom.";
+      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO.\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nHold V and click a node to set per-node max volume.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\n\\ cycles looper record/play/overdub. ] clears loop.\nDrag to pan. Scroll to zoom.";
     return;
   }
   uiHint.textContent =
-    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\n\\ cycles looper record/play/overdub. ] clears loop.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
+    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nHold V and click a node to set per-node max volume.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\n\\ cycles looper record/play/overdub. ] clears loop.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
 }
 
 function resetUiHintToDefault() {
@@ -18686,7 +19009,11 @@ function updateBannerMessage() {
   let nextHtml = "";
   let nextInteractive = false;
   let nextHidden = false;
-  if (!layoutMode && looperState === "recording") {
+  if (nodeVolumeAdjustMode) {
+    nextKey = "node-volume-adjust";
+    nextHtml = 'Adjust node volumes. <button type="button" data-layout-banner="reset-volumes">reset</button>';
+    nextInteractive = true;
+  } else if (!layoutMode && looperState === "recording") {
     nextKey = "looper-recording";
     nextText = "Looper recording. Press \\ to play, ] to clear.";
   } else if (!layoutMode && looperState === "overdubbing") {
@@ -21780,6 +22107,22 @@ function normalizePresetOctaveOffsetEntry(entry) {
   return [key, Math.trunc(shift)];
 }
 
+function normalizePresetNodeVolumeEntry(entry) {
+  const tuple = parsePresetTupleEntry(entry);
+  if (!tuple) {
+    return null;
+  }
+  const key = String(tuple.key || "");
+  if (!key) {
+    return null;
+  }
+  const value = clampNodeVolume(Number(tuple.value));
+  if (Math.abs(value - 1) < 1e-6) {
+    return null;
+  }
+  return [key, value];
+}
+
 function normalizePresetTrianglePosition(entry, targetCenterZ, targetDepth) {
   if (!entry || typeof entry !== "object") {
     return null;
@@ -22093,7 +22436,26 @@ function serializePresetCustomNodes() {
     octaveShift: Number.isFinite(node.octaveShift) ? node.octaveShift : 0,
     position: { x: node.coordinate.x, y: node.coordinate.y },
     active: Boolean(node.active),
+    volumeMax: clampNodeVolume(node.volumeMax),
   }));
+}
+
+function serializePresetNodeVolumes() {
+  const entries = [];
+  nodeVolumeLimits.forEach((value, key) => {
+    const normalized = clampNodeVolume(value);
+    if (Math.abs(normalized - 1) >= 1e-6) {
+      entries.push([`grid:${key}`, normalized]);
+    }
+  });
+  customNodes.forEach((node) => {
+    const key = getNodeVolumeKey(node);
+    const value = clampNodeVolume(node.volumeMax);
+    if (key && Math.abs(value - 1) >= 1e-6) {
+      entries.push([key, value]);
+    }
+  });
+  return entries;
 }
 
 function pruneEmptyPresetCollections(state) {
@@ -22107,6 +22469,7 @@ function pruneEmptyPresetCollections(state) {
     "distanceEdgeOverrides",
     "noteSpellings",
     "octaveOffsets",
+    "nodeVolumes",
     "triangles",
     "triangleLabels",
   ];
@@ -22225,6 +22588,7 @@ function buildPresetStateSkeleton(active, customState, lineLabelState, distanceS
     exponentOffset: getPresetExponentOffsetState(),
     noteSpellings: Array.from(nodeSpellingOverrides.entries()),
     octaveOffsets: Array.from(nodeOctaveOffsets.entries()),
+    nodeVolumes: serializePresetNodeVolumes(),
     triangles: getPresetTrianglesState(),
     triangleLabels: getPresetTriangleLabelsState(),
     fundamental: Number(fundamentalInput.value) || 220,
@@ -22240,6 +22604,7 @@ function buildPresetStateSkeleton(active, customState, lineLabelState, distanceS
     hejiEnabled,
     enharmonicsEnabled,
     centsPrecision,
+    hzPrecision,
     synth: getPresetSynthState(),
   };
 }
@@ -22399,6 +22764,7 @@ function applyPresetCustomNodes(entries) {
       node.coordinate.y = entry.position.y;
     }
     node.active = entry.active !== false;
+    node.volumeMax = clampNodeVolume(Number(entry.volumeMax));
     insertCustomNode(node);
   });
   refreshCustomNodes();
@@ -22724,6 +23090,26 @@ function applyPresetSpellingAndOctaveState(state) {
       nodeOctaveOffsets.set(normalized[0], normalized[1]);
     }
   );
+  nodeVolumeLimits.clear();
+  forEachNormalizedPresetEntry(
+    state.nodeVolumes,
+    normalizePresetNodeVolumeEntry,
+    (normalized) => {
+      const key = normalized[0];
+      const value = normalized[1];
+      if (key.startsWith("grid:")) {
+        nodeVolumeLimits.set(key.slice(5), value);
+        return;
+      }
+      if (!key.startsWith("custom:")) {
+        return;
+      }
+      const node = getNodeBySnapshotKey(key);
+      if (node && node.isCustom) {
+        node.volumeMax = value;
+      }
+    }
+  );
 }
 
 function applyPresetReadoutAndTuningSettings(state) {
@@ -22796,6 +23182,10 @@ function applyPresetReadoutAndTuningSettings(state) {
   if (Number.isFinite(state.centsPrecision)) {
     centsPrecision = Math.min(2, Math.max(0, Math.round(state.centsPrecision)));
     syncCentsPrecisionControls();
+  }
+  if (Number.isFinite(state.hzPrecision)) {
+    hzPrecision = Math.min(2, Math.max(0, Math.round(state.hzPrecision)));
+    syncHzPrecisionControls();
   }
   enforceCentsDisplayMode();
   invalidateLabelCache();
@@ -25604,7 +25994,7 @@ async function buildLayoutSvgString(
       const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
       const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
       const ratioText = `${node.numerator}:${node.denominator}${octaveLabel}`;
-      const hzText = showHz && Number.isFinite(node.freq) ? `${node.freq.toFixed(2)} Hz` : "";
+      const hzText = showHz ? formatHzReadout(node.freq) : "";
       const ratioWidth = await measureSvgTextWidth(
         ratioText,
         detailSize,
@@ -25767,7 +26157,7 @@ async function buildLayoutSvgString(
       });
       const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
       const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
-      const hzText = showHz && Number.isFinite(node.freq) ? `${node.freq.toFixed(2)} Hz` : "";
+      const hzText = showHz ? formatHzReadout(node.freq) : "";
       const hasParen = centsLabel && centsLabel.includes("(");
       const restGapScale =
         hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
@@ -26199,6 +26589,7 @@ function rebuildLattice(
     }
   });
   applyNodeOctaveOffsets();
+  applyNodeVolumeLimits();
   if (layoutMode) {
     nodes.forEach((node) => ensureLayoutPosition(node));
   }
@@ -26261,6 +26652,7 @@ function resetLattice() {
   updateCustomPianoKeyStyles();
   nodeSpellingOverrides.clear();
   nodeOctaveOffsets.clear();
+  nodeVolumeLimits.clear();
   triangleDiagonals.clear();
   triangleLabels.clear();
   layoutUndoStack.length = 0;
@@ -26369,6 +26761,7 @@ setControlChecked(navCirclesToggle, showCircles);
 setControlChecked(layoutCirclesToggle, showCircles);
 syncAnalysisLayerToggles();
 syncCentsPrecisionControls();
+syncHzPrecisionControls();
 syncLayoutKeyMappingControls();
 syncLayoutScaleInput();
 updateKeyMappingToggleVisibility();
@@ -27224,6 +27617,22 @@ if (centsPrecisionButtons.length) {
       syncCentsPrecisionControls();
       invalidateLabelCache();
       updateIntervalChartIfOpen();
+      draw();
+      schedulePresetUrlUpdate();
+    });
+  });
+}
+if (hzPrecisionButtons.length) {
+  hzPrecisionButtons.forEach((button) => {
+    bindOptionalClick(button, () => {
+      const next = Number(button.dataset.hzPrecision);
+      if (!Number.isFinite(next)) {
+        return;
+      }
+      hzPrecision = Math.min(2, Math.max(0, Math.round(next)));
+      syncHzPrecisionControls();
+      invalidateLabelCache();
+      updateFundamentalNotes();
       draw();
       schedulePresetUrlUpdate();
     });
@@ -28202,6 +28611,22 @@ bindOptionalClick(bannerMessage, (event) => {
     setLayoutAlignMode("");
     return;
   }
+  if (layoutAction === "reset-volumes") {
+    nodeVolumeLimits.clear();
+    customNodes.forEach((node) => {
+      node.volumeMax = 1;
+      applyNodeVolumeLimitToActiveVoices(node);
+    });
+    nodes.forEach((node) => {
+      if (!node.isCustom) {
+        node.volumeMax = 1;
+        applyNodeVolumeLimitToActiveVoices(node);
+      }
+    });
+    schedulePresetUrlUpdate();
+    draw();
+    return;
+  }
   bannerDismissedKey = currentBannerKey;
   updateBannerMessage();
 });
@@ -28718,6 +29143,9 @@ bindOptionalEvent(window, "keydown", (event) => {
   if (event.key.toLowerCase() === "l") {
     lHeld = true;
   }
+  if (event.key.toLowerCase() === "v") {
+    vHeld = true;
+  }
   if (event.key.toLowerCase() === "f") {
     fHeld = true;
   }
@@ -28883,6 +29311,9 @@ bindOptionalEvent(window, "keyup", (event) => {
   }
   if (event.key.toLowerCase() === "l") {
     lHeld = false;
+  }
+  if (event.key.toLowerCase() === "v") {
+    vHeld = false;
   }
   if (event.key.toLowerCase() === "f") {
     fHeld = false;

@@ -2197,7 +2197,7 @@ function drawViz() {
   const minSemi = bounds.min;
   const maxSemi = bounds.max;
   const decayEnabled = Boolean(decayModeToggle && decayModeToggle.checked);
-  const lineX = Math.round(width * (decayEnabled ? 0.62 : 0.45));
+  const lineX = Math.round(width * 0.5);
   const gridRightX = Math.min(width - 6, lineX + 248);
   const etLabelX = gridRightX;
   const etLineEndX = etLabelX - 52;

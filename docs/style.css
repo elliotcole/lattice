@@ -1,0 +1,235 @@
+:root {
+  color-scheme: light;
+  --chrome-bg: #f3f4f6;
+  --chrome-panel: rgba(255, 255, 255, 0.78);
+  --chrome-panel-solid: #ffffff;
+  --chrome-ink: #101316;
+  --chrome-muted-ink: rgba(16, 19, 22, 0.65);
+  --chrome-accent: #245a8d;
+  --chrome-border: rgba(16, 19, 22, 0.15);
+  --chrome-soft-surface: rgba(255, 255, 255, 0.62);
+  --chrome-soft-field-border: rgba(16, 19, 22, 0.12);
+  --docs-max-width: 1260px;
+  --docs-copy-width: 760px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  color: var(--chrome-muted-ink);
+  background: radial-gradient(circle at top left, #ffffff, var(--chrome-bg));
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+a {
+  color: var(--chrome-accent);
+}
+
+code {
+  font-family: ui-monospace, "SFMono-Regular", monospace;
+  font-size: 0.92em;
+}
+
+.docs-page {
+  width: min(calc(100% - 32px), var(--docs-max-width));
+  margin: 0 auto;
+  padding: 26px 0 72px;
+}
+
+.docs-hero {
+  padding: 10px 8px 24px;
+}
+
+.docs-kicker {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--chrome-muted-ink);
+}
+
+.docs-hero h1 {
+  margin: 15px 0 5px;
+  font-size: clamp(2.6rem, 5vw, 4.25rem);
+  letter-spacing: 0.4px;
+  font-weight: 200;
+  color: var(--chrome-ink);
+}
+
+.docs-creator {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--chrome-muted-ink);
+  opacity: 0.75;
+}
+
+.docs-intro {
+  width: min(100%, 820px);
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.docs-shell {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.docs-sidebar {
+  position: sticky;
+  top: 18px;
+}
+
+.docs-sidebar-inner,
+.docs-section {
+  background: var(--chrome-panel);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--chrome-border);
+  border-radius: 14px;
+}
+
+.docs-sidebar-inner {
+  padding: 14px 16px;
+}
+
+.docs-sidebar-label {
+  margin: 0 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--chrome-muted-ink);
+}
+
+.docs-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.docs-sidebar a {
+  text-decoration: none;
+  line-height: 1.35;
+  font-size: 13px;
+}
+
+.docs-article {
+  min-width: 0;
+}
+
+.docs-section {
+  padding: 22px 26px 24px;
+}
+
+.docs-section + .docs-section {
+  margin-top: 14px;
+}
+
+.docs-article h2,
+.docs-article h3,
+.docs-article h4 {
+  color: var(--chrome-ink);
+}
+
+.docs-article h2 {
+  margin: 0 0 16px;
+  font-size: clamp(1.9rem, 2.8vw, 2.5rem);
+  line-height: 1.08;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.docs-article h3 {
+  margin: 0 0 12px;
+  font-size: clamp(1.35rem, 2.1vw, 1.7rem);
+  line-height: 1.18;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.docs-article h4 {
+  margin: 26px 0 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--chrome-accent);
+}
+
+.docs-article p,
+.docs-article li {
+  width: min(100%, var(--docs-copy-width));
+  font-size: 14px;
+  line-height: 1.72;
+  color: var(--chrome-ink);
+}
+
+.docs-article p {
+  margin: 0;
+}
+
+.docs-article p + p,
+.docs-article p + ol,
+.docs-article p + ul,
+.docs-article ol + p,
+.docs-article ul + p,
+.docs-article ol + ol,
+.docs-article ul + ul,
+.docs-article ul + ol,
+.docs-article ol + ul {
+  margin-top: 12px;
+}
+
+.docs-article ol,
+.docs-article ul {
+  width: min(100%, var(--docs-copy-width));
+  margin: 0;
+  padding-left: 1.3rem;
+}
+
+.docs-article li + li {
+  margin-top: 7px;
+}
+
+@media (max-width: 920px) {
+  .docs-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .docs-sidebar {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  .docs-page {
+    width: min(calc(100% - 20px), var(--docs-max-width));
+    padding-top: 18px;
+  }
+
+  .docs-section {
+    padding: 18px 16px 20px;
+  }
+
+  .docs-sidebar-inner {
+    padding: 12px 14px;
+  }
+}

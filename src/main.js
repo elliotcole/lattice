@@ -358,9 +358,9 @@ const INTERACTION_MODE_LABELS = {
   "axis-z": "Z Axis Mode",
 };
 const DISTANCE_MODE_HELP =
-  "Distance Edit\nDrag between nodes to create distance lines.\nDrag label to slide, drag line to curve.\nOption-click line to delete.\nDouble-click label to change interval name.\nESC or double-click background to exit.";
+  "Distance Edit\nDrag between nodes to create distance lines.\nDrag label to slide, drag line to curve.\nOption-click line to delete.\nDouble-click label to change interval name.";
 const MICROTONAL_MODE_HELP =
-  "Interval Overlay (analysis view)\nClick node to show connections.\nClick visible connections to listen.\nDouble-click canvas to exit mode.\nExcluded from PDF/SVG export.";
+  "Interval Overlay (analysis view)\nClick node to show connections.\nClick visible connections to listen.\nExcluded from PDF/SVG export.";
 const DISTANCE_RING_COLOR = "rgba(72, 146, 255, 0.9)";
 const ADD_INTERVAL_RING_COLOR = "rgba(220, 72, 72, 0.9)";
 const MICROTONAL_HOVER_RING_COLOR = "rgba(134, 239, 172, 0.95)";
@@ -1439,6 +1439,7 @@ let pitchInstances = [];
 let nextVoiceId = 1;
 const MIN_FREQ = 40;
 const MAX_FREQ = 19000;
+const SNAPSHOT_MORPH_MAX_CENTS = 500;
 let is3DMode = false;
 let isFlattened2D = false;
 let showAxes = true;
@@ -1660,6 +1661,8 @@ let pendingSnapshotAtNextEvent = false;
 let snapshotDeferToCycleEnd = false;
 let snapshotRestorePlayNodes = true;
 let snapshotConnectCommonTones = false;
+let snapshotMorphEnabled = false;
+let snapshotMorphTimeMs = 100;
 let snapshotRestoreView = true;
 let snapshotRestoreSequence = true;
 let snapshotRestoreSynthSettings = true;
@@ -3623,6 +3626,8 @@ function buildSnapshotSetPayload({ compact = true } = {}) {
       deferToCycleEnd: snapshotDeferToCycleEnd,
       restorePlayNodes: snapshotRestorePlayNodes,
       connectCommonTones: snapshotConnectCommonTones,
+      morphEnabled: snapshotMorphEnabled,
+      morphTimeMs: snapshotMorphTimeMs,
       restoreView: snapshotRestoreView,
       restoreSequence: snapshotRestoreSequence,
       restoreSynthSettings: snapshotRestoreSynthSettings,
@@ -3657,6 +3662,10 @@ function applySnapshotSetPayload(payload) {
     snapshotDeferToCycleEnd = Boolean(settings.deferToCycleEnd);
     snapshotRestorePlayNodes = Boolean(settings.restorePlayNodes);
     snapshotConnectCommonTones = Boolean(settings.connectCommonTones);
+    snapshotMorphEnabled = Boolean(settings.morphEnabled);
+    if (Number.isFinite(settings.morphTimeMs)) {
+      snapshotMorphTimeMs = Math.max(1, Math.round(settings.morphTimeMs));
+    }
     snapshotRestoreView = Boolean(settings.restoreView);
     snapshotRestoreSequence = Boolean(settings.restoreSequence);
     if (typeof settings.restoreSynthSettings === "boolean") {
@@ -3670,6 +3679,7 @@ function applySnapshotSetPayload(payload) {
     snapshotKeyboardMode = Boolean(settings.useLetterKeys);
     snapshotKeyboardActive = Boolean(settings.lettersActive);
   }
+  normalizeSnapshotMorphSettings();
   syncSnapshotSettingsControls();
   setKeyboardModeDisabled(snapshotKeyboardMode);
   updateSnapshotUi();
@@ -3916,8 +3926,10 @@ function recallSnapshotLetter(letter, index) {
   } else {
     buildPatternStates(true);
   }
-  restoreSnapshotPlayState(snapshot);
-  restoreSnapshotLfos(snapshot);
+  const morphHandled = restoreSnapshotPlayState(snapshot);
+  if (!morphHandled) {
+    restoreSnapshotLfos(snapshot);
+  }
   updateSnapshotUi();
 }
 
@@ -3964,8 +3976,10 @@ function recallSnapshot(index) {
   } else {
     buildPatternStates(true);
   }
-  restoreSnapshotPlayState(snapshot);
-  restoreSnapshotLfos(snapshot);
+  const morphHandled = restoreSnapshotPlayState(snapshot);
+  if (!morphHandled) {
+    restoreSnapshotLfos(snapshot);
+  }
   updateSnapshotUi();
 }
 
@@ -3975,12 +3989,267 @@ function clearSnapshots() {
   updateSnapshotUi();
 }
 
-function restoreSnapshotPlayState(snapshot) {
-  if (!snapshotRestorePlayNodes || !snapshot || !snapshot.playKeys) {
+function normalizeSnapshotMorphSettings() {
+  snapshotMorphTimeMs = Math.max(1, Math.round(Number(snapshotMorphTimeMs) || 100));
+  if (snapshotMorphEnabled) {
+    snapshotRestorePlayNodes = true;
+    snapshotConnectCommonTones = true;
+  }
+}
+
+function buildSnapshotRecallTargets(snapshot) {
+  const targets = [];
+  if (!snapshot || !Array.isArray(snapshot.playKeys)) {
+    return targets;
+  }
+  const lfoEntries = new Map();
+  if (snapshotRestoreLfos && snapshot && Array.isArray(snapshot.lfos)) {
+    snapshot.lfos.forEach((entry) => {
+      if (entry && entry.key) {
+        lfoEntries.set(entry.key, entry);
+      }
+    });
+  }
+  const seen = new Set();
+  snapshot.playKeys.forEach((key) => {
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    const node = getNodeBySnapshotKey(key);
+    if (!node || !Number.isFinite(node.freq)) {
+      return;
+    }
+    const lfoEntry = lfoEntries.get(key) || null;
+    targets.push({
+      key,
+      node,
+      freq: node.freq,
+      freqKey: node.freq.toFixed(6),
+      hasLfo: Boolean(snapshotRestoreLfos && lfoEntry),
+      lfoHalfPeriod: lfoEntry ? Number(lfoEntry.half) || 0 : 0,
+      lfoCurve: lfoEntry && Number.isFinite(lfoEntry.curve) ? lfoEntry.curve : 1,
+      lfoStartOffsetMs: lfoEntry ? Number(lfoEntry.startOffsetMs) || 0 : 0,
+    });
+  });
+  return targets;
+}
+
+function getSnapshotMorphVoiceGroup(voice) {
+  return snapshotRestoreLfos && voice && voice.lfoActive ? "lfo" : "plain";
+}
+
+function getSnapshotMorphTargetGroup(target) {
+  return snapshotRestoreLfos && target && target.hasLfo ? "lfo" : "plain";
+}
+
+function getFrequencyDistanceCents(a, b) {
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.abs(1200 * Math.log2(a / b));
+}
+
+function matchSnapshotMorphGroup(currentVoices, targetEntries) {
+  if (!currentVoices.length || !targetEntries.length) {
+    return [];
+  }
+  const limit = SNAPSHOT_MORPH_MAX_CENTS;
+  const adjacency = currentVoices.map((voice, currentIndex) =>
+    targetEntries
+      .map((target, targetIndex) => ({
+        targetIndex,
+        cents: getFrequencyDistanceCents(voice.freq, target.freq),
+      }))
+      .filter((entry) => entry.cents <= limit)
+      .sort((a, b) => a.cents - b.cents)
+  );
+  const order = adjacency
+    .map((edges, currentIndex) => ({
+      currentIndex,
+      edgeCount: edges.length,
+      best: edges.length ? edges[0].cents : Number.POSITIVE_INFINITY,
+    }))
+    .filter((entry) => entry.edgeCount > 0)
+    .sort((a, b) => a.edgeCount - b.edgeCount || a.best - b.best)
+    .map((entry) => entry.currentIndex);
+  const targetToCurrent = new Array(targetEntries.length).fill(-1);
+  const visit = (currentIndex, seen) => {
+    const edges = adjacency[currentIndex];
+    for (let i = 0; i < edges.length; i += 1) {
+      const edge = edges[i];
+      if (seen[edge.targetIndex]) {
+        continue;
+      }
+      seen[edge.targetIndex] = true;
+      if (
+        targetToCurrent[edge.targetIndex] === -1 ||
+        visit(targetToCurrent[edge.targetIndex], seen)
+      ) {
+        targetToCurrent[edge.targetIndex] = currentIndex;
+        return true;
+      }
+    }
+    return false;
+  };
+  order.forEach((currentIndex) => {
+    visit(currentIndex, new Array(targetEntries.length).fill(false));
+  });
+  const matches = [];
+  targetToCurrent.forEach((currentIndex, targetIndex) => {
+    if (currentIndex >= 0) {
+      matches.push({
+        voice: currentVoices[currentIndex],
+        target: targetEntries[targetIndex],
+      });
+    }
+  });
+  return matches;
+}
+
+function beginVoiceMorph(voice, options = {}) {
+  if (!voice) {
     return;
   }
+  const nowMs = performance.now();
+  const durationMs = Math.max(1, Math.round(Number(options.durationMs) || snapshotMorphTimeMs));
+  const morphGain = voice.morphGain && voice.morphGain.gain ? voice.morphGain.gain : null;
+  const currentGain = morphGain ? morphGain.value : 1;
+  const nextFromGain = Number.isFinite(options.fromGain) ? options.fromGain : currentGain;
+  const nextToGain = Number.isFinite(options.toGain) ? options.toGain : currentGain;
+  if (morphGain) {
+    morphGain.cancelScheduledValues(audioCtx.currentTime);
+    morphGain.setValueAtTime(nextFromGain, audioCtx.currentTime);
+  }
+  voice.morphState = {
+    startMs: nowMs,
+    durationMs,
+    fromFreq: Number.isFinite(options.fromFreq) ? options.fromFreq : voice.freq,
+    toFreq: Number.isFinite(options.toFreq) ? options.toFreq : voice.freq,
+    fromGain: nextFromGain,
+    toGain: nextToGain,
+    stopAtEnd: Boolean(options.stopAtEnd),
+  };
+  ensureLfoLoop();
+}
+
+function createSnapshotTargetVoice(target, durationMs) {
+  if (!target || !target.node || !Number.isFinite(target.freq)) {
+    return null;
+  }
+  const now = performance.now();
+  const voice = startVoice({
+    nodeId: target.node.id,
+    octave: 0,
+    freq: target.freq,
+    lfoActive: target.hasLfo,
+    lfoHalfPeriod: target.hasLfo ? target.lfoHalfPeriod : 0,
+    lfoStartMs:
+      target.hasLfo && snapshotRestoreLfoPhase ? now + target.lfoStartOffsetMs : now,
+    lfoCurve: target.hasLfo ? target.lfoCurve : 1,
+    source: target.hasLfo ? "snapshot-lfo" : "snapshot",
+    initialMorphGain: 0,
+  });
+  if (!voice) {
+    return null;
+  }
+  target.node.baseVoiceId = voice.id;
+  beginVoiceMorph(voice, {
+    durationMs,
+    fromFreq: target.freq,
+    toFreq: target.freq,
+    fromGain: 0,
+    toGain: 1,
+  });
+  return voice;
+}
+
+function tryMorphSnapshotPlayState(snapshot) {
+  if (
+    !snapshotMorphEnabled ||
+    !snapshotRestorePlayNodes ||
+    !snapshotConnectCommonTones ||
+    !audioCtx ||
+    audioCtx.state !== "running" ||
+    getCurrentWaveformType() === SOUNDFONT_WAVEFORM
+  ) {
+    return false;
+  }
+  if (voices.some((voice) => voice && !voice.releasing && voice.usesSoundfont)) {
+    return false;
+  }
+  const targets = buildSnapshotRecallTargets(snapshot);
+  const currentVoices = voices.filter(
+    (voice) =>
+      voice &&
+      !voice.releasing &&
+      voice.source !== "pattern" &&
+      !voice.usesSoundfont &&
+      Number.isFinite(voice.freq)
+  );
+  if (!targets.length && !currentVoices.length) {
+    return false;
+  }
+  nodes.forEach((node) => {
+    node.baseVoiceId = null;
+  });
+  const durationMs = snapshotMorphTimeMs;
+  const groups = ["lfo", "plain"];
+  const matches = [];
+  const matchedVoiceIds = new Set();
+  const matchedTargetKeys = new Set();
+  groups.forEach((group) => {
+    const groupVoices = currentVoices.filter((voice) => getSnapshotMorphVoiceGroup(voice) === group);
+    const groupTargets = targets.filter((target) => getSnapshotMorphTargetGroup(target) === group);
+    matchSnapshotMorphGroup(groupVoices, groupTargets).forEach((match) => {
+      matches.push(match);
+      matchedVoiceIds.add(match.voice.id);
+      matchedTargetKeys.add(match.target.key);
+    });
+  });
+  matches.forEach(({ voice, target }) => {
+    voice.nodeId = target.node.id;
+    voice.ratioKey = getNodeRatioKey(target.node);
+    target.node.baseVoiceId = voice.id;
+    beginVoiceMorph(voice, {
+      durationMs,
+      fromFreq: voice.freq,
+      toFreq: target.freq,
+      fromGain: 1,
+      toGain: 1,
+    });
+  });
+  currentVoices.forEach((voice) => {
+    if (matchedVoiceIds.has(voice.id)) {
+      return;
+    }
+    beginVoiceMorph(voice, {
+      durationMs,
+      fromFreq: voice.freq,
+      toFreq: voice.freq,
+      fromGain: 1,
+      toGain: 0,
+      stopAtEnd: true,
+    });
+  });
+  targets.forEach((target) => {
+    if (matchedTargetKeys.has(target.key)) {
+      return;
+    }
+    createSnapshotTargetVoice(target, durationMs);
+  });
+  return true;
+}
+
+function restoreSnapshotPlayState(snapshot) {
+  if (!snapshotRestorePlayNodes || !snapshot || !snapshot.playKeys) {
+    return false;
+  }
   if (!audioCtx || audioCtx.state !== "running") {
-    return;
+    return false;
+  }
+  if (tryMorphSnapshotPlayState(snapshot)) {
+    return true;
   }
   if (snapshotDebugEnabled) {
     console.groupCollapsed("[snapshot-restore-play]");
@@ -4124,6 +4393,7 @@ function restoreSnapshotPlayState(snapshot) {
     console.log("voices-after", voiceInfo);
     console.groupEnd();
   }
+  return false;
 }
 
 function getSnapshotIndexFromEvent(event) {
@@ -5435,9 +5705,39 @@ function updateVoiceFrequencies() {
     }
     const baseRatio = node.numerator / node.denominator;
     const freq = fundamental * baseRatio * Math.pow(2, voice.octave);
-    voice.freq = freq;
-    voice.oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.01);
+    setVoiceFrequencyAtTime(voice, freq, audioCtx.currentTime, 0.01);
   });
+}
+
+function setVoiceFrequencyAtTime(voice, freq, when, timeConstant = 0.01) {
+  if (!voice || !Number.isFinite(freq) || freq <= 0) {
+    return;
+  }
+  voice.freq = freq;
+  const oscillator = voice.oscillator;
+  if (!oscillator) {
+    updateMidiOutVoicePitch(voice);
+    return;
+  }
+  if (oscillator.frequency && typeof oscillator.frequency.setTargetAtTime === "function") {
+    oscillator.frequency.setTargetAtTime(freq, when, timeConstant);
+  } else if (oscillator.frequency && typeof oscillator.frequency.setValueAtTime === "function") {
+    oscillator.frequency.setValueAtTime(freq, when);
+  } else if (oscillator.parameters && typeof oscillator.parameters.get === "function") {
+    const frequencyParam = oscillator.parameters.get("frequency");
+    if (frequencyParam) {
+      if (typeof frequencyParam.setTargetAtTime === "function") {
+        frequencyParam.setTargetAtTime(freq, when, timeConstant);
+      } else if (typeof frequencyParam.setValueAtTime === "function") {
+        frequencyParam.setValueAtTime(freq, when);
+      } else {
+        frequencyParam.value = freq;
+      }
+    }
+  } else if ("frequency" in oscillator) {
+    oscillator.frequency = freq;
+  }
+  updateMidiOutVoicePitch(voice);
 }
 
 function getKeyboardMode() {
@@ -12577,8 +12877,8 @@ function draw() {
     if (node.id === ratioWheelHoverNodeId) {
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, radius * 1.35, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255, 168, 200, 0.25)";
-      ctx.strokeStyle = "rgba(255, 168, 200, 0.6)";
+      ctx.fillStyle = themeColors.hoverRingFill;
+      ctx.strokeStyle = themeColors.hoverRingStroke;
       ctx.lineWidth = 2;
       ctx.fill();
       ctx.stroke();
@@ -12592,9 +12892,9 @@ function draw() {
       }
       if (is3DMode) {
         const inactiveFill = node.isCustom
-          ? "rgba(210, 210, 210, 0.12)"
-          : "rgba(255, 255, 255, 0.02)";
-        const shadowColor = "rgba(0, 0, 0, 0.22)";
+          ? colorWithAlpha(themeColors.nodeCustomInactive, 0.6)
+          : themeColors.nodeInactive;
+        const shadowColor = themeColors.nodeShadow;
         const fillAlpha = Math.min(1, brightness);
         const baseFill =
           fillAlpha > 0 ? colorWithAlpha(themeColors.playFill, fillAlpha) : inactiveFill;
@@ -12602,8 +12902,8 @@ function draw() {
           fillAlpha > 0
             ? colorWithAlpha(themeColors.playFill, 0.35 + 0.65 * fillAlpha)
             : node.isCustom
-            ? "rgba(220, 220, 220, 0.25)"
-            : "rgba(255, 255, 255, 0.35)";
+            ? colorWithAlpha(themeColors.nodeCustomInactive, 0.9)
+            : themeColors.nodeHighlight;
         if (reducedEffects || !show3DShading) {
           ctx.shadowColor = "transparent";
           ctx.shadowBlur = 0;
@@ -12623,7 +12923,7 @@ function draw() {
         ctx.fillStyle = "transparent";
       } else {
         if (node.isCustom && !node.active && brightness <= 0) {
-          ctx.fillStyle = "rgba(210, 210, 210, 0.2)";
+          ctx.fillStyle = themeColors.nodeCustomInactive;
         } else {
           ctx.fillStyle = brightness > 0 ? themeColors.playFill : "transparent";
         }
@@ -13342,6 +13642,7 @@ function startVoice(options) {
   }
   const envGain = audioCtx.createGain();
   const lfoGain = audioCtx.createGain();
+  const morphGain = audioCtx.createGain();
 
   if (
     waveformType !== KARPLUS_WAVEFORM &&
@@ -13381,7 +13682,9 @@ function startVoice(options) {
     oscillator,
     envGain,
     lfoGain,
+    morphGain,
     lfoActive: Boolean(options.lfoActive),
+    morphState: null,
     releasing: false,
     startTimeSec: now,
     envAttackSec: attack,
@@ -13412,10 +13715,13 @@ function startVoice(options) {
   }
 
   lfoGain.gain.value = voice.lfoActive ? getLfoGainValue(voice, performance.now()) : 1;
+  morphGain.gain.value = Number.isFinite(options.initialMorphGain)
+    ? Math.max(0, Math.min(1, options.initialMorphGain))
+    : 1;
   if (voice.sfOutput) {
-    voice.sfOutput.connect(envGain).connect(lfoGain).connect(masterGain);
+    voice.sfOutput.connect(envGain).connect(lfoGain).connect(morphGain).connect(masterGain);
   } else if (oscillator && typeof oscillator.connect === "function") {
-    oscillator.connect(envGain).connect(lfoGain).connect(masterGain);
+    oscillator.connect(envGain).connect(lfoGain).connect(morphGain).connect(masterGain);
   }
   if (typeof oscillator.start === "function") {
     oscillator.start(now);
@@ -13426,6 +13732,9 @@ function startVoice(options) {
       }
       if (lfoGain) {
         lfoGain.disconnect();
+      }
+      if (morphGain) {
+        morphGain.disconnect();
       }
       removeVoiceById(voice.id);
     };
@@ -13472,8 +13781,10 @@ function stopVoice(voice, immediate = false) {
   const hasStop = typeof osc.stop === "function" && !voice.usesWorklet;
   const envGain = voice.envGain;
   const lfoGain = voice.lfoGain;
+  const morphGain = voice.morphGain;
   voice.oscillator = null;
   voice.releasing = true;
+  voice.morphState = null;
   const nowMs = performance.now();
   const lfoLevel = voice.lfoActive ? getLfoGainValue(voice, nowMs) : 1;
   voice.lfoActive = false;
@@ -13507,6 +13818,9 @@ function stopVoice(voice, immediate = false) {
         if (lfoGain) {
           lfoGain.disconnect();
         }
+        if (morphGain) {
+          morphGain.disconnect();
+        }
         removeVoiceById(voice.id);
       }, timeoutMs);
     } else if (hasStop) {
@@ -13523,6 +13837,9 @@ function stopVoice(voice, immediate = false) {
         if (lfoGain) {
           lfoGain.disconnect();
         }
+        if (morphGain) {
+          morphGain.disconnect();
+        }
         removeVoiceById(voice.id);
       }, timeoutMs);
     }
@@ -13533,6 +13850,9 @@ function stopVoice(voice, immediate = false) {
         if (voice.sfOutput) {
           voice.sfOutput.disconnect();
         }
+        if (morphGain) {
+          morphGain.disconnect();
+        }
         removeVoiceById(voice.id);
       }, 150);
     } else if (hasStop) {
@@ -13541,6 +13861,9 @@ function stopVoice(voice, immediate = false) {
       setTimeout(() => {
         if (typeof osc.disconnect === "function") {
           osc.disconnect();
+        }
+        if (morphGain) {
+          morphGain.disconnect();
         }
         removeVoiceById(voice.id);
       }, 150);
@@ -13809,6 +14132,25 @@ function sendMidiOutPitchBend(channel, bendValue) {
   const lsb = value & 0x7f;
   const msb = (value >> 7) & 0x7f;
   midiOutDevice.send([0xe0 | (channel - 1), lsb, msb]);
+}
+
+function updateMidiOutVoicePitch(voice) {
+  if (!midiOutEnabled || !midiOutDevice || !voice) {
+    return;
+  }
+  const entry = midiOutActive.get(voice.id);
+  if (!entry) {
+    return;
+  }
+  const freq = Number(voice.freq);
+  if (!Number.isFinite(freq) || freq <= 0) {
+    return;
+  }
+  const a4 = Number(a4Input.value) || 440;
+  const midiFloat = 69 + 12 * Math.log2(freq / a4);
+  const delta = midiFloat - entry.note;
+  const bend = 8192 + (delta / midiOutBendRange) * 8192;
+  sendMidiOutPitchBend(entry.channel, bend);
 }
 
 function allocateMidiOutChannel() {
@@ -18292,6 +18634,56 @@ function setUiHintVisibility(isVisible) {
   uiHint.style.display = hidden ? "none" : "";
 }
 
+function setUiHintContent(text, { exitAction = "" } = {}) {
+  if (!uiHint) {
+    return;
+  }
+  uiHint.innerHTML = "";
+  String(text || "")
+    .split("\n")
+    .forEach((line, index) => {
+      if (index > 0) {
+        uiHint.appendChild(document.createElement("br"));
+      }
+      uiHint.appendChild(document.createTextNode(line));
+    });
+  if (!exitAction) {
+    return;
+  }
+  uiHint.appendChild(document.createElement("br"));
+  const exitButton = document.createElement("button");
+  exitButton.type = "button";
+  exitButton.className = "ui-hint-exit";
+  exitButton.dataset.exitAction = exitAction;
+  exitButton.textContent = "[exit]";
+  uiHint.appendChild(exitButton);
+}
+
+function exitTemporaryInteraction(action) {
+  switch (action) {
+    case "distance-edit":
+      setDistanceSelectMode(false);
+      return true;
+    case "microtonal-intervals":
+      setMicrotonalIntervalsMode(false);
+      return true;
+    case "layout-align":
+      setLayoutAlignMode("");
+      return true;
+    case "layout-axis-edit":
+      layoutAxisEdit = null;
+      layoutAxisEditDrag = null;
+      updateUiHint();
+      draw();
+      return true;
+    case "axis-mode":
+      deactivateAxisMode();
+      return true;
+    default:
+      return false;
+  }
+}
+
 function updateUiHint() {
   if (!uiHint) {
     return;
@@ -18313,75 +18705,75 @@ function updateUiHint() {
   setUiHintVisibility(true);
   const interactionMode = getInteractionMode();
   if (interactionMode === "distance-edit") {
-    uiHint.textContent = DISTANCE_MODE_HELP;
+    setUiHintContent(DISTANCE_MODE_HELP);
     return;
   }
   if (interactionMode === "microtonal-intervals") {
-    uiHint.textContent = MICROTONAL_MODE_HELP;
+    setUiHintContent(MICROTONAL_MODE_HELP);
     return;
   }
   if (interactionMode === "align-x") {
-    uiHint.textContent =
-      "X-Align mode\nClick node to establish position.\nAny other nodes clicked will align.";
+    setUiHintContent("X-Align mode\nClick node to establish position.\nAny other nodes clicked will align.");
     return;
   }
   if (interactionMode === "align-y") {
-    uiHint.textContent =
-      "Y-Align mode\nClick node to establish position.\nAny other nodes clicked will align.";
+    setUiHintContent("Y-Align mode\nClick node to establish position.\nAny other nodes clicked will align.");
     return;
   }
   if (interactionMode === "align-straighten") {
-    uiHint.textContent =
-      "Straighten mode\nClick two nodes to set the line.\nAny other nodes clicked will align.";
+    setUiHintContent(
+      "Straighten mode\nClick two nodes to set the line.\nAny other nodes clicked will align."
+    );
     return;
   }
   if (interactionMode === "axis-x") {
-    uiHint.textContent =
-      "Editing along X axis. \nClick to create nodes, option-click to delete.\nPress ESC to exit.";
+    setUiHintContent("Editing along X axis. \nClick to create nodes, option-click to delete.");
     return;
   }
   if (interactionMode === "axis-y") {
-    uiHint.textContent =
-      "Editing along Y axis. \nClick to create nodes, option-click to delete.\nPress ESC to exit.";
+    setUiHintContent("Editing along Y axis. \nClick to create nodes, option-click to delete.");
     return;
   }
   if (interactionMode === "axis-z") {
-    uiHint.textContent =
-      "Editing along Z axis. \nClick to create nodes, option-click to delete.\nPress ESC to exit.";
+    setUiHintContent("Editing along Z axis. \nClick to create nodes, option-click to delete.");
     return;
   }
   if (layoutMode) {
     if (layoutAxisEdit) {
-      uiHint.textContent =
-        "Editing axis legend.\nPress Delete to remove. Reset Layout restores.\nPress ESC to exit.";
+      setUiHintContent("Editing axis legend.\nPress Delete to remove. Reset Layout restores.");
       return;
     }
     if (tHeld) {
-      uiHint.textContent =
-        "Creating triangles (T)\nClick to add a diagonal, click again to label.\nClick line to rotate or remove.";
+      setUiHintContent(
+        "Creating triangles (T)\nClick to add a diagonal, click again to label.\nClick line to rotate or remove."
+      );
       return;
     }
   }
   if (spellingHintActive) {
-    uiHint.textContent =
+    setUiHintContent(
       spellingMode === "true"
         ? "Diatonic spellings up to 3 sharps / flats, after which nearest enharmonic equivalents are used. \nHold R and click 1:1 to re-spell the fundamental."
-        : "Manual spelling: hold R and click on a node to cycle.";
+        : "Manual spelling: hold R and click on a node to cycle."
+    );
     return;
   }
   if (layoutMode) {
-    uiHint.textContent =
-      "Layout mode: Drag to adjust positions. \nOption-click to reset adjustments\nHold Shift to lock moves to 1 direction.\nHold X and click to add custom text.\nClick Space to adjust per-axis spacing.\nDouble-click a node to change its shape.\nDouble-click an axis legend to adjust angle.\nDouble-click a connection to show ratio";
+    setUiHintContent(
+      "Layout mode: Drag to adjust positions. \nOption-click to reset adjustments\nHold Shift to lock moves to 1 direction.\nHold X and click to add custom text.\nClick Space to adjust per-axis spacing.\nDouble-click a node to change its shape.\nDouble-click an axis legend to adjust angle.\nDouble-click a connection to show ratio"
+    );
     return;
   }
 
   if (!is3DMode) {
-    uiHint.textContent =
-      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO.\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nHold V and click a node to set per-node max volume.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\n\\ cycles looper record/play/overdub. ] clears loop.\nDrag to pan. Scroll to zoom.";
+    setUiHintContent(
+      "2D Mode\nShift-click to add a node. \nOption-click to remove.\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO.\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nHold V and click a node to set per-node max volume.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\n\\ cycles looper record/play/overdub. ] clears loop.\nDrag to pan. Scroll to zoom."
+    );
     return;
   }
-  uiHint.textContent =
-    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nHold V and click a node to set per-node max volume.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\n\\ cycles looper record/play/overdub. ] clears loop.\nDrag to rotate\nArrow keys to pan\nScroll to zoom";
+  setUiHintContent(
+    "3D Mode\nShift-click to add a node. \nOption-click to remove\nZ-click a node to access its Z axis (also X or Y)\nC-click a node to add a custom ratio (4-7th dimension)\nHold I and click a node to add an interval.\nHold L and press & hold to start LFO\nHold M and click a node to center it.\nHold T to label triangles\nHold O and click a node to change playback octave.\nHold F and click a node to make it the fundamental.\nHold V and click a node to set per-node max volume.\nSpace toggles pattern play/stop. Shift+Space releases all notes.\n\\ cycles looper record/play/overdub. ] clears loop.\nDrag to rotate\nArrow keys to pan\nScroll to zoom"
+  );
 }
 
 function resetUiHintToDefault() {
@@ -19009,6 +19401,8 @@ function updateBannerMessage() {
   let nextHtml = "";
   let nextInteractive = false;
   let nextHidden = false;
+  const withExitLine = (label, action) =>
+    `${label}<br><button type="button" data-layout-banner="${action}">[exit]</button>`;
   if (nodeVolumeAdjustMode) {
     nextKey = "node-volume-adjust";
     nextHtml = 'Adjust node volumes. <button type="button" data-layout-banner="reset-volumes">reset</button>';
@@ -19023,6 +19417,10 @@ function updateBannerMessage() {
     nextKey = "layout-freeze";
     nextHtml = 'Drag, scroll, and use arrow keys to adjust view. <button type="button" data-layout-banner="freeze">Freeze</button> this view to edit.';
     nextInteractive = true;
+  } else if (layoutAxisEdit) {
+    nextKey = "layout-axis-edit";
+    nextHtml = withExitLine("Editing axis legend.", "exit-layout-axis-edit");
+    nextInteractive = true;
   } else if (
     interactionMode === "align-x" ||
     interactionMode === "align-y" ||
@@ -19035,7 +19433,23 @@ function updateBannerMessage() {
         ? "Straighten mode"
         : "X-Align mode";
     nextKey = `interaction:${interactionMode}`;
-    nextHtml = `<button type="button" data-layout-banner="exit-align">Exit</button> ${label}.`;
+    nextHtml = withExitLine(label, "exit-align");
+    nextInteractive = true;
+  } else if (
+    interactionMode === "distance-edit" ||
+    interactionMode === "microtonal-intervals" ||
+    interactionMode === "axis-x" ||
+    interactionMode === "axis-y" ||
+    interactionMode === "axis-z"
+  ) {
+    const action =
+      interactionMode === "distance-edit"
+        ? "exit-distance-edit"
+        : interactionMode === "microtonal-intervals"
+        ? "exit-microtonal"
+        : "exit-axis-mode";
+    nextKey = `interaction:${interactionMode}`;
+    nextHtml = withExitLine(INTERACTION_MODE_LABELS[interactionMode] || interactionMode, action);
     nextInteractive = true;
   } else if (interactionMode) {
     nextKey = `interaction:${interactionMode}`;
@@ -20074,6 +20488,29 @@ function lfoLoop() {
 
   voices.forEach((voice) => {
     let voiceNeedsFrame = false;
+    if (voice.morphState) {
+      const elapsedMs = nowMs - voice.morphState.startMs;
+      const progress = Math.max(0, Math.min(1, elapsedMs / Math.max(1, voice.morphState.durationMs)));
+      const nextFreq =
+        voice.morphState.fromFreq +
+        (voice.morphState.toFreq - voice.morphState.fromFreq) * progress;
+      const nextGain =
+        voice.morphState.fromGain +
+        (voice.morphState.toGain - voice.morphState.fromGain) * progress;
+      setVoiceFrequencyAtTime(voice, nextFreq, nowSec, 0.01);
+      if (voice.morphGain && voice.morphGain.gain) {
+        voice.morphGain.gain.value = Math.max(0, Math.min(1, nextGain));
+      }
+      if (progress >= 1) {
+        if (voice.morphState.stopAtEnd) {
+          stopVoice(voice, true);
+        } else {
+          voice.morphState = null;
+        }
+      } else {
+        voiceNeedsFrame = true;
+      }
+    }
     if (voice.lfoActive && voice.lfoGain) {
       voice.lfoGain.gain.value = getLfoGainValue(voice, nowMs);
       voiceNeedsFrame = true;
@@ -20107,37 +20544,48 @@ function ensureLfoLoop() {
   }
 }
 
-function readThemeColorsFromStyles(styles) {
+function readThemeColorsFromStyles(styles, prefix = "canvas") {
+  const key = (name) => `--${prefix}-${name}`;
   return {
-    edge: styles.getPropertyValue("--edge").trim() || "rgba(0, 0, 0, 0.18)",
-    nodeStroke: styles.getPropertyValue("--node-stroke").trim() || "rgba(0, 0, 0, 0.35)",
-    nodeActive: styles.getPropertyValue("--node-active").trim() || "#c94b3d",
-    textPrimary: styles.getPropertyValue("--text-primary").trim() || "#1e1e1e",
-    textSecondary: styles.getPropertyValue("--text-secondary").trim() || "#2a2a2a",
-    page: styles.getPropertyValue("--page").trim() || "#ffffff",
+    edge: styles.getPropertyValue(key("edge")).trim() || "rgba(0, 0, 0, 0.18)",
+    nodeStroke: styles.getPropertyValue(key("node-stroke")).trim() || "rgba(0, 0, 0, 0.35)",
+    nodeActive: styles.getPropertyValue(key("node-active")).trim() || "#c94b3d",
+    nodeInactive: styles.getPropertyValue(key("node-inactive")).trim() || "rgba(255, 255, 255, 0.02)",
+    nodeCustomInactive:
+      styles.getPropertyValue(key("node-custom-inactive")).trim() || "rgba(210, 210, 210, 0.2)",
+    nodeShadow: styles.getPropertyValue(key("node-shadow")).trim() || "rgba(0, 0, 0, 0.22)",
+    nodeHighlight:
+      styles.getPropertyValue(key("node-highlight")).trim() || "rgba(255, 255, 255, 0.35)",
+    hoverRingFill:
+      styles.getPropertyValue(key("hover-ring-fill")).trim() || "rgba(255, 168, 200, 0.25)",
+    hoverRingStroke:
+      styles.getPropertyValue(key("hover-ring-stroke")).trim() || "rgba(255, 168, 200, 0.6)",
+    textPrimary: styles.getPropertyValue(key("text-primary")).trim() || "#1e1e1e",
+    textSecondary: styles.getPropertyValue(key("text-secondary")).trim() || "#2a2a2a",
+    page: styles.getPropertyValue("--layout-page").trim() || "#ffffff",
     pageBorder:
-      styles.getPropertyValue("--page-border").trim() || "rgba(16, 19, 22, 0.15)",
+      styles.getPropertyValue("--layout-page-border").trim() || "rgba(16, 19, 22, 0.15)",
     pageShadow:
-      styles.getPropertyValue("--page-shadow").trim() || "rgba(16, 19, 22, 0.18)",
-    lfo: styles.getPropertyValue("--lfo").trim() || "#3b82f6",
-    playFill: styles.getPropertyValue("--play-fill").trim() || "#f3d64d",
-    looperFill: styles.getPropertyValue("--looper-fill").trim() || "#f0bf3a",
-    wheelLine: styles.getPropertyValue("--wheel-line").trim() || "rgba(16, 19, 22, 0.65)",
-    wheelRing: styles.getPropertyValue("--wheel-ring").trim() || "rgba(16, 19, 22, 0.2)",
-    wheelText: styles.getPropertyValue("--wheel-text").trim() || "#000000",
+      styles.getPropertyValue("--layout-page-shadow").trim() || "rgba(16, 19, 22, 0.18)",
+    lfo: styles.getPropertyValue(key("lfo")).trim() || "#3b82f6",
+    playFill: styles.getPropertyValue(key("play-fill")).trim() || "#f3d64d",
+    looperFill: styles.getPropertyValue(key("looper-fill")).trim() || "#f0bf3a",
+    wheelLine: styles.getPropertyValue(key("wheel-line")).trim() || "rgba(16, 19, 22, 0.65)",
+    wheelRing: styles.getPropertyValue(key("wheel-ring")).trim() || "rgba(16, 19, 22, 0.2)",
+    wheelText: styles.getPropertyValue(key("wheel-text")).trim() || "#000000",
   };
 }
 
 const rootThemeStyles = getComputedStyle(document.documentElement);
-const layoutLightThemeColors = readThemeColorsFromStyles(rootThemeStyles);
+const layoutThemeColors = readThemeColorsFromStyles(rootThemeStyles, "layout");
 
 function refreshThemeColors() {
-  if (layoutMode && document.body.classList.contains("theme-dark")) {
-    themeColors = { ...layoutLightThemeColors };
+  if (layoutMode) {
+    themeColors = { ...layoutThemeColors };
     return;
   }
   const styles = getComputedStyle(document.body);
-  themeColors = readThemeColorsFromStyles(styles);
+  themeColors = readThemeColorsFromStyles(styles, "canvas");
 }
 
 function initLayoutFonts() {
@@ -20162,7 +20610,7 @@ function initLayoutFonts() {
 }
 
 function applyTheme(theme) {
-  document.body.classList.toggle("theme-dark", theme === "dark");
+  document.body.dataset.theme = theme;
   if (themeSelect) {
     themeSelect.value = theme;
   }
@@ -20171,7 +20619,7 @@ function applyTheme(theme) {
 }
 
 function toggleTheme() {
-  const nextTheme = document.body.classList.contains("theme-dark") ? "light" : "dark";
+  const nextTheme = document.body.dataset.theme === "dark" ? "light" : "dark";
   applyTheme(nextTheme);
   localStorage.setItem("lattice-theme", nextTheme);
 }
@@ -20180,7 +20628,8 @@ function onThemeSelectChange() {
   if (!themeSelect) {
     return;
   }
-  const selected = themeSelect.value === "dark" ? "dark" : "light";
+  const availableThemes = Array.from(themeSelect.options).map((option) => option.value);
+  const selected = availableThemes.includes(themeSelect.value) ? themeSelect.value : "light";
   applyTheme(selected);
   localStorage.setItem("lattice-theme", selected);
 }
@@ -20189,7 +20638,11 @@ function initTheme() {
   const saved = localStorage.getItem("lattice-theme");
   const prefersDark =
     window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-  const theme = saved || (prefersDark ? "dark" : "light");
+  const availableThemes = themeSelect
+    ? Array.from(themeSelect.options).map((option) => option.value)
+    : ["light", "dark"];
+  const fallbackTheme = prefersDark ? "dark" : "light";
+  const theme = saved && availableThemes.includes(saved) ? saved : fallbackTheme;
   applyTheme(theme);
 }
 
@@ -22841,6 +23294,7 @@ function readPresetFromUrl() {
 
 // Snapshot Settings Apply
 function syncSnapshotSettingsControls() {
+  normalizeSnapshotMorphSettings();
   setControlChecked(snapshotDeferToggle, snapshotDeferToCycleEnd);
   setControlChecked(snapshotRestoreToggle, snapshotRestorePlayNodes);
   setControlChecked(snapshotRestoreViewToggle, snapshotRestoreView);
@@ -22850,7 +23304,13 @@ function syncSnapshotSettingsControls() {
   setControlChecked(snapshotRestoreLfosToggle, snapshotRestoreLfos);
   setControlChecked(snapshotKeyboardModeToggle, snapshotKeyboardMode);
   setControlChecked(snapshotConnectToggle, snapshotConnectCommonTones);
-  setControlDisabled(snapshotConnectToggle, !snapshotRestorePlayNodes);
+  setControlChecked(snapshotMorphToggle, snapshotMorphEnabled);
+  if (snapshotMorphTimeInput) {
+    snapshotMorphTimeInput.value = String(snapshotMorphTimeMs);
+  }
+  setControlDisabled(snapshotConnectToggle, !snapshotRestorePlayNodes || snapshotMorphEnabled);
+  setControlDisabled(snapshotMorphToggle, !snapshotRestorePlayNodes);
+  setControlDisabled(snapshotMorphTimeInput, !snapshotMorphEnabled);
   setControlChecked(snapshotRestoreLfoPhaseToggle, snapshotRestoreLfoPhase);
   setControlDisabled(snapshotRestoreLfoPhaseToggle, !snapshotRestoreLfos);
   setControlChecked(snapshotKeyboardActiveToggle, snapshotKeyboardActive);
@@ -22869,6 +23329,12 @@ function applyPresetSnapshotSettings(settings) {
   }
   if (typeof settings.connectCommonTones === "boolean") {
     snapshotConnectCommonTones = settings.connectCommonTones;
+  }
+  if (typeof settings.morphEnabled === "boolean") {
+    snapshotMorphEnabled = settings.morphEnabled;
+  }
+  if (Number.isFinite(settings.morphTimeMs)) {
+    snapshotMorphTimeMs = Math.max(1, Math.round(settings.morphTimeMs));
   }
   if (typeof settings.restoreView === "boolean") {
     snapshotRestoreView = settings.restoreView;
@@ -22894,6 +23360,7 @@ function applyPresetSnapshotSettings(settings) {
   if (typeof settings.lettersActive === "boolean") {
     snapshotKeyboardActive = settings.lettersActive;
   }
+  normalizeSnapshotMorphSettings();
   syncSnapshotSettingsControls();
   setKeyboardModeDisabled(snapshotKeyboardMode);
   updateSnapshotUi();
@@ -27052,13 +27519,29 @@ bindSingleBooleanToggle(snapshotDeferToggle, (checked) => {
 const snapshotRestoreToggle = document.getElementById("snapshot-restore-play");
 bindSingleBooleanToggle(snapshotRestoreToggle, (checked) => {
   snapshotRestorePlayNodes = checked;
-  setControlDisabled(snapshotConnectToggle, !snapshotRestorePlayNodes);
+  if (!checked) {
+    snapshotMorphEnabled = false;
+  }
+  normalizeSnapshotMorphSettings();
+  syncSnapshotSettingsControls();
 });
 const snapshotConnectToggle = document.getElementById("snapshot-connect-tones");
 bindSingleBooleanToggle(snapshotConnectToggle, (checked) => {
   snapshotConnectCommonTones = checked;
+  normalizeSnapshotMorphSettings();
+  syncSnapshotSettingsControls();
 });
-setControlDisabled(snapshotConnectToggle, !snapshotRestorePlayNodes);
+const snapshotMorphToggle = document.getElementById("snapshot-morph");
+const snapshotMorphTimeInput = document.getElementById("snapshot-morph-time");
+bindSingleBooleanToggle(snapshotMorphToggle, (checked) => {
+  snapshotMorphEnabled = checked;
+  normalizeSnapshotMorphSettings();
+  syncSnapshotSettingsControls();
+});
+bindOptionalChange(snapshotMorphTimeInput, () => {
+  snapshotMorphTimeMs = Math.max(1, Math.round(Number(snapshotMorphTimeInput.value) || 100));
+  syncSnapshotSettingsControls();
+});
 const snapshotRestoreViewToggle = document.getElementById("snapshot-restore-view");
 bindSingleBooleanToggle(snapshotRestoreViewToggle, (checked) => {
   snapshotRestoreView = checked;
@@ -28585,7 +29068,7 @@ bindOptionalDialogClose(addIntervalDialog, () => {
 });
 bindOptionalClick(presetToggle, togglePresetPanel);
 bindOptionalClick(fileToggle, toggleFilePanel);
-bindOptionalClick(uiHint, () => {
+bindOptionalClick(uiHint, (event) => {
   uiHintDismissed = true;
   showHelpEnabled = false;
   if (showHelpToggle) {
@@ -28609,6 +29092,22 @@ bindOptionalClick(bannerMessage, (event) => {
   }
   if (layoutAction === "exit-align") {
     setLayoutAlignMode("");
+    return;
+  }
+  if (layoutAction === "exit-distance-edit") {
+    exitTemporaryInteraction("distance-edit");
+    return;
+  }
+  if (layoutAction === "exit-microtonal") {
+    exitTemporaryInteraction("microtonal-intervals");
+    return;
+  }
+  if (layoutAction === "exit-axis-mode") {
+    exitTemporaryInteraction("axis-mode");
+    return;
+  }
+  if (layoutAction === "exit-layout-axis-edit") {
+    exitTemporaryInteraction("layout-axis-edit");
     return;
   }
   if (layoutAction === "reset-volumes") {

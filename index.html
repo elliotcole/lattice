@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
+      if (/\/docs$/.test(window.location.pathname)) {
+        window.location.replace(
+          `${window.location.pathname}/${window.location.search}${window.location.hash}`,
+        );
+      }
       if (/\/tuner$/.test(window.location.pathname)) {
         window.location.replace(
           `${window.location.pathname}/${window.location.search}${window.location.hash}`,
@@ -127,6 +132,9 @@
                   <select id="theme-select">
                     <option value="light">Light Mode</option>
                     <option value="dark">Dark Mode</option>
+                    <option value="sepia">Sepia Mode</option>
+                    <option value="solarized-light">Solarized Light</option>
+                    <option value="solarized-dark">Solarized Dark</option>
                   </select>
                 </div>
                 <div class="control-group control-group-inline">
@@ -807,6 +815,23 @@
             <input id="snapshot-connect-tones" type="checkbox" />
             Connect common tones
           </label>
+          <div class="snapshot-morph-row">
+            <label class="snapshot-toggle">
+              <input id="snapshot-morph" type="checkbox" />
+              Morph
+            </label>
+            <label class="snapshot-morph-time" for="snapshot-morph-time">
+              <span>ms</span>
+              <input
+                id="snapshot-morph-time"
+                type="number"
+                min="1"
+                max="5000"
+                step="1"
+                value="100"
+              />
+            </label>
+          </div>
           <label class="snapshot-toggle">
             <input id="snapshot-restore-view" type="checkbox" checked />
             Restore view

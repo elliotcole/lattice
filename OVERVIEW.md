@@ -2,6 +2,7 @@
 
 Tuning Lattice is an interactive tool for exploring just‑intonation lattices, interval relationships, and microtonal structures. It combines a visual lattice editor with a synth engine, MIDI input and retuned MIDI output, snapshot system, and export tools so you can analyze, audition, and publish tunings and interval networks quickly.
 
+
 ## What it can do (at a glance)
 
 ### Visual lattice & navigation

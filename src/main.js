@@ -13070,10 +13070,9 @@ function draw() {
         labelWeight,
         maxHeight
       );
-      const ratioYOffset = Math.round(layout.size * -0.09);
       ctx.font = `${labelWeight} ${layout.size}px ${labelFont}`;
       if (layout.lines.length === 1) {
-        ctx.fillText(layout.lines[0], pos.x, pos.y + ratioYOffset);
+        ctx.fillText(layout.lines[0], pos.x, pos.y);
       } else {
         const positions = computeStackedRatioPositionsFromLine(
           layout.lines,

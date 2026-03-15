@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Menu Bar Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@200;300;400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 40px 0;
+    background: #f0f1f3;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 13px;
+    color: #101316;
+  }
+
+  .demo-label {
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: rgba(16,19,22,0.45);
+    padding: 0 24px 8px;
+    margin-top: 32px;
+  }
+  .demo-label:first-child { margin-top: 0; }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 10px 20px;
+    background: #f3f4f6;
+    border-top: 1px solid rgba(16,19,22,0.09);
+    border-bottom: 1px solid rgba(16,19,22,0.09);
+  }
+
+  /* ─── SHARED RESET ─── */
+  .bar button {
+    appearance: none;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+
+  /* ────────────────────────────────────────
+     CURRENT (baseline)
+  ──────────────────────────────────────── */
+  .bar-current {
+    gap: 8px;
+  }
+  .bar-current .fund-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 12px;
+  }
+  .bar-current .fund-group label {
+    font-size: 12px;
+    color: rgba(16,19,22,0.65);
+  }
+  .bar-current .fund-group select,
+  .bar-current .fund-group input {
+    font-family: inherit;
+    font-size: 14px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(16,19,22,0.15);
+    background: #fff;
+    color: #101316;
+  }
+  .bar-current .fund-group input { width: 90px; }
+  .bar-current .sep {
+    width: 1px;
+    height: 28px;
+    background: rgba(16,19,22,0.15);
+    margin: 0 8px;
+  }
+  .bar-current button.pill {
+    padding: 10px 16px;
+    border-radius: 999px;
+    font-size: 14px;
+    background: #245a8d;
+    color: #fff;
+    border: 1px solid transparent;
+    transition: background 0.15s;
+  }
+  .bar-current button.pill:hover { background: #1d4e7a; }
+  .bar-current button.pill.ghost {
+    background: transparent;
+    border-color: rgba(16,19,22,0.2);
+    color: #101316;
+  }
+  .bar-current button.pill.ghost:hover { border-color: #245a8d; color: #245a8d; }
+  .bar-current button.pill.active {
+    background: #f3d64d;
+    color: #1a1a1a;
+    border-color: transparent;
+  }
+
+  /* ────────────────────────────────────────
+     DIRECTION A: Compact + Clear Hierarchy
+  ──────────────────────────────────────── */
+  .bar-a {
+    gap: 4px;
+  }
+  .bar-a .fund-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-right: 10px;
+  }
+  .bar-a .fund-group label {
+    font-size: 11px;
+    color: rgba(16,19,22,0.55);
+    letter-spacing: 0.1px;
+  }
+  .bar-a .fund-group select,
+  .bar-a .fund-group input {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 5px 8px;
+    border-radius: 7px;
+    border: 1px solid rgba(16,19,22,0.14);
+    background: #fff;
+    color: #101316;
+  }
+  .bar-a .fund-group input { width: 82px; }
+  .bar-a .fund-group .tiny {
+    padding: 3px 7px;
+    border-radius: 5px;
+    font-size: 10px;
+    background: rgba(16,19,22,0.07);
+    color: rgba(16,19,22,0.7);
+    border: 1px solid rgba(16,19,22,0.1);
+  }
+  /* Menu group — ghost, grouped */
+  .bar-a .menu-group {
+    display: flex;
+    align-items: center;
+    background: rgba(255,255,255,0.7);
+    border: 1px solid rgba(16,19,22,0.12);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-right: 6px;
+  }
+  .bar-a .menu-group button {
+    padding: 5px 13px;
+    font-size: 12px;
+    color: rgba(16,19,22,0.75);
+    border-right: 1px solid rgba(16,19,22,0.1);
+    border-radius: 0;
+    transition: background 0.12s, color 0.12s;
+  }
+  .bar-a .menu-group button:last-child { border-right: none; }
+  .bar-a .menu-group button:hover { background: rgba(16,19,22,0.06); color: #101316; }
+
+  .bar-a .sep {
+    width: 1px;
+    height: 22px;
+    background: rgba(16,19,22,0.12);
+    margin: 0 6px;
+  }
+  /* Action buttons — compact pills */
+  .bar-a button.action {
+    padding: 5px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    background: transparent;
+    color: rgba(16,19,22,0.7);
+    border: 1px solid rgba(16,19,22,0.15);
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .bar-a button.action:hover { background: rgba(16,19,22,0.06); color: #101316; border-color: rgba(16,19,22,0.25); }
+  .bar-a button.action.reset { color: rgba(16,19,22,0.45); border-color: rgba(16,19,22,0.1); }
+  .bar-a button.action.reset:hover { color: rgba(16,19,22,0.7); border-color: rgba(16,19,22,0.2); }
+  .bar-a button.sound-on {
+    padding: 5px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #245a8d;
+    color: #fff;
+    border: 1px solid transparent;
+    transition: background 0.12s;
+  }
+  .bar-a button.sound-on:hover { background: #1d4e7a; }
+
+  /* ────────────────────────────────────────
+     DIRECTION B: Minimal text nav
+  ──────────────────────────────────────── */
+  .bar-b {
+    gap: 0;
+    padding: 8px 20px;
+  }
+  .bar-b .fund-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-right: 16px;
+    padding-right: 16px;
+    border-right: 1px solid rgba(16,19,22,0.1);
+  }
+  .bar-b .fund-group label {
+    font-size: 11px;
+    color: rgba(16,19,22,0.5);
+  }
+  .bar-b .fund-group select,
+  .bar-b .fund-group input {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(16,19,22,0.12);
+    background: rgba(255,255,255,0.8);
+    color: #101316;
+  }
+  .bar-b .fund-group input { width: 80px; }
+  .bar-b .fund-group .tiny {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    background: transparent;
+    color: rgba(16,19,22,0.5);
+    border: 1px solid rgba(16,19,22,0.12);
+  }
+  /* Text nav buttons */
+  .bar-b button.nav-item {
+    padding: 6px 11px;
+    font-size: 12px;
+    color: rgba(16,19,22,0.6);
+    border-radius: 5px;
+    transition: background 0.1s, color 0.1s;
+  }
+  .bar-b button.nav-item:hover { background: rgba(16,19,22,0.06); color: #101316; }
+  .bar-b .nav-sep {
+    width: 1px;
+    height: 20px;
+    background: rgba(16,19,22,0.1);
+    margin: 0 8px;
+    flex-shrink: 0;
+  }
+  .bar-b button.tool-item {
+    padding: 5px 12px;
+    font-size: 12px;
+    color: rgba(16,19,22,0.65);
+    border: 1px solid rgba(16,19,22,0.14);
+    border-radius: 6px;
+    margin-left: 4px;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+  }
+  .bar-b button.tool-item:hover { background: rgba(255,255,255,0.9); color: #101316; border-color: rgba(16,19,22,0.22); }
+  .bar-b button.reset-item {
+    padding: 5px 10px;
+    font-size: 11px;
+    color: rgba(16,19,22,0.4);
+    margin-left: 4px;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    transition: color 0.1s;
+  }
+  .bar-b button.reset-item:hover { color: rgba(16,19,22,0.7); background: rgba(16,19,22,0.05); }
+  .bar-b button.sound-btn {
+    padding: 5px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #245a8d;
+    color: #fff;
+    border-radius: 6px;
+    margin-left: 4px;
+    transition: background 0.1s;
+  }
+  .bar-b button.sound-btn:hover { background: #1d4e7a; }
+
+  /* ────────────────────────────────────────
+     DIRECTION C: Toolbar with icon hints
+  ──────────────────────────────────────── */
+  .bar-c {
+    gap: 2px;
+    padding: 7px 20px;
+    background: #ecedf0;
+    border-top: 1px solid rgba(16,19,22,0.12);
+    border-bottom: 1px solid rgba(16,19,22,0.12);
+  }
+  .bar-c .fund-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-right: 10px;
+    padding-right: 12px;
+    border-right: 1px solid rgba(16,19,22,0.12);
+  }
+  .bar-c .fund-group label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: rgba(16,19,22,0.45);
+  }
+  .bar-c .fund-group select,
+  .bar-c .fund-group input {
+    font-family: inherit;
+    font-size: 12px;
+    padding: 3px 7px;
+    border-radius: 5px;
+    border: 1px solid rgba(16,19,22,0.14);
+    background: #fff;
+    color: #101316;
+  }
+  .bar-c .fund-group input { width: 80px; }
+  .bar-c .fund-group .tiny {
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-size: 9px;
+    background: #fff;
+    color: rgba(16,19,22,0.55);
+    border: 1px solid rgba(16,19,22,0.12);
+  }
+  .bar-c button.menu-btn {
+    padding: 4px 11px;
+    font-size: 12px;
+    color: rgba(16,19,22,0.65);
+    border-radius: 5px;
+    border: 1px solid transparent;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+  }
+  .bar-c button.menu-btn::after { content: ' ▾'; font-size: 9px; opacity: 0.6; }
+  .bar-c button.menu-btn:hover { background: rgba(255,255,255,0.75); border-color: rgba(16,19,22,0.12); color: #101316; }
+  .bar-c .toolbar-sep {
+    width: 1px;
+    height: 20px;
+    background: rgba(16,19,22,0.12);
+    margin: 0 8px;
+    flex-shrink: 0;
+  }
+  .bar-c button.tool-btn {
+    padding: 4px 11px;
+    font-size: 12px;
+    color: rgba(16,19,22,0.7);
+    border-radius: 5px;
+    border: 1px solid rgba(16,19,22,0.14);
+    background: rgba(255,255,255,0.6);
+    margin-left: 2px;
+    transition: background 0.1s, color 0.1s;
+  }
+  .bar-c button.tool-btn:hover { background: #fff; color: #101316; }
+  .bar-c button.reset-btn {
+    padding: 4px 10px;
+    font-size: 11px;
+    color: rgba(16,19,22,0.38);
+    border-radius: 5px;
+    border: 1px solid transparent;
+    margin-left: 2px;
+    transition: color 0.1s;
+  }
+  .bar-c button.reset-btn:hover { color: rgba(16,19,22,0.65); background: rgba(255,255,255,0.5); }
+  .bar-c button.sound-active {
+    padding: 4px 13px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #2a6496;
+    color: #fff;
+    border-radius: 5px;
+    margin-left: 2px;
+    transition: background 0.1s;
+  }
+  .bar-c button.sound-active:hover { background: #245a8d; }
+</style>
+</head>
+<body>
+
+<div class="demo-label">Current (baseline)</div>
+<div class="bar bar-current">
+  <div class="fund-group">
+    <label>Fundamental:</label>
+    <select><option>C4 (261.63 Hz)</option></select>
+    <input type="number" value="261.63" />
+    <span style="font-size:11px;color:rgba(16,19,22,0.5)">Hz</span>
+    <button class="pill ghost" style="padding:5px 9px;font-size:11px;border-radius:8px">/2</button>
+    <button class="pill ghost" style="padding:5px 9px;font-size:11px;border-radius:8px">×2</button>
+  </div>
+  <div class="fund-group" style="gap:5px">
+    <span style="font-size:11px;color:rgba(16,19,22,0.6)">Factors:</span>
+    <span style="font-size:11px;color:rgba(16,19,22,0.5)">X</span>
+    <select style="width:55px"><option>3</option></select>
+    <span style="font-size:11px;color:rgba(16,19,22,0.5)">Y</span>
+    <select style="width:55px"><option>5</option></select>
+    <span style="font-size:11px;color:rgba(16,19,22,0.5)">Z</span>
+    <select style="width:55px"><option>7</option></select>
+  </div>
+  <div class="sep"></div>
+  <button class="pill">File</button>
+  <button class="pill">Presets</button>
+  <button class="pill">Calculate</button>
+  <button class="pill">Options</button>
+  <button class="pill ghost">Reset</button>
+  <button class="pill active">Sound On</button>
+  <button class="pill">Overtones</button>
+  <button class="pill">Tuner</button>
+</div>
+
+
+<div class="demo-label">Direction A — Compact + Clear hierarchy</div>
+<div class="bar bar-a">
+  <div class="fund-group">
+    <label>Fundamental:</label>
+    <select><option>C4 (261.63 Hz)</option></select>
+    <input type="number" value="261.63" />
+    <span style="font-size:10px;color:rgba(16,19,22,0.45)">Hz</span>
+    <button class="tiny">/2</button>
+    <button class="tiny">×2</button>
+  </div>
+  <div class="fund-group" style="gap:4px;margin-right:10px">
+    <span style="font-size:10px;color:rgba(16,19,22,0.5)">Factors:</span>
+    <span style="font-size:10px;color:rgba(16,19,22,0.5)">X</span>
+    <select style="width:52px;padding:5px 6px;border-radius:6px;font-size:12px;border:1px solid rgba(16,19,22,0.13);background:#fff"><option>3</option></select>
+    <span style="font-size:10px;color:rgba(16,19,22,0.5)">Y</span>
+    <select style="width:52px;padding:5px 6px;border-radius:6px;font-size:12px;border:1px solid rgba(16,19,22,0.13);background:#fff"><option>5</option></select>
+    <span style="font-size:10px;color:rgba(16,19,22,0.5)">Z</span>
+    <select style="width:52px;padding:5px 6px;border-radius:6px;font-size:12px;border:1px solid rgba(16,19,22,0.13);background:#fff"><option>7</option></select>
+  </div>
+  <div class="sep"></div>
+  <div class="menu-group">
+    <button>File</button>
+    <button>Presets</button>
+    <button>Calculate</button>
+    <button>Options</button>
+  </div>
+  <button class="action reset">Reset</button>
+  <div class="sep"></div>
+  <button class="sound-on">Sound On</button>
+  <button class="action">Overtones</button>
+  <button class="action">Tuner</button>
+</div>
+
+
+<div class="demo-label">Direction B — Minimal text nav</div>
+<div class="bar bar-b">
+  <div class="fund-group">
+    <label>Fundamental:</label>
+    <select><option>C4 (261.63 Hz)</option></select>
+    <input type="number" value="261.63" />
+    <span style="font-size:10px;color:rgba(16,19,22,0.4)">Hz</span>
+    <button class="tiny">/2</button>
+    <button class="tiny">×2</button>
+  </div>
+  <button class="nav-item">File</button>
+  <button class="nav-item">Presets</button>
+  <button class="nav-item">Calculate</button>
+  <button class="nav-item">Options</button>
+  <div class="nav-sep"></div>
+  <button class="reset-item">Reset</button>
+  <div class="nav-sep"></div>
+  <button class="sound-btn">Sound On</button>
+  <button class="tool-item">Overtones</button>
+  <button class="tool-item">Tuner</button>
+</div>
+
+
+<div class="demo-label">Direction C — Traditional toolbar</div>
+<div class="bar bar-c">
+  <div class="fund-group">
+    <label>Fundamental</label>
+    <select><option>C4 (261.63 Hz)</option></select>
+    <input type="number" value="261.63" />
+    <span style="font-size:9px;color:rgba(16,19,22,0.4)">Hz</span>
+    <button class="tiny">/2</button>
+    <button class="tiny">×2</button>
+  </div>
+  <button class="menu-btn">File</button>
+  <button class="menu-btn">Presets</button>
+  <button class="menu-btn">Calculate</button>
+  <button class="menu-btn">Options</button>
+  <div class="toolbar-sep"></div>
+  <button class="reset-btn">Reset</button>
+  <button class="tool-btn">Overtones</button>
+  <button class="tool-btn">Tuner</button>
+  <div class="toolbar-sep"></div>
+  <button class="sound-active">◼ Sound On</button>
+</div>
+
+<div style="padding: 40px 24px 16px; font-size: 12px; color: rgba(16,19,22,0.45); max-width: 700px; line-height: 1.6;">
+  <strong style="color:rgba(16,19,22,0.65)">Notes:</strong><br>
+  • <strong>A</strong> keeps the pill aesthetic but is much lighter — grouped menu buttons + compact sizing gives clear hierarchy.<br>
+  • <strong>B</strong> goes minimal — menu items read like navigation text, tools are secondary bordered buttons, Sound is the one solid action.<br>
+  • <strong>C</strong> is traditional toolbar — dropdown caret hints are added, Sound is right-aligned as the primary toggle.<br>
+  All three reduce button height by ~30% and introduce visual grouping that the current design lacks.
+</div>
+
+</body>
+</html>

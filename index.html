@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
+      if (/\/docs$/.test(window.location.pathname)) {
+        window.location.replace(
+          `${window.location.pathname}/${window.location.search}${window.location.hash}`,
+        );
+      }
       if (/\/tuner$/.test(window.location.pathname)) {
         window.location.replace(
           `${window.location.pathname}/${window.location.search}${window.location.hash}`,
@@ -23,10 +28,10 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/main-DRPBOjxf.js"></script>
+    <script type="module" crossorigin src="./assets/main-iYj9psML.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-B5Qt9EMX.js">
     <link rel="modulepreload" crossorigin href="./assets/interval-names-DvPInInK.js">
-    <link rel="stylesheet" crossorigin href="./assets/style-DqPqx-MH.css">
+    <link rel="stylesheet" crossorigin href="./assets/style-DaBIqsNh.css">
   </head>
   <body>
     <canvas id="lattice" tabindex="0" aria-label="Tuning lattice"></canvas>
@@ -130,6 +135,9 @@
                   <select id="theme-select">
                     <option value="light">Light Mode</option>
                     <option value="dark">Dark Mode</option>
+                    <option value="sepia">Sepia Mode</option>
+                    <option value="solarized-light">Solarized Light</option>
+                    <option value="solarized-dark">Solarized Dark</option>
                   </select>
                 </div>
                 <div class="control-group control-group-inline">
@@ -205,6 +213,7 @@
         <div class="help-toggle help-toggle-right">
           <input id="show-help" type="checkbox" checked />
           <label for="show-help">Show help</label>
+          <a class="help-toggle-link" href="/docs/" target="_blank" rel="noreferrer">Read Docs</a>
         </div>
       </div>
     </main>
@@ -789,8 +798,8 @@
         <div id="keyboard-help" class="keyboard-help" aria-live="polite"></div>
       </div>
       <div class="synth-group snapshot-group">
+        <div class="snapshot-area-label">Snapshots</div>
         <div class="snapshot-header">
-          <span>Snapshots</span>
           <button id="snapshot-options-toggle" type="button" aria-expanded="false" aria-controls="snapshot-options">Options</button>
           <button id="snapshot-export" type="button">Export</button>
           <button id="snapshot-import" type="button">Import</button>
@@ -810,6 +819,23 @@
             <input id="snapshot-connect-tones" type="checkbox" />
             Connect common tones
           </label>
+          <div class="snapshot-morph-row">
+            <label class="snapshot-toggle">
+              <input id="snapshot-morph" type="checkbox" />
+              Morph
+            </label>
+            <label class="snapshot-morph-time" for="snapshot-morph-time">
+              <span>ms</span>
+              <input
+                id="snapshot-morph-time"
+                type="number"
+                min="1"
+                max="5000"
+                step="1"
+                value="100"
+              />
+            </label>
+          </div>
           <label class="snapshot-toggle">
             <input id="snapshot-restore-view" type="checkbox" checked />
             Restore view

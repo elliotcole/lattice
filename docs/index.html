@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tuning Lattice Docs</title>
+    <meta
+      name="description"
+      content="Introduction and workflow guide for Tuning Lattice."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&family=Noto+Serif:wght@400..700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" crossorigin href="../assets/docs-BpPJspR1.css">
+  </head>
+  <body>
+    <div class="docs-page">
+      <header class="docs-hero">
+        <p class="docs-kicker">Documentation</p>
+        <h1>Tuning Lattice</h1>
+        <p class="docs-creator">Created by Elliot Cole</p>
+        <p class="docs-intro">
+          A visual and playable environment for working with just intonation:
+          tuning design, interval calculation, performance, practice, and page
+          layout in one instrument.
+        </p>
+      </header>
+
+      <main class="docs-shell">
+        <aside class="docs-sidebar" aria-label="Section navigation">
+          <div class="docs-sidebar-inner">
+            <p class="docs-sidebar-label">Contents</p>
+            <nav>
+              <a href="#what-it-is">What It Is</a>
+              <a href="#first-session">A Simple First Session</a>
+              <a href="#ways-to-use-it">Ways To Use It</a>
+              <a href="#tuning-designer">As a Tuning Designer</a>
+              <a href="#calculator">As a JI Calculator</a>
+              <a href="#instrument">As an Instrument</a>
+              <a href="#composition">As a Composition Aid</a>
+              <a href="#practice">As a Practice Aid</a>
+              <a href="#layout">As a Page Layout Tool</a>
+              <a href="#scale-workshop">For Scale Workshop</a>
+            </nav>
+          </div>
+        </aside>
+
+        <article class="docs-article">
+          <section class="docs-section">
+            <h2 id="what-it-is">What It Is</h2>
+            <p>
+              Tuning Lattice is a visual and playable environment for working
+              with just intonation. It lets you build tuning systems as ratio
+              networks, hear them immediately, save playable scenes, and turn
+              them into finished diagrams or exported tuning data.
+            </p>
+            <p>
+              The lattice diagram itself has a long history. Variants appear in
+              Euler&apos;s <em>tonnetz</em> and in later just intonation work by
+              composers and theorists including Harry Partch, Ben Johnston,
+              James Tenney, La Monte Young, Terry Riley, Michael Harrison, and
+              Erv Wilson. Tuning Lattice extends that paper-and-pencil tradition
+              into an interactive tool: you can design lattices in 2D or 3D,
+              assign prime factors to axes, work beyond three dimensions with
+              custom nodes, and move fluidly between analysis, performance, and
+              layout.
+            </p>
+            <p>
+              At its core, the app treats every node as a frequency ratio
+              relative to a fundamental. From there, the same structure can be
+              used as a tuning designer, a calculator, an instrument, a
+              composition aid, a practice tool, and a diagram tool.
+            </p>
+          </section>
+
+          <section class="docs-section">
+            <h2 id="first-session">A Simple First Session</h2>
+            <p>
+              If you are new to the lattice, this is the fastest way to
+              understand the app&apos;s main ideas.
+            </p>
+            <ol>
+              <li>Set the fundamental.</li>
+              <li>Choose simple axis factors such as 3, 5, and 7.</li>
+              <li>
+                Shift-click to add a few nearby nodes around the center. Use
+                <code>Z</code>-click if you want to enter the Z axis.
+              </li>
+              <li>Click nodes to hear the intervals.</li>
+              <li>Press <code>Option-1</code> to save the state as a snapshot.</li>
+              <li>Change the lattice and the playing nodes.</li>
+              <li>Press <code>Option-2</code> to save a second snapshot.</li>
+              <li>Press <code>1</code> and <code>2</code> to switch between them.</li>
+              <li>Open the Tuner from the top menu.</li>
+              <li>Switch to Layout mode and make a clean diagram.</li>
+            </ol>
+            <p>
+              That sequence covers the central idea: one lattice can function as
+              a theory model, a playable instrument, a rehearsal aid, and a
+              finished document.
+            </p>
+          </section>
+
+          <section class="docs-section">
+            <h2 id="ways-to-use-it">Ways To Use It</h2>
+          </section>
+
+          <section class="docs-section">
+            <h3 id="tuning-designer">As a Tuning Designer</h3>
+            <p>
+              Use the lattice as a visual design surface for building and
+              evaluating ratio spaces around a chosen fundamental.
+            </p>
+            <ol>
+              <li>Set the fundamental at the top of the app.</li>
+              <li>Choose prime-based factors for the X, Y, and Z axes.</li>
+              <li>
+                Start from the center node and Shift-click nearby ratios to grow
+                the lattice. Use <code>Option</code>/<code>Alt</code>-click to
+                remove ratios.
+              </li>
+              <li>Click nodes to toggle sound on and off.</li>
+              <li>
+                Use the displayed ratio, Hz, and cents readouts to evaluate the
+                structure.
+              </li>
+              <li>Hold <code>Z</code> and click a node to add notes on its Z axis.</li>
+              <li>
+                Save the work with <code>File &gt; Save Lattice</code>, or copy
+                the URL if you want a shareable encoded state.
+              </li>
+            </ol>
+
+            <h4>To go beyond 3 dimensions</h4>
+            <p>
+              Use Custom Nodes: hold <code>C</code> and click a node to add a
+              custom node based on any ratio. Custom nodes appear as diamonds to
+              show they are off the X-Y-Z grid.
+            </p>
+
+            <h4>If you already have a list of ratios relative to 1:1</h4>
+            <p>
+              Use <code>Calculate &gt; Find Ratios</code> to build a lattice from
+              that ratio set.
+            </p>
+
+            <h4>If you already have a list of intervals</h4>
+            <p>
+              Use <code>Calculate &gt; Build from Intervals</code> to generate the
+              lattice from interval input instead of placing nodes manually.
+            </p>
+          </section>
+
+          <section class="docs-section">
+            <h3 id="calculator">As a Just Intonation Calculator</h3>
+            <p>
+              Tuning Lattice can also function as a calculator for ratios,
+              frequencies, cents, and interval relationships.
+            </p>
+
+            <h4>Useful tools</h4>
+            <ul>
+              <li>Hz, ratio, and cents readouts on nodes.</li>
+              <li>Interval finding and ratio search in the Calculate menu.</li>
+              <li>Interval Overlay for relationship labels.</li>
+              <li>Distance lines for comparison, labeling, and annotation.</li>
+            </ul>
+
+            <h4>To inspect frequencies and cents</h4>
+            <ol>
+              <li>Set the fundamental and A4 reference if needed.</li>
+              <li>
+                Turn on the readouts you want in Options, such as Hz, cents, or
+                cents deviation.
+              </li>
+              <li>Build the nodes you want to compare.</li>
+              <li>Read each node directly in the lattice.</li>
+            </ol>
+
+            <h4>To inspect interval names between nodes</h4>
+            <ol>
+              <li>Turn on Interval Overlay in the View panel.</li>
+              <li>Hover over nodes to see interval labels.</li>
+            </ol>
+
+            <h4>To calculate the interval between two nodes</h4>
+            <ol>
+              <li>Turn on Distances in the View panel and click Edit.</li>
+              <li>Click and drag between nodes to create distance lines.</li>
+              <li>Double-click labels to customize their text.</li>
+              <li>
+                Use <code>Option</code>/<code>Alt</code>-click on a distance line
+                to remove it.
+              </li>
+            </ol>
+
+            <h4>To find a new node as an interval from an existing node</h4>
+            <ol>
+              <li>
+                Hold <code>I</code> and click a node, or select
+                <code>Calculate &gt; Find Interval</code>.
+              </li>
+              <li>Choose an interval from the list, or enter a new ratio.</li>
+            </ol>
+
+            <h4>To visualize overtone interactions</h4>
+            <ol>
+              <li>Click Overtones to enter the Overtone Tool.</li>
+              <li>
+                Edit the ratios in the Input Notes box. Use line breaks to
+                separate ratios into chords.
+              </li>
+              <li>
+                Show or hide overtones, combination tones, and columns showing
+                alignments and roughness.
+              </li>
+              <li>Click nodes to hear them.</li>
+              <li>Switch to Print mode to create print-ready diagrams.</li>
+            </ol>
+          </section>
+
+          <section class="docs-section">
+            <h3 id="instrument">As an Instrument</h3>
+            <p>
+              Tuning Lattice is also a playable instrument, with a built-in
+              synth, keyboard mappings, MIDI input, pattern playback, one-button
+              looping, LFOs, snapshots, and retuned MIDI out.
+            </p>
+
+            <h4>Main ways to play it</h4>
+            <ul>
+              <li>Click nodes directly in the lattice.</li>
+              <li>Use QWERTY keyboard mappings.</li>
+              <li>Play from a MIDI controller.</li>
+              <li>Build repeating playback patterns.</li>
+              <li>Loop your own performance.</li>
+              <li>Send retuned MIDI out to an external synth or MPE device.</li>
+              <li>Use snapshots to sequence harmonic states.</li>
+            </ul>
+
+            <h4>Simple playback</h4>
+            <ol>
+              <li>Click nodes to turn them on or off.</li>
+              <li><code>V</code>-click a node to adjust its individual volume.</li>
+              <li>Adjust waveform and envelope in the Synth menu.</li>
+              <li>Press <code>Shift-Space</code> to turn all notes off.</li>
+            </ol>
+
+            <h4>To play from the computer keyboard</h4>
+            <ol>
+              <li>Choose a keyboard mode.</li>
+              <li>
+                Use Piano Keyboard if you want a piano-like two-octave layout.
+              </li>
+              <li>
+                Use Custom Piano Map if you want to assign combinations of nodes
+                to specific keys.
+              </li>
+              <li>
+                Use Isomorphic if you want the keyboard to approximate the shape
+                of the current view.
+              </li>
+              <li>
+                Use Isomorphic (Fuzzy) if you want nearby-key tolerance instead
+                of exact key targeting.
+              </li>
+            </ol>
+
+            <h4>To play from MIDI input</h4>
+            <ol>
+              <li>Enable MIDI input.</li>
+              <li>Select your MIDI device and channel.</li>
+              <li>Play from your controller.</li>
+            </ol>
+
+            <h4>To use pattern playback</h4>
+            <ol>
+              <li>
+                Open the Play menu to choose a pattern, rhythm, tempo, and
+                sustain or gate settings.
+              </li>
+              <li>Choose the sequence, rhythm, and octave behavior.</li>
+              <li>Press Build and then Play to begin.</li>
+              <li>Use the space bar to start and stop the pattern.</li>
+              <li>
+                Change the lattice or the view while it runs if you want the
+                pattern to update live.
+              </li>
+            </ol>
+
+            <h4>To use the built-in LFO</h4>
+            <ol>
+              <li>Hold <code>L</code> and click-hold on a node to start an LFO.</li>
+              <li>
+                The time between mouse press and release becomes the LFO
+                duration.
+              </li>
+              <li>Adjust rate and depth in the Synth menu.</li>
+            </ol>
+
+            <h4>To use the looper</h4>
+            <p>
+              The looper is controlled from the backslash key
+              (<code>\</code>).
+            </p>
+            <ol>
+              <li>Press once to arm recording.</li>
+              <li>Recording begins when you play a note.</li>
+              <li>Press again to enter Play mode and loop the recording.</li>
+              <li>Press a third time to enter Overdub mode.</li>
+              <li>Continue pressing to alternate between Play and Overdub.</li>
+              <li>Press <code>[</code> to clear the loop.</li>
+            </ol>
+
+            <h4>To use MIDI out</h4>
+            <ol>
+              <li>Enable MIDI Out.</li>
+              <li>Select the output device.</li>
+              <li>
+                Route the output to an instrument that supports per-note pitch
+                bend retuning.
+              </li>
+              <li>
+                Match the pitch-bend range in Tuning Lattice and on the target
+                instrument.
+              </li>
+              <li>
+                Play from the lattice and listen on the external synth instead
+                of, or alongside, the internal engine.
+              </li>
+            </ol>
+          </section>
+
+          <section class="docs-section">
+            <h3 id="composition">As a Composition Aid</h3>
+            <p>
+              The snapshot system makes Tuning Lattice useful as a compositional
+              sketchbook and a live scene manager.
+            </p>
+
+            <h4>What snapshots are good for</h4>
+            <ul>
+              <li>Saving chord regions or drone states.</li>
+              <li>Recalling different pattern setups.</li>
+              <li>Capturing playable states for performance.</li>
+            </ul>
+
+            <h4>To build a snapshot-based scene set</h4>
+            <ol>
+              <li>
+                Create a lattice state you want to keep. It can include playing
+                nodes, LFOs, patterns, and loops.
+              </li>
+              <li>
+                Hold <code>Option</code>/<code>Alt</code> and press a number key
+                to save that state in a slot.
+              </li>
+              <li>Press the number key to recall it.</li>
+              <li>Repeat for alternate harmonies, tunings, or playback states.</li>
+            </ol>
+
+            <h4>To use snapshots during playback</h4>
+            <ol>
+              <li>Prepare several snapshots in advance.</li>
+              <li>
+                Use Snapshot Options to choose what should be recalled: play
+                state, view, synth settings, sequence state, keyboard mode, and
+                LFO behavior.
+              </li>
+              <li>
+                Decide whether recalls should happen immediately or at cycle end
+                for pattern playback.
+              </li>
+              <li>
+                Enable Morph if you want connected sustained notes to bend
+                between snapshot states.
+              </li>
+              <li>
+                Recall snapshots by clicking the slots or using the number-key
+                shortcuts.
+              </li>
+            </ol>
+
+            <h4>A practical compositional use</h4>
+            <ol>
+              <li>Build one lattice for an entire section or piece.</li>
+              <li>Save contrasting harmonic regions as snapshots.</li>
+              <li>
+                Give each snapshot its own held notes, playback pattern, or LFO
+                state.
+              </li>
+              <li>
+                Explore movement between them to design harmonic progressions.
+              </li>
+            </ol>
+          </section>
+
+          <section class="docs-section">
+            <h3 id="practice">As a Practice Aid</h3>
+            <p>
+              Tuning Lattice can act as a reference instrument for rehearsal,
+              ear training, and intonation work, and the Tuner can function as a
+              live pitch-detection visualizer while you sing or play.
+            </p>
+
+            <h4>Useful practice scenarios</h4>
+            <ul>
+              <li>Holding a drone while you sing or play against it.</li>
+              <li>Checking the exact frequency of a target pitch.</li>
+              <li>Comparing nearby just intervals.</li>
+              <li>Using the tuner while practicing intonation.</li>
+            </ul>
+
+            <h4>To create a drone for practice</h4>
+            <ol>
+              <li>Turn on audio.</li>
+              <li>Toggle on one or more stable reference notes.</li>
+              <li>Shape the synth so the sound is steady and unobtrusive.</li>
+              <li>
+                Practice against the drone while adjusting the fundamental or
+                active harmony as needed.
+              </li>
+            </ol>
+
+            <h4>To use the Tuner alongside the lattice</h4>
+            <ol>
+              <li>Open the Tuner.</li>
+              <li>Activate the microphone and adjust input level.</li>
+              <li>Adjust the ratios and labels as desired.</li>
+              <li>
+                Click and drag on the graph to adjust range bounds, and scroll
+                to zoom the range.
+              </li>
+              <li>Sing or play your instrument and watch the meter.</li>
+              <li>
+                Hold a reference in Tuning Lattice if needed. Use headphones so
+                the lattice audio does not interfere with pitch detection.
+              </li>
+            </ol>
+          </section>
+
+          <section class="docs-section">
+            <h3 id="layout">As a Page Layout Tool</h3>
+            <p>
+              Layout mode turns the lattice into a finished diagram for scores,
+              teaching materials, and export.
+            </p>
+
+            <h4>What layout mode lets you control</h4>
+            <ul>
+              <li>Page size and orientation.</li>
+              <li>Position, scale, and spacing.</li>
+              <li>Node size and shape.</li>
+              <li>
+                Text styles for titles, ratios, note labels, axis labels, and
+                custom text.
+              </li>
+              <li>Which information layers are visible in the final diagram.</li>
+            </ul>
+
+            <h4>To make a presentation-ready diagram</h4>
+            <ol>
+              <li>Build the lattice in the main editing view.</li>
+              <li>Switch into Layout mode.</li>
+              <li>Set the page size and orientation.</li>
+              <li>
+                Adjust zoom, spacing, and alignment so the lattice sits well on
+                the page.
+              </li>
+              <li>Freeze the view to begin editing.</li>
+              <li>Add a title and creator line if needed.</li>
+              <li>Refine text sizes, fonts, and label visibility.</li>
+              <li>Preview only the layers you want to publish.</li>
+              <li>Export as PDF or SVG.</li>
+            </ol>
+
+            <h4>A good workflow here</h4>
+            <ol>
+              <li>Finish the tuning logic first.</li>
+              <li>
+                Hide any labels that are useful during editing but distracting
+                in the final diagram.
+              </li>
+              <li>Tune typography and spacing last.</li>
+              <li>
+                Export several versions if you want variants for screen, print,
+                or teaching.
+              </li>
+            </ol>
+          </section>
+
+          <section class="docs-section">
+            <h3 id="scale-workshop">As a Design Surface for Scale Workshop</h3>
+            <p>
+              Tuning Lattice is also a front end for building tunings that you
+              will later export into other tools, especially Scale Workshop.
+            </p>
+
+            <h4>Why this is useful</h4>
+            <ul>
+              <li>You can design the tuning visually before exporting it.</li>
+              <li>You can hear the tuning while you build it.</li>
+              <li>
+                You can move from exploratory work to formal tuning files
+                quickly.
+              </li>
+            </ul>
+
+            <h4>To export to Scale Workshop</h4>
+            <ol>
+              <li>Build the tuning you want in Tuning Lattice.</li>
+              <li>Open the File menu.</li>
+              <li>Export to Scale Workshop.</li>
+              <li>Review the tuning there and convert it into the format you need.</li>
+              <li>
+                Export or install the result for your target environment, such
+                as <code>.scl</code>, MTS, Max/MSP, or Pure Data workflows.
+              </li>
+            </ol>
+          </section>
+        </article>
+      </main>
+    </div>
+  </body>
+</html>

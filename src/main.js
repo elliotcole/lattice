@@ -26294,7 +26294,7 @@ async function buildLayoutSvgString(
   }
   if (triangleLabels.size) {
     const gridMap = getActiveGridNodeMap();
-    for (const entry of triangleLabels) {
+    for (const entry of triangleLabels.values()) {
       if (!entry.label) {
         continue;
       }

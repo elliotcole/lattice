@@ -58,7 +58,7 @@ This is a context‑based reference for Tuning Lattice shortcuts. Most commands 
 - Drag: adjust positions
 - Option‑click: reset adjustments
 - Hold Shift: lock moves to 1 direction
-- Hold X + click: add custom text
+- Page Layout: use `Add Custom Text`
 - Space: adjust per‑axis spacing
 - Double‑click node: change shape
 - Double‑click axis legend: adjust angle

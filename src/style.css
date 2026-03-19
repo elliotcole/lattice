@@ -717,6 +717,80 @@ body.performance-mode [role="dialog"] {
   z-index: 5;
 }
 
+.layout-custom-text-editor {
+  position: fixed;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 140px;
+  min-height: 90px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(16, 19, 22, 0.3);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(16, 19, 22, 0.18);
+  overflow: hidden;
+  resize: both;
+  pointer-events: auto;
+}
+
+.layout-custom-text-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--chrome-muted-ink);
+  background: rgba(16, 19, 22, 0.06);
+  border-bottom: 1px solid rgba(16, 19, 22, 0.1);
+  cursor: move;
+  user-select: none;
+}
+
+.layout-custom-text-align {
+  display: inline-flex;
+  gap: 4px;
+  cursor: default;
+}
+
+.layout-custom-text-align button {
+  min-width: 24px;
+  padding: 2px 6px;
+  border: 1px solid rgba(16, 19, 22, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--chrome-muted-ink);
+  font: inherit;
+  line-height: 1.2;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.layout-custom-text-align button.is-active {
+  background: rgba(16, 19, 22, 0.88);
+  color: #ffffff;
+  border-color: rgba(16, 19, 22, 0.88);
+}
+
+.layout-custom-text-editor-input {
+  width: 100%;
+  height: 100%;
+  min-height: 68px;
+  padding: 10px 12px 12px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--layout-text-secondary);
+  font: inherit;
+  line-height: 1.2;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+
 .control-actions {
   display: inline-flex;
   flex-wrap: wrap;
@@ -2759,7 +2833,8 @@ body.map-mode-active::before {
   font-size: 12px;
 }
 
-.custom-ratio-form input {
+.custom-ratio-form input,
+.custom-ratio-form textarea {
   width: 100%;
 }
 

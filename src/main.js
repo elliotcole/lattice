@@ -81,6 +81,7 @@ const layoutCustomLabelSizeInput = document.getElementById("layout-custom-label-
 const layoutCustomSizeGroup = document.getElementById("layout-custom-size-group");
 const layoutNodeShapeSelect = document.getElementById("layout-node-shape");
 const layoutFontsButton = document.getElementById("layout-fonts");
+const layoutAddCustomTextButton = document.getElementById("layout-add-custom-text");
 const layoutFontPopover = document.getElementById("layout-font-popover");
 const layoutFontCancelButton = document.getElementById("layout-font-cancel");
 const layoutFontDoneButton = document.getElementById("layout-font-done");
@@ -152,6 +153,12 @@ const ratioWheelMini = document.getElementById("ratio-wheel-mini");
 const uiHint = document.getElementById("ui-hint");
 const bannerMessage = document.getElementById("banner-message");
 const layoutOverlay = document.getElementById("layout-overlay");
+const layoutCustomTextEditor = document.getElementById("layout-custom-text-editor");
+const layoutCustomTextDragHandle = document.getElementById("layout-custom-text-drag-handle");
+const layoutCustomTextEditorInput = document.getElementById("layout-custom-text-editor-input");
+const layoutCustomTextAlignLeftButton = document.getElementById("layout-custom-text-align-left");
+const layoutCustomTextAlignCenterButton = document.getElementById("layout-custom-text-align-center");
+const layoutCustomTextAlignRightButton = document.getElementById("layout-custom-text-align-right");
 const creditsTrigger = document.getElementById("credits-trigger");
 const creditsDialog = document.getElementById("credits-dialog");
 const showHelpToggle = document.getElementById("show-help");
@@ -505,7 +512,6 @@ let rHeld = false;
 let tHeld = false;
 let lHeld = false;
 let vHeld = false;
-let customTextHeld = false;
 let fHeld = false;
 let oHeld = false;
 let mHeld = false;
@@ -528,7 +534,6 @@ function resetHeldModifiers() {
   xKeyHeld = false;
   yKeyHeld = false;
   mHeld = false;
-  customTextHeld = false;
 }
 const midiActiveNotes = new Map();
 const activeKeys = new Map();
@@ -1215,6 +1220,9 @@ function updateLayoutLinkControls() {
       ? "Unfreeze"
       : "Freeze & Edit Layout";
   }
+  if ((!layoutMode || layoutLockPosition) && layoutCustomTextEditorState) {
+    closeLayoutCustomTextEditor({ commit: true });
+  }
   if (layoutOverlay) {
     layoutOverlay.hidden = !(layoutMode && !layoutLockPosition);
   }
@@ -1233,6 +1241,7 @@ function refreshLayoutFromView({ flatten = false } = {}) {
   const preservedCustomLabels = layoutCustomLabels.map((entry) => ({
     ...entry,
     position: entry.position ? { ...entry.position } : null,
+    width: entry.width ?? null,
   }));
   const preservedCustomLabelId = layoutCustomLabelId;
   const preservedTitle = layoutTitle;
@@ -1753,6 +1762,9 @@ let layoutCustomLabels = [];
 let layoutCustomLabelPending = null;
 let layoutCustomLabelId = 1;
 let layoutCustomLabelEditId = null;
+let layoutCustomTextEditorState = null;
+let layoutCustomTextEditorDrag = null;
+let layoutCustomTextEditorResizeObserver = null;
 let layoutAxisOffsets = {
   x: { x: 0, y: 0 },
   y: { x: 0, y: 0 },
@@ -1775,6 +1787,8 @@ const layoutUndoStack = [];
 const layoutRedoStack = [];
 const LAYOUT_UNDO_LIMIT = 50;
 let layoutWheelUndoTimer = null;
+const LAYOUT_CUSTOM_TEXT_DEFAULT_WIDTH = 260;
+const LAYOUT_CUSTOM_TEXT_MIN_WIDTH = 120;
 let spellingMode = "simple";
 let spellingHintActive = false;
 let fundamentalSpelling = "sharp";
@@ -9219,6 +9233,303 @@ function getLayoutCustomLabelPosition(entry) {
   return { x: left + entry.position.x, y: top + entry.position.y };
 }
 
+function normalizeLayoutCustomLabelAlign(align) {
+  return align === "left" || align === "right" ? align : "center";
+}
+
+function normalizeLayoutCustomLabelWidth(width) {
+  const { width: pageWidth } = getLayoutPageRect();
+  const maxWidth = Math.max(LAYOUT_CUSTOM_TEXT_MIN_WIDTH, Math.round(pageWidth - 40));
+  if (!Number.isFinite(width)) {
+    return null;
+  }
+  return Math.min(maxWidth, Math.max(LAYOUT_CUSTOM_TEXT_MIN_WIDTH, Math.round(width)));
+}
+
+function getLayoutCustomLabelStoredWidth(entry) {
+  return normalizeLayoutCustomLabelWidth(Number(entry?.width));
+}
+
+function wrapLayoutCustomLabelParagraph(text, maxWidth) {
+  const source = String(text ?? "");
+  if (!(maxWidth > 0) || !source) {
+    return [source];
+  }
+  const tokens = source.match(/\S+\s*/g) || [source];
+  const lines = [];
+  let current = "";
+  const pushCurrent = () => {
+    if (current.length || !lines.length) {
+      lines.push(current.trimEnd());
+    }
+    current = "";
+  };
+  const breakLongToken = (token) => {
+    let part = "";
+    for (const char of token) {
+      const next = part + char;
+      if (part && ctx.measureText(next).width > maxWidth) {
+        lines.push(part);
+        part = char;
+      } else {
+        part = next;
+      }
+    }
+    return part;
+  };
+  tokens.forEach((token) => {
+    const candidate = current + token;
+    if (!current || ctx.measureText(candidate).width <= maxWidth) {
+      current = candidate;
+      return;
+    }
+    pushCurrent();
+    const trimmedToken = token.trimStart();
+    if (!trimmedToken) {
+      return;
+    }
+    if (ctx.measureText(trimmedToken).width <= maxWidth) {
+      current = trimmedToken;
+      return;
+    }
+    current = breakLongToken(trimmedToken);
+  });
+  if (current.length || !lines.length) {
+    lines.push(current.trimEnd());
+  }
+  return lines;
+}
+
+function getLayoutCustomLabelLines(text, maxWidth = null) {
+  const rawLines = String(text ?? "").split(/\r?\n/);
+  return rawLines.flatMap((line) => wrapLayoutCustomLabelParagraph(line, maxWidth));
+}
+
+function getLayoutCustomLabelMetrics(entryOrText, explicitWidth = null) {
+  const size = Math.max(8, Math.round(layoutCustomLabelTextSize));
+  const lineHeight = Math.max(size, Math.round(size * 1.2));
+  const entry = entryOrText && typeof entryOrText === "object" ? entryOrText : null;
+  const text = entry ? entry.text : entryOrText;
+  const storedWidth = explicitWidth ?? getLayoutCustomLabelStoredWidth(entry);
+  ctx.save();
+  ctx.font = `${layoutCustomLabelFontWeight} ${size}px ${layoutCustomLabelFont}`;
+  const lines = getLayoutCustomLabelLines(text, storedWidth);
+  const width = lines.reduce((maxWidth, line) => Math.max(maxWidth, ctx.measureText(line).width), 0);
+  ctx.restore();
+  const height = lineHeight * Math.max(1, lines.length);
+  return {
+    lines,
+    width: storedWidth ?? width,
+    naturalWidth: width,
+    height,
+    lineHeight,
+    size,
+  };
+}
+
+function getLayoutCustomLabelAlign(entry) {
+  return normalizeLayoutCustomLabelAlign(entry?.align);
+}
+
+function getLayoutCustomLabelLeft(pos, width, align = "center") {
+  if (align === "left") {
+    return pos.x;
+  }
+  if (align === "right") {
+    return pos.x - width;
+  }
+  return pos.x - width / 2;
+}
+
+function getLayoutCustomLabelAnchorX(pos, width, align = "center") {
+  return getLayoutCustomLabelLeft(pos, width, align) + (align === "right" ? width : 0);
+}
+
+function getLayoutCustomLabelViewportRect(entry) {
+  const canvasRect = canvas.getBoundingClientRect();
+  const pos = getLayoutCustomLabelPosition(entry);
+  const { width, height } = getLayoutCustomLabelMetrics(entry);
+  const align = getLayoutCustomLabelAlign(entry);
+  return {
+    left: canvasRect.left + getLayoutCustomLabelLeft(pos, width, align),
+    top: canvasRect.top + pos.y,
+    width,
+    height,
+  };
+}
+
+function syncLayoutCustomTextEditorBoxHeight() {
+  if (!layoutCustomTextEditor || !layoutCustomTextEditorInput || layoutCustomTextEditor.hidden) {
+    return;
+  }
+  const handleHeight = layoutCustomTextDragHandle ? layoutCustomTextDragHandle.offsetHeight : 0;
+  const minimumHeight = handleHeight + 72;
+  layoutCustomTextEditorInput.style.height = "0px";
+  const contentHeight = layoutCustomTextEditorInput.scrollHeight;
+  layoutCustomTextEditorInput.style.height = `${contentHeight}px`;
+  const nextHeight = Math.max(minimumHeight, contentHeight + handleHeight);
+  if (layoutCustomTextEditor.offsetHeight < nextHeight) {
+    layoutCustomTextEditor.style.height = `${nextHeight}px`;
+  }
+}
+
+function syncLayoutCustomTextEditorVisuals() {
+  if (
+    !layoutCustomTextEditor ||
+    !layoutCustomTextEditorInput ||
+    !layoutCustomTextEditorState ||
+    layoutCustomTextEditor.hidden
+  ) {
+    return;
+  }
+  const entry = layoutCustomLabels.find((item) => item.id === layoutCustomTextEditorState.id);
+  if (!entry || !entry.position) {
+    closeLayoutCustomTextEditor({ commit: false });
+    return;
+  }
+  const rect = getLayoutCustomLabelViewportRect(entry);
+  layoutCustomTextEditor.style.left = `${Math.round(rect.left)}px`;
+  layoutCustomTextEditor.style.top = `${Math.round(rect.top)}px`;
+  layoutCustomTextEditor.style.width = `${Math.round(rect.width)}px`;
+  layoutCustomTextEditorInput.style.fontFamily = layoutCustomLabelFont;
+  layoutCustomTextEditorInput.style.fontWeight = String(layoutCustomLabelFontWeight);
+  layoutCustomTextEditorInput.style.fontSize = `${Math.max(8, Math.round(layoutCustomLabelTextSize))}px`;
+  layoutCustomTextEditorInput.style.color = themeColors.textSecondary;
+  layoutCustomTextEditorInput.style.textAlign = getLayoutCustomLabelAlign(entry);
+  [
+    layoutCustomTextAlignLeftButton,
+    layoutCustomTextAlignCenterButton,
+    layoutCustomTextAlignRightButton,
+  ].forEach((button) => {
+    if (!button) {
+      return;
+    }
+    button.classList.toggle("is-active", button.dataset.align === getLayoutCustomLabelAlign(entry));
+  });
+  syncLayoutCustomTextEditorBoxHeight();
+}
+
+function closeLayoutCustomTextEditor({ commit = true } = {}) {
+  if (!layoutCustomTextEditorState) {
+    return;
+  }
+  const state = layoutCustomTextEditorState;
+  const entry = layoutCustomLabels.find((item) => item.id === state.id);
+  if (!commit) {
+    if (state.isNew) {
+      layoutCustomLabels = layoutCustomLabels.filter((item) => item.id !== state.id);
+    } else if (entry && state.originalEntry) {
+      Object.assign(entry, {
+        text: state.originalEntry.text,
+        position: state.originalEntry.position ? { ...state.originalEntry.position } : null,
+        width: state.originalEntry.width ?? null,
+        align: state.originalEntry.align ?? "center",
+      });
+    }
+  } else if (entry) {
+    entry.text = String(layoutCustomTextEditorInput?.value || "");
+    entry.width = getLayoutCustomLabelStoredWidth(entry);
+    if (!entry.text.trim()) {
+      layoutCustomLabels = layoutCustomLabels.filter((item) => item.id !== state.id);
+    }
+  }
+  layoutCustomTextEditorState = null;
+  layoutCustomTextEditorDrag = null;
+  layoutCustomLabelEditId = null;
+  layoutCustomLabelPending = null;
+  if (layoutCustomTextEditor) {
+    layoutCustomTextEditor.hidden = true;
+    layoutCustomTextEditor.style.display = "none";
+  }
+  if (layoutOverlay) {
+    layoutOverlay.hidden = !(layoutMode && !layoutLockPosition);
+  }
+  updateLayoutCustomLabelControls();
+  schedulePresetUrlUpdate();
+  draw();
+}
+
+function openLayoutCustomTextEditor(entryId, options = {}) {
+  if (!layoutCustomTextEditor || !layoutCustomTextEditorInput) {
+    return;
+  }
+  const entry = layoutCustomLabels.find((item) => item.id === entryId);
+  if (!entry || !entry.position) {
+    return;
+  }
+  if (layoutCustomTextEditorState && layoutCustomTextEditorState.id !== entryId) {
+    closeLayoutCustomTextEditor({ commit: true });
+  }
+  if (!options.isNew && (!layoutCustomTextEditorState || layoutCustomTextEditorState.id !== entryId)) {
+    pushLayoutUndoState();
+  }
+  const naturalWidth = Math.max(
+    LAYOUT_CUSTOM_TEXT_DEFAULT_WIDTH,
+    Math.round(getLayoutCustomLabelMetrics(entry, null).naturalWidth + 24)
+  );
+  layoutCustomTextEditorState = {
+    id: entryId,
+    isNew: Boolean(options.isNew),
+    originalEntry: {
+      text: String(entry.text || ""),
+      position: entry.position ? { ...entry.position } : null,
+      width: entry.width ?? null,
+      align: normalizeLayoutCustomLabelAlign(entry.align),
+    },
+  };
+  entry.width = getLayoutCustomLabelStoredWidth(entry) ?? naturalWidth;
+  entry.align = normalizeLayoutCustomLabelAlign(entry.align);
+  layoutCustomTextEditorInput.value = String(entry.text || "");
+  if (layoutOverlay) {
+    layoutOverlay.hidden = false;
+  }
+  layoutCustomTextEditor.hidden = false;
+  layoutCustomTextEditor.style.display = "";
+  draw();
+  syncLayoutCustomTextEditorVisuals();
+  requestAnimationFrame(() => {
+    syncLayoutCustomTextEditorVisuals();
+    layoutCustomTextEditorInput.focus();
+    if (options.selectAll) {
+      layoutCustomTextEditorInput.select();
+    } else {
+      const end = layoutCustomTextEditorInput.value.length;
+      layoutCustomTextEditorInput.setSelectionRange(end, end);
+    }
+  });
+}
+
+function createLayoutCustomLabelEntry(position, options = {}) {
+  const entry = {
+    id: layoutCustomLabelId++,
+    text: String(options.text || ""),
+    position: position ? { ...position } : { x: 0, y: 0 },
+    width: normalizeLayoutCustomLabelWidth(options.width) ?? LAYOUT_CUSTOM_TEXT_DEFAULT_WIDTH,
+    align: normalizeLayoutCustomLabelAlign(options.align),
+  };
+  layoutCustomLabels.push(entry);
+  updateLayoutCustomLabelControls();
+  return entry;
+}
+
+function syncActiveLayoutCustomTextEntryFromEditor() {
+  if (!layoutCustomTextEditorState || !layoutCustomTextEditorInput) {
+    return null;
+  }
+  const entry = layoutCustomLabels.find((item) => item.id === layoutCustomTextEditorState.id);
+  if (!entry) {
+    return null;
+  }
+  entry.text = String(layoutCustomTextEditorInput.value || "");
+  entry.width =
+    normalizeLayoutCustomLabelWidth(layoutCustomTextEditor?.offsetWidth) ??
+    getLayoutCustomLabelStoredWidth(entry) ??
+    LAYOUT_CUSTOM_TEXT_DEFAULT_WIDTH;
+  entry.align = normalizeLayoutCustomLabelAlign(entry.align);
+  updateLayoutCustomLabelControls();
+  return entry;
+}
+
 function drawLayoutCustomLabels() {
   if (!layoutCustomLabels.length) {
     return;
@@ -9227,16 +9538,36 @@ function drawLayoutCustomLabels() {
   ctx.save();
   ctx.fillStyle = themeColors.textSecondary;
   ctx.font = `${layoutCustomLabelFontWeight} ${size}px ${layoutCustomLabelFont}`;
-  ctx.textAlign = "center";
   ctx.textBaseline = "top";
   layoutCustomLabels.forEach((entry) => {
     if (!entry.text || !entry.position) {
       return;
     }
+    if (layoutCustomTextEditorState && layoutCustomTextEditorState.id === entry.id) {
+      return;
+    }
     const pos = getLayoutCustomLabelPosition(entry);
-    ctx.fillText(entry.text, pos.x, pos.y);
+    const { lines, lineHeight } = getLayoutCustomLabelMetrics(entry);
+    ctx.textAlign = getLayoutCustomLabelAlign(entry);
+    lines.forEach((line, index) => {
+      ctx.fillText(line, pos.x, pos.y + index * lineHeight);
+    });
   });
   ctx.restore();
+}
+
+function setActiveLayoutCustomTextAlign(align) {
+  if (!layoutCustomTextEditorState) {
+    return;
+  }
+  const entry = layoutCustomLabels.find((item) => item.id === layoutCustomTextEditorState.id);
+  if (!entry) {
+    return;
+  }
+  entry.align = normalizeLayoutCustomLabelAlign(align);
+  syncLayoutCustomTextEditorVisuals();
+  scheduleDraw();
+  schedulePresetUrlUpdate();
 }
 
 function syncLayoutFontVars() {
@@ -9862,19 +10193,32 @@ function openTriangleLabelDialog(value) {
 }
 
 function openLayoutCustomLabelDialog(value = "") {
-  if (!layoutCustomLabelDialog || !layoutCustomLabelInput) {
+  xKeyHeld = false;
+  if (layoutCustomLabelEditId != null) {
+    openLayoutCustomTextEditor(layoutCustomLabelEditId, { selectAll: !value });
     return;
   }
-  customTextHeld = false;
-  xKeyHeld = false;
-  layoutCustomLabelInput.value = value;
-  if (typeof layoutCustomLabelDialog.showModal === "function") {
-    layoutCustomLabelDialog.showModal();
+  if (!layoutCustomLabelPending) {
+    return;
   }
-  requestAnimationFrame(() => {
-    layoutCustomLabelInput.focus();
-    layoutCustomLabelInput.select();
+  pushLayoutUndoState();
+  const entry = createLayoutCustomLabelEntry(layoutCustomLabelPending, {
+    text: value,
+    width: LAYOUT_CUSTOM_TEXT_DEFAULT_WIDTH,
   });
+  layoutCustomLabelPending = null;
+  layoutCustomLabelEditId = entry.id;
+  openLayoutCustomTextEditor(entry.id, { isNew: true, selectAll: true });
+}
+
+function getLayoutPageCenterPosition() {
+  const { left, top, width, height } = getLayoutPageRect();
+  return {
+    x: width / 2,
+    y: height / 2,
+    pageLeft: left,
+    pageTop: top,
+  };
 }
 
 function setNodeOctaveShift(node, shift) {
@@ -13541,6 +13885,9 @@ function draw() {
   updateBannerMessage();
 
   updateRatioWheels();
+  if (layoutCustomTextEditorState) {
+    syncLayoutCustomTextEditorVisuals();
+  }
 }
 
 function startVoice(options) {
@@ -14418,7 +14765,7 @@ function onPointerDown(event) {
       toggleCustomPianoPreviewVoice(hit);
       return;
     }
-    if (tHeld || rHeld || (layoutMode && customTextHeld)) {
+    if (tHeld || rHeld) {
       return;
     }
     if (layoutMode) {
@@ -14672,17 +15019,6 @@ function onPointerDown(event) {
         draw();
         return;
       }
-    }
-    if (customTextHeld) {
-      if (layoutCustomLabelDialog && !layoutCustomLabelDialog.open) {
-        const { left, top } = getLayoutPageRect();
-        layoutCustomLabelPending = {
-          x: screenPoint.x - left,
-          y: screenPoint.y - top,
-        };
-        openLayoutCustomLabelDialog();
-      }
-      return;
     }
     if (layoutAxisEdit) {
       const handleHit = hitTestAxisLegendHandle(screenPoint);
@@ -16532,8 +16868,8 @@ function hitTestLayoutCustomLabel(screenPoint) {
   if (!layoutMode || !layoutCustomLabels.length) {
     return null;
   }
-  const size = Math.max(8, Math.round(layoutCustomLabelTextSize));
   ctx.save();
+  const size = Math.max(8, Math.round(layoutCustomLabelTextSize));
   ctx.font = `${layoutCustomLabelFontWeight} ${size}px ${layoutCustomLabelFont}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
@@ -16542,12 +16878,13 @@ function hitTestLayoutCustomLabel(screenPoint) {
     if (!entry.text || !entry.position) {
       continue;
     }
-    const width = ctx.measureText(entry.text).width;
+    const { width, height } = getLayoutCustomLabelMetrics(entry);
     const pos = getLayoutCustomLabelPosition(entry);
-    const left = pos.x - width / 2;
-    const right = pos.x + width / 2;
+    const align = getLayoutCustomLabelAlign(entry);
+    const left = getLayoutCustomLabelLeft(pos, width, align);
+    const right = left + width;
     const top = pos.y;
-    const bottom = pos.y + size;
+    const bottom = pos.y + height;
     if (
       screenPoint.x >= left &&
       screenPoint.x <= right &&
@@ -18759,7 +19096,7 @@ function updateUiHint() {
   }
   if (layoutMode) {
     setUiHintContent(
-      "Layout mode: Drag to adjust positions. \nOption-click to reset adjustments\nHold Shift to lock moves to 1 direction.\nHold X and click to add custom text.\nClick Space to adjust per-axis spacing.\nDouble-click a node to change its shape.\nDouble-click an axis legend to adjust angle.\nDouble-click a connection to show ratio"
+      "Layout mode: Drag to adjust positions. \nOption-click to reset adjustments\nHold Shift to lock moves to 1 direction.\nUse Add Custom Text to create an editable text box. Drag its Move bar and resize the box directly.\nClick Space to adjust per-axis spacing.\nDouble-click a node to change its shape.\nDouble-click an axis legend to adjust angle.\nDouble-click a connection to show ratio"
     );
     return;
   }
@@ -19722,6 +20059,8 @@ function captureLayoutUndoState() {
     layoutCustomLabels: layoutCustomLabels.map((entry) => ({
       ...entry,
       position: entry.position ? { ...entry.position } : null,
+      width: entry.width ?? null,
+      align: normalizeLayoutCustomLabelAlign(entry.align),
     })),
     layoutSpacing: { ...layoutSpacing },
     layoutNodeSize,
@@ -19854,6 +20193,9 @@ function applyLayoutUndoState(state) {
   if (!state) {
     return;
   }
+  if (layoutCustomTextEditorState) {
+    closeLayoutCustomTextEditor({ commit: false });
+  }
   layoutPositions = new Map(
     Array.from(state.layoutPositions.entries()).map(([id, coord]) => [id, { ...coord }])
   );
@@ -19887,6 +20229,8 @@ function applyLayoutUndoState(state) {
     ? state.layoutCustomLabels.map((entry) => ({
         ...entry,
         position: entry.position ? { ...entry.position } : null,
+        width: normalizeLayoutCustomLabelWidth(entry.width),
+        align: normalizeLayoutCustomLabelAlign(entry.align),
       }))
     : [];
   const maxCustomId = layoutCustomLabels.reduce(
@@ -19991,6 +20335,9 @@ function redoLayoutChange() {
 }
 
 function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
+  if (layoutCustomTextEditorState) {
+    closeLayoutCustomTextEditor({ commit: false });
+  }
   layoutPositions.clear();
   layoutLabelOffsets.clear();
   layoutKeyMappingOffsets.clear();
@@ -22810,6 +23157,8 @@ function buildPresetLayoutState(layoutViewState, layoutSourceViewState, includeD
       id: entry.id,
       text: entry.text,
       position: entry.position ? { ...entry.position } : null,
+      width: normalizeLayoutCustomLabelWidth(entry.width),
+      align: normalizeLayoutCustomLabelAlign(entry.align),
     })),
     positionOffsets: serializeLayoutPositionOffsets(),
     customNodePositions: serializeLayoutCustomNodePositions(),
@@ -24047,6 +24396,8 @@ function applyPresetLayoutCustomLabels(layoutState) {
           Number.isFinite(entry.position.y)
             ? { x: entry.position.x, y: entry.position.y }
             : null,
+        width: normalizeLayoutCustomLabelWidth(entry.width),
+        align: normalizeLayoutCustomLabelAlign(entry.align),
       }))
       .filter((entry) => entry.text && entry.position);
     const maxId = layoutCustomLabels.reduce(
@@ -25430,6 +25781,23 @@ async function buildSvgTextElement({
   if (!safeText) {
     return "";
   }
+  const lines = safeText.split(/\r?\n/);
+  const lineHeight = Math.max(size, Math.round(size * 1.2));
+  if (lines.length > 1) {
+    const attrs = `text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
+      font
+    )}" font-size="${size}" font-weight="${fontWeight}" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
+      "fill",
+      color
+    )}`;
+    const tspans = lines
+      .map((line, index) => {
+        const dy = index === 0 ? 0 : lineHeight;
+        return `<tspan x="${x}" dy="${dy}">${escapeSvgText(line)}</tspan>`;
+      })
+      .join("");
+    return `<text x="${x}" y="${y}" ${attrs}>${tspans}</text>`;
+  }
   if (!OUTLINE_SVG_TEXT) {
     return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
       font
@@ -25707,17 +26075,20 @@ async function buildLayoutSvgString(
       if (!entry.text || !entry.position) {
         continue;
       }
+      const { lines } = getLayoutCustomLabelMetrics(entry);
       const x = entry.position.x;
       const y = entry.position.y;
+      const align = getLayoutCustomLabelAlign(entry);
+      const anchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
       parts.push(
         await buildSvgTextElement({
-          text: entry.text,
+          text: lines.join("\n"),
           x,
           y,
           font: layoutCustomLabelFont,
           size: customSize,
           fontWeight: layoutCustomLabelFontWeight,
-          anchor: "middle",
+          anchor,
           baseline: "hanging",
           color: themeColors.textSecondary,
         })
@@ -25743,6 +26114,77 @@ async function buildLayoutSvgString(
   exportNodeRenderList.forEach(({ node, pos }) => {
     exportNodePosMap.set(node.id, { pos, radius: getLayoutNodeRadius(pos) });
   });
+  const keyboardMode = getKeyboardMode();
+  if (keyboardMode === "piano-custom" && layoutKeyMappingMode !== "hide") {
+    const customPianoLabels = getCustomPianoLabelMap();
+    const keyMappingSize = Math.max(8, Math.round(layoutKeyMappingTextSize));
+    for (const { node } of exportNodeRenderList) {
+      if (!(node.isCenter || node.active || node.isCustom)) {
+        continue;
+      }
+      const keyLabel = customPianoLabels.get(node.id);
+      if (!keyLabel) {
+        continue;
+      }
+      const displayInfo = getCachedDisplayInfo(node);
+      const pitchClass = displayInfo.pitchClass || node.pitch_class;
+      if (!shouldShowLayoutKeyMappingLabel(keyLabel, pitchClass)) {
+        continue;
+      }
+      const nodeEntry = exportNodePosMap.get(node.id);
+      if (!nodeEntry) {
+        continue;
+      }
+      const labelText = getLayoutKeyMappingLabelText(keyLabel);
+      const labelPos = getLayoutKeyMappingLabelPosition(node, nodeEntry.pos, nodeEntry.radius);
+      const x = labelPos.x - left;
+      const y = labelPos.y - top;
+      const textWidth = await measureSvgTextWidth(
+        labelText,
+        keyMappingSize,
+        layoutKeyMappingFont,
+        layoutKeyMappingFontWeight
+      );
+      if (layoutKeyMappingDark) {
+        const paddingX = 6;
+        const paddingY = 3;
+        const boxWidth = textWidth + paddingX * 2;
+        const boxHeight = keyMappingSize + paddingY * 2;
+        const boxX = x - boxWidth;
+        const boxY = y - boxHeight;
+        parts.push(
+          `<rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="6" ry="6" fill="rgb(10,15,20)" fill-opacity="0.7" stroke="rgba(255,255,255,0.4)" />`
+        );
+        parts.push(
+          await buildSvgTextElement({
+            text: labelText,
+            x: boxX + paddingX,
+            y: boxY + paddingY,
+            font: layoutKeyMappingFont,
+            size: keyMappingSize,
+            fontWeight: layoutKeyMappingFontWeight,
+            anchor: "start",
+            baseline: "hanging",
+            color: "#ffffff",
+          })
+        );
+      } else {
+        parts.push(
+          await buildSvgTextElement({
+            text: labelText,
+            x: x - textWidth,
+            y: y - keyMappingSize,
+            font: layoutKeyMappingFont,
+            size: keyMappingSize,
+            fontWeight: layoutKeyMappingFontWeight,
+            anchor: "start",
+            baseline: "hanging",
+            color: themeColors.textSecondary,
+          })
+        );
+      }
+    }
+  }
   const exportDetailLabelSegments = [];
   edges.forEach(([a, b]) => {
     if (!a.active || !b.active) {
@@ -28618,12 +29060,95 @@ bindOptionalClick(layoutStraightenButton, () => {
   }
   setLayoutAlignMode("straighten");
 });
+bindOptionalClick(layoutAddCustomTextButton, () => {
+  if (!layoutMode) {
+    return;
+  }
+  if (layoutCustomTextEditorState) {
+    closeLayoutCustomTextEditor({ commit: true });
+  }
+  const center = getLayoutPageCenterPosition();
+  layoutCustomLabelEditId = null;
+  layoutCustomLabelPending = { x: center.x, y: center.y };
+  openLayoutCustomLabelDialog("");
+});
 bindOptionalClick(layoutFontCancelButton, () => {
   closeLayoutFontPopover({ revert: true });
 });
 bindOptionalClick(layoutFontDoneButton, () => {
   closeLayoutFontPopover();
 });
+if (layoutCustomTextDragHandle && layoutCustomTextEditor) {
+  layoutCustomTextDragHandle.addEventListener("pointerdown", (event) => {
+    if (!layoutCustomTextEditorState) {
+      return;
+    }
+    if (event.target instanceof Element && event.target.closest(".layout-custom-text-align")) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const entry = layoutCustomLabels.find((item) => item.id === layoutCustomTextEditorState.id);
+    if (!entry || !entry.position) {
+      return;
+    }
+    layoutCustomTextEditorDrag = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startPosition: { ...entry.position },
+    };
+    layoutCustomTextDragHandle.setPointerCapture?.(event.pointerId);
+  });
+}
+if (layoutCustomTextEditorInput) {
+  layoutCustomTextEditorInput.addEventListener("input", () => {
+    const entry = syncActiveLayoutCustomTextEntryFromEditor();
+    if (!entry) {
+      return;
+    }
+    syncLayoutCustomTextEditorBoxHeight();
+    scheduleDraw();
+    schedulePresetUrlUpdate();
+  });
+  layoutCustomTextEditorInput.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeLayoutCustomTextEditor({ commit: false });
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "enter") {
+      event.preventDefault();
+      closeLayoutCustomTextEditor({ commit: true });
+    }
+  });
+}
+[
+  layoutCustomTextAlignLeftButton,
+  layoutCustomTextAlignCenterButton,
+  layoutCustomTextAlignRightButton,
+].forEach((button) => {
+  if (!button) {
+    return;
+  }
+  bindOptionalClick(button, (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setActiveLayoutCustomTextAlign(button.dataset.align || "center");
+  });
+});
+if (layoutCustomTextEditor && typeof ResizeObserver !== "undefined") {
+  layoutCustomTextEditorResizeObserver = new ResizeObserver(() => {
+    const entry = syncActiveLayoutCustomTextEntryFromEditor();
+    if (!entry) {
+      return;
+    }
+    syncLayoutCustomTextEditorBoxHeight();
+    scheduleDraw();
+    schedulePresetUrlUpdate();
+  });
+  layoutCustomTextEditorResizeObserver.observe(layoutCustomTextEditor);
+}
 let layoutKeyMappingTextSnapshot = null;
 if (layoutKeyMappingTextButton && layoutKeyMappingTextDialog) {
   bindOptionalClick(layoutKeyMappingTextButton, () => {
@@ -29623,6 +30148,12 @@ bindOptionalEvent(window, "keydown", (event) => {
   if (event.metaKey || event.ctrlKey) {
     return;
   }
+  const targetIsEditable =
+    event.target instanceof HTMLElement &&
+    event.target.matches("input, textarea, select, [contenteditable='true']");
+  if (targetIsEditable) {
+    return;
+  }
   if (isCustomPianoMapModeActive()) {
     const heldKey = event.key.toLowerCase();
     if (heldKey === "t" || heldKey === "r" || heldKey === "l" || heldKey === "f") {
@@ -29672,9 +30203,6 @@ bindOptionalEvent(window, "keydown", (event) => {
   }
   if (event.key.toLowerCase() === "x") {
     xKeyHeld = true;
-    if (layoutMode) {
-      customTextHeld = true;
-    }
   }
   if (event.key.toLowerCase() === "y") {
     yKeyHeld = true;
@@ -29699,6 +30227,10 @@ bindOptionalEvent(window, "keydown", (event) => {
     draw();
   }
   if (event.key === "Escape") {
+    if (layoutCustomTextEditorState) {
+      closeLayoutCustomTextEditor({ commit: false });
+      return;
+    }
     if (presetOverlay && !presetOverlay.hidden) {
       closePresetOverlay();
       return;
@@ -29768,6 +30300,41 @@ bindOptionalEvent(window, "pointerdown", (event) => {
   }
   closeLayoutFontPopover();
 });
+window.addEventListener(
+  "pointerdown",
+  (event) => {
+    if (!layoutCustomTextEditorState || !layoutCustomTextEditor || layoutCustomTextEditor.hidden) {
+      return;
+    }
+    if (layoutCustomTextEditor.contains(event.target)) {
+      return;
+    }
+    closeLayoutCustomTextEditor({ commit: true });
+  },
+  true
+);
+window.addEventListener("pointermove", (event) => {
+  if (!layoutCustomTextEditorDrag || !layoutCustomTextEditorState) {
+    return;
+  }
+  const entry = layoutCustomLabels.find((item) => item.id === layoutCustomTextEditorState.id);
+  if (!entry) {
+    return;
+  }
+  entry.position = {
+    x: layoutCustomTextEditorDrag.startPosition.x + (event.clientX - layoutCustomTextEditorDrag.startClientX),
+    y: layoutCustomTextEditorDrag.startPosition.y + (event.clientY - layoutCustomTextEditorDrag.startClientY),
+  };
+  syncLayoutCustomTextEditorVisuals();
+  scheduleDraw();
+});
+window.addEventListener("pointerup", () => {
+  if (!layoutCustomTextEditorDrag) {
+    return;
+  }
+  layoutCustomTextEditorDrag = null;
+  schedulePresetUrlUpdate();
+});
 bindOptionalEvent(window, "pointerdown", (event) => {
   if (!keyboardMapPopover || keyboardMapPopover.hidden) {
     return;
@@ -29830,7 +30397,6 @@ bindOptionalEvent(window, "keyup", (event) => {
   }
   if (event.key.toLowerCase() === "x") {
     xKeyHeld = false;
-    customTextHeld = false;
   }
   if (event.key.toLowerCase() === "y") {
     yKeyHeld = false;

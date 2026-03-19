@@ -28,14 +28,31 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/main-DTTUCaHJ.js"></script>
+    <script type="module" crossorigin src="./assets/main-D1ewMFzy.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-B5Qt9EMX.js">
     <link rel="modulepreload" crossorigin href="./assets/interval-names-DvPInInK.js">
-    <link rel="stylesheet" crossorigin href="./assets/style-DaBIqsNh.css">
+    <link rel="stylesheet" crossorigin href="./assets/style-DxZZmgae.css">
   </head>
   <body>
     <canvas id="lattice" tabindex="0" aria-label="Tuning lattice"></canvas>
-    <div id="layout-overlay" class="layout-overlay" hidden></div>
+    <div id="layout-overlay" class="layout-overlay" hidden>
+      <div id="layout-custom-text-editor" class="layout-custom-text-editor" hidden>
+        <div id="layout-custom-text-drag-handle" class="layout-custom-text-drag-handle">
+          <span>Move</span>
+          <div class="layout-custom-text-align" role="group" aria-label="Text alignment">
+            <button id="layout-custom-text-align-left" type="button" data-align="left" aria-label="Align left">L</button>
+            <button id="layout-custom-text-align-center" type="button" data-align="center" aria-label="Align center">C</button>
+            <button id="layout-custom-text-align-right" type="button" data-align="right" aria-label="Align right">R</button>
+          </div>
+        </div>
+        <textarea
+          id="layout-custom-text-editor-input"
+          class="layout-custom-text-editor-input"
+          rows="4"
+          spellcheck="false"
+        ></textarea>
+      </div>
+    </div>
 
     <main class="app">
       <div class="top-bar">
@@ -267,6 +284,9 @@
           >
             Edit Text Styles
           </button>
+        </div>
+        <div class="control-group">
+          <button id="layout-add-custom-text" type="button" class="button-full">Add Custom Text</button>
         </div>
         <div class="nav-3d-title">Size</div>
         <div class="control-group">
@@ -1374,14 +1394,14 @@
 
     <dialog id="layout-custom-label-dialog" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form">
-        <div class="dialog-title">Custom Label</div>
+        <div class="dialog-title">Custom Text</div>
         <label>
           Text:
-          <input type="text" id="layout-custom-label-input" maxlength="60" />
+          <textarea id="layout-custom-label-input" rows="6"></textarea>
         </label>
         <menu class="dialog-actions">
           <button type="submit" value="cancel">Cancel</button>
-          <button type="submit" value="none">No label</button>
+          <button type="submit" value="none">No text</button>
           <button type="submit" value="confirm">OK</button>
         </menu>
       </form>

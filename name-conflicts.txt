@@ -1,0 +1,59 @@
+Name conflicts between our interval-names.json and Huygens-Fokker list
+======================================================================
+
+Ratio		Ours		→	Huygens-Fokker
+----------------------------------------------------------------------
+1/1	tonic	→	unison, perfect prime
+5/3	5-limit major sixth	→	major sixth, BP sixth
+7/4	septimal minor seventh, 7th harmonic	→	harmonic seventh
+7/5	septimal tritone	→	septimal or Huygens' tritone, BP fourth
+9/5	5-limit large minor seventh	→	just minor seventh, BP seventh
+10/7	septimal tritone	→	Euler's tritone
+11/6	undecimal "median" seventh	→	undecimal neutral seventh, 21/4-tone
+11/7	undecimal minor sixth	→	undecimal augmented fifth
+11/8	undecimal tritone, 11th harmonic	→	undecimal semi-augmented fourth
+11/9	undecimal "median" third	→	undecimal neutral third
+12/11	undecimal "median" 1/2-step	→	undecimal neutral second, 3/4-tone
+13/12	3/4-tone	→	tridecimal 2/3-tone
+15/8	5-limit major seventh, 15th harmonic	→	classic major seventh
+15/14	Cowell just half-step	→	major diatonic semitone
+16/9	Pythagorean small min. seventh	→	Pythagorean minor seventh
+16/15	major 5-limit half-step	→	minor diatonic semitone
+18/17	E.T. half-step approximation	→	Arabic lute index finger
+21/16	septimal fourth	→	narrow fourth
+21/20	septimal semitone	→	minor semitone
+22/21	hard 1/2-step	→	undecimal minor semitone
+25/24	minor 5-limit half-step	→	classic chromatic semitone, minor chroma
+27/25	alternate Renaissance half-step	→	large limma, BP small semitone, Zarlino semitone
+27/26	tridecimal thirdtone	→	tridecimal comma
+28/27	inferior quarter-tone	→	Archytas' 1/3-tone
+31/30	superior quarter-tone	→	31st-partial chroma
+32/31	inferior quarter-tone	→	Greek enharmonic 1/4-tone
+33/32	33rd harmonic	→	undecimal comma, al-Farabi's 1/4-tone
+35/32	35th harmonic	→	septimal neutral second
+35/34	E.T. 1/4-tone approximation	→	septendecimal 1/4-tone
+36/35	superior quarter-tone	→	septimal diesis, 1/4-tone
+40/27	dissonant "wolf" 5-limit fifth	→	grave fifth
+45/32	high 5-limit tritone	→	diatonic tritone
+46/45	inferior quarter-tone	→	23rd-partial chroma
+56/55	Ptolemy's enharmonic	→	undecimal diesis, konbini comma
+57/32	57th harmonic	→	undevicesimal minor seventh
+63/32	63rd harmonic	→	octave - septimal comma
+64/45	low 5-limit tritone	→	2nd tritone
+65/64	65th harmonic	→	13th-partial chroma
+74/73	superparticular Pythagorean comma approximation	→	approximation to Pythagorean comma
+89/84	12-EDO half-step approximation	→	quasi-equal semitone
+100/99	small undecimal comma	→	Ptolemy's comma
+121/64	121st harmonic	→	Alpharabian major seventh
+128/125	lesser diesis	→	minor diesis, diesis
+135/128	limma ascendant	→	major chroma, major limma
+225/128	225th harmonic	→	augmented sixth
+256/243	Pythagorean half-step	→	limma, Pythagorean minor second
+513/512	19-limit schisma	→	undevicesimal comma, Boethius' comma
+648/625	greater diesis	→	major diesis
+736/729	23-limit comma	→	vicesimotertial comma
+1024/729	low Pythagorean tritone	→	Pythagorean diminished fifth
+1732/1731	superparticular cent approximation	→	approximation to 1 cent
+2187/2176	17-limit schisma	→	septendecimal schisma
+6561/4096	Pythagorean "schismatic" sixth	→	Pythagorean augmented fifth
+8192/6561	Pythagorean "schismatic" third	→	Pythagorean diminished fourth

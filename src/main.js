@@ -4,6 +4,7 @@ import soundfontUrl from "./soundfonts/HSStrings.sf2?url";
 const karplusWorkletUrl = new URL("./karplus-worklet.js", import.meta.url);
 const resonatorWorkletUrl = new URL("./modal-resonator-worklet.js", import.meta.url);
 import intervalChartData from "./interval-names.json";
+import { quickTourSteps, deepTourSteps } from "./tour-steps.js";
 import opentype from "opentype.js";
 const canvas = document.getElementById("lattice");
 const ctx = canvas.getContext("2d");
@@ -230,7 +231,9 @@ const showCentsSignToggle = document.getElementById("show-cents-sign");
 const directionalRatioLabelsToggle = document.getElementById("directional-ratio-labels");
 const connectOrphansToggle = document.getElementById("connect-orphans");
 const show3DShadingToggle = document.getElementById("show-3d-shading");
-const hejiEnabledToggle = document.getElementById("heji-enabled");
+const hejiEnabledButton = document.getElementById("heji-enabled-button");
+const hejiDisabledButton = document.getElementById("heji-disabled-button");
+const hejiToggleGroup = document.getElementById("heji-toggle-group");
 const enharmonicsEnabledToggle = document.getElementById("enharmonics-enabled");
 const enharmonicsGroup = document.getElementById("enharmonics-group");
 const centsPrecisionButtons = document.querySelectorAll("[data-cents-precision]");
@@ -297,7 +300,9 @@ const navDistanceInput = document.getElementById("nav-distance");
 const layoutShowToggle = document.getElementById("layout-show-toggle");
 const layoutShowBody = document.getElementById("layout-show-body");
 const layoutKeyMappingsGroup = document.getElementById("layout-key-mappings-group");
-const layoutHejiEnabledToggle = document.getElementById("layout-heji-enabled");
+const layoutHejiEnabledButton = document.getElementById("layout-heji-enabled-button");
+const layoutHejiDisabledButton = document.getElementById("layout-heji-disabled-button");
+const layoutHejiToggleGroup = document.getElementById("layout-heji-toggle-group");
 const layoutEnharmonicsEnabledToggle = document.getElementById("layout-enharmonics-enabled");
 const layoutEnharmonicsGroup = document.getElementById("layout-enharmonics-group");
 const layoutShowHzToggle = document.getElementById("layout-show-hz");
@@ -1633,6 +1638,7 @@ let looperCycleStartMs = 0;
 let looperCycleTimer = null;
 let looperTimeouts = [];
 let looperVoicesByNode = new Map();
+let looperGeneration = 0;
 let looperQuantizeEnabled = false;
 let looperQuantizeGrid = "16";
 let looperQuantizeStrength = 1;
@@ -1683,6 +1689,10 @@ let snapshotKeyboardActive = false;
 let snapshotKeyboardPrevMode = "";
 let snapshotActiveLetterKey = "";
 let snapshotDebugEnabled = false;
+let activeCaption = null; // { text: string, x: number, y: number } — x,y as fractions of viewport
+let captionEditing = false;
+let captionDragState = null;
+let captionPreEditSnapshot = null;
 let customNodes = [];
 let nextCustomNodeId = 200000;
 let pendingCustomAction = null;
@@ -1789,10 +1799,10 @@ const LAYOUT_UNDO_LIMIT = 50;
 let layoutWheelUndoTimer = null;
 const LAYOUT_CUSTOM_TEXT_DEFAULT_WIDTH = 260;
 const LAYOUT_CUSTOM_TEXT_MIN_WIDTH = 120;
-let spellingMode = "simple";
+let spellingMode = "true";
 let spellingHintActive = false;
 let fundamentalSpelling = "sharp";
-let featureMode = "ratio";
+let featureMode = "note";
 let showHz = false;
 let showRatioCents = false;
 let showCentsDeviation = true;
@@ -2198,6 +2208,21 @@ function getSnapshotLooperState() {
   };
 }
 
+function looperEventsMatch(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (
+      a[i].type !== b[i].type ||
+      a[i].nodeId !== b[i].nodeId ||
+      a[i].t !== b[i].t ||
+      a[i].octave !== b[i].octave
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function restoreSnapshotLooper(snapshot) {
   const looper = snapshot && snapshot.looper;
   if (!looper || !Array.isArray(looper.events) || !looper.events.length) {
@@ -2222,6 +2247,12 @@ function restoreSnapshotLooper(snapshot) {
     .sort((a, b) => a.t - b.t);
   if (!events.length) {
     clearLooper();
+    return;
+  }
+  // If the looper is already playing the same events, keep it running
+  // instead of restarting from the beginning.
+  const looperIsPlaying = looperState === "playing" || looperState === "overdubbing";
+  if (looperIsPlaying && looperEventsMatch(looperEvents, events)) {
     return;
   }
   clearLooperTimers();
@@ -2890,14 +2921,16 @@ function applyPendingSnapshotForPattern(nextSnapshot, nextIndex, nextLetter) {
     } else {
       stopPatternPlayback();
       restoreSnapshotLooper(nextSnapshot);
-      restoreSnapshotPlayState(nextSnapshot);
-      restoreSnapshotLfos(nextSnapshot);
+      const playSnapshot = excludeLooperNodesFromPlayKeys(nextSnapshot);
+      restoreSnapshotPlayState(playSnapshot);
+      restoreSnapshotLfos(playSnapshot);
       return false;
     }
     restoreSnapshotLooper(nextSnapshot);
   }
-  restoreSnapshotPlayState(nextSnapshot);
-  restoreSnapshotLfos(nextSnapshot);
+  const playSnapshot = excludeLooperNodesFromPlayKeys(nextSnapshot);
+  restoreSnapshotPlayState(playSnapshot);
+  restoreSnapshotLfos(playSnapshot);
   return true;
 }
 
@@ -3403,6 +3436,12 @@ function getPlayingSnapshotKeys({ excludePattern = false } = {}) {
     if (excludePattern && voice.source === "pattern") {
       return;
     }
+    // Skip looper-sourced voices — the looper state is serialized separately
+    // via getSnapshotLooperState(). Including looper voices in playKeys
+    // creates double-voiced nodes on recall.
+    if (voice.source === "looper") {
+      return;
+    }
     const key = getSnapshotNodeKey(nodeById.get(voice.nodeId));
     if (key) {
       keys.add(key);
@@ -3610,6 +3649,9 @@ function buildSnapshotSetPayload({ compact = true } = {}) {
         if (!entry.diff) {
           entry.state = snapshot.state;
         }
+        if (snapshot.caption) {
+          entry.caption = snapshot.caption;
+        }
         return [index, entry];
       })
     : snapshots;
@@ -3625,6 +3667,9 @@ function buildSnapshotSetPayload({ compact = true } = {}) {
         };
         if (!entry.diff) {
           entry.state = snapshot.state;
+        }
+        if (snapshot.caption) {
+          entry.caption = snapshot.caption;
         }
         return [index, entry];
       })
@@ -3758,6 +3803,1026 @@ function updateSnapshotUi() {
   if (snapshotGrid) {
     snapshotGrid.hidden = snapshotKeyboardMode;
   }
+  renderCaption();
+}
+
+const CAPTION_DEFAULT_POSITION = { x: 0.5, y: 0.82 };
+
+function cloneCaption(caption) {
+  if (!caption || typeof caption !== "object") return null;
+  const text = typeof caption.text === "string" ? caption.text : "";
+  const x = Number.isFinite(caption.x) ? Number(caption.x) : CAPTION_DEFAULT_POSITION.x;
+  const y = Number.isFinite(caption.y) ? Number(caption.y) : CAPTION_DEFAULT_POSITION.y;
+  return { text, x, y };
+}
+
+function setActiveCaption(caption, { updateUrl = true } = {}) {
+  if (caption && typeof caption === "object") {
+    activeCaption = cloneCaption(caption);
+  } else {
+    activeCaption = null;
+  }
+  renderCaption();
+  if (updateUrl) {
+    schedulePresetUrlUpdate();
+  }
+}
+
+function clampCaptionFraction(value) {
+  if (!Number.isFinite(value)) return 0.5;
+  if (value < 0.02) return 0.02;
+  if (value > 0.98) return 0.98;
+  return value;
+}
+
+function renderCaption() {
+  const el = document.getElementById("caption");
+  if (!el) return;
+  if (!activeCaption) {
+    el.hidden = true;
+    el.classList.remove("is-editing", "is-dragging");
+    return;
+  }
+  el.hidden = false;
+  el.style.left = `${clampCaptionFraction(activeCaption.x) * 100}%`;
+  el.style.top = `${clampCaptionFraction(activeCaption.y) * 100}%`;
+  const textEl = document.getElementById("caption-text");
+  if (textEl && !captionEditing) {
+    textEl.textContent = activeCaption.text;
+  }
+}
+
+function openCaptionEditor() {
+  const el = document.getElementById("caption");
+  const textEl = document.getElementById("caption-text");
+  const input = document.getElementById("caption-input");
+  if (!el || !textEl || !input) return;
+  if (!activeCaption) {
+    activeCaption = {
+      text: "",
+      x: CAPTION_DEFAULT_POSITION.x,
+      y: CAPTION_DEFAULT_POSITION.y,
+    };
+    renderCaption();
+  }
+  captionPreEditSnapshot = cloneCaption(activeCaption);
+  captionEditing = true;
+  input.value = activeCaption.text || "";
+  textEl.hidden = true;
+  input.hidden = false;
+  el.classList.add("is-editing");
+  el.hidden = false;
+  input.style.height = "0px";
+  input.style.height = `${Math.max(input.scrollHeight, 22)}px`;
+  requestAnimationFrame(() => {
+    input.focus();
+    input.select();
+  });
+}
+
+function commitCaptionEdit() {
+  if (!captionEditing) return;
+  const el = document.getElementById("caption");
+  const textEl = document.getElementById("caption-text");
+  const input = document.getElementById("caption-input");
+  const rawText = input ? input.value : "";
+  const trimmed = rawText.replace(/\s+$/u, "");
+  captionEditing = false;
+  captionPreEditSnapshot = null;
+  if (input) input.hidden = true;
+  if (textEl) textEl.hidden = false;
+  if (el) el.classList.remove("is-editing");
+  if (!trimmed) {
+    activeCaption = null;
+  } else if (activeCaption) {
+    activeCaption.text = trimmed;
+  }
+  renderCaption();
+  schedulePresetUrlUpdate();
+}
+
+function cancelCaptionEdit() {
+  if (!captionEditing) return;
+  const el = document.getElementById("caption");
+  const textEl = document.getElementById("caption-text");
+  const input = document.getElementById("caption-input");
+  captionEditing = false;
+  if (input) input.hidden = true;
+  if (textEl) textEl.hidden = false;
+  if (el) el.classList.remove("is-editing");
+  if (captionPreEditSnapshot && !captionPreEditSnapshot.text) {
+    // We created a new empty caption for editing — discard it.
+    activeCaption = null;
+  } else if (captionPreEditSnapshot) {
+    activeCaption = cloneCaption(captionPreEditSnapshot);
+  }
+  captionPreEditSnapshot = null;
+  renderCaption();
+}
+
+const CAPTION_DRAG_THRESHOLD = 4;
+
+function startCaptionPointerDown(event) {
+  if (captionEditing) return;
+  if (!activeCaption) return;
+  if (event.button !== undefined && event.button !== 0) return;
+  const el = document.getElementById("caption");
+  if (!el) return;
+  captionDragState = {
+    startX: event.clientX,
+    startY: event.clientY,
+    startFracX: activeCaption.x,
+    startFracY: activeCaption.y,
+    moved: false,
+    pointerId: event.pointerId,
+  };
+  try {
+    el.setPointerCapture(event.pointerId);
+  } catch (err) {
+    /* no-op */
+  }
+  event.preventDefault();
+}
+
+function onCaptionPointerMove(event) {
+  if (!captionDragState || captionDragState.pointerId !== event.pointerId) return;
+  const dx = event.clientX - captionDragState.startX;
+  const dy = event.clientY - captionDragState.startY;
+  if (!captionDragState.moved && Math.hypot(dx, dy) >= CAPTION_DRAG_THRESHOLD) {
+    captionDragState.moved = true;
+    const el = document.getElementById("caption");
+    if (el) el.classList.add("is-dragging");
+  }
+  if (!captionDragState.moved) return;
+  if (!activeCaption) return;
+  const vw = window.innerWidth || 1;
+  const vh = window.innerHeight || 1;
+  activeCaption.x = clampCaptionFraction(
+    captionDragState.startFracX + dx / vw
+  );
+  activeCaption.y = clampCaptionFraction(
+    captionDragState.startFracY + dy / vh
+  );
+  renderCaption();
+}
+
+function endCaptionPointerUp(event) {
+  if (!captionDragState || captionDragState.pointerId !== event.pointerId) return;
+  const el = document.getElementById("caption");
+  const moved = captionDragState.moved;
+  captionDragState = null;
+  if (el) {
+    el.classList.remove("is-dragging");
+    try {
+      el.releasePointerCapture(event.pointerId);
+    } catch (err) {
+      /* no-op */
+    }
+  }
+  if (moved) {
+    schedulePresetUrlUpdate();
+  } else {
+    // Click without drag → open editor
+    openCaptionEditor();
+  }
+}
+
+const WELCOME_STORAGE_KEY = "tuning-lattice-welcomed";
+
+function hasVisitedBefore() {
+  try {
+    return window.localStorage.getItem(WELCOME_STORAGE_KEY) === "1";
+  } catch (error) {
+    return false;
+  }
+}
+
+function markWelcomed() {
+  try {
+    window.localStorage.setItem(WELCOME_STORAGE_KEY, "1");
+  } catch (error) {
+    /* no-op */
+  }
+}
+
+function maybeShowWelcomeOverlay(hasIncomingPresetState, embedMode) {
+  if (embedMode) return;
+  if (hasIncomingPresetState) return;
+  if (hasVisitedBefore()) return;
+  showWelcomeOverlay();
+}
+
+function showWelcomeOverlay() {
+  const overlay = document.getElementById("welcome-overlay");
+  if (!overlay) return;
+  overlay.hidden = false;
+  const tourBtn = document.getElementById("welcome-tour-button");
+  if (tourBtn) {
+    requestAnimationFrame(() => tourBtn.focus());
+  }
+}
+
+function hideWelcomeOverlay() {
+  const overlay = document.getElementById("welcome-overlay");
+  if (!overlay) return;
+  overlay.hidden = true;
+  markWelcomed();
+}
+
+// ---- Guided tour runner ----
+//
+// Pure overlay: renders a speech-bubble card on top of a fully-interactive
+// app. Never touches lattice state, never seeds anything. Steps are loaded
+// from src/tour-steps.js. See docs/guided-tour-design.md for the full design.
+
+const TOUR_DEFAULT_ANCHOR = { corner: "top-right", dx: -24, dy: 24 };
+
+let tourActive = false;
+let tourIndex = 0;
+let tourSteps = [];
+let tourLabel = "Guided tour";
+
+const tourBubbleEl = document.getElementById("tour-bubble");
+const tourBubbleTitleEl = document.getElementById("tour-bubble-title");
+const tourBubbleBodyEl = document.getElementById("tour-bubble-body");
+const tourBackButton = document.getElementById("tour-back-button");
+const tourNextButton = document.getElementById("tour-next-button");
+const tourBannerEl = document.getElementById("tour-banner");
+const tourBannerProgressEl = document.getElementById("tour-banner-progress");
+const tourBannerExitButton = document.getElementById("tour-banner-exit");
+const tourArrowSvg = document.getElementById("tour-arrow-svg");
+const tourArrowLine = document.getElementById("tour-arrow-line");
+
+function positionTourBubble(anchor) {
+  if (!tourBubbleEl) return;
+  const { corner, dx, dy } = {
+    ...TOUR_DEFAULT_ANCHOR,
+    ...(anchor || {}),
+  };
+  // Clear prior edge props so each call is a clean slate.
+  tourBubbleEl.style.top = "";
+  tourBubbleEl.style.right = "";
+  tourBubbleEl.style.bottom = "";
+  tourBubbleEl.style.left = "";
+  tourBubbleEl.style.transform = "";
+  const offsetDx = Number.isFinite(dx) ? dx : 0;
+  const offsetDy = Number.isFinite(dy) ? dy : 0;
+  switch (corner) {
+    case "top-left":
+      tourBubbleEl.style.top = `${offsetDy}px`;
+      tourBubbleEl.style.left = `${offsetDx}px`;
+      break;
+    case "top-center":
+      tourBubbleEl.style.top = `${offsetDy}px`;
+      tourBubbleEl.style.left = "50%";
+      tourBubbleEl.style.transform = `translate(calc(-50% + ${offsetDx}px), 0)`;
+      break;
+    case "top-right":
+      tourBubbleEl.style.top = `${offsetDy}px`;
+      tourBubbleEl.style.right = `${-offsetDx}px`;
+      break;
+    case "left-center":
+      tourBubbleEl.style.top = "50%";
+      tourBubbleEl.style.left = `${offsetDx}px`;
+      tourBubbleEl.style.transform = `translate(0, calc(-50% + ${offsetDy}px))`;
+      break;
+    case "right-center":
+      tourBubbleEl.style.top = "50%";
+      tourBubbleEl.style.right = `${-offsetDx}px`;
+      tourBubbleEl.style.transform = `translate(0, calc(-50% + ${offsetDy}px))`;
+      break;
+    case "bottom-left":
+      tourBubbleEl.style.bottom = `${-offsetDy}px`;
+      tourBubbleEl.style.left = `${offsetDx}px`;
+      break;
+    case "bottom-center":
+      tourBubbleEl.style.bottom = `${-offsetDy}px`;
+      tourBubbleEl.style.left = "50%";
+      tourBubbleEl.style.transform = `translate(calc(-50% + ${offsetDx}px), 0)`;
+      break;
+    case "bottom-right":
+      tourBubbleEl.style.bottom = `${-offsetDy}px`;
+      tourBubbleEl.style.right = `${-offsetDx}px`;
+      break;
+    default:
+      tourBubbleEl.style.top = `${offsetDy}px`;
+      tourBubbleEl.style.right = `${-offsetDx}px`;
+      break;
+  }
+}
+
+function closestEdgePoint(rect, targetX, targetY) {
+  // Find the point on the rectangle's border closest to (targetX, targetY).
+  const cx = (rect.left + rect.right) / 2;
+  const cy = (rect.top + rect.bottom) / 2;
+  const dx = targetX - cx;
+  const dy = targetY - cy;
+  if (dx === 0 && dy === 0) {
+    return { x: rect.left, y: cy };
+  }
+  const hw = (rect.right - rect.left) / 2;
+  const hh = (rect.bottom - rect.top) / 2;
+  // Scale factor to reach the edge along the ray from center to target.
+  const sx = hw / Math.abs(dx || 1);
+  const sy = hh / Math.abs(dy || 1);
+  const s = Math.min(sx, sy);
+  return { x: cx + dx * s, y: cy + dy * s };
+}
+
+function renderTourArrow(step) {
+  if (!tourArrowSvg || !tourArrowLine) return;
+  const arrow = step && step.arrow;
+  if (!arrow || !Number.isFinite(arrow.x) || !Number.isFinite(arrow.y)) {
+    tourArrowSvg.hidden = true;
+    return;
+  }
+  const targetX = (arrow.x / 100) * window.innerWidth;
+  const targetY = (arrow.y / 100) * window.innerHeight;
+  // Wait a frame for bubble positioning to settle before reading its rect.
+  requestAnimationFrame(() => {
+    if (!tourBubbleEl || tourBubbleEl.hidden) {
+      tourArrowSvg.hidden = true;
+      return;
+    }
+    const rect = tourBubbleEl.getBoundingClientRect();
+    const start = closestEdgePoint(rect, targetX, targetY);
+    tourArrowLine.setAttribute("x1", start.x);
+    tourArrowLine.setAttribute("y1", start.y);
+    tourArrowLine.setAttribute("x2", targetX);
+    tourArrowLine.setAttribute("y2", targetY);
+    tourArrowSvg.hidden = false;
+  });
+}
+
+function hideTourArrow() {
+  if (tourArrowSvg) tourArrowSvg.hidden = true;
+}
+
+function renderTourStep() {
+  if (!tourActive || !tourBubbleEl) {
+    return;
+  }
+  const step = tourSteps[tourIndex];
+  if (!step) {
+    endTour();
+    return;
+  }
+  if (tourBubbleTitleEl) {
+    tourBubbleTitleEl.textContent = step.title || "";
+  }
+  if (tourBubbleBodyEl) {
+    tourBubbleBodyEl.textContent = step.body || "";
+  }
+  if (tourBackButton) {
+    tourBackButton.disabled = tourIndex === 0;
+  }
+  if (tourNextButton) {
+    tourNextButton.textContent = step.isFinal ? "Done" : "Next \u25B6";
+  }
+  positionTourBubble(step.anchor);
+  tourBubbleEl.hidden = false;
+  renderTourArrow(step);
+  if (tourBannerEl) {
+    tourBannerEl.hidden = false;
+  }
+  if (tourBannerProgressEl) {
+    tourBannerProgressEl.textContent = `${tourLabel} ${tourIndex + 1}/${tourSteps.length}`;
+  }
+}
+
+function startTour(stepsSource, label) {
+  const defaultSteps = quickTourSteps;
+  const source = tourEditMode
+    ? loadTourDraft() || stepsSource || defaultSteps
+    : stepsSource || defaultSteps;
+  if (!Array.isArray(source) || source.length === 0) {
+    console.warn("[tour] No tour steps defined in src/tour-steps.js");
+    return false;
+  }
+  // Reset the lattice and set beginner-friendly defaults so the tour starts
+  // from a clean, familiar state.
+  resetLattice();
+  featureMode = "note";
+  syncFeatureModeControls();
+  spellingMode = "true";
+  syncSpellingModeControls();
+  syncHejiButtons();
+  applyLabelDisplayToggleChange({ refreshCustom: true });
+
+  tourLabel = label || (source === deepTourSteps ? "Deep tour" : "Quick tour");
+  // Deep-clone so in-memory mutations during edit mode don't bleed into the
+  // imported module or the draft-from-localStorage reference.
+  tourSteps = source.map((step) => ({
+    ...step,
+    anchor: step.anchor ? { ...step.anchor } : undefined,
+  }));
+  tourIndex = 0;
+  tourActive = true;
+  renderTourStep();
+  return true;
+}
+
+function startQuickTour() {
+  return startTour(quickTourSteps, "Quick tour");
+}
+
+function startDeepTour() {
+  return startTour(deepTourSteps, "Deep tour");
+}
+
+function endTour() {
+  tourActive = false;
+  if (tourBubbleEl) {
+    tourBubbleEl.hidden = true;
+  }
+  if (tourBannerEl) {
+    tourBannerEl.hidden = true;
+  }
+  hideTourArrow();
+  exitArrowPlaceMode();
+}
+
+function tourNext() {
+  if (!tourActive) return;
+  const step = tourSteps[tourIndex];
+  if (step && step.isFinal) {
+    endTour();
+    return;
+  }
+  if (tourIndex >= tourSteps.length - 1) {
+    endTour();
+    return;
+  }
+  tourIndex += 1;
+  renderTourStep();
+}
+
+function tourBack() {
+  if (!tourActive) return;
+  if (tourIndex === 0) return;
+  tourIndex -= 1;
+  renderTourStep();
+}
+
+// Called from the main keydown handler. Returns true if the event was
+// consumed by the tour (in which case the caller should return without
+// running its own arrow-key logic).
+function handleTourKeydown(event) {
+  if (!tourActive) return false;
+  if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return false;
+  // Skip if any text input / contenteditable is focused.
+  const targetIsEditable =
+    event.target instanceof HTMLElement &&
+    event.target.matches("input, textarea, select, [contenteditable='true']");
+  if (targetIsEditable) return false;
+  // Skip if an interaction mode is active — those keys belong to the mode.
+  if (typeof getInteractionMode === "function" && getInteractionMode()) {
+    return false;
+  }
+  event.preventDefault();
+  if (event.key === "ArrowRight") {
+    tourNext();
+  } else {
+    tourBack();
+  }
+  return true;
+}
+
+if (tourNextButton) {
+  tourNextButton.addEventListener("click", () => {
+    tourNext();
+    canvas.focus();
+  });
+}
+if (tourBackButton) {
+  tourBackButton.addEventListener("click", () => {
+    tourBack();
+    canvas.focus();
+  });
+}
+if (tourBannerExitButton) {
+  tourBannerExitButton.addEventListener("click", endTour);
+}
+
+if (typeof window !== "undefined") {
+  window.replayTour = function replayTour() {
+    return startQuickTour();
+  };
+  window.startQuickTour = startQuickTour;
+  window.startDeepTour = startDeepTour;
+  window.showWelcomeOverlay = showWelcomeOverlay;
+  window.clearWelcomeFlag = function clearWelcomeFlag() {
+    try {
+      window.localStorage.removeItem(WELCOME_STORAGE_KEY);
+    } catch (error) {
+      /* no-op */
+    }
+  };
+}
+
+// ---- Guided tour: edit mode (Phase 2) ----
+//
+// Activate with window.tourEdit() (or the "Edit tour" row in Learn & Get Help).
+// Edits are saved live to localStorage under TOUR_DRAFT_STORAGE_KEY. Drafts
+// only affect the tour when edit mode is on; regular users never see them.
+// Export serializes the current draft to a JS snippet for pasting into
+// src/tour-steps.js.
+
+const TOUR_DRAFT_STORAGE_KEY = "tuning-lattice-tour-draft-v1";
+
+let tourEditMode = false;
+let tourDragState = null;
+let tourDraftSaveTimer = null;
+let tourPreviewMode = false;
+
+const tourBubbleDragHandle = document.getElementById("tour-bubble-drag-handle");
+const tourEditAddButton = document.getElementById("tour-edit-add");
+const tourEditDuplicateButton = document.getElementById("tour-edit-duplicate");
+const tourEditDeleteButton = document.getElementById("tour-edit-delete");
+const tourEditMoveUpButton = document.getElementById("tour-edit-move-up");
+const tourEditMoveDownButton = document.getElementById("tour-edit-move-down");
+const tourEditExportButton = document.getElementById("tour-edit-export");
+const tourEditDoneButton = document.getElementById("tour-edit-done");
+const learnHelpEditQuickTourButton = document.getElementById("learn-help-edit-quick-tour-button");
+const learnHelpEditDeepTourButton = document.getElementById("learn-help-edit-deep-tour-button");
+
+function loadTourDraft() {
+  try {
+    const raw = window.localStorage.getItem(TOUR_DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    return parsed;
+  } catch (error) {
+    console.warn("[tour-edit] Failed to load draft", error);
+    return null;
+  }
+}
+
+function saveTourDraftNow() {
+  try {
+    window.localStorage.setItem(
+      TOUR_DRAFT_STORAGE_KEY,
+      JSON.stringify(tourSteps)
+    );
+  } catch (error) {
+    console.warn("[tour-edit] Failed to save draft", error);
+  }
+}
+
+function scheduleTourDraftSave() {
+  if (tourDraftSaveTimer) {
+    clearTimeout(tourDraftSaveTimer);
+  }
+  tourDraftSaveTimer = setTimeout(() => {
+    tourDraftSaveTimer = null;
+    saveTourDraftNow();
+  }, 200);
+}
+
+function currentTourStep() {
+  return tourSteps[tourIndex] || null;
+}
+
+function syncEditableFromInput() {
+  const step = currentTourStep();
+  if (!step) return;
+  if (tourBubbleTitleEl) {
+    // Title is single-line; strip any stray newlines users might paste in.
+    step.title = (tourBubbleTitleEl.innerText || "").replace(/\s*\n\s*/g, " ").trim();
+  }
+  if (tourBubbleBodyEl) {
+    // innerText (not textContent) preserves the newlines the browser inserts
+    // as <br>/<div> when the user presses Enter inside contenteditable.
+    step.body = tourBubbleBodyEl.innerText || "";
+  }
+  scheduleTourDraftSave();
+}
+
+function setContentEditable(on) {
+  if (tourBubbleTitleEl) {
+    if (on) {
+      tourBubbleTitleEl.setAttribute("contenteditable", "true");
+      tourBubbleTitleEl.setAttribute("spellcheck", "true");
+    } else {
+      tourBubbleTitleEl.removeAttribute("contenteditable");
+      tourBubbleTitleEl.removeAttribute("spellcheck");
+    }
+  }
+  if (tourBubbleBodyEl) {
+    if (on) {
+      tourBubbleBodyEl.setAttribute("contenteditable", "true");
+      tourBubbleBodyEl.setAttribute("spellcheck", "true");
+    } else {
+      tourBubbleBodyEl.removeAttribute("contenteditable");
+      tourBubbleBodyEl.removeAttribute("spellcheck");
+    }
+  }
+}
+
+if (tourBubbleTitleEl) {
+  tourBubbleTitleEl.addEventListener("input", () => {
+    if (tourEditMode) syncEditableFromInput();
+  });
+}
+if (tourBubbleBodyEl) {
+  tourBubbleBodyEl.addEventListener("input", () => {
+    if (tourEditMode) syncEditableFromInput();
+  });
+}
+
+function enterTourEditMode(stepsSource, label) {
+  tourEditMode = true;
+  document.body.classList.add("tour-edit-mode");
+  // Start the requested tour fresh for editing.
+  if (!tourActive) {
+    // Temporarily disable tourEditMode so startTour doesn't load a stale draft
+    tourEditMode = false;
+    startTour(stepsSource || quickTourSteps, label || "Quick tour");
+    tourEditMode = true;
+  } else {
+    const draft = loadTourDraft();
+    if (draft) {
+      tourSteps = draft.map((step) => ({
+        ...step,
+        anchor: step.anchor ? { ...step.anchor } : undefined,
+      }));
+      tourIndex = Math.min(tourIndex, tourSteps.length - 1);
+      renderTourStep();
+    }
+  }
+  setContentEditable(true);
+}
+
+function exitTourEditMode() {
+  tourEditMode = false;
+  tourPreviewMode = false;
+  document.body.classList.remove("tour-edit-mode");
+  document.body.classList.remove("tour-preview");
+  setContentEditable(false);
+  if (tourDraftSaveTimer) {
+    clearTimeout(tourDraftSaveTimer);
+    tourDraftSaveTimer = null;
+    saveTourDraftNow();
+  }
+}
+
+function enterTourPreview() {
+  if (!tourEditMode) return;
+  tourPreviewMode = true;
+  document.body.classList.add("tour-preview");
+  setContentEditable(false);
+}
+
+function exitTourPreview() {
+  tourPreviewMode = false;
+  document.body.classList.remove("tour-preview");
+  if (tourEditMode) {
+    setContentEditable(true);
+  }
+}
+
+function clearTourDraft() {
+  try {
+    window.localStorage.removeItem(TOUR_DRAFT_STORAGE_KEY);
+  } catch (error) {
+    /* no-op */
+  }
+}
+
+// ---- Drag-to-reposition ----
+
+function snapToNearestCorner(bubbleRect) {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const candidates = [
+    {
+      corner: "top-left",
+      dist: Math.hypot(bubbleRect.left, bubbleRect.top),
+      dx: bubbleRect.left,
+      dy: bubbleRect.top,
+    },
+    {
+      corner: "top-right",
+      dist: Math.hypot(vw - bubbleRect.right, bubbleRect.top),
+      dx: bubbleRect.right - vw,
+      dy: bubbleRect.top,
+    },
+    {
+      corner: "bottom-left",
+      dist: Math.hypot(bubbleRect.left, vh - bubbleRect.bottom),
+      dx: bubbleRect.left,
+      dy: bubbleRect.bottom - vh,
+    },
+    {
+      corner: "bottom-right",
+      dist: Math.hypot(vw - bubbleRect.right, vh - bubbleRect.bottom),
+      dx: bubbleRect.right - vw,
+      dy: bubbleRect.bottom - vh,
+    },
+  ];
+  candidates.sort((a, b) => a.dist - b.dist);
+  const best = candidates[0];
+  return {
+    corner: best.corner,
+    dx: Math.round(best.dx),
+    dy: Math.round(best.dy),
+  };
+}
+
+if (tourBubbleDragHandle) {
+  tourBubbleDragHandle.addEventListener("pointerdown", (event) => {
+    if (!tourEditMode || !tourBubbleEl) return;
+    event.preventDefault();
+    const rect = tourBubbleEl.getBoundingClientRect();
+    tourDragState = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft: rect.left,
+      startTop: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    try {
+      tourBubbleDragHandle.setPointerCapture(event.pointerId);
+    } catch (error) {
+      /* older browsers — no-op */
+    }
+    document.body.classList.add("tour-edit-dragging");
+  });
+
+  tourBubbleDragHandle.addEventListener("pointermove", (event) => {
+    if (!tourDragState || event.pointerId !== tourDragState.pointerId) return;
+    const nextLeft = tourDragState.startLeft + (event.clientX - tourDragState.startX);
+    const nextTop = tourDragState.startTop + (event.clientY - tourDragState.startY);
+    // Temporarily pin the bubble by top/left for smooth dragging. We'll
+    // convert back to corner+dx/dy on release.
+    tourBubbleEl.style.top = `${nextTop}px`;
+    tourBubbleEl.style.left = `${nextLeft}px`;
+    tourBubbleEl.style.right = "";
+    tourBubbleEl.style.bottom = "";
+    tourBubbleEl.style.transform = "";
+  });
+
+  const finishDrag = (event) => {
+    if (!tourDragState || event.pointerId !== tourDragState.pointerId) return;
+    document.body.classList.remove("tour-edit-dragging");
+    try {
+      tourBubbleDragHandle.releasePointerCapture(event.pointerId);
+    } catch (error) {
+      /* no-op */
+    }
+    tourDragState = null;
+    const rect = tourBubbleEl.getBoundingClientRect();
+    const anchor = snapToNearestCorner(rect);
+    const step = currentTourStep();
+    if (step) {
+      step.anchor = anchor;
+      scheduleTourDraftSave();
+      positionTourBubble(anchor);
+    }
+  };
+  tourBubbleDragHandle.addEventListener("pointerup", finishDrag);
+  tourBubbleDragHandle.addEventListener("pointercancel", finishDrag);
+}
+
+// ---- Toolbar actions ----
+
+function makeBlankStep() {
+  return {
+    id: `step-${Date.now().toString(36)}`,
+    title: "",
+    body: "",
+    anchor: { corner: "top-right", dx: -24, dy: 24 },
+  };
+}
+
+function addStepAfter() {
+  if (!tourEditMode) return;
+  tourSteps.splice(tourIndex + 1, 0, makeBlankStep());
+  tourIndex += 1;
+  saveTourDraftNow();
+  renderTourStep();
+}
+
+function duplicateStep() {
+  if (!tourEditMode) return;
+  const step = currentTourStep();
+  if (!step) return;
+  const copy = {
+    ...step,
+    id: `${step.id || "step"}-copy-${Date.now().toString(36)}`,
+    anchor: step.anchor ? { ...step.anchor } : undefined,
+  };
+  tourSteps.splice(tourIndex + 1, 0, copy);
+  tourIndex += 1;
+  saveTourDraftNow();
+  renderTourStep();
+}
+
+function deleteStep() {
+  if (!tourEditMode) return;
+  if (tourSteps.length <= 1) {
+    console.warn("[tour-edit] Can't delete the last remaining step");
+    return;
+  }
+  tourSteps.splice(tourIndex, 1);
+  if (tourIndex >= tourSteps.length) {
+    tourIndex = tourSteps.length - 1;
+  }
+  saveTourDraftNow();
+  renderTourStep();
+}
+
+function moveStepEarlier() {
+  if (!tourEditMode || tourIndex === 0) return;
+  const step = tourSteps.splice(tourIndex, 1)[0];
+  tourIndex -= 1;
+  tourSteps.splice(tourIndex, 0, step);
+  saveTourDraftNow();
+  renderTourStep();
+}
+
+function moveStepLater() {
+  if (!tourEditMode || tourIndex >= tourSteps.length - 1) return;
+  const step = tourSteps.splice(tourIndex, 1)[0];
+  tourIndex += 1;
+  tourSteps.splice(tourIndex, 0, step);
+  saveTourDraftNow();
+  renderTourStep();
+}
+
+function serializeTourSteps(steps, varName) {
+  const exportName = varName || "tourSteps";
+  const out = [
+    "// Tour steps — generated by in-app editor; safe to hand-edit.",
+    "",
+    `export const ${exportName} = [`,
+  ];
+  for (const step of steps) {
+    out.push("  {");
+    out.push(`    id: ${JSON.stringify(step.id || "")},`);
+    if (step.title) {
+      out.push(`    title: ${JSON.stringify(step.title)},`);
+    }
+    out.push(`    body: ${JSON.stringify(step.body || "")},`);
+    if (step.anchor) {
+      const corner = JSON.stringify(step.anchor.corner || "top-right");
+      const dx = Number.isFinite(step.anchor.dx) ? step.anchor.dx : 0;
+      const dy = Number.isFinite(step.anchor.dy) ? step.anchor.dy : 0;
+      out.push(`    anchor: { corner: ${corner}, dx: ${dx}, dy: ${dy} },`);
+    }
+    if (step.arrow && Number.isFinite(step.arrow.x) && Number.isFinite(step.arrow.y)) {
+      out.push(`    arrow: { x: ${step.arrow.x}, y: ${step.arrow.y} },`);
+    }
+    if (step.isFinal) {
+      out.push("    isFinal: true,");
+    }
+    out.push("  },");
+  }
+  out.push("];");
+  out.push("");
+  return out.join("\n");
+}
+
+function saveTourToFile() {
+  saveTourDraftNow();
+  const isDeep = tourLabel === "Deep tour";
+  const varName = isDeep ? "deepTourSteps" : "quickTourSteps";
+  const filename = isDeep ? "deep-tour-draft.js" : "tour-quick-draft.js";
+  const source = serializeTourSteps(tourSteps, varName);
+  const blob = new Blob([source], { type: "text/javascript" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  if (typeof showTemporaryBanner === "function") {
+    showTemporaryBanner(`Saved ${filename}`);
+  }
+}
+
+if (tourEditAddButton) tourEditAddButton.addEventListener("click", addStepAfter);
+if (tourEditDuplicateButton) tourEditDuplicateButton.addEventListener("click", duplicateStep);
+if (tourEditDeleteButton) tourEditDeleteButton.addEventListener("click", deleteStep);
+if (tourEditMoveUpButton) tourEditMoveUpButton.addEventListener("click", moveStepEarlier);
+if (tourEditMoveDownButton) tourEditMoveDownButton.addEventListener("click", moveStepLater);
+if (tourEditExportButton) tourEditExportButton.addEventListener("click", saveTourToFile);
+if (tourEditDoneButton) tourEditDoneButton.addEventListener("click", exitTourEditMode);
+
+// ---- Arrow placement mode ----
+let tourArrowPlacing = false;
+const tourEditArrowButton = document.getElementById("tour-edit-arrow");
+
+function enterArrowPlaceMode() {
+  if (!tourEditMode) return;
+  tourArrowPlacing = true;
+  document.body.classList.add("tour-arrow-placing");
+  if (tourEditArrowButton) {
+    tourEditArrowButton.classList.add("tour-edit-button-active");
+  }
+}
+
+function exitArrowPlaceMode() {
+  tourArrowPlacing = false;
+  document.body.classList.remove("tour-arrow-placing");
+  if (tourEditArrowButton) {
+    tourEditArrowButton.classList.remove("tour-edit-button-active");
+  }
+}
+
+function toggleArrowPlaceMode() {
+  if (!tourEditMode) return;
+  const step = currentTourStep();
+  if (!step) return;
+  if (tourArrowPlacing) {
+    exitArrowPlaceMode();
+    return;
+  }
+  // If step already has an arrow, remove it.
+  if (step.arrow) {
+    step.arrow = undefined;
+    scheduleTourDraftSave();
+    hideTourArrow();
+    return;
+  }
+  // Enter placing mode — next click sets the target.
+  enterArrowPlaceMode();
+}
+
+if (tourEditArrowButton) {
+  tourEditArrowButton.addEventListener("click", toggleArrowPlaceMode);
+}
+
+// Intercept pointerdown in capture phase to place the arrow target before the
+// canvas sees the event and starts a pan/drag.
+if (typeof window !== "undefined") {
+  window.addEventListener("pointerdown", (event) => {
+    if (!tourArrowPlacing || !tourEditMode) return;
+    // Ignore clicks on the tour bubble itself / toolbar buttons.
+    if (tourBubbleEl && tourBubbleEl.contains(event.target)) return;
+    if (tourBannerEl && tourBannerEl.contains(event.target)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const step = currentTourStep();
+    if (!step) return;
+    step.arrow = {
+      x: Math.round((event.clientX / window.innerWidth) * 1000) / 10,
+      y: Math.round((event.clientY / window.innerHeight) * 1000) / 10,
+    };
+    scheduleTourDraftSave();
+    renderTourArrow(step);
+    exitArrowPlaceMode();
+  }, true); // capture phase
+}
+
+const tourEditPreviewButton = document.getElementById("tour-edit-preview");
+const tourPreviewEditLink = document.getElementById("tour-preview-edit-link");
+if (tourEditPreviewButton) tourEditPreviewButton.addEventListener("click", enterTourPreview);
+if (tourPreviewEditLink) tourPreviewEditLink.addEventListener("click", exitTourPreview);
+
+if (learnHelpEditQuickTourButton) {
+  learnHelpEditQuickTourButton.addEventListener("click", () => {
+    if (learnHelpDialog && learnHelpDialog.open) {
+      learnHelpDialog.close("tour-edit");
+    }
+    enterTourEditMode(quickTourSteps, "Quick tour");
+  });
+}
+if (learnHelpEditDeepTourButton) {
+  learnHelpEditDeepTourButton.addEventListener("click", () => {
+    if (learnHelpDialog && learnHelpDialog.open) {
+      learnHelpDialog.close("tour-edit");
+    }
+    enterTourEditMode(deepTourSteps, "Deep tour");
+  });
+}
+
+if (typeof window !== "undefined") {
+  window.tourEdit = enterTourEditMode;
+  window.tourEditDone = exitTourEditMode;
+  window.clearTourDraft = clearTourDraft;
+}
+
+if (typeof window !== "undefined") {
+  window.setCaption = function setCaption(text, position) {
+    if (!text) {
+      setActiveCaption(null);
+      return null;
+    }
+    const next = {
+      text: String(text),
+      x: position && Number.isFinite(position.x) ? position.x : activeCaption ? activeCaption.x : CAPTION_DEFAULT_POSITION.x,
+      y: position && Number.isFinite(position.y) ? position.y : activeCaption ? activeCaption.y : CAPTION_DEFAULT_POSITION.y,
+    };
+    setActiveCaption(next);
+    return cloneCaption(activeCaption);
+  };
+  window.getCaption = function getCaption() {
+    return cloneCaption(activeCaption);
+  };
 }
 
 function logSnapshotDebug(stage, snapshot) {
@@ -3843,6 +4908,7 @@ function saveSnapshot(index) {
     pattern: getSnapshotPatternState(),
     looper: getSnapshotLooperState(),
     lfos: getSnapshotLfoState(),
+    caption: cloneCaption(activeCaption),
   };
   if (snapshotDebugEnabled) {
     console.groupCollapsed(`[snapshot-save-keys] ${index}`);
@@ -3881,6 +4947,7 @@ function saveSnapshotLetter(letter, index) {
     pattern: getSnapshotPatternState(),
     looper: getSnapshotLooperState(),
     lfos: getSnapshotLfoState(),
+    caption: cloneCaption(activeCaption),
   };
   if (snapshotDebugEnabled) {
     console.groupCollapsed(`[snapshot-save-letter-keys] ${letter}`);
@@ -3940,10 +5007,12 @@ function recallSnapshotLetter(letter, index) {
   } else {
     buildPatternStates(true);
   }
-  const morphHandled = restoreSnapshotPlayState(snapshot);
+  const playSnapshot = excludeLooperNodesFromPlayKeys(snapshot);
+  const morphHandled = restoreSnapshotPlayState(playSnapshot);
   if (!morphHandled) {
-    restoreSnapshotLfos(snapshot);
+    restoreSnapshotLfos(playSnapshot);
   }
+  setActiveCaption(snapshot.caption || null, { updateUrl: false });
   updateSnapshotUi();
 }
 
@@ -3990,10 +5059,12 @@ function recallSnapshot(index) {
   } else {
     buildPatternStates(true);
   }
-  const morphHandled = restoreSnapshotPlayState(snapshot);
+  const playSnapshot = excludeLooperNodesFromPlayKeys(snapshot);
+  const morphHandled = restoreSnapshotPlayState(playSnapshot);
   if (!morphHandled) {
-    restoreSnapshotLfos(snapshot);
+    restoreSnapshotLfos(playSnapshot);
   }
+  setActiveCaption(snapshot.caption || null, { updateUrl: false });
   updateSnapshotUi();
 }
 
@@ -4253,6 +5324,39 @@ function tryMorphSnapshotPlayState(snapshot) {
     createSnapshotTargetVoice(target, durationMs);
   });
   return true;
+}
+
+// When a snapshot has both playKeys (manually-on nodes) and a looper, the
+// playKeys may include nodes that the looper also manages. Starting a
+// persistent voice AND a looper voice for the same node causes the note to
+// hang — the looper's "off" only stops the looper voice, leaving the
+// persistent one. Strip looper-managed nodeIds from playKeys so the looper
+// is the sole owner of those nodes.
+function excludeLooperNodesFromPlayKeys(snapshot) {
+  if (
+    !snapshot ||
+    !snapshot.playKeys ||
+    !snapshot.playKeys.length ||
+    !snapshot.looper ||
+    !Array.isArray(snapshot.looper.events) ||
+    !snapshot.looper.events.length
+  ) {
+    return snapshot;
+  }
+  const looperNodeIds = new Set();
+  snapshot.looper.events.forEach((event) => {
+    if (event.type === "on" && Number.isFinite(event.nodeId)) {
+      looperNodeIds.add(event.nodeId);
+    }
+  });
+  if (!looperNodeIds.size) {
+    return snapshot;
+  }
+  const filteredKeys = snapshot.playKeys.filter((key) => {
+    const node = getNodeBySnapshotKey(key);
+    return !node || !looperNodeIds.has(node.id);
+  });
+  return { ...snapshot, playKeys: filteredKeys };
 }
 
 function restoreSnapshotPlayState(snapshot) {
@@ -5282,6 +6386,7 @@ function refreshPatternFromActiveNodes() {
 }
 
 function clearLooperTimers() {
+  looperGeneration++;
   looperTimeouts.forEach((timer) => clearTimeout(timer));
   looperTimeouts = [];
   if (looperCycleTimer) {
@@ -5292,7 +6397,7 @@ function clearLooperTimers() {
 
 function stopLooperVoices() {
   looperVoicesByNode.forEach((voicesList) => {
-    voicesList.forEach((voice) => stopVoice(voice));
+    voicesList.forEach((voice) => stopVoice(voice, true));
   });
   looperVoicesByNode = new Map();
 }
@@ -5425,14 +6530,18 @@ function getLooperPlaybackEventTime(event) {
 
 function scheduleLooperCycle() {
   looperCycleStartMs = performance.now();
+  const gen = looperGeneration;
   looperEvents.forEach((event) => {
     const eventTimeMs = getLooperPlaybackEventTime(event);
     const timer = setTimeout(() => {
+      if (gen !== looperGeneration) {
+        return;
+      }
       if (looperState !== "playing" && looperState !== "overdubbing") {
         return;
       }
       const node = nodeById.get(event.nodeId);
-      if (!node) {
+      if (!node || !node.active) {
         return;
       }
       if (event.type === "on") {
@@ -12443,21 +13552,18 @@ function drawDistanceDragPreview(nodePosMap) {
   if (!startEntry) {
     return;
   }
-  let endPoint = distanceSelectDrag.lastPoint;
-  let endNode = null;
-  let endEntry = null;
-  if (distanceSelectDrag.hoverNodeId != null) {
-    endNode = nodeById.get(distanceSelectDrag.hoverNodeId);
-    if (endNode) {
-      endEntry = nodePosMap.get(endNode.id);
-      if (endEntry) {
-        endPoint = endEntry.pos;
-      }
-    }
-  }
-  if (!endPoint) {
+  if (distanceSelectDrag.hoverNodeId == null) {
     return;
   }
+  const endNode = nodeById.get(distanceSelectDrag.hoverNodeId);
+  if (!endNode) {
+    return;
+  }
+  const endEntry = nodePosMap.get(endNode.id);
+  if (!endEntry) {
+    return;
+  }
+  const endPoint = endEntry.pos;
   const start = startEntry.pos;
   const end = endPoint;
   const dx = end.x - start.x;
@@ -14699,6 +15805,7 @@ function onPointerDown(event) {
       // allow normal layout dragging when no distance line/label is hit
     }
     if (distanceSelectMode && hit && hit.active) {
+      hoverNodeId = null;
       distanceSelectDrag = {
         startNodeId: hit.id,
         startKey: getDistanceNodeKey(hit),
@@ -15376,6 +16483,7 @@ function onPointerMove(event) {
     const nextHoverId = hit && hit.active ? hit.id : null;
     if (nextHoverId !== distanceSelectDrag.hoverNodeId) {
       distanceSelectDrag.hoverNodeId = nextHoverId;
+      hoverNodeId = null;
       scheduleDraw();
     }
     distanceSelectDrag.lastPoint = { x: event.offsetX, y: event.offsetY };
@@ -16476,7 +17584,7 @@ function onWheel(event) {
 
 function isInactiveNodeAvailable(node) {
   if (distanceSelectMode) {
-    return true;
+    return false;
   }
   const onZeroPlane = (Number(node.exponentZ) || 0) === 0;
   if (!is3DMode) {
@@ -16494,7 +17602,8 @@ function isInactiveNodeAvailable(node) {
   return z === gridCenterZ;
 }
 
-function hitTestScreen(screenPoint) {
+function hitTestScreen(screenPoint, options) {
+  const expandRadius = (options && options.expandRadius) || 1;
   const baseRadius = layoutMode ? layoutNodeSize : null;
   let best = null;
   let bestDistance = Number.POSITIVE_INFINITY;
@@ -16538,6 +17647,7 @@ function hitTestScreen(screenPoint) {
       const uy = dy / distance;
       hitRadius = getNodeEdgeRadius(node, ux, uy, adjustedRadius);
     }
+    hitRadius *= expandRadius;
     if (hitRadius > 0 && distance <= hitRadius) {
       const prefersCustom = node.isCustom && (!best || !best.isCustom);
       if (
@@ -23442,6 +24552,10 @@ function getPresetState(options = {}) {
     }
   }
 
+  if (activeCaption) {
+    state.caption = cloneCaption(activeCaption);
+  }
+
   return state;
 }
 
@@ -23935,6 +25049,7 @@ function applyPresetReadoutAndTuningSettings(state) {
   if (typeof state.spellingMode === "string") {
     spellingMode = state.spellingMode === "true" ? "true" : "simple";
     syncSpellingModeControls();
+    syncHejiButtons();
   }
   applyPresetBooleanField(
     state,
@@ -23980,9 +25095,10 @@ function applyPresetReadoutAndTuningSettings(state) {
   applyPresetBooleanField(
     state,
     "hejiEnabled",
-    [hejiEnabledToggle, layoutHejiEnabledToggle],
+    [],
     (value) => {
       hejiEnabled = value;
+      syncHejiButtons();
     }
   );
   applyPresetBooleanField(
@@ -25016,9 +26132,20 @@ function applyPresetState(state, options = {}) {
   if (!state || typeof state !== "object") {
     return;
   }
+  const isSnapshotRecall = Boolean(
+    options && (options.skipStopVoices || options.preserveViewMode)
+  );
   const normalizedState = normalizePresetStateWithDefaults(state);
   const presetContext = initializePresetApplyContext(normalizedState, options);
   runPresetApplyPipeline(normalizedState, options, presetContext);
+  if (!isSnapshotRecall) {
+    // Full preset load: adopt the preset's caption as the current active caption.
+    if (state.caption && typeof state.caption === "object") {
+      setActiveCaption(state.caption, { updateUrl: false });
+    } else {
+      setActiveCaption(null, { updateUrl: false });
+    }
+  }
 }
 
 function formatActiveRatiosForScaleWorkshop() {
@@ -25219,6 +26346,14 @@ function escapeSvgText(text) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+function escapeSvgTextPreservingWhitespace(text) {
+  const value = String(text ?? "");
+  if (!value) {
+    return "&#160;";
+  }
+  return escapeSvgText(value);
 }
 
 function buildHejiSvgText({
@@ -25786,14 +26921,14 @@ async function buildSvgTextElement({
   if (lines.length > 1) {
     const attrs = `text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
       font
-    )}" font-size="${size}" font-weight="${fontWeight}" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
+    )}" font-size="${size}" font-weight="${fontWeight}" xml:space="preserve" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
       "fill",
       color
     )}`;
     const tspans = lines
       .map((line, index) => {
         const dy = index === 0 ? 0 : lineHeight;
-        return `<tspan x="${x}" dy="${dy}">${escapeSvgText(line)}</tspan>`;
+        return `<tspan x="${x}" dy="${dy}">${escapeSvgTextPreservingWhitespace(line)}</tspan>`;
       })
       .join("");
     return `<text x="${x}" y="${y}" ${attrs}>${tspans}</text>`;
@@ -25801,19 +26936,19 @@ async function buildSvgTextElement({
   if (!OUTLINE_SVG_TEXT) {
     return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
       font
-    )}" font-size="${size}" font-weight="${fontWeight}" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
+    )}" font-size="${size}" font-weight="${fontWeight}" xml:space="preserve" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
       "fill",
       color
-    )}>${escapeSvgText(safeText)}</text>`;
+    )}>${escapeSvgTextPreservingWhitespace(safeText)}</text>`;
   }
   const fontObj = await getOutlineFontOrFallback(font, fontWeight);
   if (!fontObj) {
     return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
       font
-    )}" font-size="${size}" font-weight="${fontWeight}" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
+    )}" font-size="${size}" font-weight="${fontWeight}" xml:space="preserve" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
       "fill",
       color
-    )}>${escapeSvgText(safeText)}</text>`;
+    )}>${escapeSvgTextPreservingWhitespace(safeText)}</text>`;
   }
   const ascent = (fontObj.ascender / fontObj.unitsPerEm) * size;
   const descent = (-fontObj.descender / fontObj.unitsPerEm) * size;
@@ -25950,8 +27085,9 @@ async function buildLayoutSvgString(
   const svgStroke = (color) => svgColorAttr("stroke", color);
 
   const parts = [];
+  parts.push(`<?xml version="1.0" encoding="UTF-8"?>`);
   parts.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${widthIn}in" height="${heightIn}in" viewBox="0 0 ${widthPx} ${heightPx}">`
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${widthIn}in" height="${heightIn}in" viewBox="0 0 ${widthPx} ${heightPx}" xml:space="preserve">`
   );
   parts.push(`<title>${escapeSvgText(exportLabel)}</title>`);
   parts.push(`<desc>${escapeSvgText(exportLabel)}</desc>`);
@@ -27661,8 +28797,8 @@ setControlChecked(directionalRatioLabelsToggle, directionalRatioLabels);
 setControlChecked(connectOrphansToggle, connectOrphansEnabled);
 setControlChecked(show3DShadingToggle, show3DShading);
 setLatticeTilt(latticeTiltDeg);
-setControlChecked(hejiEnabledToggle, hejiEnabled);
-setControlChecked(layoutHejiEnabledToggle, hejiEnabled);
+syncHejiButtons();
+
 setControlChecked(enharmonicsEnabledToggle, enharmonicsEnabled);
 setControlChecked(layoutEnharmonicsEnabledToggle, enharmonicsEnabled);
 setControlChecked(navCirclesToggle, showCircles);
@@ -27675,14 +28811,22 @@ syncLayoutScaleInput();
 updateKeyMappingToggleVisibility();
 initEnvelopeSliders();
 presetStateDefaults = deepClonePresetValue(getPresetState({ includeDefaults: true }));
+const isEmbedMode = new URLSearchParams(window.location.search).has("embed");
+if (isEmbedMode) {
+  document.body.classList.add("embed-mode");
+}
 const presetState = readPresetFromUrl();
+const hasIncomingPresetState = Boolean(presetState);
 if (presetState) {
   applyPresetState(presetState);
 } else {
   rebuildLattice();
 }
-presetSyncEnabled = true;
-updatePresetUrl();
+maybeShowWelcomeOverlay(hasIncomingPresetState, isEmbedMode);
+presetSyncEnabled = !isEmbedMode;
+if (!isEmbedMode) {
+  updatePresetUrl();
+}
 
 bindOptionalClick(audioToggle, toggleAudio);
 bindOptionalClick(resetButton, resetLattice);
@@ -27938,6 +29082,48 @@ bindOptionalEvent(window, "keydown", (event) => {
 const snapshotResetButton = document.getElementById("snapshot-reset");
 bindOptionalClick(snapshotResetButton, () => {
   clearSnapshots();
+});
+const addCaptionButton = document.getElementById("add-caption-button");
+bindOptionalClick(addCaptionButton, () => {
+  openCaptionEditor();
+});
+const captionEl = document.getElementById("caption");
+const captionInputEl = document.getElementById("caption-input");
+if (captionEl) {
+  captionEl.addEventListener("pointerdown", (event) => {
+    if (captionEditing) return;
+    // Don't start a drag from inside the textarea.
+    if (event.target && event.target.id === "caption-input") return;
+    startCaptionPointerDown(event);
+  });
+  captionEl.addEventListener("pointermove", onCaptionPointerMove);
+  captionEl.addEventListener("pointerup", endCaptionPointerUp);
+  captionEl.addEventListener("pointercancel", endCaptionPointerUp);
+}
+if (captionInputEl) {
+  captionInputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      commitCaptionEdit();
+      canvas && canvas.focus && canvas.focus();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancelCaptionEdit();
+      canvas && canvas.focus && canvas.focus();
+    }
+  });
+  captionInputEl.addEventListener("input", () => {
+    captionInputEl.style.height = "0px";
+    captionInputEl.style.height = `${Math.max(captionInputEl.scrollHeight, 22)}px`;
+  });
+  captionInputEl.addEventListener("blur", () => {
+    if (captionEditing) {
+      commitCaptionEdit();
+    }
+  });
+}
+window.addEventListener("resize", () => {
+  renderCaption();
 });
 const snapshotButtons = document.querySelectorAll(".snapshot-slot");
 snapshotButtons.forEach((button) => {
@@ -28298,6 +29484,7 @@ if (spellingModeButtons.length) {
       spellingMode = nextMode === "true" ? "true" : "simple";
       spellingHintActive = true;
       syncSpellingModeControls();
+      syncHejiButtons();
       updateUiHint();
       hideFundamentalSpellingDialog();
       applyLabelDisplayToggleChange({ refreshCustom: true });
@@ -28498,14 +29685,24 @@ bindSingleBooleanToggle(showCentsSignToggle, (checked) => {
   showCentsSign = checked;
   applyLabelDisplayToggleChange();
 });
-bindMirroredBooleanToggles(
-  hejiEnabledToggle,
-  layoutHejiEnabledToggle,
-  (checked) => {
-    hejiEnabled = checked;
-  },
-  { refreshCustom: true }
-);
+function syncHejiButtons() {
+  if (hejiEnabledButton) hejiEnabledButton.classList.toggle("is-active", hejiEnabled);
+  if (hejiDisabledButton) hejiDisabledButton.classList.toggle("is-active", !hejiEnabled);
+  if (layoutHejiEnabledButton) layoutHejiEnabledButton.classList.toggle("is-active", hejiEnabled);
+  if (layoutHejiDisabledButton) layoutHejiDisabledButton.classList.toggle("is-active", !hejiEnabled);
+  const isDiatonic = spellingMode === "true";
+  if (hejiToggleGroup) hejiToggleGroup.style.display = isDiatonic ? "" : "none";
+  if (layoutHejiToggleGroup) layoutHejiToggleGroup.style.display = isDiatonic ? "" : "none";
+}
+function setHeji(value) {
+  hejiEnabled = value;
+  syncHejiButtons();
+  applyLabelDisplayToggleChange({ refreshCustom: true });
+}
+if (hejiEnabledButton) hejiEnabledButton.addEventListener("click", () => setHeji(true));
+if (hejiDisabledButton) hejiDisabledButton.addEventListener("click", () => setHeji(false));
+if (layoutHejiEnabledButton) layoutHejiEnabledButton.addEventListener("click", () => setHeji(true));
+if (layoutHejiDisabledButton) layoutHejiDisabledButton.addEventListener("click", () => setHeji(false));
 bindMirroredBooleanToggles(
   enharmonicsEnabledToggle,
   layoutEnharmonicsEnabledToggle,
@@ -29188,6 +30385,28 @@ bindOptionalDialogClose(layoutKeyMappingTextDialog, () => {
 document.querySelectorAll("dialog").forEach((dialog) => {
   setupDialogKeyDefaults(dialog);
 });
+const welcomeOverlayEl = document.getElementById("welcome-overlay");
+const welcomeTourBtn = document.getElementById("welcome-tour-button");
+const welcomeExploreBtn = document.getElementById("welcome-explore-button");
+bindOptionalClick(welcomeTourBtn, () => {
+  hideWelcomeOverlay();
+  startQuickTour();
+});
+bindOptionalClick(welcomeExploreBtn, () => {
+  hideWelcomeOverlay();
+});
+if (welcomeOverlayEl) {
+  welcomeOverlayEl.addEventListener("click", (event) => {
+    if (event.target && event.target.classList.contains("welcome-backdrop")) {
+      hideWelcomeOverlay();
+    }
+  });
+}
+bindOptionalEvent(window, "keydown", (event) => {
+  if (event.key === "Escape" && welcomeOverlayEl && !welcomeOverlayEl.hidden) {
+    hideWelcomeOverlay();
+  }
+});
 if (creditsTrigger && creditsDialog) {
   bindOptionalClick(creditsTrigger, (event) => {
     event.preventDefault();
@@ -29201,6 +30420,62 @@ if (creditsTrigger && creditsDialog) {
     }
   });
 }
+const introInfoButton = document.getElementById("intro-info-button");
+const introDialog = document.getElementById("intro-dialog");
+const introReplayTourBtn = document.getElementById("intro-replay-tour");
+if (introInfoButton && introDialog) {
+  bindOptionalClick(introInfoButton, (event) => {
+    event.preventDefault();
+    if (!introDialog.open) {
+      introDialog.showModal();
+    }
+  });
+  introDialog.addEventListener("click", (event) => {
+    // Close on backdrop click but not when clicking action buttons / links.
+    const target = event.target;
+    if (target === introDialog) {
+      introDialog.close("dismiss");
+    }
+  });
+}
+bindOptionalClick(introReplayTourBtn, () => {
+  if (introDialog && introDialog.open) {
+    introDialog.close("tour");
+  }
+  startQuickTour();
+});
+
+// ---- Learn & Get Help dialog ----
+const learnHelpButton = document.getElementById("learn-help-button");
+const learnHelpDialog = document.getElementById("learn-help-dialog");
+const learnHelpTourButton = document.getElementById("learn-help-tour-button");
+if (learnHelpButton && learnHelpDialog) {
+  bindOptionalClick(learnHelpButton, (event) => {
+    event.preventDefault();
+    if (!learnHelpDialog.open) {
+      learnHelpDialog.showModal();
+    }
+  });
+  learnHelpDialog.addEventListener("click", (event) => {
+    // Close on backdrop click only — not clicks on interactive items inside.
+    if (event.target === learnHelpDialog) {
+      learnHelpDialog.close("dismiss");
+    }
+  });
+}
+bindOptionalClick(learnHelpTourButton, () => {
+  if (learnHelpDialog && learnHelpDialog.open) {
+    learnHelpDialog.close("tour");
+  }
+  startQuickTour();
+});
+const learnHelpDeepTourButton = document.getElementById("learn-help-deep-tour-button");
+bindOptionalClick(learnHelpDeepTourButton, () => {
+  if (learnHelpDialog && learnHelpDialog.open) {
+    learnHelpDialog.close("tour");
+  }
+  startDeepTour();
+});
 function bindLayoutFontFamilyChange(
   selectElement,
   { getCurrent, setCurrent, getWeight, getSize, syncVars = false, invalidateCache = true }
@@ -30116,6 +31391,9 @@ window.snapshotDebug = {
 };
 bindOptionalEvent(window, "keydown", (event) => {
   syncCapsLockState(event);
+  if (handleTourKeydown(event)) {
+    return;
+  }
   const keyboardModeEnabled = snapshotKeyboardModeToggle
     ? snapshotKeyboardModeToggle.checked
     : snapshotKeyboardMode;

@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tuning Lattice</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&family=Noto+Serif:wght@400..700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --chrome-bg: #f3f4f6;
+    --chrome-panel: rgba(255, 255, 255, 0.78);
+    --chrome-panel-solid: #ffffff;
+    --chrome-ink: #101316;
+    --chrome-muted-ink: rgba(16, 19, 22, 0.65);
+    --chrome-accent: #245a8d;
+    --chrome-border: rgba(16, 19, 22, 0.15);
+    --chrome-soft-surface: rgba(255, 255, 255, 0.62);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    min-height: 100vh;
+    font-family: "Lexend", "Helvetica Neue", sans-serif;
+    color: var(--chrome-muted-ink);
+    background: radial-gradient(circle at top left, #ffffff, var(--chrome-bg));
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---- Layout ---- */
+  .page {
+    width: min(calc(100% - 32px), 960px);
+    margin: 0 auto;
+    padding: 26px 0 72px;
+  }
+
+  /* ---- Hero ---- */
+  .hero {
+    padding: 80px 8px 60px;
+    text-align: center;
+  }
+
+  .hero-kicker {
+    margin: 0 0 14px;
+    font-size: 12px;
+    line-height: 1.4;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--chrome-muted-ink);
+  }
+
+  .hero h1 {
+    margin: 0 0 8px;
+    font-size: clamp(2.6rem, 5vw, 4.25rem);
+    letter-spacing: 0.4px;
+    font-weight: 200;
+    color: var(--chrome-ink);
+  }
+
+  .hero-creator {
+    margin: 0 0 18px;
+    font-size: 12px;
+    color: var(--chrome-muted-ink);
+    opacity: 0.75;
+  }
+
+  .hero-intro {
+    width: min(100%, 620px);
+    margin: 0 auto;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  /* ---- Panels (docs-style cards) ---- */
+  .panel {
+    background: var(--chrome-panel);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--chrome-border);
+    border-radius: 14px;
+    padding: 22px 26px 24px;
+  }
+
+  .panel + .panel {
+    margin-top: 14px;
+  }
+
+  /* ---- Video slots ---- */
+  .hero-video-slot {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    background: var(--chrome-soft-surface);
+    border: 1px solid var(--chrome-border);
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--chrome-muted-ink);
+    font-size: 13px;
+    overflow: hidden;
+    margin-top: 32px;
+  }
+
+  .hero-video-slot video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .video-slot {
+    aspect-ratio: 4 / 3;
+    background: var(--chrome-soft-surface);
+    border: 1px solid var(--chrome-border);
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--chrome-muted-ink);
+    font-size: 13px;
+    overflow: hidden;
+  }
+
+  .video-slot video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* ---- Interactive Demo ---- */
+  .demo-panel {
+    text-align: center;
+    padding: 32px 26px 36px;
+  }
+
+  .demo-panel h4 {
+    margin: 0 0 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--chrome-accent);
+  }
+
+  .demo-subtitle {
+    font-size: 13px;
+    color: var(--chrome-muted-ink);
+    margin-bottom: 24px;
+  }
+
+  .lattice-embed {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    border: 1px solid var(--chrome-border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .lattice-embed iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
+
+
+  /* ---- Feature sections ---- */
+  .feature {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 22px;
+    align-items: center;
+  }
+
+  .feature.reverse {
+    direction: rtl;
+  }
+
+  .feature.reverse > * {
+    direction: ltr;
+  }
+
+  .feature-text h2 {
+    margin: 0 0 12px;
+    font-size: clamp(1.9rem, 2.8vw, 2.5rem);
+    line-height: 1.08;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    color: var(--chrome-ink);
+  }
+
+  .feature-text p {
+    font-size: 14px;
+    line-height: 1.72;
+    color: var(--chrome-ink);
+  }
+
+  .feature-text ul {
+    list-style: none;
+    margin-top: 10px;
+    font-size: 14px;
+    line-height: 1.72;
+    color: var(--chrome-ink);
+  }
+
+  .feature-text ul li {
+    padding: 2px 0;
+  }
+
+  .feature-text ul li::before {
+    content: "\2014\2002";
+    color: var(--chrome-muted-ink);
+  }
+
+  /* ---- Presets / Names ---- */
+  .presets-panel {
+    text-align: center;
+    padding: 28px 26px 30px;
+  }
+
+  .presets-panel h4 {
+    margin: 0 0 16px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--chrome-accent);
+  }
+
+  .preset-names {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px 20px;
+    max-width: 580px;
+    margin: 0 auto 12px;
+    font-size: 15px;
+    font-weight: 300;
+    color: var(--chrome-ink);
+  }
+
+  .preset-names span {
+    white-space: nowrap;
+  }
+
+  .presets-note {
+    font-size: 13px;
+    color: var(--chrome-muted-ink);
+  }
+
+  /* ---- CTA ---- */
+  .cta-panel {
+    text-align: center;
+    padding: 40px 26px;
+  }
+
+  .cta-link {
+    display: inline-block;
+    font-family: "Lexend", "Helvetica Neue", sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    color: #ffffff;
+    background: var(--chrome-accent);
+    text-decoration: none;
+    letter-spacing: 0.06em;
+    padding: 10px 32px;
+    border-radius: 8px;
+    transition: opacity 0.2s ease;
+  }
+
+  .cta-link:hover {
+    opacity: 0.85;
+  }
+
+  .cta-sub {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--chrome-muted-ink);
+  }
+
+  /* ---- Footer ---- */
+  footer {
+    text-align: center;
+    padding: 24px 16px 32px;
+    font-size: 12px;
+    color: var(--chrome-muted-ink);
+    opacity: 0.6;
+  }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 720px) {
+    .hero { padding: 48px 8px 40px; }
+    .feature { grid-template-columns: 1fr; }
+    .feature.reverse { direction: ltr; }
+    .lattice-demo { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ============ HERO ============ -->
+  <header class="hero">
+    <p class="hero-kicker">Just Intonation</p>
+    <h1>Tuning Lattice</h1>
+    <p class="hero-creator">Elliot Cole</p>
+    <p class="hero-intro">
+      An interactive environment for building, hearing, playing, and publishing
+      just intonation systems. Design tunings as ratio networks, hear them immediately,
+      perform on them, and export publication-ready diagrams.
+    </p>
+
+    <div class="hero-video-slot">
+      <!-- Replace with: <video src="hero.mp4" autoplay loop muted playsinline></video> -->
+      Screen recording: overview of the app
+    </div>
+  </header>
+
+  <!-- ============ INTERACTIVE DEMO ============ -->
+  <div class="panel demo-panel">
+    <h4>Try it</h4>
+    <p class="demo-subtitle">Click the nodes. Listen to them ring.</p>
+
+    <div class="lattice-embed">
+      <!-- Append #s=<encoded-preset> to load a specific tuning -->
+      <iframe src="index.html?embed" allow="autoplay" loading="lazy"></iframe>
+    </div>
+  </div>
+
+  <!-- ============ FEATURES ============ -->
+
+  <!-- BUILD -->
+  <div class="panel" style="margin-top: 14px;">
+    <div class="feature">
+      <div class="feature-text">
+        <h2>Build</h2>
+        <p>Shift-click to place nodes. Drag to rearrange. Connections and interval labels appear automatically.</p>
+        <ul>
+          <li>Any prime limit &mdash; 3 through 97</li>
+          <li>2D and 3D views with custom axes</li>
+          <li>Higher-dimensional lattices via custom nodes</li>
+          <li>Find ratios, calculate intervals, visualize commas</li>
+        </ul>
+      </div>
+      <div class="video-slot">
+        <!-- Replace with: <video src="build.mp4" autoplay loop muted playsinline></video> -->
+        Screen recording: building a lattice
+      </div>
+    </div>
+  </div>
+
+  <!-- PLAY -->
+  <div class="panel">
+    <div class="feature reverse">
+      <div class="feature-text">
+        <h2>Play</h2>
+        <p>Every node is a playable pitch. Click, type, or send MIDI. The lattice becomes an instrument.</p>
+        <ul>
+          <li>QWERTY keyboard with multiple mapping modes</li>
+          <li>MIDI input and output with MPE pitch bend</li>
+          <li>Sine, sawtooth, Karplus-Strong, soundfonts</li>
+          <li>Patterns, loops, snapshots, morph between states</li>
+        </ul>
+      </div>
+      <div class="video-slot">
+        <!-- Replace with: <video src="play.mp4" autoplay loop muted playsinline></video> -->
+        Screen recording: playing the lattice
+      </div>
+    </div>
+  </div>
+
+  <!-- PUBLISH -->
+  <div class="panel">
+    <div class="feature">
+      <div class="feature-text">
+        <h2>Publish</h2>
+        <p>Export publication-ready lattice diagrams for scores, liner notes, articles, and teaching materials.</p>
+        <ul>
+          <li>SVG and PDF export</li>
+          <li>Full typographic control &mdash; 44+ fonts</li>
+          <li>Custom text, labels, and annotation</li>
+          <li>Page size presets for standard formats</li>
+        </ul>
+      </div>
+      <div class="video-slot">
+        <!-- Replace with: <video src="publish.mp4" autoplay loop muted playsinline></video> -->
+        Screen recording: layout and export
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PRESETS ============ -->
+  <div class="panel presets-panel">
+    <h4>Includes tunings by</h4>
+    <div class="preset-names">
+      <span>La Monte Young</span>
+      <span>Michael Harrison</span>
+      <span>Lou Harrison</span>
+      <span>Ben Johnston</span>
+      <span>Harry Partch</span>
+      <span>Erv Wilson</span>
+    </div>
+    <p class="presets-note">Load, explore, modify, extend &mdash; or start from scratch.</p>
+  </div>
+
+  <!-- ============ CTA ============ -->
+  <div class="panel cta-panel">
+    <a href="#" class="cta-link">Open Tuning Lattice</a>
+    <p class="cta-sub">Runs in the browser. Nothing to install.</p>
+  </div>
+
+</div>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  Tuning Lattice &middot; Elliot Cole
+</footer>
+
+
+</body>
+</html>

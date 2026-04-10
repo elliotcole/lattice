@@ -592,6 +592,15 @@ body[data-theme="solarized-dark"] {
   color: var(--ink);
 }
 
+.help-toggle-button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-right: 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
 body.performance-mode .panel,
 body.performance-mode .title,
 body.performance-mode .help-toggle,
@@ -715,6 +724,10 @@ body.performance-mode [role="dialog"] {
   background: rgba(120, 130, 145, 0.22);
   pointer-events: none;
   z-index: 5;
+}
+
+.layout-custom-text-editor[hidden] {
+  display: none;
 }
 
 .layout-custom-text-editor {
@@ -3433,4 +3446,735 @@ body.preset-open {
 .snapshot-keyboard-keys {
   display: grid;
   gap: 4px;
+}
+
+/* ---- Intro info button + dialog ---- */
+.intro-info-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 6px;
+  padding: 0;
+  border: 1px solid rgba(16, 19, 22, 0.25);
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(16, 19, 22, 0.55);
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.intro-info-button:hover {
+  background: rgba(16, 19, 22, 0.08);
+  color: rgba(16, 19, 22, 0.9);
+  border-color: rgba(16, 19, 22, 0.5);
+}
+
+.intro-dialog {
+  max-width: min(460px, calc(100vw - 40px));
+}
+
+.intro-dialog-content {
+  padding: 8px 4px;
+  text-align: left;
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  color: rgba(16, 19, 22, 0.88);
+}
+
+.intro-dialog-content .dialog-title {
+  font-size: 20px;
+  font-weight: 300;
+  margin-bottom: 12px;
+}
+
+.intro-tagline {
+  font-size: 14px;
+  color: rgba(16, 19, 22, 0.7);
+  margin: 0 0 14px;
+}
+
+.intro-dialog-content p {
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+
+.intro-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 18px 0 14px;
+}
+
+.intro-action-button {
+  display: inline-block;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 9px 18px;
+  border-radius: 7px;
+  border: 1px solid rgba(16, 19, 22, 0.18);
+  background: rgba(255, 255, 255, 0.9);
+  color: rgba(16, 19, 22, 0.85);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.intro-action-button:hover {
+  background: rgba(16, 19, 22, 0.06);
+  border-color: rgba(16, 19, 22, 0.3);
+}
+
+.intro-action-primary {
+  background: #245a8d;
+  color: #ffffff;
+  border-color: #245a8d;
+}
+
+.intro-action-primary:hover {
+  background: #1e4b77;
+  border-color: #1e4b77;
+  color: #ffffff;
+}
+
+.intro-close-hint {
+  margin: 14px 0 0;
+  font-size: 11px;
+  color: rgba(16, 19, 22, 0.4);
+  text-align: center;
+}
+
+/* ---- Welcome overlay ---- */
+.welcome-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: welcome-fade-in 0.35s ease;
+}
+
+.welcome-overlay[hidden] {
+  display: none;
+}
+
+.welcome-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(245, 246, 248, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.welcome-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(16, 19, 22, 0.14);
+  border-radius: 18px;
+  box-shadow: 0 24px 80px rgba(16, 19, 22, 0.18);
+  padding: 46px 52px 40px;
+  max-width: min(520px, calc(100vw - 40px));
+  text-align: center;
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  color: rgba(16, 19, 22, 0.92);
+}
+
+.welcome-title {
+  margin: 0 0 14px;
+  font-size: clamp(1.9rem, 3.6vw, 2.6rem);
+  font-weight: 200;
+  letter-spacing: 0.3px;
+  color: rgba(16, 19, 22, 1);
+}
+
+.welcome-tagline {
+  margin: 0 0 22px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: rgba(16, 19, 22, 0.7);
+}
+
+.welcome-verbs {
+  margin: 0 0 32px;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(16, 19, 22, 0.55);
+}
+
+.welcome-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.welcome-button {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 10px 24px;
+  border-radius: 8px;
+  border: 1px solid rgba(16, 19, 22, 0.18);
+  background: rgba(255, 255, 255, 0.7);
+  color: rgba(16, 19, 22, 0.85);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.welcome-button:hover {
+  background: rgba(16, 19, 22, 0.06);
+  border-color: rgba(16, 19, 22, 0.3);
+}
+
+.welcome-button:active {
+  transform: translateY(1px);
+}
+
+.welcome-button-primary {
+  background: #245a8d;
+  color: #ffffff;
+  border-color: #245a8d;
+}
+
+.welcome-button-primary:hover {
+  background: #1e4b77;
+  border-color: #1e4b77;
+}
+
+body.embed-mode .welcome-overlay {
+  display: none !important;
+}
+
+@keyframes welcome-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ---- Caption (draggable, snapshot-aware) ---- */
+.caption {
+  position: fixed;
+  left: 50%;
+  top: 82%;
+  transform: translate(-50%, -50%);
+  max-width: min(520px, calc(100vw - 48px));
+  min-width: 180px;
+  padding: 12px 20px;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(16, 19, 22, 0.14);
+  border-radius: 12px;
+  box-shadow: 0 6px 28px rgba(16, 19, 22, 0.12);
+  z-index: 40;
+  cursor: grab;
+  user-select: none;
+  font-family: "Noto Serif", Georgia, serif;
+  font-size: 15px;
+  line-height: 1.55;
+  color: rgba(16, 19, 22, 0.92);
+  text-align: center;
+}
+
+.caption[hidden] {
+  display: none;
+}
+
+.caption.is-dragging {
+  cursor: grabbing;
+  opacity: 0.9;
+  box-shadow: 0 10px 38px rgba(16, 19, 22, 0.22);
+}
+
+.caption.is-editing {
+  cursor: default;
+  user-select: text;
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(16, 19, 22, 0.22);
+}
+
+.caption-text {
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.caption-input {
+  display: block;
+  width: 100%;
+  min-width: 200px;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  text-align: center;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 0;
+  margin: 0;
+}
+
+.caption-input[hidden] {
+  display: none;
+}
+
+body.embed-mode .caption {
+  display: none !important;
+}
+
+/* ---- Embed mode ---- */
+.embed-mode-early .app,
+.embed-mode-early .layout-overlay,
+body.embed-mode .app,
+body.embed-mode .layout-overlay,
+body.embed-mode #layout-panel,
+body.embed-mode #envelope-panel,
+body.embed-mode #animation-panel,
+body.embed-mode #ratio-wheel-panel,
+body.embed-mode #credits-dialog,
+body.embed-mode .tooltip {
+  display: none !important;
+}
+
+/* ---- Guided tour: bubble ----
+ * Positioned in screen space by data-corner + inline dx/dy. Sits below chrome
+ * (z-index < panels/menus) so user-controlled UI can cover it if needed.
+ */
+.tour-bubble {
+  position: fixed;
+  z-index: 50;
+  max-width: min(340px, calc(100vw - 40px));
+  padding: 18px 22px 16px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(16, 19, 22, 0.14);
+  border-radius: 14px;
+  box-shadow: 0 18px 60px rgba(16, 19, 22, 0.18);
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  color: rgba(16, 19, 22, 0.92);
+  pointer-events: auto;
+  animation: tour-bubble-fade-in 0.2s ease;
+}
+
+.tour-bubble[hidden] {
+  display: none;
+}
+
+.tour-bubble-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: rgba(16, 19, 22, 1);
+}
+
+.tour-bubble-title:empty {
+  display: none;
+}
+
+.tour-bubble-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(16, 19, 22, 0.78);
+  white-space: pre-wrap;
+}
+
+.tour-bubble-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.tour-bubble-button {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(16, 19, 22, 0.18);
+  background: rgba(255, 255, 255, 0.7);
+  color: rgba(16, 19, 22, 0.85);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.tour-bubble-button:hover {
+  background: rgba(16, 19, 22, 0.06);
+  border-color: rgba(16, 19, 22, 0.3);
+}
+
+.tour-bubble-button:active {
+  transform: translateY(1px);
+}
+
+.tour-bubble-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tour-bubble-button-primary {
+  background: #245a8d;
+  color: #ffffff;
+  border-color: #245a8d;
+}
+
+.tour-bubble-button-primary:hover {
+  background: #1e4b77;
+  border-color: #1e4b77;
+}
+
+@keyframes tour-bubble-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- Tour arrow SVG overlay ---- */
+.tour-arrow-svg {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 49;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.tour-arrow-svg[hidden] {
+  display: none;
+}
+
+.tour-arrow-line {
+  stroke: rgba(16, 19, 22, 0.55);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+body.embed-mode .tour-bubble,
+body.performance-mode .tour-bubble,
+body.embed-mode .tour-arrow-svg,
+body.performance-mode .tour-arrow-svg {
+  display: none !important;
+}
+
+/* ---- Guided tour: banner ----
+ * Separate DOM element from #banner-message. Always visible while a tour is
+ * active so the "Explore on my own" exit is never hidden by interaction-mode
+ * banners.
+ */
+.tour-banner {
+  position: fixed;
+  top: 10%;
+  left: 50%;
+  transform: translate(-50%, 36px);
+  z-index: 11;
+  padding: 4px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--chrome-banner-border);
+  background: transparent;
+  color: var(--chrome-banner-ink);
+  font-size: 12px;
+  line-height: 1.35;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.tour-banner[hidden] {
+  display: none;
+}
+
+.tour-banner-sep {
+  opacity: 0.5;
+}
+
+.tour-banner-exit {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.tour-banner-exit:hover {
+  color: var(--ink);
+}
+
+body.embed-mode .tour-banner,
+body.performance-mode .tour-banner {
+  display: none !important;
+}
+
+/* ---- Learn & Get Help dialog ---- */
+.learn-help-dialog {
+  width: min(420px, 90vw);
+}
+
+.learn-help-content {
+  display: grid;
+  gap: 12px;
+}
+
+.learn-help-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.learn-help-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid rgba(16, 19, 22, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.learn-help-item:hover {
+  background: rgba(16, 19, 22, 0.05);
+  border-color: rgba(16, 19, 22, 0.28);
+}
+
+.learn-help-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.learn-help-item-desc {
+  font-size: 11px;
+  color: var(--muted-ink);
+}
+
+.learn-help-item-disabled {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
+}
+
+.learn-help-item-disabled:hover {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(16, 19, 22, 0.14);
+}
+
+.learn-help-close-hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--muted-ink);
+  text-align: center;
+}
+
+.learn-help-dev-tag {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(36, 90, 141, 0.14);
+  color: #245a8d;
+  vertical-align: middle;
+}
+
+/* ---- Guided tour: edit mode ----
+ * Activated by adding body.tour-edit-mode. Shows the toolbar, enables the
+ * drag handle, and styles contenteditable affordances.
+ */
+.tour-bubble-drag-handle {
+  display: none;
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 14px;
+  color: rgba(16, 19, 22, 0.45);
+  cursor: grab;
+  user-select: none;
+  line-height: 1;
+  padding: 4px;
+}
+
+.tour-bubble-drag-handle:active {
+  cursor: grabbing;
+}
+
+.tour-edit-toolbar {
+  display: none;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(16, 19, 22, 0.18);
+  gap: 6px;
+  flex-direction: column;
+}
+
+.tour-edit-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.tour-edit-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(16, 19, 22, 0.45);
+  margin-right: 2px;
+}
+
+.tour-edit-button {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(16, 19, 22, 0.18);
+  background: rgba(255, 255, 255, 0.7);
+  color: rgba(16, 19, 22, 0.78);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.tour-edit-button:hover {
+  background: rgba(16, 19, 22, 0.05);
+  border-color: rgba(16, 19, 22, 0.32);
+}
+
+.tour-edit-button:active {
+  transform: translateY(1px);
+}
+
+.tour-edit-button-primary {
+  background: #f2e9cf;
+  border-color: #c8ae5f;
+  color: #6a5012;
+}
+
+.tour-edit-button-primary:hover {
+  background: #ecdfaf;
+  border-color: #ad9344;
+}
+
+body.tour-edit-mode .tour-bubble {
+  padding-top: 28px;
+}
+
+body.tour-edit-mode .tour-bubble-drag-handle {
+  display: block;
+}
+
+body.tour-edit-mode .tour-edit-toolbar {
+  display: flex;
+}
+
+body.tour-edit-mode .tour-bubble-title[contenteditable="true"],
+body.tour-edit-mode .tour-bubble-body[contenteditable="true"] {
+  outline: 1px dashed rgba(36, 90, 141, 0.35);
+  outline-offset: 4px;
+  border-radius: 4px;
+  cursor: text;
+}
+
+body.tour-edit-mode .tour-bubble-title[contenteditable="true"]:focus,
+body.tour-edit-mode .tour-bubble-body[contenteditable="true"]:focus {
+  outline-color: rgba(36, 90, 141, 0.75);
+  outline-style: solid;
+}
+
+body.tour-edit-mode .tour-bubble-title:empty {
+  display: block;
+  min-height: 1em;
+}
+
+body.tour-edit-mode .tour-bubble-title:empty::before {
+  content: "(click to add title)";
+  color: rgba(16, 19, 22, 0.3);
+  font-style: italic;
+}
+
+body.tour-edit-mode .tour-bubble-body:empty::before {
+  content: "(empty step — type here)";
+  color: rgba(16, 19, 22, 0.3);
+  font-style: italic;
+}
+
+body.tour-edit-mode.tour-edit-dragging,
+body.tour-edit-mode.tour-edit-dragging .tour-bubble {
+  cursor: grabbing !important;
+}
+
+body.tour-arrow-placing,
+body.tour-arrow-placing canvas {
+  cursor: crosshair !important;
+}
+
+.tour-edit-button.tour-edit-button-active {
+  background: #d6e8f7;
+  border-color: #6ba3d6;
+  color: #1a4a73;
+}
+
+/* ---- Tour preview: edit link shown, toolbar/drag/contenteditable hidden ---- */
+.tour-preview-edit-link {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--accent, #245a8d);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  margin-right: auto;
+}
+
+.tour-preview-edit-link:hover {
+  color: var(--ink);
+}
+
+body.tour-edit-mode.tour-preview .tour-preview-edit-link {
+  display: inline;
+}
+
+body.tour-edit-mode.tour-preview .tour-edit-toolbar {
+  display: none;
+}
+
+body.tour-edit-mode.tour-preview .tour-bubble-drag-handle {
+  display: none;
+}
+
+body.tour-edit-mode.tour-preview .tour-bubble {
+  padding-top: 18px;
+}
+
+body.tour-edit-mode.tour-preview .tour-bubble-title[contenteditable="true"],
+body.tour-edit-mode.tour-preview .tour-bubble-body[contenteditable="true"] {
+  outline: none;
+  cursor: default;
+}
+
+body.tour-edit-mode.tour-preview .tour-bubble-title:empty {
+  display: none;
+  min-height: 0;
 }

@@ -14,6 +14,9 @@
           `${window.location.pathname}/${window.location.search}${window.location.hash}`,
         );
       }
+      if (new URLSearchParams(window.location.search).has('embed')) {
+        document.documentElement.classList.add('embed-mode-early');
+      }
     </script>
     <title>Tuning Lattice</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -28,13 +31,74 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/main-D1ewMFzy.js"></script>
+    <script type="module" crossorigin src="./assets/main-CNTvk1Ad.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-B5Qt9EMX.js">
-    <link rel="modulepreload" crossorigin href="./assets/interval-names-DvPInInK.js">
-    <link rel="stylesheet" crossorigin href="./assets/style-DxZZmgae.css">
+    <link rel="modulepreload" crossorigin href="./assets/interval-names-DeDTMXK9.js">
+    <link rel="stylesheet" crossorigin href="./assets/style-DTaRONHB.css">
   </head>
   <body>
     <canvas id="lattice" tabindex="0" aria-label="Tuning lattice"></canvas>
+    <div id="welcome-overlay" class="welcome-overlay" hidden>
+      <div class="welcome-backdrop"></div>
+      <div class="welcome-card" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+        <h2 id="welcome-title" class="welcome-title">Tuning Lattice</h2>
+        <p class="welcome-tagline">a visual and playable environment for just intonation</p>
+        <p class="welcome-verbs">build &middot; hear &middot; play &middot; practice &middot; export</p>
+        <div class="welcome-actions">
+          <button id="welcome-tour-button" type="button" class="welcome-button welcome-button-primary">Take a tour</button>
+          <button id="welcome-explore-button" type="button" class="welcome-button">Just explore</button>
+        </div>
+      </div>
+    </div>
+    <div id="tour-bubble" class="tour-bubble" hidden role="dialog" aria-live="polite" aria-labelledby="tour-bubble-title">
+      <div id="tour-bubble-drag-handle" class="tour-bubble-drag-handle" title="Drag to reposition">&#x2725;</div>
+      <div id="tour-bubble-title" class="tour-bubble-title"></div>
+      <div id="tour-bubble-body" class="tour-bubble-body"></div>
+      <div class="tour-bubble-actions">
+        <button id="tour-preview-edit-link" type="button" class="tour-preview-edit-link">Edit</button>
+        <button id="tour-back-button" type="button" class="tour-bubble-button">&#9664; Back</button>
+        <button id="tour-next-button" type="button" class="tour-bubble-button tour-bubble-button-primary">Next &#9654;</button>
+      </div>
+      <div class="tour-edit-toolbar">
+        <div class="tour-edit-toolbar-row">
+          <span class="tour-edit-label">Edit</span>
+          <button id="tour-edit-add" type="button" class="tour-edit-button" title="Insert a new step after this one">+ Add after</button>
+          <button id="tour-edit-duplicate" type="button" class="tour-edit-button" title="Duplicate this step">&#x29C9; Duplicate</button>
+          <button id="tour-edit-delete" type="button" class="tour-edit-button" title="Delete this step">&#x2715; Delete</button>
+        </div>
+        <div class="tour-edit-toolbar-row">
+          <button id="tour-edit-move-up" type="button" class="tour-edit-button" title="Move this step earlier">&#9650; Earlier</button>
+          <button id="tour-edit-move-down" type="button" class="tour-edit-button" title="Move this step later">&#9660; Later</button>
+          <button id="tour-edit-arrow" type="button" class="tour-edit-button" title="Click to place an arrow, or remove the current arrow">&#x2197; Arrow</button>
+          <button id="tour-edit-preview" type="button" class="tour-edit-button" title="Preview the tour without edit chrome">&#x25B6; Preview</button>
+          <button id="tour-edit-export" type="button" class="tour-edit-button tour-edit-button-primary" title="Save tour to file">&#x1F4BE; Save</button>
+          <button id="tour-edit-done" type="button" class="tour-edit-button" title="Leave edit mode">Done editing</button>
+        </div>
+      </div>
+    </div>
+    <svg id="tour-arrow-svg" class="tour-arrow-svg" hidden>
+      <defs>
+        <marker id="tour-arrowhead" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+          <path d="M0,0 L10,4 L0,8 Z" fill="rgba(16,19,22,0.55)" />
+        </marker>
+      </defs>
+      <line id="tour-arrow-line" class="tour-arrow-line" marker-end="url(#tour-arrowhead)" />
+    </svg>
+    <div id="tour-banner" class="tour-banner" hidden>
+      <span id="tour-banner-progress" class="tour-banner-progress"></span>
+      <span class="tour-banner-sep">&middot;</span>
+      <button id="tour-banner-exit" type="button" class="tour-banner-exit">Explore on my own</button>
+    </div>
+    <div id="caption" class="caption" hidden>
+      <div id="caption-text" class="caption-text"></div>
+      <textarea
+        id="caption-input"
+        class="caption-input"
+        rows="3"
+        spellcheck="false"
+        hidden
+      ></textarea>
+    </div>
     <div id="layout-overlay" class="layout-overlay" hidden>
       <div id="layout-custom-text-editor" class="layout-custom-text-editor" hidden>
         <div id="layout-custom-text-drag-handle" class="layout-custom-text-drag-handle">
@@ -57,7 +121,18 @@
     <main class="app">
       <div class="top-bar">
         <header class="title">
-          <h1>Tuning Lattice</h1>
+          <h1>
+            Tuning Lattice
+            <button
+              id="intro-info-button"
+              type="button"
+              class="intro-info-button"
+              aria-label="About Tuning Lattice"
+              aria-haspopup="dialog"
+              aria-controls="intro-dialog"
+              title="About Tuning Lattice"
+            >?</button>
+          </h1>
           <p class="creator">
             Created by
             <a
@@ -228,9 +303,10 @@
           <div id="banner-message" class="ui-hint banner-message" hidden></div>
         </div>
         <div class="help-toggle help-toggle-right">
+          <button id="add-caption-button" type="button" class="help-toggle-link help-toggle-button" title="Add a caption (click to place, then type; drag anywhere)">Add caption</button>
           <input id="show-help" type="checkbox" checked />
           <label for="show-help">Show help</label>
-          <a class="help-toggle-link" href="/docs/" target="_blank" rel="noreferrer">Read Docs</a>
+          <button id="learn-help-button" type="button" class="help-toggle-link help-toggle-button">Learn &amp; Get Help</button>
         </div>
       </div>
     </main>
@@ -372,6 +448,13 @@
           </div>
         </div>
         <div class="nav-3d-section">
+          <div class="nav-3d-title">Spelling</div>
+          <div id="layout-heji-toggle-group" class="nav-3d-buttons nav-3d-toggle-buttons">
+            <button id="layout-heji-enabled-button" type="button" data-heji="true" class="is-active">HEJI</button>
+            <button id="layout-heji-disabled-button" type="button" data-heji="false">Trad.</button>
+          </div>
+        </div>
+        <div class="nav-3d-section">
           <button
             id="layout-show-toggle"
             class="nav-3d-accordion-toggle is-collapsed"
@@ -383,12 +466,6 @@
             <span class="nav-3d-accordion-chevron">▾</span>
           </button>
           <div id="layout-show-body" class="nav-3d-accordion-body" hidden>
-            <div class="control-group">
-              <div class="control-inline">
-                <input id="layout-heji-enabled" type="checkbox" checked />
-                <label for="layout-heji-enabled">HEJI</label>
-              </div>
-            </div>
             <div class="control-group">
               <div class="control-inline">
                 <input id="layout-show-cents-deviation" type="checkbox" checked />
@@ -1259,8 +1336,8 @@
           <div class="nav-3d-section">
             <div class="nav-3d-title">Feature</div>
             <div class="nav-3d-buttons nav-3d-toggle-buttons">
-              <button type="button" data-feature-mode="ratio">Ratio</button>
               <button type="button" data-feature-mode="note">Note</button>
+              <button type="button" data-feature-mode="ratio">Ratio</button>
             </div>
           </div>
           <div class="nav-3d-section">
@@ -1269,15 +1346,13 @@
               <button type="button" data-spelling-mode="true">Diatonic</button>
               <button type="button" data-spelling-mode="simple">Custom</button>
             </div>
+            <div id="heji-toggle-group" class="nav-3d-buttons nav-3d-toggle-buttons">
+              <button id="heji-enabled-button" type="button" data-heji="true" class="is-active">HEJI</button>
+              <button id="heji-disabled-button" type="button" data-heji="false">Trad.</button>
+            </div>
           </div>
           <div class="nav-3d-section">
             <div class="nav-3d-title">Show</div>
-            <div class="control-group">
-              <div class="control-inline">
-                <input id="heji-enabled" type="checkbox" checked />
-                <label for="heji-enabled">HEJI</label>
-              </div>
-            </div>
             <div class="control-group">
               <div class="control-inline">
                 <input id="show-cents-deviation" type="checkbox" checked />
@@ -1374,6 +1449,72 @@
           <button type="submit" value="confirm">Add</button>
         </menu>
       </form>
+    </dialog>
+    <dialog id="intro-dialog" class="custom-ratio-dialog intro-dialog">
+      <div class="intro-dialog-content">
+        <div class="dialog-title">Tuning Lattice</div>
+        <p class="intro-tagline">A visual and playable environment for just intonation.</p>
+        <p>
+          Build tunings as ratio networks, hear them instantly, play them, practice with them,
+          and turn them into finished diagrams or exportable tuning data.
+        </p>
+        <div class="intro-actions">
+          <button id="intro-replay-tour" type="button" class="intro-action-button intro-action-primary">Take the tour</button>
+          <a class="intro-action-button" href="./presentation.html">Full overview</a>
+        </div>
+        <p class="intro-close-hint">[click anywhere to close]</p>
+      </div>
+    </dialog>
+    <dialog id="learn-help-dialog" class="custom-ratio-dialog learn-help-dialog">
+      <div class="learn-help-content">
+        <div class="dialog-title">Learn &amp; Get Help</div>
+        <ul class="learn-help-list">
+          <li>
+            <a class="learn-help-item" href="/docs/" target="_blank" rel="noreferrer">
+              <span class="learn-help-item-title">User's Guide</span>
+              <span class="learn-help-item-desc">Full written documentation for the lattice.</span>
+            </a>
+          </li>
+          <li>
+            <button id="learn-help-tour-button" type="button" class="learn-help-item">
+              <span class="learn-help-item-title">Guided Tour</span>
+              <span class="learn-help-item-desc">A short walkthrough of the basics.</span>
+            </button>
+          </li>
+          <!-- Hidden for now — re-enable by removing the hidden attribute -->
+          <li hidden>
+            <button id="learn-help-deep-tour-button" type="button" class="learn-help-item">
+              <span class="learn-help-item-title">Deep Tour</span>
+              <span class="learn-help-item-desc">3D lattices, page layout, analysis tools, and more.</span>
+            </button>
+          </li>
+          <li hidden>
+            <div class="learn-help-item learn-help-item-disabled" aria-disabled="true">
+              <span class="learn-help-item-title">Video Demo</span>
+              <span class="learn-help-item-desc">Coming soon.</span>
+            </div>
+          </li>
+          <li hidden>
+            <div class="learn-help-item learn-help-item-disabled" aria-disabled="true">
+              <span class="learn-help-item-title">Snapshot Demo</span>
+              <span class="learn-help-item-desc">Coming soon.</span>
+            </div>
+          </li>
+          <li hidden>
+            <button id="learn-help-edit-quick-tour-button" type="button" class="learn-help-item learn-help-item-dev">
+              <span class="learn-help-item-title">Edit Quick Tour &nbsp;<span class="learn-help-dev-tag">dev</span></span>
+              <span class="learn-help-item-desc">Rewrite the quick tour live on screen, then export.</span>
+            </button>
+          </li>
+          <li hidden>
+            <button id="learn-help-edit-deep-tour-button" type="button" class="learn-help-item learn-help-item-dev">
+              <span class="learn-help-item-title">Edit Deep Tour &nbsp;<span class="learn-help-dev-tag">dev</span></span>
+              <span class="learn-help-item-desc">Rewrite the deep tour live on screen, then export.</span>
+            </button>
+          </li>
+        </ul>
+        <p class="learn-help-close-hint">[click anywhere to close]</p>
+      </div>
     </dialog>
     <dialog id="credits-dialog" class="custom-ratio-dialog credits-dialog">
       <div class="credits-content">

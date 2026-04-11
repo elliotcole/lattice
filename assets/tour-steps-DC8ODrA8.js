@@ -9,61 +9,78 @@
 //   body     — instructional text; \n is preserved as a line break
 //   anchor   — { corner, dx, dy }; optional, defaults to top-right corner
 //   isFinal  — optional; the closing card, where "Next" becomes "Done"
-
 export const quickTourSteps = [
   {
     id: "welcome",
     title: "What is a tuning lattice?",
-    body: "A tuning lattice is a diagram used to design a scale. It's an arrangement of notes where each axis represents an interval. \n\nHere, horizontal connections are perfect fifths (the 3rd harmonic), and vertical connections are pure major thirds (the 5th harmonic).",
+    body: "A tuning lattice is a diagram used to design a scale. It's an arrangement of notes where each axis represents an interval. \n\nHere, horizontal connections are perfect fifths (the 3rd harmonic), and vertical connections are pure major thirds (the 5th harmonic). \nYou can change what intervals define your axes in the menu above.\n",
     anchor: { corner: "top-left", dx: 216, dy: 91 },
   },
   {
     id: "create-notes",
     title: "Create some notes",
-    body: "SHIFT-CLICK to create some nodes that connect to our fundamental C. See how they move left and right by 5ths and up/down by thirds.\n\nGo ahead — make a few.",
+    body: "SHIFT-CLICK to create some nodes that connect to our fundamental C. Notice how the notes are related by fifths along the X axis and thirds along the Y axis.\n\nOPTION-CLICK to delete them.\n",
     anchor: { corner: "top-left", dx: 216, dy: 91 },
   },
   {
     id: "step-mnqrrav5",
     title: "Making sound",
-    body: "Now click on them to hear them, and click again to turn them off.",
-    anchor: { corner: "top-left", dx: 277, dy: 204 },
+    body: "Each note plays a tone. Click on them to turn them on and off.\n\nYou can also make them pulse with an LFO. Hold down the L key, and click and hold down the mouse button on a node before releasing it. The longer you hold it down, the longer the cycle of the LFO will be.\n",
+    anchor: { corner: "top-left", dx: 216, dy: 91 },
   },
   {
-    id: "step-mnqs4cvl",
-    title: "Pulsing notes",
-    body: "Now start one pulsing: hold down the L key, click on a node, and hold the mouse down for some amount of time.\n\nClick again to turn it fully on, and again to turn it off.",
-    anchor: { corner: "bottom-right", dx: -115, dy: -50 },
+    id: "create-notes-copy-mnua09tb",
+    title: "Go 3D",
+    body: "Hold Z and click on any note to enter Z Edit Mode, where you can add notes along a new axis. Double click the background to return.\n\nClick and drag to rotate your view. Use your scroll wheel or two-finger drag on a trackpad to zoom. To pan, use your arrow keys. Click Navigation on the left for more controls.\n\n(For more than 3 dimensions, use custom nodes: C-click on a note to add one.)\n",
+    anchor: { corner: "top-left", dx: 216, dy: 91 },
   },
   {
     id: "step-mnqs6o8q",
-    title: "It's an instrument",
-    body: "You can play them with your computer keyboard. From the menu below:\n\nTry \"Piano Keyboard\" to turn your letters into a two-octave piano layout (where C is mapped to Z and Y).\n\nOr try Isomorphic to map the shape you see directly to your keyboard. You can also play with a MIDI controller (in supported browsers like Chrome.)",
-    anchor: { corner: "bottom-left", dx: 30, dy: -88 },
+    title: "Play it!",
+    body: 'You can play them with your computer keyboard. From the menu at the bottom left:\n\nTry "Piano Keyboard" to turn your letters into a two-octave piano layout (where the low C is mapped to Z and the high C is mapped to Y).\n\nOr try Isomorphic to map the shape you see directly to your keyboard. You\'ll see new labels on each note to tell you what key to push.\n\nYou can also play with a MIDI controller (in supported browsers like Chrome) and even send tuned MPE MIDI out to play software instruments in a DAW.\n',
+    anchor: { corner: "top-left", dx: 216, dy: 91 },
   },
   {
     id: "step-mnqsctlp",
-    title: "It's a sequencer and looper",
-    body: "You can animate your scale. From the panel below, open the Play menu, choose a Sequence and a Rhythm, press Build and then Play.\n\nPress SPACEBAR to stop and start the Pattern, or SHIFT-SPACEBAR to stop all notes.",
-    anchor: { corner: "bottom-right", dx: -284, dy: -84 },
+    title: "Start a Sequence",
+    body: "The Play menu is at the bottom-right of the screen. \n\nOpen it. Choose a Sequence and a Rhythm, press Build and then Play.\n\nPress SPACEBAR to stop and start the Pattern, or SHIFT-SPACEBAR to stop all notes.\n",
+    anchor: { corner: "bottom-right", dx: -301, dy: -80 },
   },
   {
     id: "step-mnqsroh6",
-    title: "Synth Settings",
-    body: "You can also change the way it sounds. Click the Synth menu below and choose a new waveform.",
-    anchor: { corner: "bottom-right", dx: -288, dy: -81 },
+    title: "Change the Sound",
+    body: "You can change what it sounds like in the Synth menu, next to Play at the bottom right.\n\nOpen it now and try changing the waveform and envelope.\n",
+    anchor: { corner: "bottom-right", dx: -339, dy: -83 },
   },
   {
     id: "step-mnqsvr1k",
     title: "Composing with Snapshots",
-    body: "Play around — find some notes and a pattern or drone you like.\n\nWhen you have something, press OPTION-1 to save it as a Snapshot. Now all you need to do to return to it is to press the number 1.\n\nMake a few more snapshots with OPTION-2, OPTION-3, etc. Use Snapshot Options below to change what gets recalled, and Export your composition to save it for later.",
-    anchor: { corner: "bottom-left", dx: 360, dy: -79 },
+    body: "You can easily save and recall any lattice or sonic state with Snapshots.\n\nTry it now: press OPTION-1 to save this state in slot 1.\n\nMake some changes, and then press 1 again to return.\n\nMake a few more snapshots with OPTION-2, OPTION-3. Use Snapshot Options below to change what gets recalled, and Export your composition to save it for later.\n",
+    anchor: { corner: "bottom-left", dx: 132, dy: -80 },
   },
   {
-    id: "quick-done",
-    title: "That's the basics",
-    body: "There's a lot more to explore — 3D lattices, a page layout tool, the overtones visualizer, and a tuner for practicing intonation.\n\nTake the Deep Tour from Learn & Get Help when you're ready, or just dive in.",
-    anchor: { corner: "top-right", dx: -24, dy: 24 },
+    id: "quick-tuner",
+    title: "Practice with the Tuner",
+    body: "The Tuner is a practice aid for developing intonation within your scale.",
+    anchor: { corner: "top-right", dx: -23, dy: 76 },
+  },
+  {
+    id: "quick-save",
+    title: "Saving your Lattice",
+    body: "You can save and load lattices from the file menu. Your lattice is also saved in the URL for easy bookmarking or sharing.",
+    anchor: { corner: "top-right", dx: -672, dy: 63 },
+  },
+  {
+    id: "step-layout",
+    title: "Page Layout",
+    body: "<< Switch to Print Mode to turn your lattice into a beautiful PDF.\n\nYou'll set your view, click Freeze, and then you can manually edit the positions of every element, add text, change fonts, and export files.\n\n",
+    anchor: { corner: "top-left", dx: 203, dy: 106 },
+  },
+  {
+    id: "step-final",
+    title: "Go play!",
+    body: "You now know the basics, go have fun!",
+    anchor: { corner: "top-left", dx: 684, dy: 175 },
     isFinal: true,
   },
 ];
@@ -209,7 +226,7 @@ export const deepTourSteps = [
   {
     id: "deep-snapshot-advanced",
     title: "Advanced snapshots",
-    body: "Letter slots: Enable \"Letters active\" to use your full QWERTY keyboard as snapshot slots (OPTION+letter to save, letter to recall).\n\nMorph mode: When enabled, sustained notes bend smoothly between snapshots instead of cutting.\n\nDeferred recall: Set snapshots to switch at the end of the current pattern cycle, not immediately.\n\nExport/Import: Save your entire snapshot composition as a file to reload later.",
+    body: 'Letter slots: Enable "Letters active" to use your full QWERTY keyboard as snapshot slots (OPTION+letter to save, letter to recall).\n\nMorph mode: When enabled, sustained notes bend smoothly between snapshots instead of cutting.\n\nDeferred recall: Set snapshots to switch at the end of the current pattern cycle, not immediately.\n\nExport/Import: Save your entire snapshot composition as a file to reload later.',
     anchor: { corner: "bottom-left", dx: 360, dy: -79 },
   },
   {
@@ -239,7 +256,7 @@ export const deepTourSteps = [
   {
     id: "deep-build-intervals",
     title: "Build from Intervals",
-    body: "Calculate > Build from Intervals lets you construct a lattice step by step.\n\nChoose intervals from a list (\"perfect fifth\", \"major third\", etc.) or enter custom ratios. Each interval is stacked on the previous one.\n\nThe tool warns you if your intervals exceed an octave.",
+    body: 'Calculate > Build from Intervals lets you construct a lattice step by step.\n\nChoose intervals from a list ("perfect fifth", "major third", etc.) or enter custom ratios. Each interval is stacked on the previous one.\n\nThe tool warns you if your intervals exceed an octave.',
     anchor: { corner: "top-right", dx: -306, dy: 177 },
   },
   {

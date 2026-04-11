@@ -30395,6 +30395,10 @@ bindOptionalClick(welcomeTourBtn, () => {
 bindOptionalClick(welcomeExploreBtn, () => {
   hideWelcomeOverlay();
 });
+const titleWelcomeLink = document.getElementById("title-welcome-link");
+bindOptionalClick(titleWelcomeLink, () => {
+  showWelcomeOverlay();
+});
 if (welcomeOverlayEl) {
   welcomeOverlayEl.addEventListener("click", (event) => {
     if (event.target && event.target.classList.contains("welcome-backdrop")) {
@@ -30420,16 +30424,9 @@ if (creditsTrigger && creditsDialog) {
     }
   });
 }
-const introInfoButton = document.getElementById("intro-info-button");
 const introDialog = document.getElementById("intro-dialog");
 const introReplayTourBtn = document.getElementById("intro-replay-tour");
-if (introInfoButton && introDialog) {
-  bindOptionalClick(introInfoButton, (event) => {
-    event.preventDefault();
-    if (!introDialog.open) {
-      introDialog.showModal();
-    }
-  });
+if (introDialog) {
   introDialog.addEventListener("click", (event) => {
     // Close on backdrop click but not when clicking action buttons / links.
     const target = event.target;

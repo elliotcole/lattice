@@ -473,6 +473,19 @@ body[data-theme="solarized-dark"] {
   white-space: nowrap;
 }
 
+.title-welcome-link {
+  all: unset;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-decoration: none;
+}
+
+.title-welcome-link:hover {
+  text-decoration: underline;
+}
+
 .title p {
   margin: 0;
   color: var(--muted-ink);
@@ -3448,34 +3461,7 @@ body.preset-open {
   gap: 4px;
 }
 
-/* ---- Intro info button + dialog ---- */
-.intro-info-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  margin-left: 6px;
-  padding: 0;
-  border: 1px solid rgba(16, 19, 22, 0.25);
-  border-radius: 50%;
-  background: transparent;
-  color: rgba(16, 19, 22, 0.55);
-  font-family: "Lexend", "Helvetica Neue", sans-serif;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  vertical-align: middle;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-
-.intro-info-button:hover {
-  background: rgba(16, 19, 22, 0.08);
-  color: rgba(16, 19, 22, 0.9);
-  border-color: rgba(16, 19, 22, 0.5);
-}
-
+/* ---- Intro dialog ---- */
 .intro-dialog {
   max-width: min(460px, calc(100vw - 40px));
 }
@@ -3754,12 +3740,12 @@ body.embed-mode .tooltip {
   z-index: 50;
   max-width: min(340px, calc(100vw - 40px));
   padding: 18px 22px 16px;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid rgba(16, 19, 22, 0.14);
+  background: var(--chrome-dialog-bg);
+  border: 1px solid var(--chrome-dialog-border);
   border-radius: 14px;
-  box-shadow: 0 18px 60px rgba(16, 19, 22, 0.18);
+  box-shadow: var(--chrome-dialog-shadow);
   font-family: "Lexend", "Helvetica Neue", sans-serif;
-  color: rgba(16, 19, 22, 0.92);
+  color: var(--chrome-ink);
   pointer-events: auto;
   animation: tour-bubble-fade-in 0.2s ease;
 }
@@ -3772,7 +3758,7 @@ body.embed-mode .tooltip {
   font-size: 14px;
   font-weight: 600;
   margin-bottom: 8px;
-  color: rgba(16, 19, 22, 1);
+  color: var(--ink);
 }
 
 .tour-bubble-title:empty {
@@ -3782,7 +3768,7 @@ body.embed-mode .tooltip {
 .tour-bubble-body {
   font-size: 13px;
   line-height: 1.5;
-  color: rgba(16, 19, 22, 0.78);
+  color: var(--muted-ink);
   white-space: pre-wrap;
 }
 
@@ -3799,16 +3785,16 @@ body.embed-mode .tooltip {
   font-weight: 500;
   padding: 6px 14px;
   border-radius: 6px;
-  border: 1px solid rgba(16, 19, 22, 0.18);
-  background: rgba(255, 255, 255, 0.7);
-  color: rgba(16, 19, 22, 0.85);
+  border: 1px solid var(--button-border);
+  background: var(--button-bg);
+  color: var(--button-ink);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
 
 .tour-bubble-button:hover {
-  background: rgba(16, 19, 22, 0.06);
-  border-color: rgba(16, 19, 22, 0.3);
+  background: var(--panel-hover);
+  border-color: var(--border);
 }
 
 .tour-bubble-button:active {
@@ -3845,6 +3831,7 @@ body.embed-mode .tooltip {
   z-index: 49;
   pointer-events: none;
   overflow: visible;
+  color: var(--muted-ink);
 }
 
 .tour-arrow-svg[hidden] {
@@ -3852,7 +3839,7 @@ body.embed-mode .tooltip {
 }
 
 .tour-arrow-line {
-  stroke: rgba(16, 19, 22, 0.55);
+  stroke: var(--muted-ink);
   stroke-width: 1.5;
   stroke-dasharray: 6 4;
 }
@@ -3939,9 +3926,9 @@ body.performance-mode .tour-banner {
   gap: 2px;
   width: 100%;
   padding: 10px 14px;
-  border: 1px solid rgba(16, 19, 22, 0.14);
+  border: 1px solid var(--chrome-section-border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--chrome-soft-surface);
   color: inherit;
   text-align: left;
   text-decoration: none;
@@ -3951,8 +3938,8 @@ body.performance-mode .tour-banner {
 }
 
 .learn-help-item:hover {
-  background: rgba(16, 19, 22, 0.05);
-  border-color: rgba(16, 19, 22, 0.28);
+  background: var(--panel-hover);
+  border-color: var(--border);
 }
 
 .learn-help-item-title {
@@ -3973,8 +3960,8 @@ body.performance-mode .tour-banner {
 }
 
 .learn-help-item-disabled:hover {
-  background: rgba(255, 255, 255, 0.7);
-  border-color: rgba(16, 19, 22, 0.14);
+  background: var(--chrome-soft-surface);
+  border-color: var(--chrome-section-border);
 }
 
 .learn-help-close-hint {
@@ -4007,7 +3994,7 @@ body.performance-mode .tour-banner {
   top: 6px;
   right: 10px;
   font-size: 14px;
-  color: rgba(16, 19, 22, 0.45);
+  color: var(--muted-ink);
   cursor: grab;
   user-select: none;
   line-height: 1;
@@ -4022,7 +4009,7 @@ body.performance-mode .tour-banner {
   display: none;
   margin-top: 14px;
   padding-top: 12px;
-  border-top: 1px dashed rgba(16, 19, 22, 0.18);
+  border-top: 1px dashed var(--chrome-section-border);
   gap: 6px;
   flex-direction: column;
 }
@@ -4039,7 +4026,7 @@ body.performance-mode .tour-banner {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: rgba(16, 19, 22, 0.45);
+  color: var(--muted-ink);
   margin-right: 2px;
 }
 
@@ -4048,16 +4035,16 @@ body.performance-mode .tour-banner {
   font-size: 11px;
   padding: 4px 8px;
   border-radius: 5px;
-  border: 1px solid rgba(16, 19, 22, 0.18);
-  background: rgba(255, 255, 255, 0.7);
-  color: rgba(16, 19, 22, 0.78);
+  border: 1px solid var(--button-border);
+  background: var(--button-bg);
+  color: var(--button-ink);
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 
 .tour-edit-button:hover {
-  background: rgba(16, 19, 22, 0.05);
-  border-color: rgba(16, 19, 22, 0.32);
+  background: var(--panel-hover);
+  border-color: var(--border);
 }
 
 .tour-edit-button:active {
@@ -4089,16 +4076,18 @@ body.tour-edit-mode .tour-edit-toolbar {
 
 body.tour-edit-mode .tour-bubble-title[contenteditable="true"],
 body.tour-edit-mode .tour-bubble-body[contenteditable="true"] {
-  outline: 1px dashed rgba(36, 90, 141, 0.35);
+  outline: 1px dashed var(--accent);
   outline-offset: 4px;
   border-radius: 4px;
   cursor: text;
+  opacity: 0.7;
 }
 
 body.tour-edit-mode .tour-bubble-title[contenteditable="true"]:focus,
 body.tour-edit-mode .tour-bubble-body[contenteditable="true"]:focus {
-  outline-color: rgba(36, 90, 141, 0.75);
+  outline-color: var(--accent);
   outline-style: solid;
+  opacity: 1;
 }
 
 body.tour-edit-mode .tour-bubble-title:empty {
@@ -4108,13 +4097,13 @@ body.tour-edit-mode .tour-bubble-title:empty {
 
 body.tour-edit-mode .tour-bubble-title:empty::before {
   content: "(click to add title)";
-  color: rgba(16, 19, 22, 0.3);
+  color: var(--muted-ink);
   font-style: italic;
 }
 
 body.tour-edit-mode .tour-bubble-body:empty::before {
   content: "(empty step — type here)";
-  color: rgba(16, 19, 22, 0.3);
+  color: var(--muted-ink);
   font-style: italic;
 }
 

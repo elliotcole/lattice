@@ -4,3 +4,6 @@ dist/
 *.code-workspace
 backup/
 snapshot-sets/
+tour.js
+tour-quick.js
+deep-tour-draft.js

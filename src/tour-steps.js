@@ -78,14 +78,14 @@ export const deepTourSteps = [
   {
     id: "deep-welcome-copy-mnssiq7m",
     title: "Fundamental and Factors",
-    body: "The fundamental tone can be specified as an equal-tempered pitch or a raw Hz.\n\nFactors lets you set the prime harmonics per axis. The fundamental is multiplied and divided by these numbers to create the lattice.\n\nEvery tone is by default 'octave reduced' - moved up or down to keep all tones within a single octave. This can be overridden on a per-node basis by holding O (for octave) and clicking on a node.\n",
+    body: "The lattice's shape is defined by its fundamental and its factors, editable in the panel above.\n\nThe fundamental tone can be specified as an equal-tempered pitch or a raw Hz.\n\nFactors lets you set the prime harmonics per axis. The fundamental is multiplied and divided by these numbers to create the lattice.\n\nEvery tone is by default 'octave reduced' - moved up or down to keep all tones within a single octave. This can be overridden on a per-node basis by holding O (for octave) and clicking on a node.\n",
     anchor: { corner: "top-left", dx: 207, dy: 96 },
     arrow: { x: 26.6, y: 6.2 },
   },
   {
     id: "deep-welcome-copy-mnssiq7m-copy-mnsspixt",
     title: "The View Panel",
-    body: "You have lots of options for what information your lattice contains.\n\nYou can choose to feature either the ratio or the note letter inside the circle.\n\nNote letter spelling can be either diatonic or custom. When set to custom, you can hold R and click on a node to toggle enharmonic options.\n\nHEJI refers to the Extended Helmholtz-Ellis JI Pitch Notation System, a set of accidentals that accurately describe ratio relationships. When toggled off, normal sharps and flats are used.\n",
+    body: "You have lots of options for what information your lattice contains.\n\nFEATURE\nYou can choose to feature either the ratio or the note letter inside the circle.\n\nSPELLING\nNote letter spelling can be either diatonic or custom. When set to custom, you can hold R and click on a node to toggle enharmonic options.\n\nHEJI refers to the Extended Helmholtz-Ellis JI Pitch Notation System, a set of accidentals that accurately describe ratio relationships. When toggled off, normal sharps and flats are used.\n",
     anchor: { corner: "top-left", dx: 207, dy: 96 },
     arrow: { x: 26.6, y: 6.2 },
   },

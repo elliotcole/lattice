@@ -28135,19 +28135,31 @@ async function buildLayoutSvgString(
         layoutRatioFontWeight,
         maxHeight
       );
-      const ratioYOffset = Math.round(layout.size * -0.09);
       const ratioTextColor = textColorPrimary;
       if (layout.lines.length === 1) {
+        const ratioFontObj = await getOutlineFontOrFallback(
+          layoutRatioFont,
+          layoutRatioFontWeight
+        );
+        let ratioY = y;
+        let ratioBaseline = "middle";
+        if (ratioFontObj) {
+          const bbox = ratioFontObj
+            .getPath(layout.lines[0], 0, 0, layout.size)
+            .getBoundingBox();
+          ratioY = y - (bbox.y1 + bbox.y2) / 2;
+          ratioBaseline = "alphabetic";
+        }
         parts.push(
           await buildSvgTextElement({
             text: layout.lines[0],
             x,
-            y: y + ratioYOffset,
+            y: ratioY,
             font: layoutRatioFont,
             size: layout.size,
             fontWeight: layoutRatioFontWeight,
             anchor: "middle",
-            baseline: "middle",
+            baseline: ratioBaseline,
             color: ratioTextColor,
           })
         );

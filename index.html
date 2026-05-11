@@ -31,7 +31,7 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/main-1XHPkreH.js"></script>
+    <script type="module" crossorigin src="./assets/main-XlH3ZoJT.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-B5Qt9EMX.js">
     <link rel="modulepreload" crossorigin href="./assets/interval-names-DeDTMXK9.js">
     <link rel="stylesheet" crossorigin href="./assets/style-goMvYQba.css">
@@ -253,10 +253,6 @@
                   />
                 </div>
                 <div class="control-group control-group-inline">
-                  <input id="connect-orphans" type="checkbox" />
-                  <label for="connect-orphans">Connect orphans</label>
-                </div>
-                <div class="control-group control-group-inline">
                   <input id="show-3d-shading" type="checkbox" checked />
                   <label for="show-3d-shading">3D shading</label>
                 </div>
@@ -390,6 +386,10 @@
           <label for="layout-node-size">Node</label>
           <input id="layout-node-size" type="range" min="18" max="70" step="1" value="35" />
         </div>
+        <div class="control-group control-group-inline">
+          <label for="layout-line-thickness">Line thickness</label>
+          <input id="layout-line-thickness" type="range" min="0.5" max="3" step="0.25" value="1" />
+        </div>
         <div class="nav-3d-title">Align</div>
         <div class="control-group">
           <div class="control-inline layout-align-row">
@@ -491,6 +491,18 @@
               <div class="control-inline">
                 <input id="layout-line-labels-toggle" type="checkbox" checked />
                 <label for="layout-line-labels-toggle">Line labels</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="layout-edges-black" type="checkbox" />
+                <label for="layout-edges-black">Black Edges</label>
+              </div>
+            </div>
+            <div class="control-group">
+              <div class="control-inline">
+                <input id="layout-connections-black" type="checkbox" />
+                <label for="layout-connections-black">Black Connections</label>
               </div>
             </div>
             <div class="control-group">

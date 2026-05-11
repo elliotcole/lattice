@@ -13,7 +13,9 @@ This is a context‑based reference for Tuning Lattice shortcuts. Most commands 
 - C‑click: add a custom ratio (4th–7th dimension)
 - Hold I + click: open Calculate Interval
 - Hold L + press & hold: start LFO on a node
-- Hold M + click: center view on the node
+- Hold M + click: mute / unmute a node (ghost — visible but silent, skipped in patterns)
+- Hold N + click: center view on the node
+- Click a muted node: unmute it
 - Hold T: label triangles
 - Hold O + click: change playback octave
 - Hold F + click: set fundamental

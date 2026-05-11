@@ -229,7 +229,6 @@ const showRatioCentsToggle = document.getElementById("show-ratio-cents");
 const showCentsDeviationToggle = document.getElementById("show-cents-deviation");
 const showCentsSignToggle = document.getElementById("show-cents-sign");
 const directionalRatioLabelsToggle = document.getElementById("directional-ratio-labels");
-const connectOrphansToggle = document.getElementById("connect-orphans");
 const show3DShadingToggle = document.getElementById("show-3d-shading");
 const hejiEnabledButton = document.getElementById("heji-enabled-button");
 const hejiDisabledButton = document.getElementById("heji-disabled-button");
@@ -303,6 +302,9 @@ const layoutKeyMappingsGroup = document.getElementById("layout-key-mappings-grou
 const layoutHejiEnabledButton = document.getElementById("layout-heji-enabled-button");
 const layoutHejiDisabledButton = document.getElementById("layout-heji-disabled-button");
 const layoutHejiToggleGroup = document.getElementById("layout-heji-toggle-group");
+const layoutEdgesBlackToggle = document.getElementById("layout-edges-black");
+const layoutConnectionsBlackToggle = document.getElementById("layout-connections-black");
+const layoutLineThicknessSlider = document.getElementById("layout-line-thickness");
 const layoutEnharmonicsEnabledToggle = document.getElementById("layout-enharmonics-enabled");
 const layoutEnharmonicsGroup = document.getElementById("layout-enharmonics-group");
 const layoutShowHzToggle = document.getElementById("layout-show-hz");
@@ -520,6 +522,7 @@ let vHeld = false;
 let fHeld = false;
 let oHeld = false;
 let mHeld = false;
+let nHeld = false;
 let suppressClickAfterRespell = false;
 let nodeVolumeAdjustMode = false;
 let nodeVolumeSliderDrag = null;
@@ -539,6 +542,7 @@ function resetHeldModifiers() {
   xKeyHeld = false;
   yKeyHeld = false;
   mHeld = false;
+  nHeld = false;
 }
 const midiActiveNotes = new Map();
 const activeKeys = new Map();
@@ -1819,10 +1823,12 @@ let showLineLabels = true;
 let showKeyMappings = true;
 let layoutKeyMappingMode = "hide";
 let showHelpEnabled = true;
-let connectOrphansEnabled = false;
 let latticeTiltDeg = 0;
-let orphanGuideNodes = new Set();
-let orphanGuideEdges = new Set();
+let edgesBlack = false;
+let connectionsBlack = false;
+let lineThickness = 1;
+const LINE_THICKNESS_MIN = 0.5;
+const LINE_THICKNESS_MAX = 3;
 let uiHintDismissed = false;
 let uiHintKey = "";
 let keyboardHelpTimer = null;
@@ -2419,7 +2425,7 @@ function clearPatternTimers() {
 
 function getActiveNodeOrder() {
   return nodes
-    .filter((node) => node.active)
+    .filter((node) => node.active && !node.muted)
     .map((node) => ({
       nodeId: node.id,
       ratio: node.numerator / node.denominator,
@@ -5933,6 +5939,7 @@ function createCustomNodeFromSource(sourceNode, slot, factorNumerator, factorDen
     note_name: "",
     pitch_class: "",
     active: Boolean(sourceNode.active),
+    muted: false,
     isCenter: false,
     baseVoiceId: null,
     isCustom: true,
@@ -6669,6 +6676,7 @@ function buildLattice() {
           note_name: etInfo.name,
           pitch_class: etInfo.pitchClass,
           active: isCenter,
+          muted: false,
           isCenter,
           baseVoiceId: null,
           octaveShift: 0,
@@ -11706,8 +11714,8 @@ function drawTriangleDiagonals(nodePosMap, disableScale = false) {
   }
   const gridMap = getActiveGridNodeMap();
   ctx.save();
-  ctx.strokeStyle = themeColors.edge;
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = getInkEdgeColor(false);
+  ctx.lineWidth = getInkEdgeLineWidth(false);
   ctx.setLineDash([6, 4]);
   forEachEffectiveTriangleDiagonal((entry) => {
     const { a, b } = getTriangleDiagonalNodes(entry, gridMap);
@@ -11882,10 +11890,6 @@ function getNodeGuideAlpha(node, guideNodes, axisEntry) {
   if (guideNodes && guideNodes.has(node.id)) {
     alpha = guideNodes.get(node.id);
   }
-  const isOrphanGuide = connectOrphansEnabled && orphanGuideNodes.has(node.id);
-  if (isOrphanGuide && !(guideNodes && guideNodes.has(node.id))) {
-    alpha = 0.08;
-  }
   if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
     alpha *= AXIS_DIM_FACTOR;
   }
@@ -11893,74 +11897,6 @@ function getNodeGuideAlpha(node, guideNodes, axisEntry) {
     alpha *= 0.18;
   }
   return alpha;
-}
-
-function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
-  if (!connectOrphansEnabled || !orphanGuideEdges.size) {
-    return;
-  }
-  const labelFont = layoutMode ? layoutLineLabelFont : "Noto Serif";
-  const labelWeight = layoutMode ? layoutLineLabelFontWeight : 400;
-  const labelSize = layoutMode ? getLayoutLineLabelSize() : EDGE_LABEL_SIZE_DEFAULT;
-  ctx.save();
-  ctx.lineWidth = 1.5;
-  orphanGuideEdges.forEach((edgeKey) => {
-    const parts = edgeKey.split("|");
-    if (parts.length !== 2) {
-      return;
-    }
-    const a = nodeById.get(Number(parts[0]));
-    const b = nodeById.get(Number(parts[1]));
-    if (!a || !b) {
-      return;
-    }
-    const startEntry = nodePosMap.get(a.id);
-    const endEntry = nodePosMap.get(b.id);
-    if (!startEntry || !endEntry) {
-      return;
-    }
-    const isOrphanA = connectOrphansEnabled && orphanGuideNodes.has(a.id);
-    const isOrphanB = connectOrphansEnabled && orphanGuideNodes.has(b.id);
-    if (!isOrphanA && !isOrphanB) {
-      return;
-    }
-    const alphaA = isOrphanA ? 0.08 : getNodeGuideAlpha(a, guideNodes, axisEntry);
-    const alphaB = isOrphanB ? 0.08 : getNodeGuideAlpha(b, guideNodes, axisEntry);
-    const edgeAlpha = Math.min(alphaA, alphaB);
-    if (edgeAlpha <= 0) {
-      return;
-    }
-    ctx.strokeStyle = colorWithAlpha(themeColors.nodeStroke, edgeAlpha);
-    const start = startEntry.pos;
-    const end = endEntry.pos;
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const dist = Math.hypot(dx, dy);
-    if (!dist) {
-      return;
-    }
-    const ux = dx / dist;
-    const uy = dy / dist;
-    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-    const labelText = getEdgeLabelText(a, b);
-    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
-    const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
-    drawCanvasEdgeSegment({
-      start,
-      end,
-      startRadius,
-      endRadius,
-      color: themeColors.nodeStroke,
-      label,
-      labelFont,
-      labelWeight,
-      labelSize,
-      alpha: edgeAlpha,
-      labelAlpha: Math.min(1, (edgeAlpha + 1) * 0.3),
-    });
-  });
-  ctx.restore();
 }
 
 function getGuideRevealInfo(nodePosMap, axisEntry = null) {
@@ -12943,10 +12879,14 @@ function draw3DEdges(nodePosMap, axisEntry = null) {
       color = AXIS_EDGE_COLORS.z;
     }
     const labelText = getEdgeLabelText(a, b);
-    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
+    const eitherMuted = Boolean(a.muted) || Boolean(b.muted);
+    const label = shouldShowEdgeLabel(a, b) && !eitherMuted ? labelText : null;
     const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
-    const edgeAlpha =
+    let edgeAlpha =
       axisActive && !isEdgeOnAxisEntry(a, b, axisEntry) ? AXIS_DIM_FACTOR : 1;
+    if (eitherMuted) {
+      edgeAlpha = Math.min(edgeAlpha, 0.4);
+    }
     drawCanvasEdgeSegment({
       start,
       end,
@@ -12959,8 +12899,81 @@ function draw3DEdges(nodePosMap, axisEntry = null) {
       labelSize,
       labelT,
       alpha: edgeAlpha,
+      dash: eitherMuted ? [6, 4] : null,
     });
   });
+}
+
+function getInkEdgeColor(eitherMuted) {
+  if (eitherMuted) {
+    return themeColors.edge;
+  }
+  return connectionsBlack ? "#000000" : themeColors.edge;
+}
+
+function getInkNodeStrokeColor(isMuted) {
+  if (isMuted) {
+    return themeColors.nodeStroke;
+  }
+  return edgesBlack ? "#000000" : themeColors.nodeStroke;
+}
+
+function clampLineThickness(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return 1;
+  }
+  return Math.max(LINE_THICKNESS_MIN, Math.min(LINE_THICKNESS_MAX, num));
+}
+
+function getInkEdgeLineWidth(_eitherMuted) {
+  return lineThickness;
+}
+
+function getInkNodeStrokeLineWidth(_isMuted) {
+  return lineThickness;
+}
+
+function parseColorToRgb(color) {
+  if (!color || typeof color !== "string") {
+    return null;
+  }
+  const trimmed = color.trim();
+  if (trimmed.startsWith("#")) {
+    let hex = trimmed.slice(1);
+    if (hex.length === 3) {
+      hex = hex.split("").map((c) => c + c).join("");
+    }
+    if (hex.length === 6 || hex.length === 8) {
+      const value = parseInt(hex.slice(0, 6), 16);
+      return {
+        r: (value >> 16) & 255,
+        g: (value >> 8) & 255,
+        b: value & 255,
+      };
+    }
+  }
+  const match = trimmed.match(/rgba?\(([^)]+)\)/i);
+  if (match) {
+    const parts = match[1].split(",").map((p) => p.trim());
+    return {
+      r: Math.round(Number(parts[0]) || 0),
+      g: Math.round(Number(parts[1]) || 0),
+      b: Math.round(Number(parts[2]) || 0),
+    };
+  }
+  return null;
+}
+
+function blendOverPage(color, alpha) {
+  const fg = parseColorToRgb(color) || { r: 0, g: 0, b: 0 };
+  const pageColor = themeColors && themeColors.page ? themeColors.page : "#ffffff";
+  const bg = parseColorToRgb(pageColor) || { r: 255, g: 255, b: 255 };
+  const a = Math.max(0, Math.min(1, alpha));
+  const r = Math.round(fg.r * a + bg.r * (1 - a));
+  const g = Math.round(fg.g * a + bg.g * (1 - a));
+  const b = Math.round(fg.b * a + bg.b * (1 - a));
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 function colorWithAlpha(color, alpha) {
@@ -13504,8 +13517,8 @@ function drawDistanceConnections(nodePosMap) {
     const leftSegment = getQuadraticSubcurve(lineStart, control, lineEnd, 0, tLeft);
     const rightSegment = getQuadraticSubcurve(lineStart, control, lineEnd, tRight, 1);
     ctx.save();
-    ctx.strokeStyle = themeColors.edge;
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = getInkEdgeColor(false);
+    ctx.lineWidth = getInkEdgeLineWidth(false);
     ctx.globalAlpha = 1;
     ctx.setLineDash([6, 6]);
     if (leftSegment) {
@@ -13827,24 +13840,30 @@ function drawCustomConnections(nodePosMap) {
       0,
       getNodeEdgeRadius(node, ux, uy, endEntry.radius) + edgeOutset - customEdgeInset
     );
-    const connectionAlpha =
+    const eitherMuted = Boolean(source.muted) || Boolean(node.muted);
+    let connectionAlpha =
       (axisActive && !isEdgeOnAxisEntry(source, node, axisEntry) ? AXIS_DIM_FACTOR : 1) *
       (analysisLayers.microtonal ? 0.18 : 1);
+    if (eitherMuted) {
+      connectionAlpha = Math.min(connectionAlpha, 0.4);
+    }
     const labelText = getCustomConnectionLabelText(node);
-    const label = shouldShowEdgeLabel(source, node) ? labelText : null;
+    const label = shouldShowEdgeLabel(source, node) && !eitherMuted ? labelText : null;
     const labelT = getLineLabelPositionOverride(source, node) ?? 0.5;
     drawCanvasEdgeSegment({
       start,
       end,
       startRadius,
       endRadius,
-      color: themeColors.edge,
+      color: getInkEdgeColor(eitherMuted),
       label,
       labelFont,
       labelWeight,
       labelSize,
       labelT,
       alpha: connectionAlpha,
+      dash: eitherMuted ? [6, 4] : null,
+      lineWidth: getInkEdgeLineWidth(eitherMuted),
     });
   });
 }
@@ -14085,9 +14104,6 @@ function draw() {
   addCustomConnectionSegments(nodePosMap, detailLabelSegments);
   addTriangleDiagonalSegments(nodePosMap, detailLabelSegments);
   addDistanceLineSegments(nodePosMap, detailLabelSegments);
-  const orphanResult = buildOrphanGuideSet();
-  orphanGuideNodes = orphanResult.guides;
-  orphanGuideEdges = orphanResult.edges;
   const detailLabelCollision = {
     circles: nodeRenderList
       .filter(({ node }) => node.isCenter || node.active || node.isCustom)
@@ -14161,19 +14177,23 @@ function draw() {
       const startRadius = getNodeEdgeRadius(a, ux, uy, radiusA);
       const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
       const labelText = getEdgeLabelText(a, b);
-      const label = shouldShowEdgeLabel(a, b) ? labelText : null;
+      const eitherMuted = Boolean(a.muted) || Boolean(b.muted);
+      const label = shouldShowEdgeLabel(a, b) && !eitherMuted ? labelText : null;
       const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
       drawCanvasEdgeSegment({
         start,
         end,
         startRadius,
         endRadius,
-        color: themeColors.edge,
+        color: getInkEdgeColor(eitherMuted),
         label,
         labelFont,
         labelWeight,
         labelSize,
         labelT,
+        alpha: eitherMuted ? 0.4 : 1,
+        dash: eitherMuted ? [6, 4] : null,
+        lineWidth: getInkEdgeLineWidth(eitherMuted),
       });
     });
   }
@@ -14189,7 +14209,6 @@ function draw() {
   }
 
   drawCustomConnections(nodePosMap);
-  drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry);
   drawGuideEdges(nodePosMap, guideNodes);
   if (!showMicrotonal) {
     drawTriangleDiagonals(nodePosMap, disableScale);
@@ -14257,10 +14276,10 @@ function draw() {
   nodeRenderList.forEach(({ node, pos }) => {
     const isHovered = node.id === hoverNodeId;
     const isGuide = guideNodes.has(node.id);
-    const isOrphanGuide = connectOrphansEnabled && orphanGuideNodes.has(node.id);
+    const isMuted = Boolean(node.muted);
     const isIntervalHover = addIntervalMode && node.active && isHovered;
     const isIntervalDim = addIntervalMode && node.active && !isHovered;
-    const canShowInactive = !isOrphanGuide && isInactiveNodeAvailable(node);
+    const canShowInactive = isInactiveNodeAvailable(node);
     const canInteractInactive = !is3DMode || isAddMode || distanceSelectMode;
     const amplitude = nodeAmplitudes.get(node.id) || 0;
     const brightness = Math.min(1, amplitude);
@@ -14270,7 +14289,6 @@ function draw() {
       node.isCustom ||
       brightness > 0.01 ||
       isGuide ||
-      isOrphanGuide ||
       (isHovered && canShowInactive && canInteractInactive);
     let alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
     if (node.isCenter && !node.active) {
@@ -14279,11 +14297,11 @@ function draw() {
     if (isGuide) {
       alpha = guideNodes.get(node.id);
     }
-    if (isOrphanGuide && !isGuide) {
-      alpha = 0.08;
-    }
     if (node.isCustom && !node.active) {
       alpha = 0.25;
+    }
+    if (isMuted) {
+      alpha = isHovered ? 0.7 : 0.4;
     }
     if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
       alpha *= AXIS_DIM_FACTOR;
@@ -14335,9 +14353,9 @@ function draw() {
     }
     if (showNodeShape && showCircles) {
       ctx.beginPath();
-      ctx.strokeStyle = intervalTint || themeColors.nodeStroke;
-      ctx.lineWidth = 2;
-      if (isOrphanGuide) {
+      ctx.strokeStyle = intervalTint || getInkNodeStrokeColor(isMuted);
+      ctx.lineWidth = getInkNodeStrokeLineWidth(isMuted);
+      if (isMuted) {
         ctx.setLineDash([6, 4]);
       }
       if (is3DMode) {
@@ -14392,7 +14410,7 @@ function draw() {
         ctx.fill();
       }
       ctx.stroke();
-      if (isOrphanGuide) {
+      if (isMuted) {
         ctx.setLineDash([]);
       }
     }
@@ -14631,7 +14649,6 @@ function draw() {
 
 
     if (
-      isOrphanGuide ||
       isGuide ||
       (!node.active && !node.isCustom && !node.isCenter)
     ) {
@@ -17019,11 +17036,15 @@ function onPointerUp(event) {
       setNodeVolumeAdjustMode(false);
       return;
     }
-    if (mHeld && hit) {
+    if (nHeld && hit) {
       const projected = projectPoint(hit.coordinate || { x: 0, y: 0, z: 0 });
       view.offsetX = -projected.x;
       view.offsetY = -projected.y;
       draw();
+      return;
+    }
+    if (mHeld && hit) {
+      toggleNodeMuted(hit);
       return;
     }
     if (addIntervalMode) {
@@ -17246,6 +17267,7 @@ function onPointerUp(event) {
       if (event.altKey) {
         if (hit.active) {
           hit.active = false;
+          hit.muted = false;
           syncCustomNodesWithSource(hit.id, false);
           stopVoicesForNode(hit.id, false);
           pruneTriangleDiagonals();
@@ -17268,6 +17290,10 @@ function onPointerUp(event) {
             draw();
           }
         }
+        return;
+      }
+      if (hit.muted) {
+        setNodeMuted(hit, false);
         return;
       }
       const requestedAxis = getRequestedAxisKey();
@@ -17611,11 +17637,6 @@ function hitTestScreen(screenPoint, options) {
   const axisEntry = getActiveAxisEntry();
 
   nodes.forEach((node) => {
-    if (connectOrphansEnabled && orphanGuideNodes.has(node.id)) {
-      if (!shiftHeld && !capsLockOn && !addIntervalMode) {
-        return;
-      }
-    }
     if (layoutMode && !node.isCustom && !node.isCenter && !node.active) {
       return;
     }
@@ -17726,63 +17747,6 @@ function hitTestEdgeLabel(screenPoint) {
       bestDistance = distance;
     }
   });
-  if (connectOrphansEnabled && orphanGuideEdges.size) {
-    orphanGuideEdges.forEach((edgeKey) => {
-      const parts = edgeKey.split("|");
-      if (parts.length !== 2) {
-        return;
-      }
-      const a = nodeById.get(Number(parts[0]));
-      const b = nodeById.get(Number(parts[1]));
-      if (!a || !b) {
-        return;
-      }
-      const labelText = getEdgeLabelText(a, b);
-      if (!labelText) {
-        return;
-      }
-      const startEntry = nodePosMap.get(a.id);
-      const endEntry = nodePosMap.get(b.id);
-      if (!startEntry || !endEntry) {
-        return;
-      }
-      const start = startEntry.pos;
-      const end = endEntry.pos;
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const dist = Math.hypot(dx, dy);
-      if (!dist) {
-        return;
-      }
-      const ux = dx / dist;
-      const uy = dy / dist;
-      const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-      const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-      const lineStart = {
-        x: start.x + ux * startRadius,
-        y: start.y + uy * startRadius,
-      };
-      const lineEnd = {
-        x: end.x - ux * endRadius,
-        y: end.y - uy * endRadius,
-      };
-      const lineLen = Math.max(0, dist - startRadius - endRadius);
-      if (lineLen <= 0) {
-        return;
-      }
-      const distance = distanceToSegment(screenPoint, lineStart, lineEnd);
-      if (distance <= hitThreshold && distance < bestDistance) {
-        best = {
-          a,
-          b,
-          key: getEdgeKey(a, b),
-          lineStart,
-          lineEnd,
-        };
-        bestDistance = distance;
-      }
-    });
-  }
   if (customNodes.length) {
     const edgeOutset = 1;
     customNodes.forEach((node) => {
@@ -18804,204 +18768,6 @@ function factorizeRatio(numerator, denominator) {
   return map;
 }
 
-function buildOrphanGuideSet() {
-  const guides = new Set();
-  const edgesSet = new Set();
-  if (!connectOrphansEnabled) {
-    return { guides, edges: edgesSet };
-  }
-  const expMap = new Map();
-  nodes.forEach((node) => {
-    if (node.isCustom) {
-      return;
-    }
-    if (
-      !Number.isFinite(node.exponentX) ||
-      !Number.isFinite(node.exponentY) ||
-      !Number.isFinite(node.exponentZ)
-    ) {
-      return;
-    }
-    expMap.set(`${node.exponentX},${node.exponentY},${node.exponentZ || 0}`, node);
-  });
-  const root = nodes.find((node) => node.isCenter);
-  const adjacency = new Map();
-  const addAdj = (a, b) => {
-    if (!adjacency.has(a.id)) {
-      adjacency.set(a.id, []);
-    }
-    adjacency.get(a.id).push(b.id);
-  };
-  edges.forEach(([a, b]) => {
-    if (!a.active || !b.active) {
-      return;
-    }
-    addAdj(a, b);
-    addAdj(b, a);
-  });
-  customNodes.forEach((node) => {
-    if (!node.active) {
-      return;
-    }
-    const source = nodeById.get(node.sourceNodeId);
-    if (!source || !source.active) {
-      return;
-    }
-    addAdj(node, source);
-    addAdj(source, node);
-  });
-  const connected = new Set();
-  if (root && root.active) {
-    const queue = [root.id];
-    connected.add(root.id);
-    while (queue.length) {
-      const current = queue.shift();
-      const neighbors = adjacency.get(current) || [];
-      neighbors.forEach((next) => {
-        if (!connected.has(next)) {
-          connected.add(next);
-          queue.push(next);
-        }
-      });
-    }
-  }
-  const neighborKeys = (key) => {
-    const [x, y, z] = key.split(",").map(Number);
-    return [
-      `${x + 1},${y},${z}`,
-      `${x - 1},${y},${z}`,
-      `${x},${y + 1},${z}`,
-      `${x},${y - 1},${z}`,
-      `${x},${y},${z + 1}`,
-      `${x},${y},${z - 1}`,
-    ];
-  };
-  const findMinMissingPath = (startKey, endKey) => {
-    const costMap = new Map();
-    const stepMap = new Map();
-    const prev = new Map();
-    const open = [startKey];
-    costMap.set(startKey, 0);
-    stepMap.set(startKey, 0);
-    while (open.length) {
-      let bestIndex = 0;
-      let bestKey = open[0];
-      for (let i = 1; i < open.length; i += 1) {
-        const key = open[i];
-        const cost = costMap.get(key);
-        const steps = stepMap.get(key);
-        const bestCost = costMap.get(bestKey);
-        const bestSteps = stepMap.get(bestKey);
-        if (cost < bestCost || (cost === bestCost && steps < bestSteps)) {
-          bestKey = key;
-          bestIndex = i;
-        }
-      }
-      open.splice(bestIndex, 1);
-      if (bestKey === endKey) {
-        break;
-      }
-      const neighbors = neighborKeys(bestKey);
-      neighbors.forEach((nextKey) => {
-        const nextNode = expMap.get(nextKey);
-        if (!nextNode) {
-          return;
-        }
-        const cost = nextNode.active ? 0 : 1;
-        const nextCost = costMap.get(bestKey) + cost;
-        const nextSteps = stepMap.get(bestKey) + 1;
-        const existingCost = costMap.get(nextKey);
-        const existingSteps = stepMap.get(nextKey);
-        const shouldUpdate =
-          existingCost == null ||
-          nextCost < existingCost ||
-          (nextCost === existingCost && nextSteps < existingSteps);
-        if (shouldUpdate) {
-          costMap.set(nextKey, nextCost);
-          stepMap.set(nextKey, nextSteps);
-          prev.set(nextKey, bestKey);
-          if (!open.includes(nextKey)) {
-            open.push(nextKey);
-          }
-        }
-      });
-    }
-    if (!costMap.has(endKey)) {
-      return null;
-    }
-    const path = [];
-    let cursor = endKey;
-    while (cursor) {
-      path.push(cursor);
-      cursor = prev.get(cursor);
-    }
-    path.reverse();
-    return path;
-  };
-  nodes.forEach((node) => {
-    if (!node.active) {
-      return;
-    }
-    if (connected.has(node.id)) {
-      return;
-    }
-    let exponents = null;
-    if (node.isCustom) {
-      if (Array.isArray(node.sourceExponents)) {
-        exponents = {
-          x: Number(node.sourceExponents[0]) || 0,
-          y: Number(node.sourceExponents[1]) || 0,
-          z: Number(node.sourceExponents[2]) || 0,
-        };
-      } else {
-        const source = nodeById.get(node.sourceNodeId);
-        if (source) {
-          exponents = {
-            x: Number(source.exponentX) || 0,
-            y: Number(source.exponentY) || 0,
-            z: Number(source.exponentZ) || 0,
-          };
-        }
-      }
-    } else {
-      exponents = {
-        x: Number(node.exponentX) || 0,
-        y: Number(node.exponentY) || 0,
-        z: Number(node.exponentZ) || 0,
-      };
-    }
-    if (!exponents) {
-      return;
-    }
-    const startKey = `${exponents.x},${exponents.y},${exponents.z}`;
-    const endKey = "0,0,0";
-    if (!expMap.has(startKey) || !expMap.has(endKey)) {
-      return;
-    }
-    const path = findMinMissingPath(startKey, endKey);
-    if (!path || path.length < 2) {
-      return;
-    }
-    for (let i = 0; i < path.length; i += 1) {
-      const key = path[i];
-      const stepNode = expMap.get(key);
-      if (stepNode && !stepNode.active) {
-        guides.add(stepNode.id);
-      }
-      if (i > 0) {
-        const prevKey = path[i - 1];
-        const a = expMap.get(prevKey);
-        const b = expMap.get(key);
-        if (a && b) {
-          const edgeKey = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
-          edgesSet.add(edgeKey);
-        }
-      }
-    }
-  });
-  return { guides, edges: edgesSet };
-}
-
 function getAxisPrimeValues() {
   const x = Number(ratioXSelect && ratioXSelect.value);
   const y = Number(ratioYSelect && ratioYSelect.value);
@@ -19111,6 +18877,47 @@ function activateNode(node) {
   markIsomorphicDirty();
   schedulePresetUrlUpdate();
   draw();
+}
+
+function setNodeMuted(node, muted) {
+  if (!node) {
+    return;
+  }
+  const next = Boolean(muted);
+  if (Boolean(node.muted) === next) {
+    return;
+  }
+  if (next) {
+    if (maybeExpandAxisRangesForActivation(node)) {
+      const key = `${node.exponentX},${node.exponentY},${node.exponentZ || 0}`;
+      node = nodes.find(
+        (candidate) =>
+          `${candidate.exponentX},${candidate.exponentY},${candidate.exponentZ || 0}` === key
+      );
+      if (!node) {
+        return;
+      }
+    }
+    node.active = true;
+    node.muted = true;
+    syncCustomNodesWithSource(node.id, true);
+    stopVoicesForNode(node.id, false);
+  } else {
+    node.muted = false;
+  }
+  updatePitchInstances();
+  refreshPatternFromActiveNodes();
+  updateUiHint();
+  markIsomorphicDirty();
+  schedulePresetUrlUpdate();
+  draw();
+}
+
+function toggleNodeMuted(node) {
+  if (!node) {
+    return;
+  }
+  setNodeMuted(node, !node.muted);
 }
 
 function getNodeByExponentKey(key) {
@@ -24330,25 +24137,37 @@ function serializePresetActiveNodes() {
     .map((node) => [node.exponentX, node.exponentY, node.exponentZ || 0]);
 }
 
+function serializePresetMutedNodes() {
+  return nodes
+    .filter((node) => node.muted && !node.isCustom)
+    .map((node) => [node.exponentX, node.exponentY, node.exponentZ || 0]);
+}
+
 function serializePresetCustomNodes() {
-  return customNodes.map((node) => ({
-    sourceExponents: Array.isArray(node.sourceExponents)
-      ? node.sourceExponents
-      : (() => {
-          const source = nodeById.get(node.sourceNodeId);
-          return source
-            ? [source.exponentX, source.exponentY, source.exponentZ || 0]
-            : null;
-        })(),
-    customSlot: node.customSlot,
-    factorNumerator: node.factorNumerator,
-    factorDenominator: node.factorDenominator,
-    octaveReduce: node.octaveReduce !== false,
-    octaveShift: Number.isFinite(node.octaveShift) ? node.octaveShift : 0,
-    position: { x: node.coordinate.x, y: node.coordinate.y },
-    active: Boolean(node.active),
-    volumeMax: clampNodeVolume(node.volumeMax),
-  }));
+  return customNodes.map((node) => {
+    const entry = {
+      sourceExponents: Array.isArray(node.sourceExponents)
+        ? node.sourceExponents
+        : (() => {
+            const source = nodeById.get(node.sourceNodeId);
+            return source
+              ? [source.exponentX, source.exponentY, source.exponentZ || 0]
+              : null;
+          })(),
+      customSlot: node.customSlot,
+      factorNumerator: node.factorNumerator,
+      factorDenominator: node.factorDenominator,
+      octaveReduce: node.octaveReduce !== false,
+      octaveShift: Number.isFinite(node.octaveShift) ? node.octaveShift : 0,
+      position: { x: node.coordinate.x, y: node.coordinate.y },
+      active: Boolean(node.active),
+      volumeMax: clampNodeVolume(node.volumeMax),
+    };
+    if (node.muted) {
+      entry.muted = true;
+    }
+    return entry;
+  });
 }
 
 function serializePresetNodeVolumes() {
@@ -24373,6 +24192,7 @@ function pruneEmptyPresetCollections(state) {
   const isEmptyArray = (value) => !Array.isArray(value) || value.length === 0;
   const collectionKeys = [
     "active",
+    "muted",
     "customNodes",
     "lineLabelOverrides",
     "lineLabelPositions",
@@ -24473,14 +24293,17 @@ function getPresetSynthState() {
   };
 }
 
-function buildPresetStateSkeleton(active, customState, lineLabelState, distanceState) {
+function buildPresetStateSkeleton(active, customState, lineLabelState, distanceState, muted) {
   return {
     v: 1,
     active,
+    muted,
     customNodes: customState,
     mode3d: is3DMode,
-    connectOrphans: connectOrphansEnabled,
     tiltDeg: latticeTiltDeg,
+    edgesBlack,
+    connectionsBlack,
+    lineThickness,
     distances: analysisLayers.distances,
     microtonal: analysisLayers.microtonal,
     view: getPresetViewState(),
@@ -24525,6 +24348,7 @@ function getPresetState(options = {}) {
   const isEmptyObject = (value) =>
     !value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length;
   const active = serializePresetActiveNodes();
+  const muted = serializePresetMutedNodes();
   const customState = serializePresetCustomNodes();
   const layoutViewState = getPresetLayoutViewState();
   const layoutSourceViewState = getPresetLayoutSourceViewState();
@@ -24536,7 +24360,7 @@ function getPresetState(options = {}) {
     includeDefaults
   );
 
-  const state = buildPresetStateSkeleton(active, customState, lineLabelState, distanceState);
+  const state = buildPresetStateSkeleton(active, customState, lineLabelState, distanceState, muted);
 
   pruneEmptyPresetCollections(state);
   if (!includeDefaults && isEmptyObject(layoutState)) {
@@ -24679,6 +24503,7 @@ function applyPresetCustomNodes(entries) {
       node.coordinate.y = entry.position.y;
     }
     node.active = entry.active !== false;
+    node.muted = entry.muted === true;
     node.volumeMax = clampNodeVolume(Number(entry.volumeMax));
     insertCustomNode(node);
   });
@@ -25075,9 +24900,14 @@ function applyPresetReadoutAndTuningSettings(state) {
   applyPresetBooleanField(state, "showCentsSign", [showCentsSignToggle], (value) => {
     showCentsSign = value;
   });
-  applyPresetBooleanField(state, "connectOrphans", [connectOrphansToggle], (value) => {
-    connectOrphansEnabled = value;
-  });
+  edgesBlack = state.edgesBlack === true;
+  connectionsBlack = state.connectionsBlack === true;
+  lineThickness = Number.isFinite(state.lineThickness)
+    ? clampLineThickness(state.lineThickness)
+    : 1;
+  syncEdgesBlackToggle();
+  syncConnectionsBlackToggle();
+  syncLineThicknessSlider();
   if (Number.isFinite(state.tiltDeg)) {
     setLatticeTilt(state.tiltDeg);
   } else {
@@ -25140,6 +24970,24 @@ function collectPresetActiveKeys(state) {
     activeKeys.add(`${x},${y},${z}`);
   });
   return activeKeys;
+}
+
+function collectPresetMutedKeys(state) {
+  const mutedKeys = new Set();
+  if (!Array.isArray(state.muted)) {
+    return mutedKeys;
+  }
+  state.muted.forEach((entry) => {
+    if (!Array.isArray(entry) || entry.length < 2) {
+      return;
+    }
+    const [x, y, z = 0] = entry;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return;
+    }
+    mutedKeys.add(`${x},${y},${z}`);
+  });
+  return mutedKeys;
 }
 
 function applyLayoutStringStateValue(layoutState, key, applyValue, inputElement) {
@@ -26060,6 +25908,7 @@ function applyPresetPostRebuildState(
   state,
   presetContext
 ) {
+  applyMutedNodeKeys(collectPresetMutedKeys(state));
   applyPresetCustomNodes(state.customNodes);
   if (pendingCustomPianoMap) {
     applyCustomPianoMap(pendingCustomPianoMap);
@@ -27430,12 +27279,18 @@ async function buildLayoutSvgString(
     };
     const lineLen = Math.max(0, dist - startRadius - endRadius);
     const labelText = getEdgeLabelText(a, b);
-    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
+    const eitherMuted = Boolean(a.muted) || Boolean(b.muted);
+    const label = shouldShowEdgeLabel(a, b) && !eitherMuted ? labelText : null;
+    const edgeStrokeColor = eitherMuted
+      ? blendOverPage(themeColors.edge, 0.4)
+      : getInkEdgeColor(false);
+    const edgeStrokeWidth = getInkEdgeLineWidth(eitherMuted);
+    const edgeDashAttr = eitherMuted ? ' stroke-dasharray="6 4"' : "";
     const pushLine = (from, to) => {
       parts.push(
         `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" ${svgStroke(
-          themeColors.edge
-        )} stroke-width="1.5" />`
+          edgeStrokeColor
+        )} stroke-width="${edgeStrokeWidth}"${edgeDashAttr} />`
       );
     };
     if (label && lineLen > 0) {
@@ -27514,8 +27369,8 @@ async function buildLayoutSvgString(
     const drawCurveSegment = (segment) => {
       parts.push(
         `<path d="M ${segment.p0.x} ${segment.p0.y} Q ${segment.p1.x} ${segment.p1.y} ${segment.p2.x} ${segment.p2.y}" ${svgStroke(
-          themeColors.edge
-        )} stroke-width="1.5" stroke-dasharray="6 6" fill="none" />`
+          getInkEdgeColor(false)
+        )} stroke-width="${getInkEdgeLineWidth(false)}" stroke-dasharray="6 6" fill="none" />`
       );
     };
     for (const edgeKey of distanceSelectedEdges) {
@@ -27716,15 +27571,23 @@ async function buildLayoutSvgString(
       y: end.y - uy * endRadius - top,
     };
     const lineLen = Math.max(0, dist - startRadius - endRadius);
-    const label = formatIntervalRatio(customNode.factorNumerator, customNode.factorDenominator);
+    const eitherMutedCustom = Boolean(source.muted) || Boolean(customNode.muted);
+    const label = eitherMutedCustom
+      ? null
+      : formatIntervalRatio(customNode.factorNumerator, customNode.factorDenominator);
+    const customStrokeColor = eitherMutedCustom
+      ? blendOverPage(themeColors.edge, 0.4)
+      : getInkEdgeColor(false);
+    const customStrokeWidth = getInkEdgeLineWidth(eitherMutedCustom);
+    const customDashAttr = eitherMutedCustom ? ' stroke-dasharray="6 4"' : "";
     const pushLine = (from, to) => {
       parts.push(
         `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" ${svgStroke(
-          themeColors.edge
-        )} stroke-width="1.5" />`
+          customStrokeColor
+        )} stroke-width="${customStrokeWidth}"${customDashAttr} />`
       );
     };
-    if (lineLen > 0) {
+    if (label && lineLen > 0) {
       const baseWidth = await measureSvgTextWidth(label, edgeLabelSize, lineLabelFont, lineLabelWeight);
       const layout = computeEdgeLabelLayoutFromWidth({
         baseSize: edgeLabelSize,
@@ -27783,58 +27646,6 @@ async function buildLayoutSvgString(
     }
   }
 
-  const exportOrphanResult = connectOrphansEnabled ? buildOrphanGuideSet() : null;
-  const exportOrphanGuides = exportOrphanResult ? exportOrphanResult.guides : null;
-  if (exportOrphanResult) {
-    exportOrphanResult.edges.forEach((edgeKey) => {
-      const partsKey = edgeKey.split("|");
-      if (partsKey.length !== 2) {
-        return;
-      }
-      const a = nodeById.get(Number(partsKey[0]));
-      const b = nodeById.get(Number(partsKey[1]));
-      if (!a || !b) {
-        return;
-      }
-      const isOrphanA = exportOrphanGuides && exportOrphanGuides.has(a.id);
-      const isOrphanB = exportOrphanGuides && exportOrphanGuides.has(b.id);
-      if (!isOrphanA && !isOrphanB) {
-        return;
-      }
-      const startEntry = exportNodePosMap.get(a.id);
-      const endEntry = exportNodePosMap.get(b.id);
-      if (!startEntry || !endEntry) {
-        return;
-      }
-      const start = startEntry.pos;
-      const end = endEntry.pos;
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const dist = Math.hypot(dx, dy);
-      if (!dist) {
-        return;
-      }
-      const ux = dx / dist;
-      const uy = dy / dist;
-      const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-      const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-      const edgeStart = {
-        x: start.x + ux * startRadius - left,
-        y: start.y + uy * startRadius - top,
-      };
-      const edgeEnd = {
-        x: end.x - ux * endRadius - left,
-        y: end.y - uy * endRadius - top,
-      };
-      const strokeColor = colorWithAlpha(themeColors.nodeStroke, 0.08);
-      parts.push(
-        `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" ${svgStroke(
-          strokeColor
-        )} stroke-width="1.5" />`
-      );
-    });
-  }
-
   ensureAutoTriangleDiagonals();
   if (triangleDiagonals.size || autoTriangleDiagonals.size) {
     const gridMap = getActiveGridNodeMap();
@@ -27865,8 +27676,8 @@ async function buildLayoutSvgString(
       };
       parts.push(
         `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" ${svgStroke(
-          themeColors.edge
-        )} stroke-width="1.5" stroke-dasharray="6 4" />`
+          getInkEdgeColor(false)
+        )} stroke-width="${getInkEdgeLineWidth(false)}" stroke-dasharray="6 4" />`
       );
     });
   }
@@ -27916,8 +27727,8 @@ async function buildLayoutSvgString(
   }
 
   for (const { node, pos } of exportNodeRenderList) {
-    const isOrphanGuide = exportOrphanGuides && exportOrphanGuides.has(node.id);
-    const isVisible = node.isCenter || node.active || node.isCustom || isOrphanGuide;
+    const isMuted = Boolean(node.muted);
+    const isVisible = node.isCenter || node.active || node.isCustom;
     if (!isVisible) {
       continue;
     }
@@ -27935,21 +27746,22 @@ async function buildLayoutSvgString(
     const nodeLabelSize = labelSize * innerTextScale;
     const shape = getLayoutNodeShape(node);
     const fill = "none";
-    const stroke = isOrphanGuide && !node.active && !node.isCenter && !node.isCustom
-      ? colorWithAlpha(themeColors.nodeStroke, 0.08)
-      : themeColors.nodeStroke;
+    const stroke = isMuted
+      ? blendOverPage(themeColors.nodeStroke, 0.4)
+      : getInkNodeStrokeColor(false);
+    const strokeWidth = getInkNodeStrokeLineWidth(isMuted);
     if (showCircles) {
       if (shape === "circle") {
         parts.push(
           `<circle cx="${x}" cy="${y}" r="${radius}" ${svgFill(
             fill
-          )} ${svgStroke(stroke)} stroke-width="2" />`
+          )} ${svgStroke(stroke)} stroke-width="${strokeWidth}" />`
         );
       } else if (shape === "square") {
         parts.push(
           `<rect x="${x - radius}" y="${y - radius}" width="${radius * 2}" height="${
             radius * 2
-          }" ${svgFill(fill)} ${svgStroke(stroke)} stroke-width="2" />`
+          }" ${svgFill(fill)} ${svgStroke(stroke)} stroke-width="${strokeWidth}" />`
         );
       } else if (shape === "triangle") {
         const height = radius * 1.2;
@@ -27961,7 +27773,7 @@ async function buildLayoutSvgString(
         parts.push(
           `<polygon points="${points}" ${svgFill(fill)} ${svgStroke(
             stroke
-          )} stroke-width="2" />`
+          )} stroke-width="${strokeWidth}" />`
         );
       } else if (shape === "diamond") {
         const points = [
@@ -27973,14 +27785,16 @@ async function buildLayoutSvgString(
         parts.push(
           `<polygon points="${points}" ${svgFill(fill)} ${svgStroke(
             stroke
-          )} stroke-width="2" />`
+          )} stroke-width="${strokeWidth}" />`
         );
       }
     }
-    const orphanTextAlpha =
-      isOrphanGuide && !node.active && !node.isCenter && !node.isCustom ? 0.08 : 1;
-    const textColorPrimary = colorWithAlpha(themeColors.textPrimary, orphanTextAlpha);
-    const textColorSecondary = colorWithAlpha(themeColors.textSecondary, orphanTextAlpha);
+    const textColorPrimary = isMuted
+      ? blendOverPage(themeColors.textPrimary, 0.7)
+      : themeColors.textPrimary;
+    const textColorSecondary = isMuted
+      ? blendOverPage(themeColors.textSecondary, 0.7)
+      : themeColors.textSecondary;
 
     if (featureMode === "note") {
       if (hejiEnabled && nodeHasHighPrime(node)) {
@@ -28450,6 +28264,11 @@ async function exportLayoutPdf() {
     <style>
       @page { size: ${Math.round(widthPx)}px ${Math.round(heightPx)}px; margin: 0; }
       html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
+      html, body, svg, svg * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+      }
       body { display: flex; align-items: center; justify-content: center; }
       svg { width: ${Math.round(widthPx)}px; height: ${Math.round(heightPx)}px; display: block; }
       @font-face {
@@ -28511,6 +28330,22 @@ function applyActiveNodeKeys(keys) {
   });
   updatePitchInstances();
   markIsomorphicDirty();
+}
+
+function applyMutedNodeKeys(keys) {
+  nodes.forEach((node) => {
+    if (node.isCustom) {
+      return;
+    }
+    const z = node.exponentZ || 0;
+    const key = `${node.exponentX},${node.exponentY},${z}`;
+    if (keys && keys.has(key)) {
+      node.muted = true;
+      node.active = true;
+    } else {
+      node.muted = false;
+    }
+  });
 }
 
 function rebuildLattice(
@@ -28806,7 +28641,6 @@ enharmonicsEnabledPreference = Boolean(enharmonicsEnabled);
 enforceCentsDisplayMode();
 setControlChecked(showCentsSignToggle, showCentsSign);
 setControlChecked(directionalRatioLabelsToggle, directionalRatioLabels);
-setControlChecked(connectOrphansToggle, connectOrphansEnabled);
 setControlChecked(show3DShadingToggle, show3DShading);
 setLatticeTilt(latticeTiltDeg);
 syncHejiButtons();
@@ -29386,9 +29220,6 @@ bindAnalysisLayerTogglePair(
 bindSingleBooleanDrawToggle(directionalRatioLabelsToggle, (checked) => {
   directionalRatioLabels = checked;
 });
-bindSingleBooleanDrawToggle(connectOrphansToggle, (checked) => {
-  connectOrphansEnabled = checked;
-});
 bindSingleBooleanDrawToggle(show3DShadingToggle, (checked) => {
   show3DShading = checked;
 });
@@ -29715,6 +29546,36 @@ if (hejiEnabledButton) hejiEnabledButton.addEventListener("click", () => setHeji
 if (hejiDisabledButton) hejiDisabledButton.addEventListener("click", () => setHeji(false));
 if (layoutHejiEnabledButton) layoutHejiEnabledButton.addEventListener("click", () => setHeji(true));
 if (layoutHejiDisabledButton) layoutHejiDisabledButton.addEventListener("click", () => setHeji(false));
+
+function syncEdgesBlackToggle() {
+  setControlChecked(layoutEdgesBlackToggle, edgesBlack);
+}
+function syncConnectionsBlackToggle() {
+  setControlChecked(layoutConnectionsBlackToggle, connectionsBlack);
+}
+function syncLineThicknessSlider() {
+  if (layoutLineThicknessSlider) {
+    layoutLineThicknessSlider.value = String(lineThickness);
+  }
+}
+bindOptionalChange(layoutEdgesBlackToggle, () => {
+  edgesBlack = Boolean(layoutEdgesBlackToggle.checked);
+  schedulePresetUrlUpdate();
+  draw();
+});
+bindOptionalChange(layoutConnectionsBlackToggle, () => {
+  connectionsBlack = Boolean(layoutConnectionsBlackToggle.checked);
+  schedulePresetUrlUpdate();
+  draw();
+});
+bindOptionalInput(layoutLineThicknessSlider, () => {
+  lineThickness = clampLineThickness(layoutLineThicknessSlider.value);
+  schedulePresetUrlUpdate();
+  draw();
+});
+syncEdgesBlackToggle();
+syncConnectionsBlackToggle();
+syncLineThicknessSlider();
 bindMirroredBooleanToggles(
   enharmonicsEnabledToggle,
   layoutEnharmonicsEnabledToggle,
@@ -31474,6 +31335,9 @@ bindOptionalEvent(window, "keydown", (event) => {
   if (event.key.toLowerCase() === "m") {
     mHeld = true;
   }
+  if (event.key.toLowerCase() === "n") {
+    nHeld = true;
+  }
   if (event.key.toLowerCase() === "r") {
     rHeld = true;
     if (DEBUG_R_CLICK) {
@@ -31678,6 +31542,9 @@ bindOptionalEvent(window, "keyup", (event) => {
   }
   if (event.key.toLowerCase() === "m") {
     mHeld = false;
+  }
+  if (event.key.toLowerCase() === "n") {
+    nHeld = false;
   }
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = false;

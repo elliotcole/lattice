@@ -13036,7 +13036,7 @@ function getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, light
   return gradient;
 }
 
-const DIAMOND_RADIUS_SCALE = 1.25;
+const DIAMOND_RADIUS_SCALE = 1.125;
 
 function drawNodeShapePath(shape, x, y, radius) {
   if (shape === "square") {

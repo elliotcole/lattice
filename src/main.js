@@ -12783,7 +12783,8 @@ function getShapeEdgeRadius(shape, ux, uy, radius) {
   }
   if (shape === "diamond") {
     const denom = Math.abs(ux) + Math.abs(uy);
-    return denom > 0 ? radius / denom : radius;
+    const r = radius * DIAMOND_RADIUS_SCALE;
+    return denom > 0 ? r / denom : r;
   }
   if (shape === "square") {
     const denom = Math.max(Math.abs(ux), Math.abs(uy));
@@ -13035,6 +13036,8 @@ function getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, light
   return gradient;
 }
 
+const DIAMOND_RADIUS_SCALE = 1.25;
+
 function drawNodeShapePath(shape, x, y, radius) {
   if (shape === "square") {
     ctx.rect(x - radius, y - radius, radius * 2, radius * 2);
@@ -13049,10 +13052,11 @@ function drawNodeShapePath(shape, x, y, radius) {
     return;
   }
   if (shape === "diamond") {
-    ctx.moveTo(x, y - radius);
-    ctx.lineTo(x + radius, y);
-    ctx.lineTo(x, y + radius);
-    ctx.lineTo(x - radius, y);
+    const r = radius * DIAMOND_RADIUS_SCALE;
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r, y);
+    ctx.lineTo(x, y + r);
+    ctx.lineTo(x - r, y);
     ctx.closePath();
     return;
   }
@@ -27776,11 +27780,12 @@ async function buildLayoutSvgString(
           )} stroke-width="${strokeWidth}" />`
         );
       } else if (shape === "diamond") {
+        const dr = radius * DIAMOND_RADIUS_SCALE;
         const points = [
-          `${x},${y - radius}`,
-          `${x + radius},${y}`,
-          `${x},${y + radius}`,
-          `${x - radius},${y}`,
+          `${x},${y - dr}`,
+          `${x + dr},${y}`,
+          `${x},${y + dr}`,
+          `${x - dr},${y}`,
         ].join(" ");
         parts.push(
           `<polygon points="${points}" ${svgFill(fill)} ${svgStroke(

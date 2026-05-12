@@ -229,6 +229,7 @@ const showRatioCentsToggle = document.getElementById("show-ratio-cents");
 const showCentsDeviationToggle = document.getElementById("show-cents-deviation");
 const showCentsSignToggle = document.getElementById("show-cents-sign");
 const directionalRatioLabelsToggle = document.getElementById("directional-ratio-labels");
+const connectOrphansToggle = document.getElementById("connect-orphans");
 const show3DShadingToggle = document.getElementById("show-3d-shading");
 const hejiEnabledButton = document.getElementById("heji-enabled-button");
 const hejiDisabledButton = document.getElementById("heji-disabled-button");
@@ -1824,6 +1825,9 @@ let showKeyMappings = true;
 let layoutKeyMappingMode = "hide";
 let showHelpEnabled = true;
 let latticeTiltDeg = 0;
+let connectOrphansEnabled = false;
+let orphanGuideNodes = new Set();
+let orphanGuideEdges = new Set();
 let edgesBlack = false;
 let connectionsBlack = false;
 let lineThickness = 1;
@@ -11890,6 +11894,10 @@ function getNodeGuideAlpha(node, guideNodes, axisEntry) {
   if (guideNodes && guideNodes.has(node.id)) {
     alpha = guideNodes.get(node.id);
   }
+  const isOrphanGuide = connectOrphansEnabled && orphanGuideNodes.has(node.id);
+  if (isOrphanGuide && !(guideNodes && guideNodes.has(node.id))) {
+    alpha = 0.08;
+  }
   if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
     alpha *= AXIS_DIM_FACTOR;
   }
@@ -11897,6 +11905,73 @@ function getNodeGuideAlpha(node, guideNodes, axisEntry) {
     alpha *= 0.18;
   }
   return alpha;
+}
+
+function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
+  if (!connectOrphansEnabled || !orphanGuideEdges.size) {
+    return;
+  }
+  const labelFont = layoutMode ? layoutLineLabelFont : "Noto Serif";
+  const labelWeight = layoutMode ? layoutLineLabelFontWeight : 400;
+  const labelSize = layoutMode ? getLayoutLineLabelSize() : EDGE_LABEL_SIZE_DEFAULT;
+  ctx.save();
+  ctx.lineWidth = getInkEdgeLineWidth(false);
+  orphanGuideEdges.forEach((edgeKey) => {
+    const partsKey = edgeKey.split("|");
+    if (partsKey.length !== 2) {
+      return;
+    }
+    const a = nodeById.get(Number(partsKey[0]));
+    const b = nodeById.get(Number(partsKey[1]));
+    if (!a || !b) {
+      return;
+    }
+    const startEntry = nodePosMap.get(a.id);
+    const endEntry = nodePosMap.get(b.id);
+    if (!startEntry || !endEntry) {
+      return;
+    }
+    const isOrphanA = orphanGuideNodes.has(a.id);
+    const isOrphanB = orphanGuideNodes.has(b.id);
+    if (!isOrphanA && !isOrphanB) {
+      return;
+    }
+    const alphaA = isOrphanA ? 0.08 : getNodeGuideAlpha(a, guideNodes, axisEntry);
+    const alphaB = isOrphanB ? 0.08 : getNodeGuideAlpha(b, guideNodes, axisEntry);
+    const edgeAlpha = Math.min(alphaA, alphaB);
+    if (edgeAlpha <= 0) {
+      return;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+    const labelText = getEdgeLabelText(a, b);
+    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
+    drawCanvasEdgeSegment({
+      start,
+      end,
+      startRadius,
+      endRadius,
+      color: themeColors.nodeStroke,
+      label,
+      labelFont,
+      labelWeight,
+      labelSize,
+      alpha: edgeAlpha,
+      labelAlpha: Math.min(1, (edgeAlpha + 1) * 0.3),
+      lineWidth: getInkEdgeLineWidth(false),
+    });
+  });
+  ctx.restore();
 }
 
 function getGuideRevealInfo(nodePosMap, axisEntry = null) {
@@ -12881,7 +12956,7 @@ function draw3DEdges(nodePosMap, axisEntry = null) {
     }
     const labelText = getEdgeLabelText(a, b);
     const eitherMuted = Boolean(a.muted) || Boolean(b.muted);
-    const label = shouldShowEdgeLabel(a, b) && !eitherMuted ? labelText : null;
+    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
     const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
     let edgeAlpha =
       axisActive && !isEdgeOnAxisEntry(a, b, axisEntry) ? AXIS_DIM_FACTOR : 1;
@@ -12901,6 +12976,7 @@ function draw3DEdges(nodePosMap, axisEntry = null) {
       labelT,
       alpha: edgeAlpha,
       dash: eitherMuted ? [6, 4] : null,
+      labelAlpha: eitherMuted ? 1 : null,
     });
   });
 }
@@ -13852,7 +13928,7 @@ function drawCustomConnections(nodePosMap) {
       connectionAlpha = Math.min(connectionAlpha, 0.4);
     }
     const labelText = getCustomConnectionLabelText(node);
-    const label = shouldShowEdgeLabel(source, node) && !eitherMuted ? labelText : null;
+    const label = shouldShowEdgeLabel(source, node) ? labelText : null;
     const labelT = getLineLabelPositionOverride(source, node) ?? 0.5;
     drawCanvasEdgeSegment({
       start,
@@ -13868,6 +13944,7 @@ function drawCustomConnections(nodePosMap) {
       alpha: connectionAlpha,
       dash: eitherMuted ? [6, 4] : null,
       lineWidth: getInkEdgeLineWidth(eitherMuted),
+      labelAlpha: eitherMuted ? 1 : null,
     });
   });
 }
@@ -14108,6 +14185,9 @@ function draw() {
   addCustomConnectionSegments(nodePosMap, detailLabelSegments);
   addTriangleDiagonalSegments(nodePosMap, detailLabelSegments);
   addDistanceLineSegments(nodePosMap, detailLabelSegments);
+  const orphanResult = buildOrphanGuideSet();
+  orphanGuideNodes = orphanResult.guides;
+  orphanGuideEdges = orphanResult.edges;
   const detailLabelCollision = {
     circles: nodeRenderList
       .filter(({ node }) => node.isCenter || node.active || node.isCustom)
@@ -14182,7 +14262,7 @@ function draw() {
       const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
       const labelText = getEdgeLabelText(a, b);
       const eitherMuted = Boolean(a.muted) || Boolean(b.muted);
-      const label = shouldShowEdgeLabel(a, b) && !eitherMuted ? labelText : null;
+      const label = shouldShowEdgeLabel(a, b) ? labelText : null;
       const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
       drawCanvasEdgeSegment({
         start,
@@ -14198,6 +14278,7 @@ function draw() {
         alpha: eitherMuted ? 0.4 : 1,
         dash: eitherMuted ? [6, 4] : null,
         lineWidth: getInkEdgeLineWidth(eitherMuted),
+        labelAlpha: eitherMuted ? 1 : null,
       });
     });
   }
@@ -14213,6 +14294,7 @@ function draw() {
   }
 
   drawCustomConnections(nodePosMap);
+  drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry);
   drawGuideEdges(nodePosMap, guideNodes);
   if (!showMicrotonal) {
     drawTriangleDiagonals(nodePosMap, disableScale);
@@ -14281,9 +14363,10 @@ function draw() {
     const isHovered = node.id === hoverNodeId;
     const isGuide = guideNodes.has(node.id);
     const isMuted = Boolean(node.muted);
+    const isOrphanGuide = connectOrphansEnabled && orphanGuideNodes.has(node.id);
     const isIntervalHover = addIntervalMode && node.active && isHovered;
     const isIntervalDim = addIntervalMode && node.active && !isHovered;
-    const canShowInactive = isInactiveNodeAvailable(node);
+    const canShowInactive = !isOrphanGuide && isInactiveNodeAvailable(node);
     const canInteractInactive = !is3DMode || isAddMode || distanceSelectMode;
     const amplitude = nodeAmplitudes.get(node.id) || 0;
     const brightness = Math.min(1, amplitude);
@@ -14293,6 +14376,7 @@ function draw() {
       node.isCustom ||
       brightness > 0.01 ||
       isGuide ||
+      isOrphanGuide ||
       (isHovered && canShowInactive && canInteractInactive);
     let alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
     if (node.isCenter && !node.active) {
@@ -14300,6 +14384,9 @@ function draw() {
     }
     if (isGuide) {
       alpha = guideNodes.get(node.id);
+    }
+    if (isOrphanGuide && !isGuide) {
+      alpha = 0.08;
     }
     if (node.isCustom && !node.active) {
       alpha = 0.25;
@@ -14359,7 +14446,7 @@ function draw() {
       ctx.beginPath();
       ctx.strokeStyle = intervalTint || getInkNodeStrokeColor(isMuted);
       ctx.lineWidth = getInkNodeStrokeLineWidth(isMuted);
-      if (isMuted) {
+      if (isMuted || isOrphanGuide) {
         ctx.setLineDash([6, 4]);
       }
       if (is3DMode) {
@@ -14414,7 +14501,7 @@ function draw() {
         ctx.fill();
       }
       ctx.stroke();
-      if (isMuted) {
+      if (isMuted || isOrphanGuide) {
         ctx.setLineDash([]);
       }
     }
@@ -14653,6 +14740,7 @@ function draw() {
 
 
     if (
+      isOrphanGuide ||
       isGuide ||
       (!node.active && !node.isCustom && !node.isCenter)
     ) {
@@ -17641,6 +17729,11 @@ function hitTestScreen(screenPoint, options) {
   const axisEntry = getActiveAxisEntry();
 
   nodes.forEach((node) => {
+    if (connectOrphansEnabled && orphanGuideNodes.has(node.id)) {
+      if (!shiftHeld && !capsLockOn && !addIntervalMode) {
+        return;
+      }
+    }
     if (layoutMode && !node.isCustom && !node.isCenter && !node.active) {
       return;
     }
@@ -17751,6 +17844,63 @@ function hitTestEdgeLabel(screenPoint) {
       bestDistance = distance;
     }
   });
+  if (connectOrphansEnabled && orphanGuideEdges.size) {
+    orphanGuideEdges.forEach((edgeKey) => {
+      const partsKey = edgeKey.split("|");
+      if (partsKey.length !== 2) {
+        return;
+      }
+      const a = nodeById.get(Number(partsKey[0]));
+      const b = nodeById.get(Number(partsKey[1]));
+      if (!a || !b) {
+        return;
+      }
+      const labelText = getEdgeLabelText(a, b);
+      if (!labelText) {
+        return;
+      }
+      const startEntry = nodePosMap.get(a.id);
+      const endEntry = nodePosMap.get(b.id);
+      if (!startEntry || !endEntry) {
+        return;
+      }
+      const start = startEntry.pos;
+      const end = endEntry.pos;
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      if (!dist) {
+        return;
+      }
+      const ux = dx / dist;
+      const uy = dy / dist;
+      const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+      const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+      const lineStart = {
+        x: start.x + ux * startRadius,
+        y: start.y + uy * startRadius,
+      };
+      const lineEnd = {
+        x: end.x - ux * endRadius,
+        y: end.y - uy * endRadius,
+      };
+      const lineLen = Math.max(0, dist - startRadius - endRadius);
+      if (lineLen <= 0) {
+        return;
+      }
+      const distance = distanceToSegment(screenPoint, lineStart, lineEnd);
+      if (distance <= hitThreshold && distance < bestDistance) {
+        best = {
+          a,
+          b,
+          key: getEdgeKey(a, b),
+          lineStart,
+          lineEnd,
+        };
+        bestDistance = distance;
+      }
+    });
+  }
   if (customNodes.length) {
     const edgeOutset = 1;
     customNodes.forEach((node) => {
@@ -18770,6 +18920,204 @@ function factorizeRatio(numerator, denominator) {
     map.set(prime, (map.get(prime) || 0) - exp);
   });
   return map;
+}
+
+function buildOrphanGuideSet() {
+  const guides = new Set();
+  const edgesSet = new Set();
+  if (!connectOrphansEnabled) {
+    return { guides, edges: edgesSet };
+  }
+  const expMap = new Map();
+  nodes.forEach((node) => {
+    if (node.isCustom) {
+      return;
+    }
+    if (
+      !Number.isFinite(node.exponentX) ||
+      !Number.isFinite(node.exponentY) ||
+      !Number.isFinite(node.exponentZ)
+    ) {
+      return;
+    }
+    expMap.set(`${node.exponentX},${node.exponentY},${node.exponentZ || 0}`, node);
+  });
+  const root = nodes.find((node) => node.isCenter);
+  const adjacency = new Map();
+  const addAdj = (a, b) => {
+    if (!adjacency.has(a.id)) {
+      adjacency.set(a.id, []);
+    }
+    adjacency.get(a.id).push(b.id);
+  };
+  edges.forEach(([a, b]) => {
+    if (!a.active || !b.active) {
+      return;
+    }
+    addAdj(a, b);
+    addAdj(b, a);
+  });
+  customNodes.forEach((node) => {
+    if (!node.active) {
+      return;
+    }
+    const source = nodeById.get(node.sourceNodeId);
+    if (!source || !source.active) {
+      return;
+    }
+    addAdj(node, source);
+    addAdj(source, node);
+  });
+  const connected = new Set();
+  if (root && root.active) {
+    const queue = [root.id];
+    connected.add(root.id);
+    while (queue.length) {
+      const current = queue.shift();
+      const neighbors = adjacency.get(current) || [];
+      neighbors.forEach((next) => {
+        if (!connected.has(next)) {
+          connected.add(next);
+          queue.push(next);
+        }
+      });
+    }
+  }
+  const neighborKeys = (key) => {
+    const [x, y, z] = key.split(",").map(Number);
+    return [
+      `${x + 1},${y},${z}`,
+      `${x - 1},${y},${z}`,
+      `${x},${y + 1},${z}`,
+      `${x},${y - 1},${z}`,
+      `${x},${y},${z + 1}`,
+      `${x},${y},${z - 1}`,
+    ];
+  };
+  const findMinMissingPath = (startKey, endKey) => {
+    const costMap = new Map();
+    const stepMap = new Map();
+    const prev = new Map();
+    const open = [startKey];
+    costMap.set(startKey, 0);
+    stepMap.set(startKey, 0);
+    while (open.length) {
+      let bestIndex = 0;
+      let bestKey = open[0];
+      for (let i = 1; i < open.length; i += 1) {
+        const key = open[i];
+        const cost = costMap.get(key);
+        const steps = stepMap.get(key);
+        const bestCost = costMap.get(bestKey);
+        const bestSteps = stepMap.get(bestKey);
+        if (cost < bestCost || (cost === bestCost && steps < bestSteps)) {
+          bestKey = key;
+          bestIndex = i;
+        }
+      }
+      open.splice(bestIndex, 1);
+      if (bestKey === endKey) {
+        break;
+      }
+      const neighbors = neighborKeys(bestKey);
+      neighbors.forEach((nextKey) => {
+        const nextNode = expMap.get(nextKey);
+        if (!nextNode) {
+          return;
+        }
+        const cost = nextNode.active ? 0 : 1;
+        const nextCost = costMap.get(bestKey) + cost;
+        const nextSteps = stepMap.get(bestKey) + 1;
+        const existingCost = costMap.get(nextKey);
+        const existingSteps = stepMap.get(nextKey);
+        const shouldUpdate =
+          existingCost == null ||
+          nextCost < existingCost ||
+          (nextCost === existingCost && nextSteps < existingSteps);
+        if (shouldUpdate) {
+          costMap.set(nextKey, nextCost);
+          stepMap.set(nextKey, nextSteps);
+          prev.set(nextKey, bestKey);
+          if (!open.includes(nextKey)) {
+            open.push(nextKey);
+          }
+        }
+      });
+    }
+    if (!costMap.has(endKey)) {
+      return null;
+    }
+    const path = [];
+    let cursor = endKey;
+    while (cursor) {
+      path.push(cursor);
+      cursor = prev.get(cursor);
+    }
+    path.reverse();
+    return path;
+  };
+  nodes.forEach((node) => {
+    if (!node.active) {
+      return;
+    }
+    if (connected.has(node.id)) {
+      return;
+    }
+    let exponents = null;
+    if (node.isCustom) {
+      if (Array.isArray(node.sourceExponents)) {
+        exponents = {
+          x: Number(node.sourceExponents[0]) || 0,
+          y: Number(node.sourceExponents[1]) || 0,
+          z: Number(node.sourceExponents[2]) || 0,
+        };
+      } else {
+        const source = nodeById.get(node.sourceNodeId);
+        if (source) {
+          exponents = {
+            x: Number(source.exponentX) || 0,
+            y: Number(source.exponentY) || 0,
+            z: Number(source.exponentZ) || 0,
+          };
+        }
+      }
+    } else {
+      exponents = {
+        x: Number(node.exponentX) || 0,
+        y: Number(node.exponentY) || 0,
+        z: Number(node.exponentZ) || 0,
+      };
+    }
+    if (!exponents) {
+      return;
+    }
+    const startKey = `${exponents.x},${exponents.y},${exponents.z}`;
+    const endKey = "0,0,0";
+    if (!expMap.has(startKey) || !expMap.has(endKey)) {
+      return;
+    }
+    const path = findMinMissingPath(startKey, endKey);
+    if (!path || path.length < 2) {
+      return;
+    }
+    for (let i = 0; i < path.length; i += 1) {
+      const key = path[i];
+      const stepNode = expMap.get(key);
+      if (stepNode && !stepNode.active) {
+        guides.add(stepNode.id);
+      }
+      if (i > 0) {
+        const prevKey = path[i - 1];
+        const a = expMap.get(prevKey);
+        const b = expMap.get(key);
+        if (a && b) {
+          const edgeKey = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+          edgesSet.add(edgeKey);
+        }
+      }
+    }
+  });
+  return { guides, edges: edgesSet };
 }
 
 function getAxisPrimeValues() {
@@ -24304,6 +24652,7 @@ function buildPresetStateSkeleton(active, customState, lineLabelState, distanceS
     muted,
     customNodes: customState,
     mode3d: is3DMode,
+    connectOrphans: connectOrphansEnabled,
     tiltDeg: latticeTiltDeg,
     edgesBlack,
     connectionsBlack,
@@ -24903,6 +25252,9 @@ function applyPresetReadoutAndTuningSettings(state) {
   }
   applyPresetBooleanField(state, "showCentsSign", [showCentsSignToggle], (value) => {
     showCentsSign = value;
+  });
+  applyPresetBooleanField(state, "connectOrphans", [connectOrphansToggle], (value) => {
+    connectOrphansEnabled = value;
   });
   edgesBlack = state.edgesBlack === true;
   connectionsBlack = state.connectionsBlack === true;
@@ -27284,7 +27636,7 @@ async function buildLayoutSvgString(
     const lineLen = Math.max(0, dist - startRadius - endRadius);
     const labelText = getEdgeLabelText(a, b);
     const eitherMuted = Boolean(a.muted) || Boolean(b.muted);
-    const label = shouldShowEdgeLabel(a, b) && !eitherMuted ? labelText : null;
+    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
     const edgeStrokeColor = eitherMuted
       ? blendOverPage(themeColors.edge, 0.4)
       : getInkEdgeColor(false);
@@ -27576,9 +27928,7 @@ async function buildLayoutSvgString(
     };
     const lineLen = Math.max(0, dist - startRadius - endRadius);
     const eitherMutedCustom = Boolean(source.muted) || Boolean(customNode.muted);
-    const label = eitherMutedCustom
-      ? null
-      : formatIntervalRatio(customNode.factorNumerator, customNode.factorDenominator);
+    const label = formatIntervalRatio(customNode.factorNumerator, customNode.factorDenominator);
     const customStrokeColor = eitherMutedCustom
       ? blendOverPage(themeColors.edge, 0.4)
       : getInkEdgeColor(false);
@@ -27648,6 +27998,58 @@ async function buildLayoutSvgString(
     } else {
       pushLine(edgeStart, edgeEnd);
     }
+  }
+
+  const exportOrphanResult = connectOrphansEnabled ? buildOrphanGuideSet() : null;
+  const exportOrphanGuides = exportOrphanResult ? exportOrphanResult.guides : null;
+  if (exportOrphanResult) {
+    exportOrphanResult.edges.forEach((edgeKey) => {
+      const partsKey = edgeKey.split("|");
+      if (partsKey.length !== 2) {
+        return;
+      }
+      const a = nodeById.get(Number(partsKey[0]));
+      const b = nodeById.get(Number(partsKey[1]));
+      if (!a || !b) {
+        return;
+      }
+      const isOrphanA = exportOrphanGuides && exportOrphanGuides.has(a.id);
+      const isOrphanB = exportOrphanGuides && exportOrphanGuides.has(b.id);
+      if (!isOrphanA && !isOrphanB) {
+        return;
+      }
+      const startEntry = exportNodePosMap.get(a.id);
+      const endEntry = exportNodePosMap.get(b.id);
+      if (!startEntry || !endEntry) {
+        return;
+      }
+      const start = startEntry.pos;
+      const end = endEntry.pos;
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      if (!dist) {
+        return;
+      }
+      const ux = dx / dist;
+      const uy = dy / dist;
+      const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+      const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+      const edgeStart = {
+        x: start.x + ux * startRadius - left,
+        y: start.y + uy * startRadius - top,
+      };
+      const edgeEnd = {
+        x: end.x - ux * endRadius - left,
+        y: end.y - uy * endRadius - top,
+      };
+      const strokeColor = blendOverPage(themeColors.nodeStroke, 0.08);
+      parts.push(
+        `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" ${svgStroke(
+          strokeColor
+        )} stroke-width="${getInkEdgeLineWidth(false)}" />`
+      );
+    });
   }
 
   ensureAutoTriangleDiagonals();
@@ -27732,7 +28134,8 @@ async function buildLayoutSvgString(
 
   for (const { node, pos } of exportNodeRenderList) {
     const isMuted = Boolean(node.muted);
-    const isVisible = node.isCenter || node.active || node.isCustom;
+    const isOrphanGuide = exportOrphanGuides && exportOrphanGuides.has(node.id);
+    const isVisible = node.isCenter || node.active || node.isCustom || isOrphanGuide;
     if (!isVisible) {
       continue;
     }
@@ -27752,6 +28155,8 @@ async function buildLayoutSvgString(
     const fill = "none";
     const stroke = isMuted
       ? blendOverPage(themeColors.nodeStroke, 0.4)
+      : isOrphanGuide && !node.active && !node.isCenter && !node.isCustom
+      ? blendOverPage(themeColors.nodeStroke, 0.08)
       : getInkNodeStrokeColor(false);
     const strokeWidth = getInkNodeStrokeLineWidth(isMuted);
     if (showCircles) {
@@ -27794,11 +28199,16 @@ async function buildLayoutSvgString(
         );
       }
     }
+    const isOrphanText = isOrphanGuide && !node.active && !node.isCenter && !node.isCustom;
     const textColorPrimary = isMuted
       ? blendOverPage(themeColors.textPrimary, 0.7)
+      : isOrphanText
+      ? blendOverPage(themeColors.textPrimary, 0.08)
       : themeColors.textPrimary;
     const textColorSecondary = isMuted
       ? blendOverPage(themeColors.textSecondary, 0.7)
+      : isOrphanText
+      ? blendOverPage(themeColors.textSecondary, 0.08)
       : themeColors.textSecondary;
 
     if (featureMode === "note") {
@@ -28646,6 +29056,7 @@ enharmonicsEnabledPreference = Boolean(enharmonicsEnabled);
 enforceCentsDisplayMode();
 setControlChecked(showCentsSignToggle, showCentsSign);
 setControlChecked(directionalRatioLabelsToggle, directionalRatioLabels);
+setControlChecked(connectOrphansToggle, connectOrphansEnabled);
 setControlChecked(show3DShadingToggle, show3DShading);
 setLatticeTilt(latticeTiltDeg);
 syncHejiButtons();
@@ -29224,6 +29635,9 @@ bindAnalysisLayerTogglePair(
 );
 bindSingleBooleanDrawToggle(directionalRatioLabelsToggle, (checked) => {
   directionalRatioLabels = checked;
+});
+bindSingleBooleanDrawToggle(connectOrphansToggle, (checked) => {
+  connectOrphansEnabled = checked;
 });
 bindSingleBooleanDrawToggle(show3DShadingToggle, (checked) => {
   show3DShading = checked;

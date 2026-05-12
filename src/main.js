@@ -1889,7 +1889,7 @@ const LAYOUT_DEFAULTS = {
   zoom: 1,
   lockPosition: false,
   view: { zoom: 1, offsetX: 0, offsetY: 0, rotX: 0, rotY: 0 },
-  titleFont: "Lexend",
+  titleFont: "Noto Serif",
   ratioFont: "Noto Serif",
   noteFont: "Lexend",
   triangleLabelFont: "Noto Serif",
@@ -1897,7 +1897,7 @@ const LAYOUT_DEFAULTS = {
   keyMappingFont: "Lexend",
   axisLegendFont: "Noto Serif",
   lineLabelFont: "Noto Serif",
-  creatorFont: "Lexend",
+  creatorFont: "Noto Serif",
   titleFontWeight: 400,
   ratioFontWeight: 400,
   noteFontWeight: 200,
@@ -26306,15 +26306,18 @@ function applyPresetPostRebuildState(
     presetContext.pendingLineLabelOverridesState,
     presetContext.pendingLineLabelPositionsState
   );
+  // Use the actual gridCenterZ/gridDepth (post-rebuild), since buildLattice can
+  // override the targetCenterZ/targetDepth from getPresetDepthContext when the
+  // preset's layout requests projected depth but is3DMode/isFlattened2D are false.
   applyPresetTrianglesState(
     presetContext.presetTriangles,
-    presetContext.targetCenterZ,
-    presetContext.targetDepth
+    gridCenterZ,
+    gridDepth
   );
   applyPresetTriangleLabelsState(
     presetContext.presetTriangleLabels,
-    presetContext.targetCenterZ,
-    presetContext.targetDepth
+    gridCenterZ,
+    gridDepth
   );
   applyPendingPresetLayoutState();
   if (state.play && !layoutMode) {
@@ -29033,6 +29036,14 @@ populateRatioSelect(ratioXSelect, 3);
 populateRatioSelect(ratioYSelect, 5);
 populateRatioSelect(ratioZSelect, 7, true);
 populateWaveformOptions();
+if (waveformSelect) {
+  const hasSemisine = Array.from(waveformSelect.options).some(
+    (option) => option.value === "semisine"
+  );
+  if (hasSemisine) {
+    waveformSelect.value = "semisine";
+  }
+}
 populateFundamentalNotes();
 updateFundamentalNotes();
 if (navAxesToggle) {

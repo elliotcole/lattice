@@ -230,6 +230,7 @@ const showCentsDeviationToggle = document.getElementById("show-cents-deviation")
 const showCentsSignToggle = document.getElementById("show-cents-sign");
 const directionalRatioLabelsToggle = document.getElementById("directional-ratio-labels");
 const connectOrphansToggle = document.getElementById("connect-orphans");
+const showOperatorLineLabelsToggle = document.getElementById("show-operator-line-labels");
 const show3DShadingToggle = document.getElementById("show-3d-shading");
 const hejiEnabledButton = document.getElementById("heji-enabled-button");
 const hejiDisabledButton = document.getElementById("heji-disabled-button");
@@ -1826,6 +1827,7 @@ let layoutKeyMappingMode = "hide";
 let showHelpEnabled = true;
 let latticeTiltDeg = 0;
 let connectOrphansEnabled = false;
+let showOperatorLineLabels = false;
 let orphanGuideNodes = new Set();
 let orphanGuideEdges = new Set();
 let edgesBlack = false;
@@ -12384,41 +12386,35 @@ function getEdgeLabelText(a, b) {
     }
     return 1;
   };
-  const dirX = dirFromExponent(b.exponentX ?? 0, a.exponentX ?? 0);
-  const dirY = dirFromExponent(b.exponentY ?? 0, a.exponentY ?? 0);
-  const dirZ = dirFromExponent(b.exponentZ ?? 0, a.exponentZ ?? 0);
   const useDirectional = directionalRatioLabels;
-  if (dx === 1 && dy === 0 && dz === 0) {
-    return useDirectional
-      ? formatAxisRatioLabelDirectional(Number(ratioXSelect.value), dirX)
+  let ratio = null;
+  let axisMaxExp = 0;
+  if (Math.abs(dx) === 1 && dy === 0 && dz === 0) {
+    const dir = dirFromExponent(b.exponentX ?? 0, a.exponentX ?? 0);
+    ratio = useDirectional
+      ? formatAxisRatioLabelDirectional(Number(ratioXSelect.value), dir)
       : formatAxisRatioLabel(Number(ratioXSelect.value));
-  }
-  if (dx === -1 && dy === 0 && dz === 0) {
-    return useDirectional
-      ? formatAxisRatioLabelDirectional(Number(ratioXSelect.value), dirX)
-      : formatAxisRatioLabel(Number(ratioXSelect.value));
-  }
-  if (dy === 1 && dx === 0 && dz === 0) {
-    return useDirectional
-      ? formatAxisRatioLabelDirectional(Number(ratioYSelect.value), dirY)
+    axisMaxExp = Math.max(a.exponentX ?? 0, b.exponentX ?? 0);
+  } else if (Math.abs(dy) === 1 && dx === 0 && dz === 0) {
+    const dir = dirFromExponent(b.exponentY ?? 0, a.exponentY ?? 0);
+    ratio = useDirectional
+      ? formatAxisRatioLabelDirectional(Number(ratioYSelect.value), dir)
       : formatAxisRatioLabel(Number(ratioYSelect.value));
-  }
-  if (dy === -1 && dx === 0 && dz === 0) {
-    return useDirectional
-      ? formatAxisRatioLabelDirectional(Number(ratioYSelect.value), dirY)
-      : formatAxisRatioLabel(Number(ratioYSelect.value));
-  }
-  if (dz === 1 && dx === 0 && dy === 0) {
-    return useDirectional
-      ? formatAxisRatioLabelDirectional(Number(ratioZSelect.value), dirZ)
+    axisMaxExp = Math.max(a.exponentY ?? 0, b.exponentY ?? 0);
+  } else if (Math.abs(dz) === 1 && dx === 0 && dy === 0) {
+    const dir = dirFromExponent(b.exponentZ ?? 0, a.exponentZ ?? 0);
+    ratio = useDirectional
+      ? formatAxisRatioLabelDirectional(Number(ratioZSelect.value), dir)
       : formatAxisRatioLabel(Number(ratioZSelect.value));
+    axisMaxExp = Math.max(a.exponentZ ?? 0, b.exponentZ ?? 0);
   }
-  if (dz === -1 && dx === 0 && dy === 0) {
-    return useDirectional
-      ? formatAxisRatioLabelDirectional(Number(ratioZSelect.value), dirZ)
-      : formatAxisRatioLabel(Number(ratioZSelect.value));
+  if (!ratio) {
+    return null;
   }
-  return null;
+  if (!showOperatorLineLabels) {
+    return ratio;
+  }
+  return `${axisMaxExp > 0 ? "×" : "÷"}${ratio}`;
 }
 
 function getCustomConnectionLabelText(customNode) {
@@ -12429,6 +12425,12 @@ function getCustomConnectionLabelText(customNode) {
   const denominator = Number(customNode.factorDenominator);
   if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
     return null;
+  }
+  if (showOperatorLineLabels) {
+    const divisor = gcd(numerator, denominator);
+    const n = numerator / divisor;
+    const d = denominator / divisor;
+    return n >= d ? `×${n}:${d}` : `÷${d}:${n}`;
   }
   return formatIntervalRatio(numerator, denominator);
 }
@@ -24667,6 +24669,7 @@ function buildPresetStateSkeleton(active, customState, lineLabelState, distanceS
     customNodes: customState,
     mode3d: is3DMode,
     connectOrphans: connectOrphansEnabled,
+    showOperatorLineLabels,
     tiltDeg: latticeTiltDeg,
     edgesBlack,
     connectionsBlack,
@@ -25270,6 +25273,14 @@ function applyPresetReadoutAndTuningSettings(state) {
   applyPresetBooleanField(state, "connectOrphans", [connectOrphansToggle], (value) => {
     connectOrphansEnabled = value;
   });
+  applyPresetBooleanField(
+    state,
+    "showOperatorLineLabels",
+    [showOperatorLineLabelsToggle],
+    (value) => {
+      showOperatorLineLabels = value;
+    }
+  );
   edgesBlack = state.edgesBlack === true;
   connectionsBlack = state.connectionsBlack === true;
   lineThickness = Number.isFinite(state.lineThickness)
@@ -27944,7 +27955,7 @@ async function buildLayoutSvgString(
     };
     const lineLen = Math.max(0, dist - startRadius - endRadius);
     const eitherMutedCustom = Boolean(source.muted) || Boolean(customNode.muted);
-    const label = formatIntervalRatio(customNode.factorNumerator, customNode.factorDenominator);
+    const label = getCustomConnectionLabelText(customNode);
     const customStrokeColor = eitherMutedCustom
       ? blendOverPage(themeColors.edge, 0.4)
       : getInkEdgeColor(false);
@@ -29073,6 +29084,7 @@ enforceCentsDisplayMode();
 setControlChecked(showCentsSignToggle, showCentsSign);
 setControlChecked(directionalRatioLabelsToggle, directionalRatioLabels);
 setControlChecked(connectOrphansToggle, connectOrphansEnabled);
+setControlChecked(showOperatorLineLabelsToggle, showOperatorLineLabels);
 setControlChecked(show3DShadingToggle, show3DShading);
 setLatticeTilt(latticeTiltDeg);
 syncHejiButtons();
@@ -29654,6 +29666,10 @@ bindSingleBooleanDrawToggle(directionalRatioLabelsToggle, (checked) => {
 });
 bindSingleBooleanDrawToggle(connectOrphansToggle, (checked) => {
   connectOrphansEnabled = checked;
+});
+bindSingleBooleanDrawToggle(showOperatorLineLabelsToggle, (checked) => {
+  showOperatorLineLabels = checked;
+  invalidateLabelCache();
 });
 bindSingleBooleanDrawToggle(show3DShadingToggle, (checked) => {
   show3DShading = checked;

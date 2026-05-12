@@ -12904,6 +12904,16 @@ function getNodeEdgeRadius(node, ux, uy, radius) {
   return getShapeEdgeRadius(shape, ux, uy, radius);
 }
 
+function isAdjacentLatticeEdge(a, b) {
+  if (!a || !b || a.isCustom || b.isCustom) {
+    return false;
+  }
+  const dx = Math.abs((Number(a.gridX) || 0) - (Number(b.gridX) || 0));
+  const dy = Math.abs((Number(a.gridY) || 0) - (Number(b.gridY) || 0));
+  const dz = Math.abs((Number(a.gridZ) || 0) - (Number(b.gridZ) || 0));
+  return dx + dy + dz === 1;
+}
+
 function hasSelectedDistanceEdgeBetweenNodes(a, b) {
   if (!a || !b || !distanceSelectedEdges.size) {
     return false;
@@ -13600,7 +13610,11 @@ function drawDistanceConnections(nodePosMap) {
     ctx.strokeStyle = getInkEdgeColor(false);
     ctx.lineWidth = getInkEdgeLineWidth(false);
     ctx.globalAlpha = 1;
-    ctx.setLineDash([6, 6]);
+    if (!isAdjacentLatticeEdge(a, b)) {
+      ctx.setLineDash([6, 6]);
+    } else {
+      ctx.setLineDash([]);
+    }
     if (leftSegment) {
       ctx.beginPath();
       ctx.moveTo(leftSegment.p0.x, leftSegment.p0.y);
@@ -27722,11 +27736,12 @@ async function buildLayoutSvgString(
     const labelFont = layoutLineLabelFont;
     const labelWeight = layoutLineLabelFontWeight;
     const labelSize = getLayoutLineLabelSize();
-    const drawCurveSegment = (segment) => {
+    const drawCurveSegment = (segment, dashed = true) => {
+      const dashAttr = dashed ? ' stroke-dasharray="6 6"' : "";
       parts.push(
         `<path d="M ${segment.p0.x} ${segment.p0.y} Q ${segment.p1.x} ${segment.p1.y} ${segment.p2.x} ${segment.p2.y}" ${svgStroke(
           getInkEdgeColor(false)
-        )} stroke-width="${getInkEdgeLineWidth(false)}" stroke-dasharray="6 6" fill="none" />`
+        )} stroke-width="${getInkEdgeLineWidth(false)}"${dashAttr} fill="none" />`
       );
     };
     for (const edgeKey of distanceSelectedEdges) {
@@ -27862,11 +27877,12 @@ async function buildLayoutSvgString(
       const tRight = curveInfo.tAtLength(labelArcLen + gapHalf);
       const leftSegment = getQuadraticSubcurve(lineStart, control, lineEnd, 0, tLeft);
       const rightSegment = getQuadraticSubcurve(lineStart, control, lineEnd, tRight, 1);
+      const dashed = !isAdjacentLatticeEdge(a, b);
       if (leftSegment) {
-        drawCurveSegment(leftSegment);
+        drawCurveSegment(leftSegment, dashed);
       }
       if (rightSegment) {
-        drawCurveSegment(rightSegment);
+        drawCurveSegment(rightSegment, dashed);
       }
       const rotation = (angle * 180) / Math.PI;
       parts.push(

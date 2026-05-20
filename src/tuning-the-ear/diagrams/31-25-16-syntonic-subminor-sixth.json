@@ -250,6 +250,8 @@
     },
     "unifyNodeSize": false,
     "perspectiveTextSize": false,
-    "zoom": 1.423358432534693
+    "zoom": 1.423358432534693,
+    "titleSize": 39,
+    "titleFont": "Lexend"
   }
 }

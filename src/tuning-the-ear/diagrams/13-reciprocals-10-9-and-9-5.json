@@ -189,7 +189,7 @@
   "layout": {
     "mode": true,
     "title": "Reciprocals 10:9 and 9:5",
-    "titleSize": 35,
+    "titleSize": 39,
     "nodeSize": 38,
     "ratioTextSize": 32,
     "noteTextSize": 19,
@@ -223,7 +223,7 @@
       "rotX": 0,
       "rotY": 0
     },
-    "titleFont": "Noto Serif",
+    "titleFont": "Lexend",
     "creatorFont": "Noto Serif",
     "ratioFont": "Lexend",
     "lineLabelFont": "Lexend",

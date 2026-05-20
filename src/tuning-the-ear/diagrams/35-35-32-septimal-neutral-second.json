@@ -2,40 +2,25 @@
   "v": 1,
   "active": [
     [
-      -2,
       0,
-      0
-    ],
-    [
-      -1,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      0
-    ],
-    [
       1,
+      1
+    ],
+    [
       0,
+      1,
       0
     ],
     [
-      2,
+      0,
       0,
       0
     ]
   ],
   "muted": [
     [
-      -1,
       0,
-      0
-    ],
-    [
       1,
-      0,
       0
     ]
   ],
@@ -49,11 +34,11 @@
   "distances": true,
   "microtonal": false,
   "view": {
-    "zoom": 1.5367401817312738,
-    "offsetX": 1.934804114247331,
-    "offsetY": 12.206448068180057,
-    "rotX": 0,
-    "rotY": 0
+    "zoom": 2.020479298949389,
+    "offsetX": 31.870359605737608,
+    "offsetY": 107.84922726941,
+    "rotX": -0.095,
+    "rotY": 1.1350000000000002
   },
   "axes": false,
   "grid": false,
@@ -62,6 +47,80 @@
     [
       "0,0,0|null,null,0",
       true
+    ],
+    [
+      "-1,1,0|0,1,0",
+      false
+    ],
+    [
+      "0,1,0|1,1,0",
+      false
+    ],
+    [
+      "-1,0,0|-1,1,0",
+      false
+    ],
+    [
+      "1,0,0|1,1,0",
+      false
+    ],
+    [
+      "1,0,0|2,0,0",
+      false
+    ],
+    [
+      "0,0,0|1,0,0",
+      false
+    ],
+    [
+      "-1,0,0|0,0,0",
+      false
+    ],
+    [
+      "0,-1,0|0,0,0",
+      false
+    ],
+    [
+      "1,-1,0|1,0,0",
+      false
+    ],
+    [
+      "2,-1,0|2,0,0",
+      false
+    ],
+    [
+      "1,-1,0|2,-1,0",
+      false
+    ],
+    [
+      "0,-1,0|1,-1,0",
+      false
+    ],
+    [
+      "-1,-1,0|-1,0,0",
+      false
+    ],
+    [
+      "-1,-1,0|0,-1,0",
+      false
+    ],
+    [
+      "-1,0,0|-2,0,0",
+      false
+    ],
+    [
+      "-2,0,0|-2,1,0",
+      false
+    ]
+  ],
+  "lineLabelPositions": [
+    [
+      "1,-1,0|1,0,0",
+      0.49931933079204627
+    ],
+    [
+      "-2,0,0|-2,1,0",
+      0.45266487298355373
     ]
   ],
   "distanceEdges": [
@@ -71,11 +130,7 @@
     "grid:0,0,0|grid:0,1,-1",
     "grid:0,0,0|grid:1,0,-1",
     "grid:-2,0,1|grid:0,0,0",
-    "grid:0,0,0|grid:1,-1,0",
-    "grid:-1,1,0|grid:0,0,0",
-    "grid:0,0,0|grid:2,-1,0",
-    "grid:-2,0,0|grid:0,0,0",
-    "grid:0,0,0|grid:2,0,0"
+    "grid:0,0,0|grid:0,1,1"
   ],
   "distanceEdgeOverrides": [
     {
@@ -94,7 +149,7 @@
         "y": -0.23046875
       },
       "showName": false,
-      "customText": "7:6 (septimal subminor third)"
+      "customText": "Septimal Subminor Third"
     },
     {
       "key": "grid:0,-1,1|grid:0,0,0"
@@ -111,38 +166,13 @@
       "key": "grid:-2,0,1|grid:0,0,0"
     },
     {
-      "key": "grid:0,0,0|grid:1,-1,0",
-      "showName": false,
-      "customText": "Syntonic Minor Third"
-    },
-    {
-      "key": "grid:-1,1,0|grid:0,0,0",
-      "showName": false,
-      "customText": "Syntonic Major 6"
-    },
-    {
-      "key": "grid:0,0,0|grid:2,-1,0",
-      "showName": false,
-      "customText": "9:5 Syntonic m7"
-    },
-    {
-      "key": "grid:-2,0,0|grid:0,0,0",
+      "key": "grid:0,0,0|grid:0,1,1",
       "controlOffset": {
-        "x": 12.03125,
-        "y": -224.67578125
+        "x": 0,
+        "y": 0
       },
       "showName": false,
-      "customText": "Pyth m7"
-    },
-    {
-      "key": "grid:0,0,0|grid:2,0,0",
-      "labelT": 0.58,
-      "controlOffset": {
-        "x": 58.44140625,
-        "y": 37.5390625
-      },
-      "showName": false,
-      "customText": "Just M2"
+      "customText": "35:32 (Septimal Neutral 2nd)"
     }
   ],
   "circles": true,
@@ -166,18 +196,7 @@
     "y": 0,
     "z": 0
   },
-  "triangleLabels": [
-    {
-      "plane": "xy",
-      "x": 8,
-      "y": 7,
-      "z": 0,
-      "expZ": 4,
-      "tri": "acd",
-      "label": "Just Major Triad"
-    }
-  ],
-  "fundamental": 261.6255653005986,
+  "fundamental": 440,
   "a4": 440,
   "fundamentalSpelling": "sharp",
   "featureMode": "note",
@@ -210,17 +229,23 @@
   },
   "layout": {
     "mode": true,
-    "title": "Reciprocals 16:9 and 9:8",
+    "title": "35:32 Septimal Neutral Second",
     "titleSize": 39,
     "nodeSize": 38,
     "ratioTextSize": 32,
     "noteTextSize": 19,
     "lineLabelTextSize": 15,
-    "titlePosition": {
-      "x": 527.76953125,
-      "y": 100.2265625
-    },
+    "titlePosition": null,
     "creatorPosition": null,
+    "positionOffsets": [
+      [
+        0,
+        1,
+        1,
+        14.979258154211749,
+        -28.96864194985136
+      ]
+    ],
     "nodeShapes": [
       {
         "exponents": [
@@ -241,55 +266,20 @@
       {
         "exponents": [
           0,
-          -1,
+          1,
           1
         ],
         "shape": "diamond"
-      },
-      {
-        "exponents": [
-          0,
-          1,
-          -1
-        ],
-        "shape": "diamond"
-      },
-      {
-        "exponents": [
-          2,
-          0,
-          -1
-        ],
-        "shape": "diamond"
-      },
-      {
-        "exponents": [
-          1,
-          0,
-          -1
-        ],
-        "shape": "diamond"
-      }
-    ],
-    "labelOffsets": [
-      {
-        "exponents": [
-          1,
-          0,
-          0
-        ],
-        "x": 23.499926454265804,
-        "y": -49.0842163149673
       }
     ],
     "axisOffsets": {
       "x": {
-        "x": -34.89453125,
-        "y": 79.2734375
+        "x": -11.89453125,
+        "y": -32.7265625
       },
       "y": {
-        "x": 0,
-        "y": 0
+        "x": -964,
+        "y": 53
       },
       "z": {
         "x": 0,
@@ -303,19 +293,18 @@
     },
     "lockPosition": true,
     "view": {
-      "zoom": 1.5367401817312738,
-      "offsetX": 1.934804114247331,
-      "offsetY": 12.206448068180057,
-      "rotX": 0,
-      "rotY": 0
+      "zoom": 2.020479298949389,
+      "offsetX": 31.870359605737608,
+      "offsetY": 107.84922726941,
+      "rotX": -0.095,
+      "rotY": 1.1350000000000002
     },
-    "creatorFont": "Noto Serif",
+    "titleFont": "Lexend",
+    "creatorFont": "Lexend",
     "ratioFont": "Lexend",
-    "customLabelFont": "Lexend",
     "lineLabelFont": "Lexend",
     "noteFontWeight": 300,
     "perspectiveTextSize": false,
-    "zoom": 1.5367401817312738,
-    "titleFont": "Lexend"
+    "zoom": 2.020479298949389
   }
 }

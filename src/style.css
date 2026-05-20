@@ -4004,6 +4004,34 @@ body.presentation-mode #lattice {
   transform: translateY(1px);
 }
 
+.presentation-tuner-button {
+  appearance: none;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--chrome-soft-field-border);
+  background: var(--chrome-soft-surface);
+  color: var(--ink);
+  font: inherit;
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.presentation-tuner-button[hidden] {
+  display: none;
+}
+
+.presentation-tuner-button:hover,
+.presentation-tuner-button:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
 /* Synth bar in presentation mode: firm strip at the bottom, right of the TOC.
  * Override the [hidden] attribute set by setLayoutMode so the bar stays
  * visible throughout the reader's session. */

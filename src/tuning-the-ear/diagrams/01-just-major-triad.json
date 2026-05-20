@@ -291,6 +291,8 @@
     "lineLabelFont": "Lexend",
     "noteFontWeight": 300,
     "perspectiveTextSize": false,
-    "zoom": 2.1587398288220356
+    "zoom": 2.1587398288220356,
+    "titleSize": 39,
+    "titleFont": "Lexend"
   }
 }

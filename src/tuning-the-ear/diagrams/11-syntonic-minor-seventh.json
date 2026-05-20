@@ -191,7 +191,7 @@
   "layout": {
     "mode": true,
     "title": "Syntonic Minor Seventh",
-    "titleSize": 35,
+    "titleSize": 39,
     "nodeSize": 38,
     "ratioTextSize": 32,
     "noteTextSize": 19,
@@ -284,6 +284,7 @@
     "lineLabelFont": "Lexend",
     "noteFontWeight": 300,
     "perspectiveTextSize": false,
-    "zoom": 2.1866392464328412
+    "zoom": 2.1866392464328412,
+    "titleFont": "Lexend"
   }
 }

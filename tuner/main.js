@@ -599,7 +599,7 @@ function setLabelMode(mode) {
 
 function collectCurrentSettings() {
   return {
-    fundamental: Number(fundamentalInput ? fundamentalInput.value : 261.63) || 261.63,
+    fundamental: Number(fundamentalInput ? fundamentalInput.value : 130.81) || 130.81,
     a4: Number(a4Input ? a4Input.value : 440) || 440,
     ratios: String(ratiosInput ? ratiosInput.value : ""),
     range: Number(rangeSizeInput ? rangeSizeInput.value : 12) || 12,
@@ -1052,7 +1052,7 @@ function getFundamentalPitchClassForSpelling() {
   let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
   if (!Number.isFinite(fundamentalMidi)) {
     const fallback = getNearestEtInfo(
-      Number(fundamentalInput.value) || 261.63,
+      Number(fundamentalInput.value) || 130.81,
       Number(a4Input.value) || 440
     );
     fundamentalMidi = fallback.midi;
@@ -1828,7 +1828,7 @@ async function ensureAudioContext() {
 
 function getFundamentalHz() {
   const value = Number(fundamentalInput.value);
-  return Number.isFinite(value) && value > 0 ? value : 261.63;
+  return Number.isFinite(value) && value > 0 ? value : 130.81;
 }
 
 function shouldIgnoreReferenceInAnalysis() {
@@ -2192,7 +2192,7 @@ function drawViz() {
   const width = size.width;
   const height = size.height;
   const bounds = getVisualizationSemitoneBounds();
-  const fundamental = Number(fundamentalInput.value) || 261.63;
+  const fundamental = Number(fundamentalInput.value) || 130.81;
   const a4 = Number(a4Input.value) || 440;
   const minSemi = bounds.min;
   const maxSemi = bounds.max;
@@ -3174,7 +3174,7 @@ function renderLoop() {
     liveInputStrength = Math.max(0, Math.min(1, (rmsWindowed - rmsFloor) / (rmsCeil - rmsFloor)));
     const detection = detectPitch(timeData, audioContext.sampleRate, rmsWindowed, rmsRaw);
     const rawPitchDetected = detection.frequency;
-    const fundamental = Number(fundamentalInput.value) || 261.63;
+    const fundamental = Number(fundamentalInput.value) || 130.81;
     const rawGate = gateRawPitchCandidate(rawPitchDetected, fundamental);
     const rawPitch = rawGate.pitchHz;
     const hasDetectedRaw = Boolean(rawPitchDetected && Number.isFinite(rawPitchDetected));
@@ -4850,7 +4850,7 @@ const storedSettings = applyStoredSettings(queryOverrides);
 initTheme();
 if (!(storedSettings && (storedSettings.fundamentalSpelling === "flat" || storedSettings.fundamentalSpelling === "sharp"))) {
   fundamentalSpelling = getFundamentalSpellingFromPitchClass(
-    getNearestEtInfo(Number(fundamentalInput.value) || 261.63, Number(a4Input.value) || 440).pitchClass
+    getNearestEtInfo(Number(fundamentalInput.value) || 130.81, Number(a4Input.value) || 440).pitchClass
   );
 }
 populateFundamentalNotes();
@@ -5421,3 +5421,38 @@ window.addEventListener("beforeunload", () => {
     audioContext.close();
   }
 });
+
+// First-visit tip: recommend headphones + a reference fundamental. Auto-shows
+// once per browser; the close/CTA/scrim/Escape all dismiss + persist the flag.
+(() => {
+  const TIP_STORAGE_KEY = "tuner-headphones-tip-seen";
+  const tip = document.getElementById("tuner-headphones-tip");
+  if (!tip) return;
+  let seen = false;
+  try {
+    seen = window.localStorage.getItem(TIP_STORAGE_KEY) === "1";
+  } catch (err) {}
+  const close = () => {
+    tip.hidden = true;
+    try { window.localStorage.setItem(TIP_STORAGE_KEY, "1"); } catch (err) {}
+  };
+  tip.addEventListener("click", (event) => {
+    if (event.target && event.target.dataset && "tunerTipClose" in event.target.dataset) {
+      close();
+    }
+  });
+  window.addEventListener("keydown", (event) => {
+    if (tip.hidden) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+    }
+  }, { capture: true });
+  if (!seen) {
+    tip.hidden = false;
+    const cta = tip.querySelector(".tuner-tip-cta");
+    if (cta) {
+      try { cta.focus(); } catch (err) {}
+    }
+  }
+})();

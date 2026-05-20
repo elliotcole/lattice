@@ -26397,6 +26397,11 @@ function applyPresetPreRebuildState(state, presetContext) {
 
 function rebuildFromPresetActiveKeys(activeKeys, options) {
   customNodes = [];
+  // Reset the custom-node id counter so each preset reseeds custom nodes from
+  // 200000. Saved presets use literal numeric keys (e.g. distanceEdges
+  // "custom:200000|grid:12,0,0"), so without this, navigating between slides
+  // can drift the counter and silently break any reference to a custom node.
+  nextCustomNodeId = 200000;
   rebuildLattice(activeKeys, {
     remapTriangles: false,
     remapLayoutOffsets: false,
@@ -26596,7 +26601,10 @@ function openTunerFromFileMenu() {
     params.set("ratios", ratios.join(","));
   }
   const query = params.toString();
-  const target = `./tuner/${query ? `?${query}` : ""}`;
+  // Use a root-absolute path so this works from both the editor at "/" and
+  // deck routes like "/tuning-the-ear/" — a relative "./tuner/" would resolve
+  // to "/tuning-the-ear/tuner/" and 404.
+  const target = `/tuner/${query ? `?${query}` : ""}`;
   window.open(target, "_blank", "noopener,noreferrer");
 }
 
@@ -29569,6 +29577,17 @@ function initPresentationMode() {
 
   editButton.hidden = false;
   editButton.addEventListener("click", exitToEditor);
+
+  // "Open Tuner" — reuses the editor's File menu handler, which reads the
+  // current slide's active ratios at click time, so it always reflects whatever
+  // slide the reader is on.
+  const tunerButton = document.getElementById("presentation-tuner-button");
+  if (tunerButton) {
+    tunerButton.hidden = false;
+    tunerButton.addEventListener("click", () => {
+      try { openTunerFromFileMenu(); } catch (err) {}
+    });
+  }
 
   // Intro overlay: shown automatically on first visit (per deck), and
   // reopened any time via the "?" button in the TOC header.

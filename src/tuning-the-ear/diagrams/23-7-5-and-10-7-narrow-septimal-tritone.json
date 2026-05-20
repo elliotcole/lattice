@@ -238,6 +238,8 @@
       "z": 1.25
     },
     "perspectiveTextSize": false,
-    "zoom": 1.8153078736414319
+    "zoom": 1.8153078736414319,
+    "titleSize": 39,
+    "titleFont": "Lexend"
   }
 }

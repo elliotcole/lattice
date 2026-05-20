@@ -169,7 +169,7 @@
   "layout": {
     "mode": true,
     "title": "Syntonic Minor Third",
-    "titleSize": 35,
+    "titleSize": 39,
     "nodeSize": 38,
     "ratioTextSize": 32,
     "noteTextSize": 19,
@@ -258,6 +258,7 @@
     "lineLabelFont": "Lexend",
     "noteFontWeight": 300,
     "perspectiveTextSize": false,
-    "zoom": 2.2971296000000003
+    "zoom": 2.2971296000000003,
+    "titleFont": "Lexend"
   }
 }

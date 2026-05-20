@@ -314,12 +314,13 @@
       "rotX": -0.0023046875,
       "rotY": -0.00345703125
     },
-    "titleFont": "Noto Serif",
+    "titleFont": "Lexend",
     "creatorFont": "Noto Serif",
     "ratioFont": "Lexend",
     "lineLabelFont": "Lexend",
     "noteFontWeight": 300,
     "perspectiveTextSize": false,
-    "zoom": 2.1587398288220356
+    "zoom": 2.1587398288220356,
+    "titleSize": 39
   }
 }

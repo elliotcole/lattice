@@ -168,7 +168,7 @@
   "layout": {
     "mode": true,
     "title": "Just Major Second",
-    "titleSize": 33,
+    "titleSize": 39,
     "nodeSize": 38,
     "ratioTextSize": 32,
     "noteTextSize": 19,
@@ -202,7 +202,7 @@
       "rotX": 0,
       "rotY": 0
     },
-    "titleFont": "Noto Serif",
+    "titleFont": "Lexend",
     "creatorFont": "Noto Serif",
     "ratioFont": "Lexend",
     "lineLabelFont": "Lexend",

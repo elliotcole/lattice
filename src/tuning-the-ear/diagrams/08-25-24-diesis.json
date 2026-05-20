@@ -188,7 +188,7 @@
   "layout": {
     "mode": true,
     "title": "25:24 Diesis",
-    "titleSize": 35,
+    "titleSize": 39,
     "nodeSize": 38,
     "ratioTextSize": 32,
     "noteTextSize": 19,
@@ -280,6 +280,7 @@
     "lineLabelFont": "Lexend",
     "noteFontWeight": 300,
     "perspectiveTextSize": false,
-    "zoom": 1.517132852282958
+    "zoom": 1.517132852282958,
+    "titleFont": "Lexend"
   }
 }

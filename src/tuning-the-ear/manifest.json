@@ -220,6 +220,30 @@
       "number": "34",
       "title": "(Something Like) Darbari Kanada",
       "file": "34-something-like-darbari-kanada.json"
+    },
+    {
+      "slug": "35-35-32-septimal-neutral-second",
+      "number": "35",
+      "title": "35:32 Septimal Neutral Second",
+      "file": "35-35-32-septimal-neutral-second.json"
+    },
+    {
+      "slug": "36-21-16-septimal-narrow-perfect-fourth",
+      "number": "36",
+      "title": "21:16 Septimal Narrow Perfect Fourth",
+      "file": "36-21-16-septimal-narrow-perfect-fourth.json"
+    },
+    {
+      "slug": "37-63-32-septimal-sub-octave",
+      "number": "37",
+      "title": "63:32 Septimal Sub-Octave",
+      "file": "37-63-32-septimal-sub-octave.json"
+    },
+    {
+      "slug": "38-27-16-pythagorean-major-sixth",
+      "number": "38",
+      "title": "27:16 Pythagorean Major Sixth",
+      "file": "38-27-16-pythagorean-major-sixth.json"
     }
   ]
 }

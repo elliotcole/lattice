@@ -27908,8 +27908,14 @@ async function buildLayoutSvgString(
       const control = controlOffset
         ? { x: defaultControl.x + controlOffset.x, y: defaultControl.y + controlOffset.y }
         : defaultControl;
-      const startVector = { x: control.x - lineStart.x, y: control.y - lineStart.y };
-      const endVector = { x: control.x - lineEnd.x, y: control.y - lineEnd.y };
+      const startVector = {
+        x: control.x - (start.x - left),
+        y: control.y - (start.y - top),
+      };
+      const endVector = {
+        x: control.x - (end.x - left),
+        y: control.y - (end.y - top),
+      };
       const startLen = Math.hypot(startVector.x, startVector.y);
       const endLen = Math.hypot(endVector.x, endVector.y);
       const startUx = startLen > 0 ? startVector.x / startLen : ux;

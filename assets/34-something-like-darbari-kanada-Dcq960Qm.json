@@ -1,0 +1,385 @@
+{
+  "v": 1,
+  "active": [
+    [
+      -4,
+      0,
+      0
+    ],
+    [
+      -3,
+      0,
+      0
+    ],
+    [
+      -2,
+      0,
+      0
+    ],
+    [
+      -1,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      2,
+      0,
+      0
+    ],
+    [
+      0,
+      -1,
+      0
+    ],
+    [
+      1,
+      -1,
+      0
+    ],
+    [
+      2,
+      -1,
+      0
+    ]
+  ],
+  "customNodes": [
+    {
+      "sourceExponents": [
+        0,
+        0,
+        0
+      ],
+      "customSlot": 0,
+      "factorNumerator": 7,
+      "factorDenominator": 4,
+      "octaveReduce": true,
+      "octaveShift": 0,
+      "position": {
+        "x": 96,
+        "y": -119
+      },
+      "active": true,
+      "volumeMax": 1
+    }
+  ],
+  "mode3d": false,
+  "connectOrphans": false,
+  "showOperatorLineLabels": false,
+  "tiltDeg": 0,
+  "edgesBlack": false,
+  "connectionsBlack": false,
+  "lineThickness": 1,
+  "distances": false,
+  "microtonal": false,
+  "view": {
+    "zoom": 1,
+    "offsetX": 100,
+    "offsetY": -10,
+    "rotX": 0.10499999999999998,
+    "rotY": 0.024999999999999994
+  },
+  "axes": false,
+  "grid": false,
+  "lineLabels": false,
+  "lineLabelOverrides": [
+    [
+      "0,0,0|null,null,0",
+      true
+    ]
+  ],
+  "circles": true,
+  "shading3d": true,
+  "keyMappings": true,
+  "ratios": [
+    3,
+    5,
+    7
+  ],
+  "axisRanges": {
+    "xMin": -8,
+    "xMax": 8,
+    "yMin": -8,
+    "yMax": 8,
+    "zMin": -3,
+    "zMax": 3
+  },
+  "exponentOffset": {
+    "x": 0,
+    "y": 0,
+    "z": 0
+  },
+  "fundamental": 261.6255653005986,
+  "a4": 440,
+  "fundamentalSpelling": "sharp",
+  "featureMode": "note",
+  "spellingMode": "true",
+  "showHz": false,
+  "showRatioCents": false,
+  "showCentsDeviation": true,
+  "showCentsSign": false,
+  "directionalRatioLabels": false,
+  "hejiEnabled": true,
+  "enharmonicsEnabled": true,
+  "centsPrecision": 0,
+  "hzPrecision": 2,
+  "synth": {
+    "volume": -12,
+    "lfoDepth": 1,
+    "lfoRate": 1,
+    "keyboardMode": "piano-custom",
+    "customPianoMap": [
+      [
+        1,
+        [
+          {
+            "exponents": [
+              8,
+              -6,
+              -1
+            ]
+          }
+        ]
+      ],
+      [
+        3,
+        [
+          {
+            "exponents": [
+              -7,
+              -7,
+              -1
+            ]
+          }
+        ]
+      ],
+      [
+        4,
+        [
+          {
+            "exponents": [
+              5,
+              -6,
+              -1
+            ]
+          }
+        ]
+      ],
+      [
+        5,
+        [
+          {
+            "exponents": [
+              -5,
+              -8,
+              -1
+            ]
+          }
+        ]
+      ],
+      [
+        6,
+        [
+          {
+            "exponents": [
+              7,
+              -6,
+              -1
+            ]
+          }
+        ]
+      ],
+      [
+        8,
+        [
+          {
+            "exponents": [
+              -8,
+              -7,
+              -1
+            ]
+          }
+        ]
+      ],
+      [
+        9,
+        [
+          {
+            "exponents": [
+              4,
+              -6,
+              -1
+            ]
+          }
+        ]
+      ],
+      [
+        10,
+        [
+          {
+            "exponents": [
+              -6,
+              -8,
+              -1
+            ]
+          }
+        ]
+      ],
+      [
+        11,
+        [
+          {
+            "exponents": [
+              6,
+              -6,
+              -1
+            ]
+          }
+        ]
+      ],
+      [
+        0,
+        [
+          {
+            "exponents": [
+              -4,
+              -8,
+              -1
+            ]
+          }
+        ]
+      ]
+    ],
+    "mode": "waveform",
+    "waveform": "sine",
+    "soundfontPreset": 0,
+    "physicalModel": "plucked",
+    "attack": 0.042487500000000004,
+    "decay": 0.6662794999999999,
+    "sustain": 0.6,
+    "release": 1.3545499999999997,
+    "oneShot": false,
+    "envelopeTimeMode": "absolute"
+  },
+  "layout": {
+    "mode": true,
+    "title": "(Something Like) Darbari Kanada",
+    "titleSize": 42,
+    "creatorSize": 17,
+    "ratioTextSize": 26,
+    "noteTextSize": 16,
+    "keyMappingOffset": 0,
+    "keyMappingDark": true,
+    "keyMappingPrefix": "on",
+    "lineLabelTextSize": 16,
+    "titlePosition": null,
+    "creatorPosition": {
+      "x": 917.3080368041992,
+      "y": 166.2734375
+    },
+    "customLabels": [
+      {
+        "id": 1,
+        "text": "Raga in C#",
+        "position": {
+          "x": 531.17578125,
+          "y": 157.50390625
+        },
+        "width": null,
+        "align": "center"
+      }
+    ],
+    "customNodePositions": [
+      {
+        "sourceExponents": [
+          0,
+          0,
+          0
+        ],
+        "customSlot": 0,
+        "factorNumerator": 7,
+        "factorDenominator": 4,
+        "x": 96,
+        "y": -119,
+        "z": 0
+      }
+    ],
+    "nodeShapes": [
+      {
+        "sourceExponents": [
+          0,
+          0,
+          0
+        ],
+        "customSlot": 0,
+        "factorNumerator": 7,
+        "factorDenominator": 4,
+        "shape": "diamond"
+      }
+    ],
+    "labelOffsets": [
+      {
+        "sourceExponents": [
+          0,
+          0,
+          0
+        ],
+        "customSlot": 0,
+        "factorNumerator": 7,
+        "factorDenominator": 4,
+        "x": 37.423,
+        "y": 14
+      }
+    ],
+    "axisOffsets": {
+      "x": {
+        "x": -196,
+        "y": -441.13671875
+      },
+      "y": {
+        "x": -48.6875,
+        "y": 18.140625
+      },
+      "z": {
+        "x": 54,
+        "y": -1
+      }
+    },
+    "axisAngles": {
+      "x": null,
+      "y": null,
+      "z": -0.953040601228664
+    },
+    "lockPosition": true,
+    "view": {
+      "zoom": 1,
+      "offsetX": 100,
+      "offsetY": -10,
+      "rotX": 0.10499999999999998,
+      "rotY": 0.024999999999999994
+    },
+    "titleFont": "Lexend",
+    "creatorFont": "Alice",
+    "ratioFont": "Lexend",
+    "customLabelFont": "Lexend",
+    "axisLegendFont": "Alice",
+    "lineLabelFont": "Alice",
+    "noteFontWeight": 300,
+    "spacing": {
+      "x": 1,
+      "y": 0.97,
+      "z": 1
+    },
+    "perspectiveTextSize": false,
+    "keyMappingsMode": "unique"
+  }
+}

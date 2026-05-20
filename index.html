@@ -14,9 +14,33 @@
           `${window.location.pathname}/${window.location.search}${window.location.hash}`,
         );
       }
+      if (/\/tuning-the-ear$/.test(window.location.pathname)) {
+        window.location.replace(
+          `${window.location.pathname}/${window.location.search}${window.location.hash}`,
+        );
+      }
       if (new URLSearchParams(window.location.search).has('embed')) {
         document.documentElement.classList.add('embed-mode-early');
       }
+      // NOTE: do NOT call history.replaceState in this early script.
+      // The <link rel="stylesheet" href="./src/style.css"> tag below is
+      // parsed AFTER this script runs; changing the URL here would make
+      // that relative href resolve to a nonexistent /tuning-the-ear/src/...
+      // path and the whole stylesheet would 404. main.js does the URL
+      // swap later, after the resource tags have been resolved.
+      (() => {
+        try {
+          const raw = sessionStorage.getItem("tuning-lattice-route");
+          if (!raw) return;
+          const route = JSON.parse(raw);
+          sessionStorage.removeItem("tuning-lattice-route");
+          if (route && route.deck) {
+            document.documentElement.classList.add("presentation-mode");
+            window.__tuningLatticePresentationDeck = route.deck;
+            window.__tuningLatticePresentationPath = route.path + (route.hash || "");
+          }
+        } catch (err) {}
+      })();
     </script>
     <title>Tuning Lattice</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -31,10 +55,10 @@
 
       gtag('config', 'G-LWPVNSVEWV');
     </script>
-    <script type="module" crossorigin src="./assets/main-Cpri2xsz.js"></script>
+    <script type="module" crossorigin src="./assets/main-C9Uk3ux5.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-B5Qt9EMX.js">
     <link rel="modulepreload" crossorigin href="./assets/interval-names-DeDTMXK9.js">
-    <link rel="stylesheet" crossorigin href="./assets/style-goMvYQba.css">
+    <link rel="stylesheet" crossorigin href="./assets/style-B99Slkil.css">
   </head>
   <body>
     <canvas id="lattice" tabindex="0" aria-label="Tuning lattice"></canvas>
@@ -89,6 +113,42 @@
       <span class="tour-banner-sep">&middot;</span>
       <button id="tour-banner-exit" type="button" class="tour-banner-exit">Explore on my own</button>
     </div>
+    <div id="presentation-banner" class="tour-banner presentation-banner" hidden>
+      <button id="presentation-banner-return" type="button" class="tour-banner-exit">&larr; Return</button>
+    </div>
+    <div id="presentation-intro" class="presentation-intro" hidden role="dialog" aria-modal="true" aria-labelledby="presentation-intro-title">
+      <div class="presentation-intro-scrim" data-presentation-intro-close></div>
+      <div class="presentation-intro-card">
+        <button class="presentation-intro-close" type="button" aria-label="Close" data-presentation-intro-close>&times;</button>
+
+        <section class="presentation-intro-section presentation-intro-section-variant">
+          <p class="presentation-intro-eyebrow" id="presentation-intro-eyebrow"></p>
+          <h2 id="presentation-intro-title" class="presentation-intro-title"></h2>
+          <p class="presentation-intro-lede" id="presentation-intro-lede"></p>
+          <p class="presentation-intro-nav"><strong>Left / right arrows</strong> move between diagrams.</p>
+        </section>
+
+        <section class="presentation-intro-section presentation-intro-section-basics">
+          <h3 class="presentation-intro-subhead">Basic controls</h3>
+          <dl class="presentation-intro-controls">
+            <dt>Play a note</dt>
+            <dd>Click a node to start it; click again to stop.</dd>
+            <dt>Pulse (LFO)</dt>
+            <dd>Hold <kbd>L</kbd> and click a node &mdash; longer hold = slower pulse.</dd>
+            <dt>Start / stop pattern</dt>
+            <dd>Press <kbd>Space</kbd> to start or stop the active sequence.</dd>
+            <dt>All notes off</dt>
+            <dd>Press <kbd>Shift</kbd> + <kbd>Space</kbd> to silence everything.</dd>
+            <dt>Patterns &amp; sequences</dt>
+            <dd>Open the <strong>Play</strong> menu in the bottom bar for Random LFOs and sequencer routines.</dd>
+            <dt>Sound &amp; envelope</dt>
+            <dd>Open the <strong>Synth</strong> menu to change instrument, waveform, and envelope.</dd>
+          </dl>
+        </section>
+
+        <button class="presentation-intro-cta" type="button" data-presentation-intro-close>Start exploring</button>
+      </div>
+    </div>
     <div id="caption" class="caption" hidden>
       <div id="caption-text" class="caption-text"></div>
       <textarea
@@ -99,6 +159,30 @@
         hidden
       ></textarea>
     </div>
+    <aside id="presentation-toc" class="presentation-toc" hidden aria-label="Tuning the Ear diagrams">
+      <header class="presentation-toc-header">
+        <div class="presentation-toc-header-text">
+          <div class="presentation-toc-eyebrow">Diagrams from Alec Goldfarb&rsquo;s</div>
+          <div class="presentation-toc-title">Tuning the Ear</div>
+        </div>
+        <button id="presentation-help-button" class="presentation-help-button" type="button" aria-label="Show introduction" hidden>?</button>
+      </header>
+      <ol id="presentation-toc-list" class="presentation-toc-list"></ol>
+      <footer class="presentation-toc-footer">
+        <button id="presentation-audio-toggle" type="button" class="presentation-audio-toggle" hidden aria-label="Toggle audio" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <polygon class="speaker-body" points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path class="speaker-wave speaker-wave-1" d="M15.54 8.46a5 5 0 0 1 0 7.07" fill="none"></path>
+            <path class="speaker-wave speaker-wave-2" d="M19.07 4.93a10 10 0 0 1 0 14.14" fill="none"></path>
+            <line class="speaker-mute-slash" x1="22" y1="2" x2="2" y2="22" stroke-width="2"></line>
+          </svg>
+          <span class="presentation-audio-label">Sound</span>
+        </button>
+        <button id="presentation-edit-button" type="button" class="presentation-edit-button" hidden>
+          Edit Lattice <span aria-hidden="true">&#x2197;</span>
+        </button>
+      </footer>
+    </aside>
     <div id="layout-overlay" class="layout-overlay" hidden>
       <div id="layout-custom-text-editor" class="layout-custom-text-editor" hidden>
         <div id="layout-custom-text-drag-handle" class="layout-custom-text-drag-handle">
@@ -324,6 +408,9 @@
         </div>
         <div class="control-group">
           <button id="layout-share-link" type="button" class="button-full">Save &amp; Copy Link</button>
+        </div>
+        <div class="control-group">
+          <button id="layout-preview-presentation" type="button" class="button-full">Preview as Presentation</button>
         </div>
         <div class="control-group">
           <label for="layout-page-size">Page Size</label>

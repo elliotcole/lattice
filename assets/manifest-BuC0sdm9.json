@@ -1,0 +1,249 @@
+{
+  "version": 1,
+  "slug": "tuning-the-ear",
+  "title": "Tuning the Ear",
+  "subtitle": "Diagrams from Alec Goldfarb’s",
+  "intro": "Each diagram is a playable tuning lattice that accompanies a section of the book. Click any node to hear its pitch, and explore the just-intonation relationships the chapter describes.",
+  "defaultInteractions": {
+    "playNotes": true,
+    "sustain": true,
+    "keyboardMode": true,
+    "lfo": true,
+    "patternPlay": true,
+    "looper": true,
+    "pan": false,
+    "zoom": false,
+    "rotate3d": false,
+    "addNodes": false
+  },
+  "slides": [
+    {
+      "slug": "00-a-few-5-limit-intervals",
+      "number": "00",
+      "title": "A few 5-limit Intervals",
+      "file": "00-a-few-5-limit-intervals.json"
+    },
+    {
+      "slug": "01-just-major-triad",
+      "number": "01",
+      "title": "Just Major Triad",
+      "file": "01-just-major-triad.json"
+    },
+    {
+      "slug": "02-perfect-fifth",
+      "number": "02",
+      "title": "Perfect Fifth",
+      "file": "02-perfect-fifth.json"
+    },
+    {
+      "slug": "03-perfect-fourth",
+      "number": "03",
+      "title": "Perfect Fourth",
+      "file": "03-perfect-fourth.json"
+    },
+    {
+      "slug": "04-just-major-second",
+      "number": "04",
+      "title": "Just Major Second",
+      "file": "04-just-major-second.json"
+    },
+    {
+      "slug": "05-syntonic-major-third",
+      "number": "05",
+      "title": "Syntonic Major Third",
+      "file": "05-syntonic-major-third.json"
+    },
+    {
+      "slug": "06-syntonic-comma",
+      "number": "06",
+      "title": "Syntonic Comma",
+      "file": "06-syntonic-comma.json"
+    },
+    {
+      "slug": "07-syntonic-minor-third",
+      "number": "07",
+      "title": "Syntonic Minor Third",
+      "file": "07-syntonic-minor-third.json"
+    },
+    {
+      "slug": "08-25-24-diesis",
+      "number": "08",
+      "title": "25:24 Diesis",
+      "file": "08-25-24-diesis.json"
+    },
+    {
+      "slug": "09-reciprocals-5-3-and-6-5",
+      "number": "09",
+      "title": "Reciprocals 5:3 and 6:5",
+      "file": "09-reciprocals-5-3-and-6-5.json"
+    },
+    {
+      "slug": "10-reciprocals-8-5-and-5-4",
+      "number": "10",
+      "title": "Reciprocals 8:5 and 5:4",
+      "file": "10-reciprocals-8-5-and-5-4.json"
+    },
+    {
+      "slug": "11-syntonic-minor-seventh",
+      "number": "11",
+      "title": "Syntonic Minor Seventh",
+      "file": "11-syntonic-minor-seventh.json"
+    },
+    {
+      "slug": "12-reciprocals-16-9-and-9-8",
+      "number": "12",
+      "title": "Reciprocals 16:9 and 9:8",
+      "file": "12-reciprocals-16-9-and-9-8.json"
+    },
+    {
+      "slug": "13-reciprocals-10-9-and-9-5",
+      "number": "13",
+      "title": "Reciprocals 10:9 and 9:5",
+      "file": "13-reciprocals-10-9-and-9-5.json"
+    },
+    {
+      "slug": "14-syntonic-major-7",
+      "number": "14",
+      "title": "Syntonic Major 7",
+      "file": "14-syntonic-major-7.json"
+    },
+    {
+      "slug": "15-syntonic-minor-second",
+      "number": "15",
+      "title": "Syntonic Minor Second",
+      "file": "15-syntonic-minor-second.json"
+    },
+    {
+      "slug": "16-syntonic-major-scale",
+      "number": "16",
+      "title": "Syntonic Major Scale",
+      "file": "16-syntonic-major-scale.json"
+    },
+    {
+      "slug": "17-syntonic-minor-scale",
+      "number": "17",
+      "title": "Syntonic Minor Scale",
+      "file": "17-syntonic-minor-scale.json"
+    },
+    {
+      "slug": "18-something-like-raag-bhairav",
+      "number": "18",
+      "title": "(Something like) Raag Bhairav",
+      "file": "18-something-like-raag-bhairav.json"
+    },
+    {
+      "slug": "19-13-degree-syntonic-scale",
+      "number": "19",
+      "title": "13-degree Syntonic Scale",
+      "file": "19-13-degree-syntonic-scale.json"
+    },
+    {
+      "slug": "20-7-4-septimal-minor-seventh",
+      "number": "20",
+      "title": "7:4 Septimal Minor Seventh",
+      "file": "20-7-4-septimal-minor-seventh.json"
+    },
+    {
+      "slug": "21-7-6-septimal-subminor-third",
+      "number": "21",
+      "title": "7:6 Septimal Subminor Third",
+      "file": "21-7-6-septimal-subminor-third.json"
+    },
+    {
+      "slug": "22-8-7-septimal-major-second",
+      "number": "22",
+      "title": "8:7 Septimal Major Second",
+      "file": "22-8-7-septimal-major-second.json"
+    },
+    {
+      "slug": "23-7-5-and-10-7-narrow-septimal-tritone",
+      "number": "23",
+      "title": "7:5 and 10:7 Narrow Septimal Tritone",
+      "file": "23-7-5-and-10-7-narrow-septimal-tritone.json"
+    },
+    {
+      "slug": "24-9-7-wide-septimal-major-third",
+      "number": "24",
+      "title": "9:7 Wide Septimal Major Third",
+      "file": "24-9-7-wide-septimal-major-third.json"
+    },
+    {
+      "slug": "25-12-7-wide-septimal-major-sixth",
+      "number": "25",
+      "title": "12:7 Wide Septimal Major Sixth",
+      "file": "25-12-7-wide-septimal-major-sixth.json"
+    },
+    {
+      "slug": "26-14-9-septimal-subminor-sixth-septimal-super-fifth",
+      "number": "26",
+      "title": "14:9 Septimal Subminor Sixth / Septimal Super Fifth",
+      "file": "26-14-9-septimal-subminor-sixth-septimal-super-fifth.json"
+    },
+    {
+      "slug": "27-minor-sixths-septimal-vs-syntonic",
+      "number": "27",
+      "title": "Minor Sixths: Septimal vs. Syntonic",
+      "file": "27-minor-sixths-septimal-vs-syntonic.json"
+    },
+    {
+      "slug": "28-three-tritones",
+      "number": "28",
+      "title": "Three Tritones",
+      "file": "28-three-tritones.json"
+    },
+    {
+      "slug": "29-pythagorean-major-third",
+      "number": "29",
+      "title": "Pythagorean Major Third",
+      "file": "29-pythagorean-major-third.json"
+    },
+    {
+      "slug": "30-45-32-syntonic-tritone",
+      "number": "30",
+      "title": "45:32 Syntonic Tritone",
+      "file": "30-45-32-syntonic-tritone.json"
+    },
+    {
+      "slug": "31-25-16-syntonic-subminor-sixth",
+      "number": "31",
+      "title": "25:16 Syntonic Subminor Sixth",
+      "file": "31-25-16-syntonic-subminor-sixth.json"
+    },
+    {
+      "slug": "32-pythagorean-comma",
+      "number": "32",
+      "title": "Pythagorean Comma",
+      "file": "32-pythagorean-comma.json"
+    },
+    {
+      "slug": "34-something-like-darbari-kanada",
+      "number": "34",
+      "title": "(Something Like) Darbari Kanada",
+      "file": "34-something-like-darbari-kanada.json"
+    },
+    {
+      "slug": "35-35-32-septimal-neutral-second",
+      "number": "35",
+      "title": "35:32 Septimal Neutral Second",
+      "file": "35-35-32-septimal-neutral-second.json"
+    },
+    {
+      "slug": "36-21-16-septimal-narrow-perfect-fourth",
+      "number": "36",
+      "title": "21:16 Septimal Narrow Perfect Fourth",
+      "file": "36-21-16-septimal-narrow-perfect-fourth.json"
+    },
+    {
+      "slug": "37-63-32-septimal-sub-octave",
+      "number": "37",
+      "title": "63:32 Septimal Sub-Octave",
+      "file": "37-63-32-septimal-sub-octave.json"
+    },
+    {
+      "slug": "38-27-16-pythagorean-major-sixth",
+      "number": "38",
+      "title": "27:16 Pythagorean Major Sixth",
+      "file": "38-27-16-pythagorean-major-sixth.json"
+    }
+  ]
+}

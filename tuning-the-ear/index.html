@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tuning the Ear &middot; Tuning Lattice</title>
+    <script>
+      (() => {
+        const hash = window.location.hash || "";
+        try {
+          sessionStorage.setItem(
+            "tuning-lattice-route",
+            JSON.stringify({
+              deck: "tuning-the-ear",
+              path: "/tuning-the-ear/",
+              hash,
+            }),
+          );
+        } catch (err) {}
+        window.location.replace("../" + hash);
+      })();
+    </script>
+  </head>
+  <body></body>
+</html>

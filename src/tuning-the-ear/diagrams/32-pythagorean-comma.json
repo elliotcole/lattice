@@ -1,0 +1,369 @@
+{
+  "v": 1,
+  "active": [
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      2,
+      0,
+      0
+    ],
+    [
+      3,
+      0,
+      0
+    ],
+    [
+      4,
+      0,
+      0
+    ],
+    [
+      5,
+      0,
+      0
+    ],
+    [
+      6,
+      0,
+      0
+    ],
+    [
+      7,
+      0,
+      0
+    ],
+    [
+      8,
+      0,
+      0
+    ],
+    [
+      9,
+      0,
+      0
+    ],
+    [
+      10,
+      0,
+      0
+    ],
+    [
+      11,
+      0,
+      0
+    ],
+    [
+      12,
+      0,
+      0
+    ]
+  ],
+  "muted": [
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      2,
+      0,
+      0
+    ],
+    [
+      3,
+      0,
+      0
+    ],
+    [
+      4,
+      0,
+      0
+    ],
+    [
+      5,
+      0,
+      0
+    ],
+    [
+      6,
+      0,
+      0
+    ],
+    [
+      7,
+      0,
+      0
+    ],
+    [
+      8,
+      0,
+      0
+    ],
+    [
+      9,
+      0,
+      0
+    ],
+    [
+      10,
+      0,
+      0
+    ],
+    [
+      11,
+      0,
+      0
+    ]
+  ],
+  "customNodes": [
+    {
+      "sourceExponents": [
+        0,
+        0,
+        0
+      ],
+      "customSlot": 0,
+      "factorNumerator": 2,
+      "factorDenominator": 1,
+      "octaveReduce": false,
+      "octaveShift": 0,
+      "position": {
+        "x": -362.7032485308164,
+        "y": -202.74994878292233
+      },
+      "active": true,
+      "volumeMax": 1
+    }
+  ],
+  "mode3d": false,
+  "connectOrphans": false,
+  "showOperatorLineLabels": true,
+  "tiltDeg": 0,
+  "edgesBlack": true,
+  "connectionsBlack": true,
+  "lineThickness": 1.25,
+  "distances": true,
+  "microtonal": false,
+  "view": {
+    "zoom": 0.41814085988270594,
+    "offsetX": -581.3431073838452,
+    "offsetY": 52.02376856608343,
+    "rotX": 0,
+    "rotY": 0
+  },
+  "axes": false,
+  "grid": false,
+  "lineLabels": false,
+  "lineLabelOverrides": [
+    [
+      "0,0,0|null,null,0",
+      true
+    ]
+  ],
+  "distanceEdges": [
+    "grid:-1,0,1|grid:0,0,0",
+    "grid:0,-1,1|grid:0,0,0",
+    "grid:0,0,0|grid:0,1,-1",
+    "grid:0,0,0|grid:2,1,0",
+    "grid:0,0,0|grid:0,2,0",
+    "custom:200000|grid:12,0,0"
+  ],
+  "distanceEdgeOverrides": [
+    {
+      "key": "grid:-1,0,1|grid:0,0,0",
+      "controlOffset": {
+        "x": -0.23046875,
+        "y": -0.23046875
+      },
+      "showName": false,
+      "customText": "7:6 (septimal subminor third)"
+    },
+    {
+      "key": "grid:0,-1,1|grid:0,0,0"
+    },
+    {
+      "key": "grid:0,0,0|grid:0,1,-1"
+    },
+    {
+      "key": "grid:0,0,0|grid:2,1,0",
+      "showName": false,
+      "customText": "45:32 (Syntonic tritone)"
+    },
+    {
+      "key": "grid:0,0,0|grid:0,2,0",
+      "labelT": 0.48,
+      "controlOffset": {
+        "x": 107,
+        "y": -15
+      },
+      "showName": false
+    },
+    {
+      "key": "custom:200000|grid:12,0,0",
+      "controlOffset": {
+        "x": 91,
+        "y": -133
+      },
+      "showName": false,
+      "customText": "Pythagorean Comman (~+23c)"
+    }
+  ],
+  "circles": true,
+  "shading3d": true,
+  "keyMappings": true,
+  "ratios": [
+    3,
+    5,
+    7
+  ],
+  "axisRanges": {
+    "xMin": -8,
+    "xMax": 13,
+    "yMin": -8,
+    "yMax": 8,
+    "zMin": -3,
+    "zMax": 4
+  },
+  "exponentOffset": {
+    "x": -3,
+    "y": 0,
+    "z": 0
+  },
+  "fundamental": 220,
+  "a4": 440,
+  "fundamentalSpelling": "sharp",
+  "featureMode": "note",
+  "spellingMode": "simple",
+  "showHz": false,
+  "showRatioCents": false,
+  "showCentsDeviation": true,
+  "showCentsSign": false,
+  "directionalRatioLabels": false,
+  "hejiEnabled": true,
+  "enharmonicsEnabled": false,
+  "centsPrecision": 0,
+  "hzPrecision": 2,
+  "synth": {
+    "volume": -12,
+    "lfoDepth": 1,
+    "lfoRate": 1,
+    "keyboardMode": "off",
+    "customPianoMap": [],
+    "mode": "waveform",
+    "waveform": "sine",
+    "soundfontPreset": 0,
+    "physicalModel": "plucked",
+    "attack": 0.018495499999999998,
+    "decay": 0.18643949999999998,
+    "sustain": 0.6,
+    "release": 0.6048000000000001,
+    "oneShot": false,
+    "envelopeTimeMode": "absolute"
+  },
+  "layout": {
+    "mode": true,
+    "title": "Pythagorean Comma",
+    "nodeSize": 29,
+    "ratioTextSize": 29,
+    "noteTextSize": 11,
+    "lineLabelTextSize": 15,
+    "titlePosition": null,
+    "creatorPosition": null,
+    "customNodePositions": [
+      {
+        "sourceExponents": [
+          0,
+          0,
+          0
+        ],
+        "customSlot": 0,
+        "factorNumerator": 2,
+        "factorDenominator": 1,
+        "x": -508.58710216117277,
+        "y": -353.41687958148657,
+        "z": 0
+      }
+    ],
+    "nodeShapes": [
+      {
+        "sourceExponents": [
+          0,
+          0,
+          0
+        ],
+        "customSlot": 0,
+        "factorNumerator": 2,
+        "factorDenominator": 1,
+        "shape": "circle"
+      }
+    ],
+    "labelOffsets": [
+      {
+        "exponents": [
+          12,
+          0,
+          0
+        ],
+        "x": 50.22231026618824,
+        "y": 81.31231185954286
+      },
+      {
+        "exponents": [
+          0,
+          0,
+          0
+        ],
+        "x": 64.2190097787724,
+        "y": 62.449959749058735
+      }
+    ],
+    "axisOffsets": {
+      "x": {
+        "x": -34.89453125,
+        "y": 79.2734375
+      },
+      "y": {
+        "x": 0,
+        "y": 0
+      },
+      "z": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "axisHidden": {
+      "x": true,
+      "y": true,
+      "z": true
+    },
+    "lockPosition": true,
+    "view": {
+      "zoom": 0.41814085988270594,
+      "offsetX": -581.3431073838452,
+      "offsetY": 52.02376856608343,
+      "rotX": 0,
+      "rotY": 0
+    },
+    "titleFont": "Lexend",
+    "ratioFont": "Lexend",
+    "lineLabelFont": "Lexend",
+    "noteFontWeight": 300,
+    "spacing": {
+      "x": 1.4,
+      "y": 1,
+      "z": 1.25
+    },
+    "unifyNodeSize": false,
+    "perspectiveTextSize": false,
+    "zoom": 0.41814085988270594
+  }
+}

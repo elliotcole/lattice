@@ -5661,7 +5661,7 @@ function disableVoiceLfo(voice) {
 
 function randomizeLfosForActiveNodes() {
   const now = performance.now();
-  const activeNodes = nodes.filter((node) => node.active);
+  const activeNodes = nodes.filter((node) => node.active && !node.muted);
   if (!activeNodes.length) {
     return;
   }
@@ -7709,10 +7709,13 @@ function handleKeyDown(event) {
     return;
   }
   if (event.code === "Space") {
-    if (layoutMode) {
+    if (layoutMode && !isInPresentationMode()) {
       return;
     }
-    if (document.activeElement !== canvas) {
+    if (isInPresentationMode() && !isPresentationInteractionAllowed("patternPlay")) {
+      return;
+    }
+    if (document.activeElement !== canvas && !isInPresentationMode()) {
       return;
     }
     if (event.shiftKey) {
@@ -7767,7 +7770,10 @@ function handleKeyDown(event) {
     schedulePresetUrlUpdate();
     return;
   }
-  if (layoutMode) {
+  if (layoutMode && !isInPresentationMode()) {
+    return;
+  }
+  if (isInPresentationMode() && !isPresentationInteractionAllowed("looper") && (event.code === "Backslash" || event.code === "BracketRight")) {
     return;
   }
   if (!event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -7891,7 +7897,7 @@ function handleKeyDown(event) {
 }
 
 function handleKeyUp(event) {
-  if (layoutMode) {
+  if (layoutMode && !isInPresentationMode()) {
     return;
   }
   const mode = getKeyboardMode();
@@ -14494,7 +14500,7 @@ function draw() {
             ? getCubeFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir)
             : getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir);
         }
-      } else if (layoutMode) {
+      } else if (layoutMode && !isInPresentationMode()) {
         ctx.fillStyle = "transparent";
       } else {
         if (node.isCustom && !node.active && brightness <= 0) {
@@ -15126,7 +15132,17 @@ function startVoice(options) {
     return null;
   }
 
-  if (audioCtx.state !== "running") {
+  // In presentation mode, the audio context is initialized by the first user
+  // gesture and resume() is async; the first click can land in onPointerUp
+  // before state has transitioned to "running". Call resume() and proceed so
+  // the voice is created — once the state catches up, audio flows naturally.
+  if (audioCtx.state === "suspended" && isInPresentationMode()) {
+    audioCtx.resume();
+  }
+  if (audioCtx.state !== "running" && audioCtx.state !== "suspended") {
+    return null;
+  }
+  if (audioCtx.state !== "running" && !isInPresentationMode()) {
     return null;
   }
 
@@ -15487,6 +15503,11 @@ function enableAudio() {
     masterGain = audioCtx.createGain();
     masterGain.connect(audioCtx.destination);
     updateVolume();
+    // resume() is async; ensure the audio-state indicator updates once the
+    // context actually transitions to "running".
+    audioCtx.addEventListener("statechange", () => {
+      syncPresentationSynthHandle();
+    });
   }
 
   ensureKarplusWorklet();
@@ -15498,6 +15519,7 @@ function enableAudio() {
 
   audioToggle.textContent = "Sound On";
   audioToggle.classList.add("button-on");
+  syncPresentationSynthHandle();
   maybeApplyPendingPlayState();
 }
 
@@ -15510,6 +15532,15 @@ function disableAudio() {
   audioCtx.suspend();
   audioToggle.textContent = "Sound Off";
   audioToggle.classList.remove("button-on");
+  syncPresentationSynthHandle();
+}
+
+function syncPresentationSynthHandle() {
+  const handle = document.getElementById("presentation-audio-toggle");
+  if (!handle) return;
+  const isOn = Boolean(audioCtx && audioCtx.state === "running");
+  handle.classList.toggle("is-audio-on", isOn);
+  handle.setAttribute("aria-pressed", isOn ? "true" : "false");
 }
 
 function toggleAudio() {
@@ -15825,6 +15856,16 @@ function onPointerDown(event) {
   }
   closeTopMenus("ratio-wheel");
   closeBottomMenus();
+  // In presentation mode, skip every pointerdown branch (drag/pan/rotate
+  // initiations, layout-edit handlers, distance-label drag, etc.). The
+  // click-to-play and other 2D-style behaviors fire in onPointerUp when
+  // no drag state has been set up, which is what we want here.
+  if (isInPresentationMode()) {
+    // Ensure audio init happens inside this confirmed user-gesture frame
+    // before we early-return, so onPointerUp can create audible voices.
+    enableAudioFromGesture();
+    return;
+  }
   const screenPoint = { x: event.offsetX, y: event.offsetY };
   if (layoutMode && layoutLabelHitboxVisible && !hitTestNoteLabel(screenPoint)) {
     layoutLabelHitboxVisible = false;
@@ -15886,7 +15927,7 @@ function onPointerDown(event) {
       isAddMode,
     });
   }
-  if (analysisLayers.distances && (distanceSelectMode || layoutMode)) {
+  if (analysisLayers.distances && (distanceSelectMode || layoutMode) && !isInPresentationMode()) {
     if (distanceSelectMode && event.altKey) {
       const labelHit = hitTestDistanceLabel(screenPoint);
       const lineHit = hitTestDistanceLine(screenPoint);
@@ -16169,7 +16210,7 @@ function onPointerDown(event) {
     return;
   }
 
-  if (layoutMode) {
+  if (layoutMode && !isInPresentationMode()) {
     if (event.altKey && !event.shiftKey) {
       const handleHit = hitTestAxisLegendHandle(screenPoint);
       if (handleHit && layoutAxisOffsets[handleHit.axis]) {
@@ -16464,6 +16505,11 @@ function onPointerDown(event) {
 
 function onCanvasDoubleClick(event) {
   clearPendingDistanceLabelClick();
+  // In presentation mode the diagram is read-only; double-click must not cycle
+  // node shapes, edit labels, or toggle distance/microtonal modes.
+  if (isInPresentationMode()) {
+    return;
+  }
   if (layoutMode && layoutAlignMode) {
     setLayoutAlignMode("");
     return;
@@ -17057,7 +17103,7 @@ function onPointerUp(event) {
     updatePresetUrl("line-label-drag-end");
     return;
   }
-  if (layoutMode) {
+  if (layoutMode && !isInPresentationMode()) {
     const wasRotatingInLayout = view.rotating;
     if (view.dragging) {
       view.dragging = false;
@@ -17691,6 +17737,9 @@ function handleMicrotonalEdgePlayback(a, b) {
 
 function onWheel(event) {
   event.preventDefault();
+  if (isInPresentationMode() && !isPresentationInteractionAllowed("zoom")) {
+    return;
+  }
   if (layoutMode) {
     pushLayoutUndoStateForWheel();
   }
@@ -17718,6 +17767,9 @@ function onWheel(event) {
 
 function isInactiveNodeAvailable(node) {
   if (distanceSelectMode) {
+    return false;
+  }
+  if (isInPresentationMode() && !isPresentationInteractionAllowed("addNodes")) {
     return false;
   }
   const onZeroPlane = (Number(node.exponentZ) || 0) === 0;
@@ -22213,6 +22265,15 @@ const layoutThemeColors = readThemeColorsFromStyles(rootThemeStyles, "layout");
 function refreshThemeColors() {
   if (layoutMode) {
     themeColors = { ...layoutThemeColors };
+    // Presentation mode renders nodes interactively over a layout page; readers
+    // expect the familiar 2D/3D "played" yellow rather than layoutThemeColors'
+    // black, which silently turns playing nodes dark grey.
+    if (isInPresentationMode()) {
+      const canvasStyles = getComputedStyle(document.body);
+      const canvasColors = readThemeColorsFromStyles(canvasStyles, "canvas");
+      themeColors.playFill = canvasColors.playFill;
+      themeColors.looperFill = canvasColors.looperFill;
+    }
     return;
   }
   const styles = getComputedStyle(document.body);
@@ -29112,9 +29173,531 @@ syncLayoutScaleInput();
 updateKeyMappingToggleVisibility();
 initEnvelopeSliders();
 presetStateDefaults = deepClonePresetValue(getPresetState({ includeDefaults: true }));
+
+// ---- Presentation mode: slide-deck viewer ----
+//
+// A deck is a manifest + a folder of preset JSONs. The early script in
+// index.html flips <html> into `presentation-mode` and stores the deck slug
+// in window.__tuningLatticePresentationDeck when the user arrives via
+// /<deck-slug>/. initPresentationMode() loads the deck, renders the TOC,
+// and wires reader chrome.
+
+// Synth fields that follow the reader across slides (per the design spec).
+// Other synth fields (lfoDepth, lfoRate, keyboardMode, customPianoMap) are
+// the slide's authored intent and re-load on each slide change.
+const PRESENTATION_PERSISTED_SYNTH_KEYS = Object.freeze([
+  "volume",
+  "mode",
+  "waveform",
+  "soundfontPreset",
+  "physicalModel",
+  "attack",
+  "decay",
+  "sustain",
+  "release",
+  "oneShot",
+  "envelopeTimeMode",
+]);
+
+function captureReaderSynthSnapshot() {
+  try {
+    const current = getPresetState();
+    const synth = current && current.synth;
+    if (!synth || typeof synth !== "object") return {};
+    const captured = {};
+    for (const key of PRESENTATION_PERSISTED_SYNTH_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(synth, key)) {
+        captured[key] = synth[key];
+      }
+    }
+    return captured;
+  } catch (err) {
+    return {};
+  }
+}
+
+function overlayReaderSynthOnSlideState(state, snapshot) {
+  if (!state || typeof state !== "object") return state;
+  if (!snapshot || typeof snapshot !== "object") return state;
+  if (!state.synth || typeof state.synth !== "object") {
+    state.synth = {};
+  }
+  for (const key of Object.keys(snapshot)) {
+    state.synth[key] = snapshot[key];
+  }
+  return state;
+}
+
+// Stops all audible state cleanly when transitioning between slides:
+// playing notes, sustained voices, pattern playback, LFOs, and the looper
+// (including any in-progress recording, which is discarded silently).
+function resetAudibleStateForSlideTransition() {
+  try { allNotesOff(); } catch (err) {}
+  try { clearLooper(); } catch (err) {}
+}
+
+// Active per-slide interactivity profile. Null when no slide is in
+// presentation mode (i.e., regular editor mode, or after Edit Lattice).
+let activePresentationProfile = null;
+
+function isInPresentationMode() {
+  return document.body.classList.contains("presentation-mode");
+}
+
+function isPresentationInteractionAllowed(key) {
+  if (!activePresentationProfile) return true;
+  return Boolean(activePresentationProfile[key]);
+}
+
+function computePresentationProfile(deck, slide) {
+  const def = (deck && deck.defaultInteractions) || {};
+  const override = (slide && slide.interactions) || {};
+  return { ...def, ...override };
+}
+
+// Pending click action for the presentation banner pill. Set by whichever
+// flow is currently using the banner (deck round-trip from Edit Lattice, or
+// preview-from-editor). The banner has a single click listener that
+// dispatches to the active handler.
+let pendingPresentationBannerHandler = null;
+
+// Tracks where the author came from when they trigger Preview from the
+// Layout panel, so Exit Preview can restore the correct editor state.
+let previewPreviousViewMode = null;
+
+function startPreviewPresentation() {
+  if (document.body.classList.contains("presentation-mode")) return;
+  previewPreviousViewMode = layoutMode ? "layout" : (is3DMode ? "3d" : "2d");
+  if (!layoutMode) {
+    try { applyViewModeSelection("layout"); } catch (err) {}
+  }
+  document.body.classList.add("presentation-mode");
+  document.documentElement.classList.add("presentation-mode");
+  presetSyncEnabled = false;
+  // Canvas inset changes when the presentation-mode class is applied.
+  try { resizeCanvas(); } catch (err) {}
+
+  const synthHandle = document.getElementById("presentation-audio-toggle");
+  if (synthHandle) synthHandle.hidden = false;
+  syncPresentationSynthHandle();
+
+  // Preview always uses the default interactivity profile (no per-slide overrides).
+  activePresentationProfile = {
+    playNotes: true,
+    sustain: true,
+    keyboardMode: true,
+    lfo: true,
+    patternPlay: true,
+    looper: true,
+    pan: false,
+    zoom: false,
+    rotate3d: false,
+    addNodes: false,
+  };
+
+  // Synthetic one-item TOC reflecting the current preset.
+  const toc = document.getElementById("presentation-toc");
+  const list = document.getElementById("presentation-toc-list");
+  if (toc && list) {
+    const eyebrow = toc.querySelector(".presentation-toc-eyebrow");
+    const title = toc.querySelector(".presentation-toc-title");
+    if (eyebrow) eyebrow.textContent = "How readers will see this slide";
+    if (title) title.textContent = "Preview";
+    list.innerHTML = "";
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "presentation-toc-item is-active";
+    const label = document.createElement("span");
+    label.className = "presentation-toc-item-label";
+    let itemTitle = "Untitled";
+    try {
+      const current = getPresetState();
+      if (current && current.layout && current.layout.title) {
+        itemTitle = current.layout.title;
+      }
+    } catch (err) {}
+    label.textContent = itemTitle;
+    btn.appendChild(label);
+    li.appendChild(btn);
+    list.appendChild(li);
+    toc.hidden = false;
+  }
+  const tab = document.getElementById("presentation-toc-tab");
+  if (tab) tab.hidden = true;
+
+  // Preview hides the Edit Lattice button (the author IS the editor).
+  const editButton = document.getElementById("presentation-edit-button");
+  if (editButton) editButton.hidden = true;
+
+  const banner = document.getElementById("presentation-banner");
+  const bannerReturn = document.getElementById("presentation-banner-return");
+  if (banner && bannerReturn) {
+    bannerReturn.textContent = "← Back to editor";
+    banner.hidden = false;
+  }
+  pendingPresentationBannerHandler = exitPreviewPresentation;
+}
+
+function exitPreviewPresentation() {
+  document.body.classList.remove("presentation-mode");
+  document.documentElement.classList.remove("presentation-mode");
+  document.body.classList.remove("synth-drawer-open");
+  presetSyncEnabled = true;
+  activePresentationProfile = null;
+  // Canvas inset disappears when the presentation-mode class is removed.
+  try { resizeCanvas(); } catch (err) {}
+
+  const toc = document.getElementById("presentation-toc");
+  if (toc) toc.hidden = true;
+  const tab = document.getElementById("presentation-toc-tab");
+  if (tab) tab.hidden = true;
+  const synthHandle = document.getElementById("presentation-audio-toggle");
+  if (synthHandle) synthHandle.hidden = true;
+  const banner = document.getElementById("presentation-banner");
+  if (banner) banner.hidden = true;
+
+  if (previewPreviousViewMode && previewPreviousViewMode !== "layout") {
+    try { applyViewModeSelection(previewPreviousViewMode); } catch (err) {}
+  }
+  previewPreviousViewMode = null;
+  pendingPresentationBannerHandler = null;
+}
+
+function initPresentationMode() {
+  // Restore the visible URL deferred from the early script (intentionally
+  // not done in <head> so that <link href="./src/..."> resolves correctly).
+  if (window.__tuningLatticePresentationPath) {
+    try {
+      history.replaceState(null, "", window.__tuningLatticePresentationPath);
+    } catch (err) {}
+    window.__tuningLatticePresentationPath = null;
+  }
+  const deckSlug = window.__tuningLatticePresentationDeck;
+  if (!deckSlug) return;
+  const toc = document.getElementById("presentation-toc");
+  const list = document.getElementById("presentation-toc-list");
+  const tab = document.getElementById("presentation-toc-tab");
+  const collapseBtn = document.getElementById("presentation-toc-collapse");
+  const editButton = document.getElementById("presentation-edit-button");
+  if (!toc || !list || !editButton) return;
+
+  let deck = null;
+  let slides = [];
+  let activeSlug = null;
+  let hasLoadedAnySlide = false;
+  let lastSlide = null;
+  let readerSnapshotForEditorRoundTrip = null;
+
+  const slugFromHash = () => {
+    const raw = location.hash.replace(/^#/, "");
+    if (!raw) return null;
+    if (raw.startsWith("s=")) return null;
+    return raw;
+  };
+
+  const findBySlug = (slug) => slides.find((s) => s.slug === slug) || null;
+
+  const setActive = (slug) => {
+    activeSlug = slug;
+    list.querySelectorAll(".presentation-toc-item").forEach((btn) => {
+      btn.classList.toggle("is-active", btn.dataset.slug === slug);
+    });
+  };
+
+  const loadSlide = async (slide, { pushHistory = true } = {}) => {
+    if (!slide) return;
+    try {
+      const res = await fetch(
+        new URL(`./${deckSlug}/diagrams/${slide.file}`, import.meta.url),
+      );
+      if (!res.ok) throw new Error(`fetch failed ${res.status}`);
+      const state = await res.json();
+      // On every slide change after the first, reset audible state and
+      // overlay the reader's persisted synth choices onto the incoming
+      // slide's synth block (per the design spec).
+      if (hasLoadedAnySlide) {
+        const carried = captureReaderSynthSnapshot();
+        resetAudibleStateForSlideTransition();
+        overlayReaderSynthOnSlideState(state, carried);
+      }
+      applyPresetState(state);
+      hasLoadedAnySlide = true;
+      lastSlide = slide;
+      activePresentationProfile = computePresentationProfile(deck, slide);
+      if (pushHistory) {
+        history.pushState(null, "", `#${slide.slug}`);
+      } else {
+        history.replaceState(null, "", `#${slide.slug}`);
+      }
+      setActive(slide.slug);
+    } catch (err) {
+      console.warn("Failed to load slide", slide, err);
+    }
+  };
+
+  const banner = document.getElementById("presentation-banner");
+  const bannerReturn = document.getElementById("presentation-banner-return");
+
+  const showReturnBanner = () => {
+    if (!banner || !bannerReturn || !lastSlide || !deck) return;
+    const deckLabel = deck.title || "presentation";
+    const numberPart = lastSlide.number ? `${lastSlide.number}. ` : "";
+    const slideLabel = lastSlide.title || lastSlide.slug;
+    bannerReturn.textContent = `← Return to ${deckLabel} · ${numberPart}${slideLabel}`;
+    banner.hidden = false;
+  };
+
+  const hideReturnBanner = () => {
+    if (banner) banner.hidden = true;
+  };
+
+  const exitToEditor = () => {
+    readerSnapshotForEditorRoundTrip = captureReaderSynthSnapshot();
+    activePresentationProfile = null;
+    document.body.classList.remove("presentation-mode");
+    document.documentElement.classList.remove("presentation-mode");
+    toc.hidden = true;
+    if (tab) tab.hidden = true;
+    editButton.hidden = true;
+    if (synthHandle) synthHandle.hidden = true;
+    presetSyncEnabled = true;
+    // Per spec: Edit Lattice always lands the user in 3D mode.
+    try { applyViewModeSelection("3d"); } catch (err) {}
+    // The canvas's CSS inset is removed once the presentation-mode class is
+    // gone, but the canvas's pixel buffer (canvas.width/height) was sized
+    // against the insetted clientWidth. Resize now so hit-testing and drawing
+    // align with the editor's full-viewport canvas without needing a refresh.
+    try { resizeCanvas(); } catch (err) {}
+    const shareUrl = getPresetShareUrl();
+    const hashIdx = shareUrl.indexOf("#");
+    const hashPart = hashIdx >= 0 ? shareUrl.slice(hashIdx) : "";
+    history.pushState(null, "", "/" + hashPart);
+    updatePresetUrl();
+    showReturnBanner();
+    pendingPresentationBannerHandler = returnFromEditor;
+  };
+
+  const returnFromEditor = async () => {
+    if (!lastSlide || !deckSlug) return;
+    hideReturnBanner();
+    document.body.classList.add("presentation-mode");
+    document.documentElement.classList.add("presentation-mode");
+    setDrawerOpen(true);
+    editButton.hidden = false;
+    if (synthHandle) synthHandle.hidden = false;
+    presetSyncEnabled = false;
+    // Canvas inset changes when the presentation-mode class is re-applied.
+    try { resizeCanvas(); } catch (err) {}
+    try {
+      const res = await fetch(
+        new URL(`./${deckSlug}/diagrams/${lastSlide.file}`, import.meta.url),
+      );
+      if (!res.ok) throw new Error(`fetch failed ${res.status}`);
+      const state = await res.json();
+      if (readerSnapshotForEditorRoundTrip) {
+        overlayReaderSynthOnSlideState(state, readerSnapshotForEditorRoundTrip);
+      }
+      resetAudibleStateForSlideTransition();
+      applyPresetState(state);
+      hasLoadedAnySlide = true;
+      activePresentationProfile = computePresentationProfile(deck, lastSlide);
+      setActive(lastSlide.slug);
+      syncPresentationSynthHandle();
+    } catch (err) {
+      console.warn("Failed to return to presentation", err);
+    }
+    history.pushState(null, "", `/${deckSlug}/#${lastSlide.slug}`);
+    readerSnapshotForEditorRoundTrip = null;
+    pendingPresentationBannerHandler = null;
+  };
+
+  const renderHeader = () => {
+    if (!deck) return;
+    // Eyebrow = small line above (deck.subtitle, e.g. "Diagrams from Alec Goldfarb's").
+    // Title  = large line below (deck.title, e.g. "Tuning the Ear").
+    const eyebrow = toc.querySelector(".presentation-toc-eyebrow");
+    const title = toc.querySelector(".presentation-toc-title");
+    if (eyebrow) eyebrow.textContent = deck.subtitle || "";
+    if (title && deck.title) title.textContent = deck.title;
+    if (deck.title) toc.setAttribute("aria-label", `${deck.title} slides`);
+  };
+
+  const render = () => {
+    list.innerHTML = "";
+    slides.forEach((slide, idx) => {
+      const li = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "presentation-toc-item";
+      btn.dataset.slug = slide.slug;
+      const num = document.createElement("span");
+      num.className = "presentation-toc-item-num";
+      num.textContent = slide.number || String(idx + 1).padStart(2, "0");
+      const label = document.createElement("span");
+      label.className = "presentation-toc-item-label";
+      label.textContent = slide.title || "Untitled";
+      btn.append(num, label);
+      btn.addEventListener("click", () => loadSlide(slide));
+      li.appendChild(btn);
+      list.appendChild(li);
+    });
+  };
+
+  const setDrawerOpen = (open) => {
+    toc.hidden = !open;
+    if (tab) tab.hidden = open;
+  };
+
+  if (collapseBtn) {
+    collapseBtn.addEventListener("click", () => setDrawerOpen(false));
+  }
+  if (tab) {
+    tab.addEventListener("click", () => setDrawerOpen(true));
+  }
+
+  const audioToggleButton = document.getElementById("presentation-audio-toggle");
+  if (audioToggleButton) {
+    audioToggleButton.hidden = false;
+    audioToggleButton.addEventListener("click", () => {
+      toggleAudio();
+    });
+  }
+  // Use a name compatible with the rest of this function's existing references.
+  const synthHandle = audioToggleButton;
+  syncPresentationSynthHandle();
+
+  editButton.hidden = false;
+  editButton.addEventListener("click", exitToEditor);
+
+  // Intro overlay: shown automatically on first visit (per deck), and
+  // reopened any time via the "?" button in the TOC header.
+  const introOverlay = document.getElementById("presentation-intro");
+  const helpButton = document.getElementById("presentation-help-button");
+  const introStorageKey = `tuning-lattice-intro-seen:${deckSlug}`;
+  const hasSeenIntro = () => {
+    try {
+      return window.localStorage.getItem(introStorageKey) === "1";
+    } catch (err) {
+      return false;
+    }
+  };
+  const markIntroSeen = () => {
+    try { window.localStorage.setItem(introStorageKey, "1"); } catch (err) {}
+  };
+  const openIntro = () => {
+    if (!introOverlay) return;
+    // Populate the variant block from the deck manifest each time it opens, so
+    // the overlay always reflects whatever deck this page is hosting.
+    const eyebrowEl = document.getElementById("presentation-intro-eyebrow");
+    const titleEl = document.getElementById("presentation-intro-title");
+    const ledeEl = document.getElementById("presentation-intro-lede");
+    if (eyebrowEl) eyebrowEl.textContent = (deck && deck.subtitle) || "";
+    if (titleEl) titleEl.textContent = (deck && deck.title) || "Welcome";
+    if (ledeEl) ledeEl.textContent = (deck && deck.intro) || "";
+    if (ledeEl) ledeEl.hidden = !ledeEl.textContent;
+    introOverlay.hidden = false;
+    const cta = introOverlay.querySelector(".presentation-intro-cta");
+    if (cta) {
+      try { cta.focus(); } catch (err) {}
+    }
+  };
+  const closeIntro = () => {
+    if (!introOverlay) return;
+    introOverlay.hidden = true;
+    markIntroSeen();
+  };
+  if (introOverlay) {
+    introOverlay.addEventListener("click", (event) => {
+      if (event.target && event.target.dataset && "presentationIntroClose" in event.target.dataset) {
+        closeIntro();
+      }
+    });
+    // Escape closes the intro when it's the topmost UI.
+    window.addEventListener("keydown", (event) => {
+      if (introOverlay.hidden) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeIntro();
+      }
+    }, { capture: true });
+  }
+  if (helpButton) {
+    helpButton.hidden = false;
+    helpButton.addEventListener("click", openIntro);
+  }
+
+  window.addEventListener("popstate", () => {
+    if (!document.body.classList.contains("presentation-mode")) return;
+    const slug = slugFromHash();
+    if (slug && slug !== activeSlug) {
+      const slide = findBySlug(slug);
+      if (slide) loadSlide(slide, { pushHistory: false });
+    }
+  });
+
+  // Arrow Left / Right = prev / next slide (edge-clamped). Skipped when the
+  // active slide opts into `pan: true` (in which case arrows control the
+  // canvas). Also skipped when focus is in a form input.
+  window.addEventListener("keydown", (event) => {
+    if (!isInPresentationMode()) return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const tag = event.target && event.target.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+    if (isPresentationInteractionAllowed("pan")) return;
+    if (!slides.length || !activeSlug) return;
+    const idx = slides.findIndex((s) => s.slug === activeSlug);
+    if (idx < 0) return;
+    let nextIdx = -1;
+    if (event.key === "ArrowLeft" && idx > 0) nextIdx = idx - 1;
+    if (event.key === "ArrowRight" && idx < slides.length - 1) nextIdx = idx + 1;
+    if (nextIdx < 0) return;
+    event.preventDefault();
+    loadSlide(slides[nextIdx]);
+  });
+
+  (async () => {
+    try {
+      const res = await fetch(
+        new URL(`./${deckSlug}/manifest.json`, import.meta.url),
+      );
+      if (!res.ok) throw new Error(`manifest fetch failed ${res.status}`);
+      deck = await res.json();
+      slides = Array.isArray(deck.slides) ? deck.slides : [];
+      renderHeader();
+      render();
+      setDrawerOpen(true);
+      const requestedSlug = slugFromHash();
+      const requested = requestedSlug ? findBySlug(requestedSlug) : null;
+      const target = requested || slides[0] || null;
+      if (target) {
+        await loadSlide(target, { pushHistory: false });
+      }
+      // First visit: pop the intro so readers know what they're looking at.
+      // Subsequent visits remain quiet; the "?" button re-opens on demand.
+      if (!hasSeenIntro()) {
+        openIntro();
+      }
+    } catch (err) {
+      console.warn(`Failed to load deck ${deckSlug}`, err);
+      const empty = document.createElement("li");
+      empty.className = "presentation-toc-empty";
+      empty.textContent = "Couldn’t load diagrams.";
+      list.appendChild(empty);
+    }
+  })();
+}
+
 const isEmbedMode = new URLSearchParams(window.location.search).has("embed");
 if (isEmbedMode) {
   document.body.classList.add("embed-mode");
+}
+const isPresentationMode =
+  window.__tuningLatticePresentationDeck === "tuning-the-ear" ||
+  document.documentElement.classList.contains("presentation-mode");
+if (isPresentationMode) {
+  document.body.classList.add("presentation-mode");
 }
 const presetState = readPresetFromUrl();
 const hasIncomingPresetState = Boolean(presetState);
@@ -29123,10 +29706,13 @@ if (presetState) {
 } else {
   rebuildLattice();
 }
-maybeShowWelcomeOverlay(hasIncomingPresetState, isEmbedMode);
-presetSyncEnabled = !isEmbedMode;
-if (!isEmbedMode) {
+maybeShowWelcomeOverlay(hasIncomingPresetState, isEmbedMode || isPresentationMode);
+presetSyncEnabled = !isEmbedMode && !isPresentationMode;
+if (!isEmbedMode && !isPresentationMode) {
   updatePresetUrl();
+}
+if (isPresentationMode) {
+  initPresentationMode();
 }
 
 bindOptionalClick(audioToggle, toggleAudio);
@@ -30126,6 +30712,26 @@ bindOptionalClick(layoutExitButton, () => {
   setControlChecked(layoutModeToggle, false);
   setLayoutMode(false);
   schedulePresetUrlUpdate();
+});
+
+// Module-level wiring for the presentation banner pill + Preview-as-Presentation
+// button. The banner click dispatches to whichever flow set the pending handler
+// (Edit Lattice round-trip or Preview-from-editor exit).
+const presentationBannerReturnButton = document.getElementById(
+  "presentation-banner-return",
+);
+if (presentationBannerReturnButton) {
+  presentationBannerReturnButton.addEventListener("click", () => {
+    if (typeof pendingPresentationBannerHandler === "function") {
+      pendingPresentationBannerHandler();
+    }
+  });
+}
+const layoutPreviewPresentationButton = document.getElementById(
+  "layout-preview-presentation",
+);
+bindOptionalClick(layoutPreviewPresentationButton, () => {
+  startPreviewPresentation();
 });
 bindLayoutTextInput(layoutTitleInput, (value) => {
   layoutTitle = value;
@@ -31823,19 +32429,24 @@ bindOptionalEvent(window, "keydown", (event) => {
   if (event.key.toLowerCase() === "c") {
     cHeld = true;
   }
-  if (event.key === "ArrowUp") {
+  // Skip view-pan in presentation mode unless the active slide opts into pan.
+  // Without this guard, left/right arrows both advance the slide AND shift
+  // the diagram, fighting the deck navigation.
+  const arrowPanAllowed =
+    !isInPresentationMode() || isPresentationInteractionAllowed("pan");
+  if (event.key === "ArrowUp" && arrowPanAllowed) {
     view.offsetY += (is3DMode ? 1 : -1) * (24 / view.zoom);
     draw();
   }
-  if (event.key === "ArrowDown") {
+  if (event.key === "ArrowDown" && arrowPanAllowed) {
     view.offsetY -= (is3DMode ? 1 : -1) * (24 / view.zoom);
     draw();
   }
-  if (event.key === "ArrowLeft") {
+  if (event.key === "ArrowLeft" && arrowPanAllowed) {
     view.offsetX += (is3DMode ? 1 : -1) * (24 / view.zoom);
     draw();
   }
-  if (event.key === "ArrowRight") {
+  if (event.key === "ArrowRight" && arrowPanAllowed) {
     view.offsetX -= (is3DMode ? 1 : -1) * (24 / view.zoom);
     draw();
   }

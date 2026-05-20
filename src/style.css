@@ -3731,6 +3731,542 @@ body.embed-mode .tooltip {
   display: none !important;
 }
 
+/* ---- Reader mode: /tuning-the-ear book companion ----
+ * Hides author chrome and exposes a left-edge Table of Contents
+ * + a prominent "Edit Lattice" escape hatch back to the full app.
+ */
+.presentation-mode .top-bar,
+.presentation-mode .nav-3d,
+.presentation-mode .layout-float,
+.presentation-mode .help-toggle-right,
+.presentation-mode .hint-row,
+.presentation-mode .welcome-overlay,
+body.presentation-mode .top-bar,
+body.presentation-mode .nav-3d,
+body.presentation-mode .layout-float,
+body.presentation-mode .help-toggle-right,
+body.presentation-mode .hint-row,
+body.presentation-mode .welcome-overlay,
+body.presentation-mode #layout-panel,
+body.presentation-mode #ratio-wheel-panel,
+body.presentation-mode #credits-dialog {
+  display: none !important;
+}
+/* NOTE: #envelope-panel and #animation-panel are reachable via the Synth and
+ * Play buttons in the firm synth bar, so they must remain available. They
+ * keep their default [hidden] state until the user clicks the toggle. */
+
+/* Firm panel layout in presentation mode: TOC on the left (full height),
+ * synth bar on the bottom-right (firm, no drawer), canvas inset to fill the
+ * remaining space so nothing overlaps the page-layout frame. */
+:root {
+  --presentation-toc-width: 280px;
+  --presentation-synth-height: 80px;
+}
+
+body.presentation-mode #lattice {
+  left: var(--presentation-toc-width);
+  width: calc(100vw - var(--presentation-toc-width));
+  bottom: var(--presentation-synth-height);
+  height: calc(100vh - var(--presentation-synth-height));
+}
+
+.presentation-toc {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--presentation-toc-width);
+  z-index: 6;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+  padding: 22px 20px 18px;
+  border-radius: 0;
+  background: var(--chrome-dialog-bg);
+  border-right: 1px solid var(--chrome-dialog-border);
+  box-shadow: 1px 0 0 0 var(--chrome-dialog-border);
+  color: var(--ink);
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  overflow: hidden;
+}
+
+.presentation-toc[hidden] {
+  display: none;
+}
+
+.presentation-toc-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--chrome-section-border);
+}
+
+.presentation-toc-header-text {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.presentation-help-button {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--chrome-soft-field-border);
+  background: var(--chrome-soft-surface);
+  color: var(--muted-ink);
+  cursor: pointer;
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.12s ease, border-color 0.12s ease;
+  padding: 0;
+}
+
+.presentation-help-button[hidden] {
+  display: none;
+}
+
+.presentation-help-button:hover,
+.presentation-help-button:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.presentation-toc-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-ink);
+}
+
+.presentation-toc-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.presentation-toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  display: grid;
+  gap: 2px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.presentation-toc-list li {
+  margin: 0;
+}
+
+.presentation-toc-item {
+  appearance: none;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--ink);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.presentation-toc-item:hover,
+.presentation-toc-item:focus-visible {
+  background: var(--chrome-soft-surface);
+  border-color: var(--chrome-soft-field-border);
+  outline: none;
+}
+
+.presentation-toc-item.is-active {
+  background: var(--chrome-soft-surface);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.presentation-toc-item-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-ink);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.presentation-toc-item.is-active .presentation-toc-item-num {
+  color: var(--accent);
+}
+
+.presentation-toc-collapse {
+  appearance: none;
+  background: none;
+  border: 1px solid var(--chrome-soft-field-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--muted-ink);
+  cursor: pointer;
+  justify-self: start;
+}
+
+.presentation-toc-collapse:hover {
+  color: var(--ink);
+}
+
+.presentation-toc-tab {
+  position: fixed;
+  top: 24px;
+  left: 0;
+  z-index: 6;
+  appearance: none;
+  padding: 10px 6px;
+  border: 1px solid var(--chrome-dialog-border);
+  border-left: none;
+  border-radius: 0 10px 10px 0;
+  background: var(--chrome-dialog-bg);
+  color: var(--ink);
+  box-shadow: var(--chrome-dialog-shadow);
+  cursor: pointer;
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.presentation-toc-tab[hidden] {
+  display: none;
+}
+
+.presentation-toc-tab:hover,
+.presentation-toc-tab:focus-visible {
+  background: var(--panel-hover);
+  outline: none;
+}
+
+.presentation-toc-tab-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  display: inline-block;
+}
+
+.presentation-toc-footer {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--chrome-section-border);
+}
+
+.presentation-edit-button {
+  appearance: none;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--button-on-accent-ink, #fff);
+  font: inherit;
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+
+.presentation-edit-button[hidden] {
+  display: none;
+}
+
+.presentation-edit-button:hover,
+.presentation-edit-button:focus-visible {
+  filter: brightness(1.05);
+  outline: none;
+}
+
+.presentation-edit-button:active {
+  transform: translateY(1px);
+}
+
+/* Synth bar in presentation mode: firm strip at the bottom, right of the TOC.
+ * Override the [hidden] attribute set by setLayoutMode so the bar stays
+ * visible throughout the reader's session. */
+body.presentation-mode .synth-panel {
+  display: flex !important;
+  left: var(--presentation-toc-width);
+  right: 0;
+  bottom: 0;
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid var(--chrome-dialog-border);
+  z-index: 5;
+  padding: 12px 18px;
+}
+
+/* Audio toggle is integrated into the TOC footer, above Edit Lattice. */
+.presentation-audio-toggle {
+  appearance: none;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--chrome-soft-field-border);
+  border-radius: 8px;
+  background: var(--chrome-soft-surface);
+  color: var(--muted-ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  font-size: 12px;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.presentation-audio-toggle[hidden] {
+  display: none;
+}
+
+.presentation-audio-toggle:hover,
+.presentation-audio-toggle:focus-visible {
+  color: var(--ink);
+  outline: none;
+}
+
+.presentation-audio-toggle.is-audio-on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.presentation-audio-label {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.presentation-audio-toggle svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.presentation-audio-toggle .speaker-wave {
+  display: none;
+}
+
+.presentation-audio-toggle.is-audio-on .speaker-wave {
+  display: inline;
+}
+
+.presentation-audio-toggle.is-audio-on .speaker-mute-slash {
+  display: none;
+}
+
+/* ---- Presentation intro overlay: first-visit welcome / help dialog ---- */
+.presentation-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.presentation-intro[hidden] {
+  display: none;
+}
+
+.presentation-intro-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(16, 19, 22, 0.45);
+}
+
+.presentation-intro-card {
+  position: relative;
+  max-width: 460px;
+  width: 100%;
+  padding: 28px 30px 26px;
+  background: var(--chrome-dialog-bg);
+  border: 1px solid var(--chrome-dialog-border);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(16, 19, 22, 0.32);
+  color: var(--ink);
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+}
+
+.presentation-intro-section {
+  display: grid;
+  gap: 6px;
+}
+
+.presentation-intro-section + .presentation-intro-section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--chrome-section-border);
+}
+
+.presentation-intro-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-ink);
+}
+
+.presentation-intro-title {
+  margin: 0 0 4px;
+  font-family: "Noto Serif", "Times New Roman", serif;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.presentation-intro-lede {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.presentation-intro-lede[hidden] {
+  display: none;
+}
+
+.presentation-intro-nav {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted-ink);
+}
+
+.presentation-intro-nav strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.presentation-intro-subhead {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-ink);
+}
+
+.presentation-intro-controls {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  column-gap: 14px;
+  row-gap: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.presentation-intro-controls dt {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.presentation-intro-controls dd {
+  margin: 0;
+  color: var(--muted-ink);
+}
+
+.presentation-intro-controls strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.presentation-intro-controls kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 6px;
+  border: 1px solid var(--chrome-soft-field-border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--chrome-soft-surface);
+  color: var(--ink);
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.presentation-intro-cta {
+  appearance: none;
+  width: 100%;
+  margin-top: 22px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--button-on-accent-ink, #fff);
+  font: inherit;
+  font-family: "Lexend", "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+
+.presentation-intro-cta:hover,
+.presentation-intro-cta:focus-visible {
+  filter: brightness(1.05);
+  outline: none;
+}
+
+.presentation-intro-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--muted-ink);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.presentation-intro-close:hover,
+.presentation-intro-close:focus-visible {
+  color: var(--ink);
+  background: var(--chrome-soft-surface);
+  outline: none;
+}
+
 /* ---- Guided tour: bubble ----
  * Positioned in screen space by data-corner + inline dx/dy. Sits below chrome
  * (z-index < panels/menus) so user-controlled UI can cover it if needed.

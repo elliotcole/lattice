@@ -10,6 +10,7 @@ export default {
         tuner: resolve(__dirname, "tuner/index.html"),
         tunerMobile: resolve(__dirname, "tuner/mobile/index.html"),
         overtones: resolve(__dirname, "overtones/index.html"),
+        tuningTheEar: resolve(__dirname, "tuning-the-ear/index.html"),
       },
     },
   },

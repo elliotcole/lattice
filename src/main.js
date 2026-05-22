@@ -9799,7 +9799,7 @@ function getHejiAnnotation(node, baseText) {
               glyphs = glyphs.slice(0, maxSymbols);
             }
             if (glyphs) {
-              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule", limit: rule.ratio });
             }
           } else {
             const pairGlyph = rule.negPair?.[accidentalKey] || "";
@@ -9819,7 +9819,7 @@ function getHejiAnnotation(node, baseText) {
               glyphs = glyphs.slice(0, maxSymbols);
             }
             if (glyphs) {
-              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule", limit: rule.ratio });
             }
           }
         });
@@ -9850,7 +9850,7 @@ function getHejiAnnotation(node, baseText) {
               glyphs = glyphs.slice(0, maxSymbols);
             }
             if (glyphs) {
-              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule", limit: rule.ratio });
             }
           } else {
             let glyphs = "";
@@ -9864,7 +9864,7 @@ function getHejiAnnotation(node, baseText) {
               glyphs = glyphs.slice(0, maxSymbols);
             }
             if (glyphs) {
-              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule", limit: rule.ratio });
             }
           }
         });
@@ -9879,7 +9879,7 @@ function getHejiAnnotation(node, baseText) {
             const glyphs = String(rule.glyphPos || "").repeat(Math.min(exp, maxSymbols));
             const showExponent = exp > maxSymbols ? String(exp) : "";
             if (glyphs) {
-              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule", limit: rule.ratio });
             }
           } else if (exp < 0) {
             const absExp = Math.abs(exp);
@@ -9887,30 +9887,28 @@ function getHejiAnnotation(node, baseText) {
             const glyphs = String(rule.glyphNeg || "").repeat(Math.min(absExp, maxSymbols));
             const showExponent = absExp > maxSymbols ? String(absExp) : "";
             if (glyphs) {
-              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule" });
+              suffixParts.push({ text: glyphs, expLabel: showExponent, source: "rule", limit: rule.ratio });
             }
           }
         });
       } else {
         if (rule.glyph) {
-          suffixParts.push({ text: rule.glyph, expLabel: "", source: "rule" });
+          suffixParts.push({ text: rule.glyph, expLabel: "", source: "rule", limit: rule.ratio });
         }
       }
     }
   });
   if (suffixParts.length > 1) {
-    const ordered = [];
-    suffixParts.forEach((part) => {
-      if (part.source === "rule") {
-        ordered.push(part);
-      }
-    });
-    suffixParts.forEach((part) => {
-      if (part.source !== "rule") {
-        ordered.push(part);
-      }
-    });
-    return { baseText: nextBase, suffixParts: ordered };
+    const defaults = suffixParts.filter((part) => part.source !== "rule");
+    const ruleParts = suffixParts.filter((part) => part.source === "rule");
+    const fiveLimitParts = ruleParts.filter((part) => Number(part.limit) === 5);
+    const higherLimitParts = ruleParts
+      .filter((part) => Number(part.limit) !== 5)
+      .sort((a, b) => (Number(b.limit) || 0) - (Number(a.limit) || 0));
+    return {
+      baseText: nextBase,
+      suffixParts: [...defaults, ...fiveLimitParts, ...higherLimitParts],
+    };
   }
   return { baseText: nextBase, suffixParts };
 }
@@ -12765,6 +12763,46 @@ function buildQuadraticCurveInfo(p0, p1, p2, steps = 40) {
   };
 }
 
+function placeGlyphsAlongQuadratic({
+  p0,
+  p1,
+  p2,
+  curveInfo,
+  chars,
+  charWidths,
+  centerArcLen,
+}) {
+  const info =
+    curveInfo && Number.isFinite(curveInfo.total)
+      ? curveInfo
+      : buildQuadraticCurveInfo(p0, p1, p2, 50);
+  const total = info.total;
+  const safeCenter = Math.min(Math.max(0, centerArcLen), total);
+  const centerT = info.tAtLength(safeCenter);
+  const centerTangent = getQuadraticTangent(p0, p1, p2, centerT);
+  const centerAngle = Math.atan2(centerTangent.y, centerTangent.x);
+  const reverseTraversal = centerAngle > Math.PI / 2 || centerAngle < -Math.PI / 2;
+  const totalWidth = charWidths.reduce((sum, value) => sum + value, 0);
+  const placements = [];
+  let cumulative = 0;
+  for (let i = 0; i < chars.length; i += 1) {
+    const width = charWidths[i] || 0;
+    const offset = -totalWidth / 2 + cumulative + width / 2;
+    const arcOffset = reverseTraversal ? -offset : offset;
+    const arcLen = Math.min(Math.max(0, safeCenter + arcOffset), total);
+    const t = info.tAtLength(arcLen);
+    const pos = getQuadraticPoint(p0, p1, p2, t);
+    const tangent = getQuadraticTangent(p0, p1, p2, t);
+    let angle = Math.atan2(tangent.y, tangent.x);
+    if (reverseTraversal) {
+      angle += Math.PI;
+    }
+    placements.push({ char: chars[i], width, pos, angle });
+    cumulative += width;
+  }
+  return { placements, reverseTraversal };
+}
+
 function getNearestQuadraticT(p0, p1, p2, point) {
   const info = buildQuadraticCurveInfo(p0, p1, p2, 50);
   let bestT = 0;
@@ -13644,13 +13682,34 @@ function drawDistanceConnections(nodePosMap) {
 
     ctx.save();
     ctx.font = `${labelWeight} ${size}px ${labelFont}`;
-    ctx.translate(labelPos.x, labelPos.y);
-    ctx.rotate(angle);
     ctx.fillStyle = themeColors.textSecondary;
     ctx.globalAlpha = 1;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(label, 0, 0);
+    if (useHorizontal) {
+      ctx.translate(labelPos.x, labelPos.y);
+      ctx.rotate(0);
+      ctx.fillText(label, 0, 0);
+    } else {
+      const chars = Array.from(label);
+      const charWidths = chars.map((char) => ctx.measureText(char).width);
+      const { placements } = placeGlyphsAlongQuadratic({
+        p0: lineStart,
+        p1: control,
+        p2: lineEnd,
+        curveInfo,
+        chars,
+        charWidths,
+        centerArcLen: labelArcLen,
+      });
+      for (const placement of placements) {
+        ctx.save();
+        ctx.translate(placement.pos.x, placement.pos.y);
+        ctx.rotate(placement.angle);
+        ctx.fillText(placement.char, 0, 0);
+        ctx.restore();
+      }
+    }
     ctx.restore();
   }
 }
@@ -27038,6 +27097,10 @@ function svgColorAttr(name, color) {
 }
 
 const OUTLINE_SVG_TEXT = true;
+const OUTLINE_FONT_URLS = import.meta.glob(
+  ["./fonts/*.ttf", "./HEJI2Text.otf"],
+  { eager: true, query: "?url", import: "default" }
+);
 const OUTLINE_FONT_FILES = {
   Lexend: {
     200: "fonts/Lexend-ExtraLight.ttf",
@@ -27131,16 +27194,24 @@ async function loadOutlineFont(fontFamily, fontWeight) {
     return null;
   }
   if (!outlineFontCache.has(file)) {
-    const url = new URL(`./${file}`, import.meta.url).href;
+    const url = OUTLINE_FONT_URLS[`./${file}`];
+    if (!url) {
+      console.warn(`[outline] No bundled URL for font file: ${file}`);
+      outlineFontCache.set(file, Promise.resolve(null));
+      return outlineFontCache.get(file);
+    }
     const promise = fetch(url)
       .then((response) => {
         if (!response.ok) {
-          throw new Error("Font fetch failed");
+          throw new Error(`Font fetch ${file} failed: ${response.status}`);
         }
         return response.arrayBuffer();
       })
       .then((buffer) => opentype.parse(buffer))
-      .catch(() => null);
+      .catch((err) => {
+        console.warn(`[outline] Failed to load ${file}:`, err);
+        return null;
+      });
     outlineFontCache.set(file, promise);
   }
   return outlineFontCache.get(file);
@@ -27221,6 +27292,25 @@ async function buildSvgTextElement({
   const lines = safeText.split(/\r?\n/);
   const lineHeight = Math.max(size, Math.round(size * 1.2));
   if (lines.length > 1) {
+    if (OUTLINE_SVG_TEXT) {
+      const parts = await Promise.all(
+        lines.map((line, index) =>
+          buildSvgTextElement({
+            text: line,
+            x,
+            y: y + index * lineHeight,
+            font,
+            size,
+            fontWeight,
+            anchor,
+            baseline,
+            color,
+            transform,
+          })
+        )
+      );
+      return parts.join("");
+    }
     const attrs = `text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
       font
     )}" font-size="${size}" font-weight="${fontWeight}" xml:space="preserve" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
@@ -27393,11 +27483,13 @@ async function buildLayoutSvgString(
   );
   parts.push(`<title>${escapeSvgText(exportLabel)}</title>`);
   parts.push(`<desc>${escapeSvgText(exportLabel)}</desc>`);
-  const resolvedFontCss =
-    typeof fontCss === "string" && fontCss.trim()
-      ? fontCss
-      : `@import url("${LEXEND_FONT_URL}");`;
-  parts.push(`<defs><style><![CDATA[${resolvedFontCss}]]></style></defs>`);
+  if (!OUTLINE_SVG_TEXT) {
+    const resolvedFontCss =
+      typeof fontCss === "string" && fontCss.trim()
+        ? fontCss
+        : `@import url("${LEXEND_FONT_URL}");`;
+    parts.push(`<defs><style><![CDATA[${resolvedFontCss}]]></style></defs>`);
+  }
   parts.push(`<rect width="100%" height="100%" ${svgFill(themeColors.page)}/>`);
 
   if (layoutTitle) {
@@ -27973,21 +28065,54 @@ async function buildLayoutSvgString(
       if (rightSegment) {
         drawCurveSegment(rightSegment, dashed);
       }
-      const rotation = (angle * 180) / Math.PI;
-      parts.push(
-        await buildSvgTextElement({
-          text: label,
-          x: labelPos.x,
-          y: labelPos.y,
-          font: labelFont,
-          size,
-          fontWeight: labelWeight,
-          anchor: "middle",
-          baseline: "middle",
-          color: themeColors.textSecondary,
-          transform: `rotate(${rotation} ${labelPos.x} ${labelPos.y})`,
-        })
-      );
+      if (useHorizontal) {
+        const rotation = (angle * 180) / Math.PI;
+        parts.push(
+          await buildSvgTextElement({
+            text: label,
+            x: labelPos.x,
+            y: labelPos.y,
+            font: labelFont,
+            size,
+            fontWeight: labelWeight,
+            anchor: "middle",
+            baseline: "middle",
+            color: themeColors.textSecondary,
+            transform: `rotate(${rotation} ${labelPos.x} ${labelPos.y})`,
+          })
+        );
+      } else {
+        const chars = Array.from(label);
+        const charWidths = await Promise.all(
+          chars.map((char) => measureSvgCharWidth(char, size, labelFont, labelWeight))
+        );
+        const { placements } = placeGlyphsAlongQuadratic({
+          p0: lineStart,
+          p1: control,
+          p2: lineEnd,
+          curveInfo,
+          chars,
+          charWidths,
+          centerArcLen: labelArcLen,
+        });
+        for (const placement of placements) {
+          const rotationDeg = (placement.angle * 180) / Math.PI;
+          parts.push(
+            await buildSvgTextElement({
+              text: placement.char,
+              x: placement.pos.x,
+              y: placement.pos.y,
+              font: labelFont,
+              size,
+              fontWeight: labelWeight,
+              anchor: "middle",
+              baseline: "middle",
+              color: themeColors.textSecondary,
+              transform: `rotate(${rotationDeg} ${placement.pos.x} ${placement.pos.y})`,
+            })
+          );
+        }
+      }
     }
   }
 
@@ -28685,8 +28810,12 @@ async function exportLayoutSvg() {
     return;
   }
   const hejiFontUrl = getHejiFontUrl();
-  const hejiFontDataUrl = await buildFontDataUrl(hejiFontUrl, "font/otf");
-  const exportFontCss = await getExportFontCss(hejiFontDataUrl || hejiFontUrl);
+  const hejiFontDataUrl = OUTLINE_SVG_TEXT
+    ? null
+    : await buildFontDataUrl(hejiFontUrl, "font/otf");
+  const exportFontCss = OUTLINE_SVG_TEXT
+    ? null
+    : await getExportFontCss(hejiFontDataUrl || hejiFontUrl);
   const svgDetailHejiYOffset = await getSvgHejiYOffset(
     layoutNoteTextSize,
     layoutNoteFont,
@@ -28741,9 +28870,13 @@ async function exportLayoutPdf() {
     return;
   }
   const hejiFontUrl = getHejiFontUrl();
-  const hejiFontDataUrl = await buildFontDataUrl(hejiFontUrl, "font/otf");
+  const hejiFontDataUrl = OUTLINE_SVG_TEXT
+    ? null
+    : await buildFontDataUrl(hejiFontUrl, "font/otf");
   const hejiFontSrc = hejiFontDataUrl || hejiFontUrl;
-  const exportFontCss = await getExportFontCss(hejiFontSrc);
+  const exportFontCss = OUTLINE_SVG_TEXT
+    ? null
+    : await getExportFontCss(hejiFontSrc);
   const svgDetailHejiYOffset = await getSvgHejiYOffset(
     layoutNoteTextSize,
     layoutNoteFont,
@@ -28771,38 +28904,19 @@ async function exportLayoutPdf() {
     win.close();
     return;
   }
-  win.document.open();
-  win.document.title = exportLabel;
-  win.document.write(`<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>${escapedExportLabel}</title>
-    <meta name="title" content="${escapedExportLabel}" />
-    <meta name="author" content="${escapedExportLabel}" />
-    <link rel="stylesheet" href="${LEXEND_FONT_URL}">
-    <style>
-      @page { size: ${Math.round(widthPx)}px ${Math.round(heightPx)}px; margin: 0; }
-      html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
-      html, body, svg, svg * {
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-        color-adjust: exact !important;
-      }
-      body { display: flex; align-items: center; justify-content: center; }
-      svg { width: ${Math.round(widthPx)}px; height: ${Math.round(heightPx)}px; display: block; }
-      @font-face {
+  const fontStylesheetTag = OUTLINE_SVG_TEXT
+    ? ""
+    : `<link rel="stylesheet" href="${LEXEND_FONT_URL}">`;
+  const hejiFontFaceRule = OUTLINE_SVG_TEXT
+    ? ""
+    : `@font-face {
         font-family: "HEJI2Text";
         src: url("${hejiFontSrc}") format("opentype");
         font-display: swap;
-      }
-    </style>
-  </head>
-  <body>
-    ${svg}
-    <script>
-      window.onload = () => {
-        const waitForFonts = document.fonts
+      }`;
+  const fontWaitScript = OUTLINE_SVG_TEXT
+    ? `setTimeout(() => window.print(), 200);`
+    : `const waitForFonts = document.fonts
           ? Promise.all([
               document.fonts.load('16px "HEJI2Text"'),
               document.fonts.load('16px "Lexend"'),
@@ -28818,7 +28932,35 @@ async function exportLayoutPdf() {
           : Promise.resolve();
         waitForFonts.finally(() => {
           setTimeout(() => window.print(), 200);
-        });
+        });`;
+  win.document.open();
+  win.document.title = exportLabel;
+  win.document.write(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapedExportLabel}</title>
+    <meta name="title" content="${escapedExportLabel}" />
+    <meta name="author" content="${escapedExportLabel}" />
+    ${fontStylesheetTag}
+    <style>
+      @page { size: ${Math.round(widthPx)}px ${Math.round(heightPx)}px; margin: 0; }
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
+      html, body, svg, svg * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+      }
+      body { display: flex; align-items: center; justify-content: center; font-family: serif; }
+      svg { width: ${Math.round(widthPx)}px; height: ${Math.round(heightPx)}px; display: block; }
+      ${hejiFontFaceRule}
+    </style>
+  </head>
+  <body>
+    ${svg}
+    <script>
+      window.onload = () => {
+        ${fontWaitScript}
       };
     </script>
   </body>

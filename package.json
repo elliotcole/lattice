@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "lint": "eslint .",
-    "format": "prettier --write src/serialization.js tests scripts eslint.config.js",
-    "format:check": "prettier --check src/serialization.js tests scripts eslint.config.js",
+    "format": "prettier --write src/serialization.js src/lib tests scripts eslint.config.js",
+    "format:check": "prettier --check src/serialization.js src/lib tests scripts eslint.config.js",
     "check:regression": "node scripts/regression-smoke.mjs"
   },
   "devDependencies": {

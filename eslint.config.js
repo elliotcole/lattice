@@ -5,7 +5,7 @@ import js from "@eslint/js";
 // them now would drown signal in thousands of legacy findings.
 export default [
   {
-    files: ["src/serialization.js", "tests/**/*.js", "scripts/**/*.mjs"],
+    files: ["src/serialization.js", "src/lib/**/*.js", "tests/**/*.js", "scripts/**/*.mjs"],
     ...js.configs.recommended,
     languageOptions: {
       ecmaVersion: "latest",

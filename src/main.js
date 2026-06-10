@@ -31532,24 +31532,6 @@ if (creditsTrigger && creditsDialog) {
     }
   });
 }
-const introDialog = document.getElementById("intro-dialog");
-const introReplayTourBtn = document.getElementById("intro-replay-tour");
-if (introDialog) {
-  introDialog.addEventListener("click", (event) => {
-    // Close on backdrop click but not when clicking action buttons / links.
-    const target = event.target;
-    if (target === introDialog) {
-      introDialog.close("dismiss");
-    }
-  });
-}
-bindOptionalClick(introReplayTourBtn, () => {
-  if (introDialog && introDialog.open) {
-    introDialog.close("tour");
-  }
-  startQuickTour();
-});
-
 // ---- Learn & Get Help dialog ----
 const learnHelpButton = document.getElementById("learn-help-button");
 const learnHelpDialog = document.getElementById("learn-help-dialog");

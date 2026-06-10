@@ -149,7 +149,7 @@ Tuning Lattice has a one-button looper. That button is the backslash \
 3. A second press enters Play mode, where the recording loops.
 4. A third press enters Overdub mode, where you can record on top of the current loop.
 5. Further presses alternate between Play and Overdub modes.
-6. Clear with [
+6. Clear with ]
 
 #### To use MIDI out
 

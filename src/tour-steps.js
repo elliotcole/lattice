@@ -232,13 +232,13 @@ export const deepTourSteps = [
   {
     id: "deep-microtonal",
     title: "Microtonal intervals",
-    body: "Under Options > Analysis, enable Show Microtonal.\n\nClick any node to see labeled connections to every other active node — each showing the interval name and ratio between them.\n\nClick a connection to hear the interval. This is how you identify relationships in your scale.\n\nDouble-click empty space or press ESCAPE to exit.",
+    body: "In the View panel, enable Interval Overlay.\n\nClick any node to see labeled connections to every other active node — each showing the interval name and ratio between them.\n\nClick a connection to hear the interval. This is how you identify relationships in your scale.\n\nDouble-click empty space or press ESCAPE to exit.",
     anchor: { corner: "top-right", dx: -24, dy: 91 },
   },
   {
     id: "deep-distances",
     title: "Distance lines",
-    body: "Under Options > Analysis, enable Show Distances, then click Edit.\n\nDrag between any two nodes to create a measurement line. It shows the interval ratio and name.\n\nDouble-click a label to rename it. Drag a label to slide it along the line. Drag the line itself to curve it. OPTION-CLICK a line to delete it.\n\nDistance lines are saved with the URL and in layout exports.",
+    body: "In the View panel, enable Distances, then click edit.\n\nDrag between any two nodes to create a measurement line. It shows the interval ratio and name.\n\nDouble-click a label to rename it. Drag a label to slide it along the line. Drag the line itself to curve it. OPTION-CLICK a line to delete it.\n\nDistance lines are saved with the URL and in layout exports.",
     anchor: { corner: "top-right", dx: -24, dy: 91 },
   },
   {

@@ -16,8 +16,7 @@ import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SRC_DIR =
-  "/Users/elliot/Library/CloudStorage/Dropbox/_Projects/Tuning the Ear/Diagrams v2";
+const SRC_DIR = "/Users/elliot/Library/CloudStorage/Dropbox/_Projects/Tuning the Ear/Diagrams v2";
 const DECK_DIR = join(__dirname, "..", "src", "tuning-the-ear");
 const DIAGRAMS_DIR = join(DECK_DIR, "diagrams");
 const MANIFEST_PATH = join(DECK_DIR, "manifest.json");
@@ -27,7 +26,8 @@ const DEFAULT_DECK = {
   slug: "tuning-the-ear",
   title: "Tuning the Ear",
   subtitle: "Diagrams from Alec Goldfarb’s",
-  intro: "Each diagram is a playable tuning lattice that accompanies a section of the book. Click any node to hear its pitch, and explore the just-intonation relationships the chapter describes.",
+  intro:
+    "Each diagram is a playable tuning lattice that accompanies a section of the book. Click any node to hear its pitch, and explore the just-intonation relationships the chapter describes.",
   defaultInteractions: {
     playNotes: true,
     sustain: true,
@@ -81,8 +81,7 @@ function buildSlide(srcFile) {
     .replace(/\s*\[tuninglattice\.com\]\s*$/, "")
     .trim();
   const layoutTitle = parsed.layout && parsed.layout.title;
-  const displayTitle =
-    layoutTitle && layoutTitle.trim() ? layoutTitle.trim() : titlePart;
+  const displayTitle = layoutTitle && layoutTitle.trim() ? layoutTitle.trim() : titlePart;
   return {
     slug: `${sourceNum}-${slugifyTitlePart(titlePart)}`,
     number: sourceNum,
@@ -110,7 +109,9 @@ function main() {
   rmSync(DIAGRAMS_DIR, { recursive: true, force: true });
   mkdirSync(DIAGRAMS_DIR, { recursive: true });
 
-  const files = readdirSync(SRC_DIR).filter((f) => f.endsWith(".json")).sort();
+  const files = readdirSync(SRC_DIR)
+    .filter((f) => f.endsWith(".json"))
+    .sort();
   const slides = [];
   const seenSlugs = new Set();
 
@@ -139,7 +140,9 @@ function main() {
   }
 
   const manifest = {
-    ...(existing && existing.version ? { version: existing.version } : { version: DEFAULT_DECK.version }),
+    ...(existing && existing.version
+      ? { version: existing.version }
+      : { version: DEFAULT_DECK.version }),
     slug: (existing && existing.slug) || DEFAULT_DECK.slug,
     title: (existing && existing.title) || DEFAULT_DECK.title,
     subtitle: existing && "subtitle" in existing ? existing.subtitle : DEFAULT_DECK.subtitle,

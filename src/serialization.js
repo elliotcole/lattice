@@ -9,7 +9,7 @@ function lzCompressToEncodedURIComponent(input) {
     return "";
   }
   return lzCompress(input, 6, (a) =>
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$".charAt(a)
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$".charAt(a),
   );
 }
 
@@ -18,7 +18,9 @@ function lzDecompressFromEncodedURIComponent(input) {
     return "";
   }
   return lzDecompress(input, 32, (index) =>
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$".indexOf(input.charAt(index))
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$".indexOf(
+      input.charAt(index),
+    ),
   );
 }
 
@@ -150,8 +152,6 @@ function lzDecompress(compressed, bitsPerChar, getNextValue) {
   let w;
   let bits;
   let resb;
-  let maxpower;
-  let power;
   let c;
 
   const data = {

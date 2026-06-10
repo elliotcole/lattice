@@ -1694,7 +1694,6 @@ let snapshotKeyboardMode = false;
 let snapshotKeyboardActive = false;
 let snapshotKeyboardPrevMode = "";
 let snapshotActiveLetterKey = "";
-let snapshotDebugEnabled = false;
 let activeCaption = null; // { text: string, x: number, y: number } — x,y as fractions of viewport
 let captionEditing = false;
 let captionDragState = null;
@@ -1852,10 +1851,8 @@ let labelCacheKey = "";
 let labelCacheDataVersion = 0;
 const textWidthCache = new Map();
 let drawPending = false;
-const DEBUG_CENTS = false;
 let tiltCos = 1;
 let tiltSin = 0;
-const DEBUG_R_CLICK = false;
 
 const LAYOUT_PX_PER_IN = 96;
 const LAYOUT_PAGE_SIZES = {
@@ -3802,14 +3799,6 @@ function updateSnapshotUi() {
         ? snapshotKeyboardModeToggle.checked && snapshotKeyboardActiveToggle.checked
         : snapshotKeyboardActive;
     snapshotKeyboardContainer.classList.toggle("is-inactive", !active);
-    if (snapshotDebugEnabled) {
-      console.log("[snapshot-letters-visual]", {
-        active,
-        mode: snapshotKeyboardModeToggle ? snapshotKeyboardModeToggle.checked : snapshotKeyboardMode,
-        toggle: snapshotKeyboardActiveToggle ? snapshotKeyboardActiveToggle.checked : null,
-        classList: snapshotKeyboardContainer.className,
-      });
-    }
   }
   const snapshotGrid = document.getElementById("snapshot-grid");
   if (snapshotGrid) {
@@ -4837,63 +4826,6 @@ if (typeof window !== "undefined") {
   };
 }
 
-function logSnapshotDebug(stage, snapshot) {
-  if (!snapshotDebugEnabled) {
-    return;
-  }
-  const voiceList = voices.filter((voice) => voice);
-  const missingNodeVoices = [];
-  const mismatchedBaseVoices = [];
-  const orphanBaseNodes = [];
-  const baseMismatchNodes = [];
-  voiceList.forEach((voice) => {
-    const node = nodeById.get(voice.nodeId);
-    if (!node) {
-      missingNodeVoices.push(voice.id);
-      return;
-    }
-    if (node.baseVoiceId !== voice.id) {
-      mismatchedBaseVoices.push({ voiceId: voice.id, nodeId: node.id, base: node.baseVoiceId });
-    }
-  });
-  nodes.forEach((node) => {
-    if (!node.baseVoiceId) {
-      return;
-    }
-    const voice = findVoiceById(node.baseVoiceId);
-    if (!voice) {
-      orphanBaseNodes.push(node.id);
-      return;
-    }
-    if (voice.nodeId !== node.id) {
-      baseMismatchNodes.push({
-        nodeId: node.id,
-        base: node.baseVoiceId,
-        voiceNodeId: voice.nodeId,
-      });
-    }
-  });
-  console.groupCollapsed(
-    `[snapshot] ${stage} | voices=${voiceList.length} | active=${snapshotActiveIndex}`
-  );
-  console.log("snapshotConnectCommonTones", snapshotConnectCommonTones);
-  console.log("snapshotRestorePlayNodes", snapshotRestorePlayNodes);
-  console.log("snapshotKeys", snapshot && snapshot.playKeys ? snapshot.playKeys.length : 0);
-  if (missingNodeVoices.length) {
-    console.warn("voices with missing node", missingNodeVoices);
-  }
-  if (mismatchedBaseVoices.length) {
-    console.warn("voices not bound as base", mismatchedBaseVoices);
-  }
-  if (orphanBaseNodes.length) {
-    console.warn("nodes with missing base voice", orphanBaseNodes);
-  }
-  if (baseMismatchNodes.length) {
-    console.warn("nodes with base voice from other node", baseMismatchNodes);
-  }
-  console.groupEnd();
-}
-
 function saveSnapshot(index) {
   if (index < 0 || index >= snapshotSlots.length) {
     return;
@@ -4901,18 +4833,6 @@ function saveSnapshot(index) {
   const state = buildSnapshotState();
   if (!state) {
     return;
-  }
-  if (snapshotDebugEnabled) {
-    console.groupCollapsed(`[snapshot-save] ${index}`);
-    const voiceInfo = voices.map((voice) => ({
-      id: voice.id,
-      nodeId: voice.nodeId,
-      source: voice.source,
-      freq: Number.isFinite(voice.freq) ? Number(voice.freq.toFixed(3)) : null,
-      releasing: voice.releasing,
-    }));
-    console.log("voices", voiceInfo);
-    console.groupEnd();
   }
   snapshotSlots[index] = {
     state,
@@ -4922,12 +4842,6 @@ function saveSnapshot(index) {
     lfos: getSnapshotLfoState(),
     caption: cloneCaption(activeCaption),
   };
-  if (snapshotDebugEnabled) {
-    console.groupCollapsed(`[snapshot-save-keys] ${index}`);
-    console.log("playKeys", snapshotSlots[index].playKeys);
-    console.log("pattern", snapshotSlots[index].pattern);
-    console.groupEnd();
-  }
   updateSnapshotUi();
   const displayIndex = index === 9 ? 0 : index + 1;
   showTemporaryBanner(`Snapshot ${displayIndex} saved`);
@@ -4941,18 +4855,6 @@ function saveSnapshotLetter(letter, index) {
   if (!state) {
     return;
   }
-  if (snapshotDebugEnabled) {
-    console.groupCollapsed(`[snapshot-save-letter] ${letter}`);
-    const voiceInfo = voices.map((voice) => ({
-      id: voice.id,
-      nodeId: voice.nodeId,
-      source: voice.source,
-      freq: Number.isFinite(voice.freq) ? Number(voice.freq.toFixed(3)) : null,
-      releasing: voice.releasing,
-    }));
-    console.log("voices", voiceInfo);
-    console.groupEnd();
-  }
   snapshotLetterSlots[index] = {
     state,
     playKeys: getPlayingSnapshotKeys({ excludePattern: patternPlayerState === "playing" }),
@@ -4961,12 +4863,6 @@ function saveSnapshotLetter(letter, index) {
     lfos: getSnapshotLfoState(),
     caption: cloneCaption(activeCaption),
   };
-  if (snapshotDebugEnabled) {
-    console.groupCollapsed(`[snapshot-save-letter-keys] ${letter}`);
-    console.log("playKeys", snapshotLetterSlots[index].playKeys);
-    console.log("pattern", snapshotLetterSlots[index].pattern);
-    console.groupEnd();
-  }
   snapshotActiveLetterKey = letter;
   updateSnapshotUi();
   showTemporaryBanner(`Snapshot ${letter.toUpperCase()} saved`);
@@ -5381,19 +5277,6 @@ function restoreSnapshotPlayState(snapshot) {
   if (tryMorphSnapshotPlayState(snapshot)) {
     return true;
   }
-  if (snapshotDebugEnabled) {
-    console.groupCollapsed("[snapshot-restore-play]");
-    console.log("playKeys", snapshot.playKeys);
-    const voiceInfo = voices.map((voice) => ({
-      id: voice.id,
-      nodeId: voice.nodeId,
-      source: voice.source,
-      freq: Number.isFinite(voice.freq) ? Number(voice.freq.toFixed(3)) : null,
-      releasing: voice.releasing,
-    }));
-    console.log("voices-before", voiceInfo);
-    console.groupEnd();
-  }
   const lfoKeySet = new Set();
   if (snapshotRestoreLfos && snapshot.lfos) {
     snapshot.lfos.forEach((entry) => {
@@ -5511,18 +5394,6 @@ function restoreSnapshotPlayState(snapshot) {
       entry.node.baseVoiceId = voice.id;
     }
   });
-  if (snapshotDebugEnabled) {
-    console.groupCollapsed("[snapshot-restore-play-after]");
-    const voiceInfo = voices.map((voice) => ({
-      id: voice.id,
-      nodeId: voice.nodeId,
-      source: voice.source,
-      freq: Number.isFinite(voice.freq) ? Number(voice.freq.toFixed(3)) : null,
-      releasing: voice.releasing,
-    }));
-    console.log("voices-after", voiceInfo);
-    console.groupEnd();
-  }
   return false;
 }
 
@@ -8059,9 +7930,6 @@ function getCentsForPitchClass(freq, a4, pitchClass) {
 }
 
 function getNodeRadius(node) {
-  if (node.isCustom) {
-    return 35;
-  }
   return 35;
 }
 
@@ -8360,7 +8228,7 @@ function onFundamentalNoteChange() {
   }
 }
 
-function projectPoint(point, disableScale = false) {
+function projectPoint(point) {
   if (!is3DMode && !isFlattened2D) {
     return { x: point.x, y: point.y, depth: 0, scale: 1, scaleRaw: 1, denom: 1, visible: true };
   }
@@ -8375,10 +8243,10 @@ function projectPoint(point, disableScale = false) {
   const z2 = point.y * sinX + z1 * cosX;
 
   const adjustedZ = z2 + cameraDistance;
-  const denom = disableScale ? 1 : 1 + adjustedZ * 0.002;
-  const scaleRaw = disableScale ? 1 : 1 / denom;
-  const scale = disableScale ? 1 : Math.max(0.15, scaleRaw);
-  const visible = disableScale ? true : denom > 0.02;
+  const denom = 1 + adjustedZ * 0.002;
+  const scaleRaw = 1 / denom;
+  const scale = Math.max(0.15, scaleRaw);
+  const visible = denom > 0.02;
   return { x: x1 * scale, y: y1 * scale, depth: z2, scale, scaleRaw, denom, visible };
 }
 
@@ -8401,8 +8269,8 @@ function projectPointWithAngles(point, rotX, rotY, disableScale = false) {
   return { x: x1 * scale, y: y1 * scale, depth: z2, scale, scaleRaw, denom, visible };
 }
 
-function worldToScreen(point, disableScale = false) {
-  const projected = projectPoint(point, disableScale);
+function worldToScreen(point) {
+  const projected = projectPoint(point);
   const tiltedX = projected.x * tiltCos - projected.y * tiltSin;
   const tiltedY = projected.x * tiltSin + projected.y * tiltCos;
   return {
@@ -8425,10 +8293,6 @@ function screenToWorld(point) {
     x: untiltedX,
     y: untiltedY,
   };
-}
-
-function shouldDisableLayoutScale() {
-  return false;
 }
 
 function getLayoutNodeScreenScale(pos) {
@@ -8456,7 +8320,7 @@ function getLayoutInnerTextScale(radius) {
   return Math.min(1.8, Math.max(0.65, ratio));
 }
 
-function worldToCamera(point, disableScale = false) {
+function worldToCamera(point) {
   const safePoint = {
     x: Number.isFinite(point.x) ? point.x : 0,
     y: Number.isFinite(point.y) ? point.y : 0,
@@ -8471,9 +8335,9 @@ function worldToCamera(point, disableScale = false) {
   const y1 = safePoint.y * cosX - z1 * sinX;
   const z2 = safePoint.y * sinX + z1 * cosX;
   const adjustedZ = z2 + cameraDistance;
-  const denom = disableScale ? 1 : 1 + adjustedZ * 0.002;
-  const scaleRaw = disableScale ? 1 : 1 / denom;
-  const scale = disableScale ? 1 : Math.max(0.15, scaleRaw);
+  const denom = 1 + adjustedZ * 0.002;
+  const scaleRaw = 1 / denom;
+  const scale = Math.max(0.15, scaleRaw);
   return { x1, y1, z2, scale };
 }
 
@@ -8489,13 +8353,13 @@ function cameraToWorld(camera) {
   return { x, y, z };
 }
 
-function screenDeltaToWorldDelta(delta, baseCoord, disableScale = false) {
+function screenDeltaToWorldDelta(delta, baseCoord) {
   const safeBase = {
     x: Number.isFinite(baseCoord.x) ? baseCoord.x : 0,
     y: Number.isFinite(baseCoord.y) ? baseCoord.y : 0,
     z: Number.isFinite(baseCoord.z) ? baseCoord.z : 0,
   };
-  const camera = worldToCamera(safeBase, disableScale);
+  const camera = worldToCamera(safeBase);
   const scale = camera.scale || 1;
   const untiltedDeltaX = delta.x * tiltCos + delta.y * tiltSin;
   const untiltedDeltaY = -delta.x * tiltSin + delta.y * tiltCos;
@@ -9368,20 +9232,6 @@ function buildCentsReadout(
     const fallbackCents = preferredFallback
       ? getCentsForPitchClass(freq, a4, preferredFallback)
       : nearest.cents;
-    if (DEBUG_CENTS) {
-      console.log("Cents debug", {
-        nodeId: node && node.id,
-        isCustom: Boolean(node && node.isCustom),
-        freq,
-        baseText,
-        infoPitchClass: info.pitchClass,
-        infoCents: info.cents,
-        nearestPitchClass: nearest.pitchClass,
-        nearestCents: nearest.cents,
-        preferredFallback,
-        fallbackCents,
-      });
-    }
     const fallbackBase = `${preferredFallback}${formatCents(fallbackCents)}`;
     if (wrap) {
       const primary = formatCents(info.cents);
@@ -10280,14 +10130,13 @@ function getLayoutKeyMappingLabelHitbox(labelText, node, pos, radius) {
 
 function getLayoutTitleY() {
   const { top } = getLayoutPageRect();
-  const disableScale = shouldDisableLayoutScale();
   let maxY = Number.NEGATIVE_INFINITY;
   for (const [a, b] of edges) {
     if (!a.active || !b.active) {
       return;
     }
-    const start = worldToScreen(getNodeDisplayCoordinate(a), disableScale);
-    const end = worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+    const start = worldToScreen(getNodeDisplayCoordinate(a));
+    const end = worldToScreen(getNodeDisplayCoordinate(b));
     const radiusA = getLayoutNodeRadius(start);
     const radiusB = getLayoutNodeRadius(end);
     const dx = end.x - start.x;
@@ -11247,7 +11096,7 @@ function getSegmentClosestT(point, a, b) {
   return t;
 }
 
-function getTriangleDiagonalHit(screenPoint, entry, gridMap, disableScale) {
+function getTriangleDiagonalHit(screenPoint, entry, gridMap) {
   const { a, b, c, d } = getTriangleCellNodes(entry, gridMap);
   let best = null;
   let bestDist = Number.POSITIVE_INFINITY;
@@ -11255,8 +11104,8 @@ function getTriangleDiagonalHit(screenPoint, entry, gridMap, disableScale) {
     if (!startNode || !endNode) {
       return;
     }
-    const start = worldToScreen(getNodeDisplayCoordinate(startNode), disableScale);
-    const end = worldToScreen(getNodeDisplayCoordinate(endNode), disableScale);
+    const start = worldToScreen(getNodeDisplayCoordinate(startNode));
+    const end = worldToScreen(getNodeDisplayCoordinate(endNode));
     const radiusA = layoutMode
       ? getLayoutNodeRadius(start)
       : getNodeRadius(startNode) * (start.scale || 1);
@@ -11717,7 +11566,7 @@ function getTriangleLabelPoints(tri, nodes) {
   return null;
 }
 
-function drawTriangleDiagonals(nodePosMap, disableScale = false) {
+function drawTriangleDiagonals(nodePosMap) {
   ensureAutoTriangleDiagonals();
   if (!triangleDiagonals.size && !autoTriangleDiagonals.size) {
     return;
@@ -11736,10 +11585,10 @@ function drawTriangleDiagonals(nodePosMap, disableScale = false) {
     const endEntry = nodePosMap && nodePosMap.get(b.id);
     const start = startEntry
       ? startEntry.pos
-      : worldToScreen(getNodeDisplayCoordinate(a), disableScale);
+      : worldToScreen(getNodeDisplayCoordinate(a));
     const end = endEntry
       ? endEntry.pos
-      : worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+      : worldToScreen(getNodeDisplayCoordinate(b));
     const radiusA = startEntry
       ? startEntry.radius
       : layoutMode
@@ -11775,7 +11624,7 @@ function drawTriangleDiagonals(nodePosMap, disableScale = false) {
   ctx.restore();
 }
 
-function drawTriangleLabels(nodePosMap, disableScale = false) {
+function drawTriangleLabels(nodePosMap) {
   if (!triangleLabels.size) {
     return;
   }
@@ -11797,7 +11646,7 @@ function drawTriangleLabels(nodePosMap, disableScale = false) {
     const points = labelNodes.map((node) => {
       const projected = nodePosMap && nodePosMap.get(node.id)
         ? nodePosMap.get(node.id).pos
-        : worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+        : worldToScreen(getNodeDisplayCoordinate(node));
       return projected;
     });
     const cx = (points[0].x + points[1].x + points[2].x) / 3;
@@ -11824,7 +11673,7 @@ function drawTriangleLabels(nodePosMap, disableScale = false) {
   });
 }
 
-function drawTriangleHover(nodePosMap, disableScale = false) {
+function drawTriangleHover(nodePosMap) {
   if (!triangleHover || !tHeld) {
     return;
   }
@@ -11841,19 +11690,19 @@ function drawTriangleHover(nodePosMap, disableScale = false) {
   const projA =
     nodePosMap && nodePosMap.get(a.id)
       ? nodePosMap.get(a.id).pos
-      : worldToScreen(getNodeDisplayCoordinate(a), disableScale);
+      : worldToScreen(getNodeDisplayCoordinate(a));
   const projB =
     nodePosMap && nodePosMap.get(b.id)
       ? nodePosMap.get(b.id).pos
-      : worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+      : worldToScreen(getNodeDisplayCoordinate(b));
   const projC =
     nodePosMap && nodePosMap.get(c.id)
       ? nodePosMap.get(c.id).pos
-      : worldToScreen(getNodeDisplayCoordinate(c), disableScale);
+      : worldToScreen(getNodeDisplayCoordinate(c));
   const projD =
     nodePosMap && nodePosMap.get(d.id)
       ? nodePosMap.get(d.id).pos
-      : worldToScreen(getNodeDisplayCoordinate(d), disableScale);
+      : worldToScreen(getNodeDisplayCoordinate(d));
 
   const keys = triangleCellKeys(triangleHover);
   const existingDiag = triangleDiagonals.has(keys.backslash)
@@ -12221,7 +12070,6 @@ function findTriangleHit(screenPoint) {
   if (!activeMap.size) {
     return null;
   }
-  const disableScale = shouldDisableLayoutScale();
   let best = null;
   let bestDist = Number.POSITIVE_INFINITY;
   const updateBest = (entry, center) => {
@@ -12239,10 +12087,10 @@ function findTriangleHit(screenPoint) {
     const hasBackslash = hasEffectiveTriangleDiagonal(keys.backslash);
     const hasSlash = hasEffectiveTriangleDiagonal(keys.slash);
     const activeDiag = hasBackslash ? "backslash" : hasSlash ? "slash" : null;
-    const pA = worldToScreen(getNodeDisplayCoordinate(aAll), disableScale);
-    const pB = worldToScreen(getNodeDisplayCoordinate(bAll), disableScale);
-    const pC = worldToScreen(getNodeDisplayCoordinate(cAll), disableScale);
-    const pD = worldToScreen(getNodeDisplayCoordinate(dAll), disableScale);
+    const pA = worldToScreen(getNodeDisplayCoordinate(aAll));
+    const pB = worldToScreen(getNodeDisplayCoordinate(bAll));
+    const pC = worldToScreen(getNodeDisplayCoordinate(cAll));
+    const pD = worldToScreen(getNodeDisplayCoordinate(dAll));
     const inABD = activeDiag === "slash"
       ? false
       : pointInTriangle(screenPoint, pA, pB, pD);
@@ -13246,11 +13094,10 @@ function getAxisLegendSettings() {
   const xLabel = `${xReduced.numerator}:${xReduced.denominator}`;
   const yLabel = `${yReduced.numerator}:${yReduced.denominator}`;
   const zLabel = `${zReduced.numerator}:${zReduced.denominator}`;
-  const disableScale = shouldDisableLayoutScale();
-  const origin = worldToScreen({ x: 0, y: 0, z: 0 }, disableScale);
-  const xAxisPoint = worldToScreen({ x: GRID_SPACING, y: 0, z: 0 }, disableScale);
-  const yAxisPoint = worldToScreen({ x: 0, y: GRID_SPACING, z: 0 }, disableScale);
-  const zAxisPoint = worldToScreen({ x: 0, y: 0, z: GRID_SPACING }, disableScale);
+  const origin = worldToScreen({ x: 0, y: 0, z: 0 });
+  const xAxisPoint = worldToScreen({ x: GRID_SPACING, y: 0, z: 0 });
+  const yAxisPoint = worldToScreen({ x: 0, y: GRID_SPACING, z: 0 });
+  const zAxisPoint = worldToScreen({ x: 0, y: 0, z: GRID_SPACING });
   const xVec = { x: xAxisPoint.x - origin.x, y: xAxisPoint.y - origin.y };
   const yVec = { x: yAxisPoint.x - origin.x, y: yAxisPoint.y - origin.y };
   const zVec = { x: zAxisPoint.x - origin.x, y: zAxisPoint.y - origin.y };
@@ -14210,11 +14057,10 @@ function draw() {
     drawLayoutPage({ drawAxes: !layoutAxisEdit });
   }
 
-  const disableScale = shouldDisableLayoutScale();
   const nodeRenderList = nodes
     .map((node) => ({
       node,
-      pos: worldToScreen(getNodeDisplayCoordinate(node), disableScale),
+      pos: worldToScreen(getNodeDisplayCoordinate(node)),
     }))
     .sort((a, b) => {
       if (a.node.isCustom && !b.node.isCustom) {
@@ -14317,10 +14163,10 @@ function draw() {
       const endEntry = nodePosMap.get(b.id);
       const start = startEntry
         ? startEntry.pos
-        : worldToScreen(getNodeDisplayCoordinate(a), disableScale);
+        : worldToScreen(getNodeDisplayCoordinate(a));
       const end = endEntry
         ? endEntry.pos
-        : worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+        : worldToScreen(getNodeDisplayCoordinate(b));
       const radiusA = startEntry
         ? startEntry.radius
         : layoutMode
@@ -14378,10 +14224,10 @@ function draw() {
   drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry);
   drawGuideEdges(nodePosMap, guideNodes);
   if (!showMicrotonal) {
-    drawTriangleDiagonals(nodePosMap, disableScale);
-    drawTriangleLabels(nodePosMap, disableScale);
+    drawTriangleDiagonals(nodePosMap);
+    drawTriangleLabels(nodePosMap);
   }
-  drawTriangleHover(nodePosMap, disableScale);
+  drawTriangleHover(nodePosMap);
 
   const nowMs = performance.now();
   const nodeVolumeModeAlpha = getNodeVolumeModeAlpha(nowMs);
@@ -15973,19 +15819,6 @@ function onPointerDown(event) {
     canvas.setPointerCapture(event.pointerId);
     return;
   }
-  if (DEBUG_R_CLICK) {
-    console.log("R-click debug: pointerdown", {
-      rHeld,
-      hitId: hit ? hit.id : null,
-      hitCenter: hit ? Boolean(hit.isCenter) : null,
-      hitRatio: hit ? `${hit.numerator}/${hit.denominator}` : null,
-      isCustom: hit ? Boolean(hit.isCustom) : null,
-      spellingMode,
-      customPianoMapMode: isCustomPianoMapModeActive(),
-      layoutMode,
-      isAddMode,
-    });
-  }
   if (analysisLayers.distances && (distanceSelectMode || layoutMode) && !isInPresentationMode()) {
     if (distanceSelectMode && event.altKey) {
       const labelHit = hitTestDistanceLabel(screenPoint);
@@ -16207,7 +16040,6 @@ function onPointerDown(event) {
     const triangle = findTriangleHit(screenPoint);
     if (triangle) {
       const keys = triangleCellKeys(triangle);
-      const disableScale = shouldDisableLayoutScale();
       const gridMap = new Map();
       nodes.forEach((node) => {
         if (node.active && !node.isCustom) {
@@ -16219,7 +16051,7 @@ function onPointerDown(event) {
       const hasLine = hasBackslash || hasSlash;
       const activeDiag = hasBackslash ? "backslash" : hasSlash ? "slash" : null;
       const diagHit = activeDiag
-        ? getTriangleDiagonalHit(screenPoint, triangle, gridMap, disableScale)
+        ? getTriangleDiagonalHit(screenPoint, triangle, gridMap)
         : null;
       const lineHit = diagHit && diagHit === activeDiag;
       if (hasLine && lineHit) {
@@ -16887,8 +16719,7 @@ function onPointerMove(event) {
   if (layoutMode && layoutKeyMappingDrag) {
     const node = nodeById.get(layoutKeyMappingDrag.nodeId);
     if (node) {
-      const disableScale = shouldDisableLayoutScale();
-      const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+      const pos = worldToScreen(getNodeDisplayCoordinate(node));
       const lockAxis = updateDragLock(layoutKeyMappingDrag, event);
       let labelX = event.offsetX + layoutKeyMappingDrag.offsetX;
       let labelY = event.offsetY + layoutKeyMappingDrag.offsetY;
@@ -16914,8 +16745,7 @@ function onPointerMove(event) {
   if (layoutMode && layoutLabelDrag) {
     const node = nodeById.get(layoutLabelDrag.nodeId);
     if (node) {
-      const disableScale = shouldDisableLayoutScale();
-      const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+      const pos = worldToScreen(getNodeDisplayCoordinate(node));
       const lockAxis = updateDragLock(layoutLabelDrag, event);
       let labelX = event.offsetX + layoutLabelDrag.offsetX;
       let labelY = event.offsetY + layoutLabelDrag.offsetY;
@@ -16961,11 +16791,7 @@ function onPointerMove(event) {
           }
         : delta;
       const lockAxis = useProjectedAxis ? null : updateDragLock(layoutDrag, event);
-      const deltaWorld = screenDeltaToWorldDelta(
-        useDelta,
-        layoutDrag.startCoord,
-        shouldDisableLayoutScale()
-      );
+      const deltaWorld = screenDeltaToWorldDelta(useDelta, layoutDrag.startCoord);
       const nextCoord = {
         x: layoutDrag.startCoord.x + deltaWorld.x,
         y: layoutDrag.startCoord.y + deltaWorld.y,
@@ -17612,13 +17438,12 @@ function hitTestCommaEdge(screenPoint, options = {}) {
   const hitThreshold = Math.max(1, Number(options.hitThreshold) || 6);
   let nodePosMap = options.nodePosMap instanceof Map ? options.nodePosMap : null;
   if (!nodePosMap) {
-    const disableScale = shouldDisableLayoutScale();
     nodePosMap = new Map();
     nodes.forEach((node) => {
       if (!node.active) {
         return;
       }
-      const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+      const pos = worldToScreen(getNodeDisplayCoordinate(node));
       const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
       const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
       nodePosMap.set(node.id, { pos, radius });
@@ -17874,10 +17699,7 @@ function hitTestScreen(screenPoint, options) {
     ) {
       return;
     }
-    const projected = worldToScreen(
-      getNodeDisplayCoordinate(node),
-      shouldDisableLayoutScale()
-    );
+    const projected = worldToScreen(getNodeDisplayCoordinate(node));
     const dx = projected.x - screenPoint.x;
     const dy = projected.y - screenPoint.y;
     const distance = Math.hypot(dx, dy);
@@ -17911,10 +17733,9 @@ function hitTestScreen(screenPoint, options) {
 }
 
 function hitTestEdgeLabel(screenPoint) {
-  const disableScale = shouldDisableLayoutScale();
   const nodePosMap = new Map();
   nodes.forEach((node) => {
-    const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+    const pos = worldToScreen(getNodeDisplayCoordinate(node));
     const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
     const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
     nodePosMap.set(node.id, { pos, radius });
@@ -18098,13 +17919,12 @@ function hitTestNoteLabel(screenPoint) {
   if (!layoutMode) {
     return null;
   }
-  const disableScale = shouldDisableLayoutScale();
   let hit = null;
   nodes.forEach((node) => {
     if (!(node.isCenter || node.active || node.isCustom)) {
       return;
     }
-    const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+    const pos = worldToScreen(getNodeDisplayCoordinate(node));
     const radius = getLayoutNodeRadius(pos);
     const hitbox = getLayoutNoteLabelHitbox(node, pos, radius);
     const left = hitbox.left;
@@ -18132,7 +17952,6 @@ function hitTestLayoutKeyMappingLabel(screenPoint) {
     return null;
   }
   const customPianoLabels = getCustomPianoLabelMap();
-  const disableScale = shouldDisableLayoutScale();
   let hit = null;
   nodes.forEach((node) => {
     if (!(node.isCenter || node.active || node.isCustom)) {
@@ -18148,7 +17967,7 @@ function hitTestLayoutKeyMappingLabel(screenPoint) {
     if (!shouldShowLayoutKeyMappingLabel(keyLabel, pitchClass)) {
       return;
     }
-    const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+    const pos = worldToScreen(getNodeDisplayCoordinate(node));
     const radius = getLayoutNodeRadius(pos);
     const hitbox = getLayoutKeyMappingLabelHitbox(labelText, node, pos, radius);
     const left = hitbox.left;
@@ -24116,45 +23935,6 @@ function decodePresetState(encoded) {
   return JSON.parse(json);
 }
 
-function getJsonByteSize(value) {
-  try {
-    const text = JSON.stringify(value);
-    return new TextEncoder().encode(text).length;
-  } catch (error) {
-    return 0;
-  }
-}
-
-function logPresetSizeBreakdown(state, encodedLength) {
-  try {
-    if (!state || typeof state !== "object") {
-      return;
-    }
-    const totalBytes = getJsonByteSize(state);
-    const topLevel = Object.entries(state).map(([key, value]) => ({
-      key,
-      bytes: getJsonByteSize(value),
-    }));
-    topLevel.sort((a, b) => b.bytes - a.bytes);
-    console.group("Preset size breakdown");
-    console.log(
-      `Encoded length: ${encodedLength} chars, JSON size: ${totalBytes} bytes`
-    );
-    console.table(topLevel);
-    if (state.layout && typeof state.layout === "object") {
-      const layoutEntries = Object.entries(state.layout).map(([key, value]) => ({
-        key,
-        bytes: getJsonByteSize(value),
-      }));
-      layoutEntries.sort((a, b) => b.bytes - a.bytes);
-      console.table(layoutEntries);
-    }
-    console.groupEnd();
-  } catch (error) {
-    console.warn("Preset size breakdown failed", error);
-  }
-}
-
 // Preset File I/O
 async function downloadLatticeState() {
   const state = getPresetState();
@@ -27458,7 +27238,6 @@ async function buildLayoutSvgString(
   }
   const { widthIn, heightIn, widthPx, heightPx } = getLayoutPageDimensions();
   const { left, top } = getLayoutPageRect();
-  const disableScale = shouldDisableLayoutScale();
   const labelSize = layoutRatioTextSize;
   const detailSize = layoutNoteTextSize;
   const titleSize = Math.max(12, Math.round(layoutTitleSize));
@@ -27629,7 +27408,7 @@ async function buildLayoutSvgString(
   const exportNodeRenderList = nodes
     .map((node) => ({
       node,
-      pos: worldToScreen(getNodeDisplayCoordinate(node), disableScale),
+      pos: worldToScreen(getNodeDisplayCoordinate(node)),
     }))
     .sort((a, b) => {
       if (a.node.isCustom && !b.node.isCustom) {
@@ -27905,7 +27684,7 @@ async function buildLayoutSvgString(
   if (analysisLayers.distances && distanceSelectedEdges.size) {
     const distanceNodePosMap = new Map();
     nodes.forEach((node) => {
-      const pos = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+      const pos = worldToScreen(getNodeDisplayCoordinate(node));
       distanceNodePosMap.set(node.id, { pos, radius: getLayoutNodeRadius(pos) });
     });
     const labelFont = layoutLineLabelFont;
@@ -28290,8 +28069,8 @@ async function buildLayoutSvgString(
       if (!a || !b) {
         return;
       }
-      const start = worldToScreen(getNodeDisplayCoordinate(a), disableScale);
-      const end = worldToScreen(getNodeDisplayCoordinate(b), disableScale);
+      const start = worldToScreen(getNodeDisplayCoordinate(a));
+      const end = worldToScreen(getNodeDisplayCoordinate(b));
       const radiusA = getLayoutNodeRadius(start);
       const radiusB = getLayoutNodeRadius(end);
       const dx = end.x - start.x;
@@ -28333,7 +28112,7 @@ async function buildLayoutSvgString(
         continue;
       }
       const points = labelNodes.map((node) => {
-        const proj = worldToScreen(getNodeDisplayCoordinate(node), disableScale);
+        const proj = worldToScreen(getNodeDisplayCoordinate(node));
         return { x: proj.x - left, y: proj.y - top };
       });
       const cx = (points[0].x + points[1].x + points[2].x) / 3;
@@ -30061,44 +29840,11 @@ bindOptionalEvent(window, "keydown", (event) => {
   const keyboardMappingActive = snapshotKeyboardActiveToggle
     ? snapshotKeyboardActiveToggle.checked
     : snapshotKeyboardActive;
-  if (snapshotDebugEnabled) {
-    console.log("[snapshot-keydown]", {
-      key: event.key,
-      code: event.code,
-      alt: event.altKey,
-      shift: event.shiftKey,
-      ctrl: event.ctrlKey,
-      meta: event.metaKey,
-      mappingEnabled: keyboardModeEnabled,
-      mappingActive: keyboardMappingActive,
-      target: event.target && event.target.tagName,
-    });
-  }
   if (document.activeElement !== canvas && !(keyboardModeEnabled && keyboardMappingActive)) {
     return;
   }
   const letterIndex = keyboardModeEnabled ? getSnapshotLetterIndexFromEvent(event) : null;
   const numberIndex = getSnapshotIndexFromEvent(event);
-  if (keyboardModeEnabled && keyboardMappingActive && snapshotDebugEnabled) {
-    console.log("[snapshot-keyboard]", {
-      code: event.code,
-      key: event.key,
-      alt: event.altKey,
-      shift: event.shiftKey,
-      ctrl: event.ctrlKey,
-      meta: event.metaKey,
-      letterIndex,
-      numberIndex,
-    });
-  }
-  if (snapshotDebugEnabled && keyboardModeEnabled) {
-    console.log("[snapshot-keyboard-state]", {
-      enabled: keyboardModeEnabled,
-      active: keyboardMappingActive,
-      letterIndex,
-      numberIndex,
-    });
-  }
   if (keyboardModeEnabled && keyboardMappingActive && letterIndex != null) {
     if (event.altKey && !event.metaKey && !event.ctrlKey) {
       event.preventDefault();
@@ -30857,11 +30603,6 @@ if (layoutKeyMappingButtons.length) {
 bindOptionalClick(layoutShareLinkButton, async () => {
   const state = getPresetState();
   const encoded = encodePresetState(state);
-  logPresetSizeBreakdown(state, encoded.length);
-  console.log("Preset size summary", {
-    encodedLength: encoded.length,
-    jsonBytes: getJsonByteSize(state),
-  });
   const hash = `${PRESET_PARAM}=${encoded}`;
   history.replaceState(null, "", `${location.pathname}${location.search}#${hash}`);
   const shareUrl = `${location.origin}${location.pathname}${location.search}#${hash}`;
@@ -32468,14 +32209,6 @@ bindOptionalEvent(window, "pointerdown", enableAudioFromGesture);
 bindOptionalEvent(window, "keydown", enableAudioFromGesture);
 bindOptionalEvent(window, "keydown", handleKeyDown);
 bindOptionalEvent(window, "keyup", handleKeyUp);
-window.snapshotDebug = {
-  enable: () => {
-    snapshotDebugEnabled = true;
-  },
-  disable: () => {
-    snapshotDebugEnabled = false;
-  },
-};
 bindOptionalEvent(window, "keydown", (event) => {
   syncCapsLockState(event);
   if (handleTourKeydown(event)) {
@@ -32557,14 +32290,6 @@ bindOptionalEvent(window, "keydown", (event) => {
   }
   if (event.key.toLowerCase() === "r") {
     rHeld = true;
-    if (DEBUG_R_CLICK) {
-      console.log("R-click debug: keydown", {
-        target: event.target && event.target.tagName ? event.target.tagName : null,
-        customPianoMapMode: isCustomPianoMapModeActive(),
-        layoutMode,
-        spellingMode,
-      });
-    }
   }
   if (event.key.toLowerCase() === "z") {
     zKeyHeld = true;
@@ -32732,14 +32457,6 @@ bindOptionalEvent(window, "keyup", (event) => {
   }
   if (event.key.toLowerCase() === "r") {
     rHeld = false;
-    if (DEBUG_R_CLICK) {
-      console.log("R-click debug: keyup", {
-        target: event.target && event.target.tagName ? event.target.tagName : null,
-        customPianoMapMode: isCustomPianoMapModeActive(),
-        layoutMode,
-        spellingMode,
-      });
-    }
   }
   if (event.key.toLowerCase() === "t") {
     tHeld = false;

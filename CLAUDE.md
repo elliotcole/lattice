@@ -6,7 +6,10 @@ Interactive just-intonation lattice editor, deployed at tuninglattice.com (GitHu
 
 A full audit and 6-phase revision plan lives in **`AUDIT-2026-06.md`** — read it before structural work. Verdict: staged rebuild around an extracted core (strangler pattern), not big-bang rewrite.
 
-**Next action: Phase 0** (§9 of the audit) — broken-wiring fixes, hygiene sweep, CI gate, dead-code deletion. Then Phase 1 (test fixtures + serialization extraction) before touching anything structural.
+**Done: Phase 0** (June 10, 2026) — wiring fixes, hygiene, CI gate, dead code deleted.
+**Done: Phase 1** (June 10, 2026) — fixtures checked in (`fixtures/`), preset codec extracted to `src/serialization.js`, 100 vitest round-trip tests (`npm test`), eslint/prettier on extracted code, Vite 8.
+
+**Next action: Phase 2** (§9 of the audit) — extract the shared core (ratio math, spelling, HEJI → monzo + bigint module imported by all three apps). Start with tuner↔overtones while `analyzeRatioForTrueSpelling` is still byte-identical.
 
 Decisions already made (don't re-ask):
 - Tech: open to anything; TypeScript welcome.
@@ -23,7 +26,9 @@ Decisions already made (don't re-ask):
 | `overtones/` | Overtone explorer (imports `src/custom-oscillators.js` — only cross-app sharing) |
 | `tuning-the-ear/` + `src/tuning-the-ear/` | Book-companion diagram deck; imported from Dropbox via `scripts/import-tuning-the-ear.mjs` (hardcoded path) |
 | `src/tour-steps.js` | Declarative tour content — the pattern to emulate |
-| `vite.config.js` | Multi-page build: 6 entries. `presentation.html` is NOT an entry (known dead link) |
+| `src/serialization.js` | Preset codec (encode/decode + LZ-string), pure, extracted Phase 1 |
+| `fixtures/` + `tests/` | Creator exports + snapshot-sets; vitest round-trip suite (`npm test`) — the serialization compatibility gate |
+| `vite.config.js` | Multi-page build: 6 entries (Vite 8/rolldown). `presentation.html` is NOT an entry |
 | `docs/` | Hand-built docs page + design notes |
 
 ## Invariants & contracts
@@ -35,7 +40,7 @@ Decisions already made (don't re-ask):
 
 ## Rules
 
-- Run `npm run check:regression` before committing.
+- Run `npm test` and `npm run check:regression` before committing; `npm run lint` covers extracted modules.
 - Never commit: `dist/`, `node_modules/`, `.venv*/`, `.DS_Store`, `.claude/projects/`.
 - Push to `main` deploys to production immediately — don't push unverified work.
 - Test changes against a saved Creator JSON round-trip (load → save → load) when touching serialization.

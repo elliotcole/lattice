@@ -1,16 +1,18 @@
 import { resolve } from "node:path";
 
+const root = import.meta.dirname;
+
 export default {
   base: "./",
   build: {
     rollupOptions: {
       input: {
-        main: resolve(__dirname, "index.html"),
-        docs: resolve(__dirname, "docs/index.html"),
-        tuner: resolve(__dirname, "tuner/index.html"),
-        tunerMobile: resolve(__dirname, "tuner/mobile/index.html"),
-        overtones: resolve(__dirname, "overtones/index.html"),
-        tuningTheEar: resolve(__dirname, "tuning-the-ear/index.html"),
+        main: resolve(root, "index.html"),
+        docs: resolve(root, "docs/index.html"),
+        tuner: resolve(root, "tuner/index.html"),
+        tunerMobile: resolve(root, "tuner/mobile/index.html"),
+        overtones: resolve(root, "overtones/index.html"),
+        tuningTheEar: resolve(root, "tuning-the-ear/index.html"),
       },
     },
   },

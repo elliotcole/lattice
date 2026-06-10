@@ -4,8 +4,8 @@ dist/
 *.code-workspace
 .venv*/
 .claude/
-backup/
-snapshot-sets/
+/backup/
+/snapshot-sets/
 tour.js
 tour-quick.js
 tour-deep.js

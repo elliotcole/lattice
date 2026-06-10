@@ -1,0 +1,1298 @@
+{
+  "v": 1,
+  "base": null,
+  "snapshots": [
+    [
+      0,
+      {
+        "state": {
+          "v": 1,
+          "active": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              -2,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              -1,
+              0
+            ]
+          ],
+          "customNodes": [
+            {
+              "sourceExponents": [
+                4,
+                0,
+                0
+              ],
+              "customSlot": 0,
+              "factorNumerator": 11,
+              "factorDenominator": 8,
+              "position": {
+                "x": 540,
+                "y": -60
+              },
+              "active": false
+            }
+          ],
+          "mode3d": true,
+          "connectOrphans": false,
+          "distances": false,
+          "view": {
+            "zoom": 1,
+            "offsetX": 0,
+            "offsetY": 0,
+            "rotX": 0.32999999999999996,
+            "rotY": 0.7450000000000001
+          },
+          "axes": true,
+          "grid": true,
+          "lineLabels": true,
+          "circles": true,
+          "keyMappings": true,
+          "ratios": [
+            13,
+            11,
+            3
+          ],
+          "exponentOffset": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "fundamental": 261.6255653005986,
+          "a4": 440,
+          "fundamentalSpelling": "sharp",
+          "featureMode": "note",
+          "spellingMode": "simple",
+          "showHz": false,
+          "showRatioCents": false,
+          "showCentsDeviation": true,
+          "showCentsSign": false,
+          "directionalRatioLabels": false,
+          "hejiEnabled": true,
+          "enharmonicsEnabled": true,
+          "centsPrecision": 0
+        },
+        "playKeys": [
+          "ratio:256:169",
+          "ratio:1:1",
+          "ratio:3:2",
+          "ratio:11:8"
+        ]
+      }
+    ],
+    [
+      1,
+      {
+        "state": {
+          "v": 1,
+          "active": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              -2,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              -1,
+              0
+            ]
+          ],
+          "customNodes": [
+            {
+              "sourceExponents": [
+                4,
+                0,
+                0
+              ],
+              "customSlot": 0,
+              "factorNumerator": 11,
+              "factorDenominator": 8,
+              "octaveReduce": true,
+              "octaveShift": 1,
+              "position": {
+                "x": 540,
+                "y": -60
+              },
+              "active": false
+            }
+          ],
+          "mode3d": true,
+          "connectOrphans": false,
+          "distances": false,
+          "view": {
+            "zoom": 1,
+            "offsetX": 0,
+            "offsetY": 0,
+            "rotX": 0.43999999999999995,
+            "rotY": 0.4850000000000001
+          },
+          "axes": true,
+          "grid": true,
+          "lineLabels": true,
+          "circles": true,
+          "keyMappings": true,
+          "ratios": [
+            13,
+            11,
+            3
+          ],
+          "exponentOffset": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "fundamental": 261.6255653005986,
+          "a4": 440,
+          "fundamentalSpelling": "sharp",
+          "featureMode": "note",
+          "spellingMode": "simple",
+          "showHz": false,
+          "showRatioCents": false,
+          "showCentsDeviation": true,
+          "showCentsSign": false,
+          "directionalRatioLabels": false,
+          "hejiEnabled": true,
+          "enharmonicsEnabled": true,
+          "centsPrecision": 0
+        },
+        "playKeys": [
+          "grid:0,0,0",
+          "grid:0,1,0",
+          "grid:0,-1,0",
+          "grid:1,0,0"
+        ],
+        "pattern": null,
+        "lfos": null
+      }
+    ],
+    [
+      2,
+      {
+        "state": {
+          "v": 1,
+          "active": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              -2,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              -1,
+              0
+            ],
+            [
+              0,
+              1,
+              -1
+            ]
+          ],
+          "customNodes": [
+            {
+              "sourceExponents": [
+                4,
+                0,
+                0
+              ],
+              "customSlot": 0,
+              "factorNumerator": 11,
+              "factorDenominator": 8,
+              "octaveReduce": true,
+              "octaveShift": 1,
+              "position": {
+                "x": 540,
+                "y": -60
+              },
+              "active": false
+            }
+          ],
+          "mode3d": true,
+          "connectOrphans": false,
+          "distances": false,
+          "view": {
+            "zoom": 1,
+            "offsetX": 0,
+            "offsetY": 0,
+            "rotX": 0.695,
+            "rotY": 0.8250000000000001
+          },
+          "axes": true,
+          "grid": true,
+          "lineLabels": true,
+          "circles": true,
+          "keyMappings": true,
+          "ratios": [
+            13,
+            11,
+            3
+          ],
+          "exponentOffset": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "fundamental": 261.6255653005986,
+          "a4": 440,
+          "fundamentalSpelling": "sharp",
+          "featureMode": "note",
+          "spellingMode": "simple",
+          "showHz": false,
+          "showRatioCents": false,
+          "showCentsDeviation": true,
+          "showCentsSign": false,
+          "directionalRatioLabels": false,
+          "hejiEnabled": true,
+          "enharmonicsEnabled": true,
+          "centsPrecision": 0
+        },
+        "playKeys": [
+          "grid:-2,0,0",
+          "grid:0,0,0",
+          "grid:0,0,1",
+          "grid:0,1,0",
+          "grid:0,1,-1"
+        ],
+        "pattern": null,
+        "lfos": null
+      }
+    ],
+    [
+      3,
+      {
+        "state": {
+          "v": 1,
+          "active": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              -1,
+              1,
+              0
+            ],
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              1,
+              1,
+              0
+            ],
+            [
+              -2,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              -1,
+              0
+            ],
+            [
+              0,
+              1,
+              -1
+            ]
+          ],
+          "customNodes": [
+            {
+              "sourceExponents": [
+                4,
+                0,
+                0
+              ],
+              "customSlot": 0,
+              "factorNumerator": 11,
+              "factorDenominator": 8,
+              "octaveReduce": true,
+              "octaveShift": 1,
+              "position": {
+                "x": 540,
+                "y": -60
+              },
+              "active": false
+            }
+          ],
+          "mode3d": true,
+          "connectOrphans": false,
+          "distances": false,
+          "view": {
+            "zoom": 2.1578505295598647,
+            "offsetX": -11.122179071826288,
+            "offsetY": 22.244358143652576,
+            "rotX": 1.0350000000000001,
+            "rotY": 0.46
+          },
+          "axes": true,
+          "grid": true,
+          "lineLabels": true,
+          "circles": true,
+          "keyMappings": true,
+          "ratios": [
+            13,
+            11,
+            3
+          ],
+          "exponentOffset": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "fundamental": 261.6255653005986,
+          "a4": 440,
+          "fundamentalSpelling": "sharp",
+          "featureMode": "note",
+          "spellingMode": "simple",
+          "showHz": false,
+          "showRatioCents": false,
+          "showCentsDeviation": true,
+          "showCentsSign": false,
+          "directionalRatioLabels": false,
+          "hejiEnabled": true,
+          "enharmonicsEnabled": true,
+          "centsPrecision": 0
+        },
+        "playKeys": [
+          "grid:0,1,0",
+          "grid:0,1,-1",
+          "grid:1,1,0",
+          "grid:-1,1,0"
+        ],
+        "pattern": null,
+        "lfos": null
+      }
+    ],
+    [
+      4,
+      {
+        "state": {
+          "v": 1,
+          "active": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              -1,
+              1,
+              0
+            ],
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              1,
+              1,
+              0
+            ],
+            [
+              2,
+              1,
+              0
+            ],
+            [
+              -2,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              -1,
+              0
+            ],
+            [
+              0,
+              1,
+              -1
+            ]
+          ],
+          "customNodes": [
+            {
+              "sourceExponents": [
+                4,
+                0,
+                0
+              ],
+              "customSlot": 0,
+              "factorNumerator": 11,
+              "factorDenominator": 8,
+              "octaveReduce": true,
+              "octaveShift": 1,
+              "position": {
+                "x": 540,
+                "y": -60
+              },
+              "active": false
+            }
+          ],
+          "mode3d": true,
+          "connectOrphans": false,
+          "distances": false,
+          "view": {
+            "zoom": 2.2,
+            "offsetX": 0,
+            "offsetY": 0,
+            "rotX": 0.675,
+            "rotY": 0.3350000000000001
+          },
+          "axes": true,
+          "grid": true,
+          "lineLabels": true,
+          "circles": true,
+          "keyMappings": true,
+          "ratios": [
+            13,
+            11,
+            3
+          ],
+          "exponentOffset": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "fundamental": 261.6255653005986,
+          "a4": 440,
+          "fundamentalSpelling": "sharp",
+          "featureMode": "note",
+          "spellingMode": "simple",
+          "showHz": false,
+          "showRatioCents": false,
+          "showCentsDeviation": true,
+          "showCentsSign": false,
+          "directionalRatioLabels": false,
+          "hejiEnabled": true,
+          "enharmonicsEnabled": true,
+          "centsPrecision": 0
+        },
+        "playKeys": [
+          "grid:0,1,0",
+          "grid:0,1,-1",
+          "grid:1,1,0",
+          "grid:1,0,0",
+          "grid:2,1,0"
+        ],
+        "pattern": null,
+        "lfos": null
+      }
+    ],
+    [
+      5,
+      {
+        "state": {
+          "v": 1,
+          "active": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              -1,
+              1,
+              0
+            ],
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              1,
+              1,
+              0
+            ],
+            [
+              2,
+              1,
+              0
+            ],
+            [
+              -3,
+              0,
+              0
+            ],
+            [
+              -2,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              -1,
+              0
+            ],
+            [
+              0,
+              1,
+              -1
+            ]
+          ],
+          "customNodes": [
+            {
+              "sourceExponents": [
+                4,
+                0,
+                0
+              ],
+              "customSlot": 0,
+              "factorNumerator": 11,
+              "factorDenominator": 8,
+              "octaveReduce": true,
+              "octaveShift": 1,
+              "position": {
+                "x": 540,
+                "y": -60
+              },
+              "active": false
+            }
+          ],
+          "mode3d": true,
+          "connectOrphans": false,
+          "distances": false,
+          "view": {
+            "zoom": 2.2,
+            "offsetX": 0,
+            "offsetY": 0,
+            "rotX": 0.685,
+            "rotY": 0.795
+          },
+          "axes": true,
+          "grid": true,
+          "lineLabels": true,
+          "circles": true,
+          "keyMappings": true,
+          "ratios": [
+            13,
+            11,
+            3
+          ],
+          "exponentOffset": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "fundamental": 261.6255653005986,
+          "a4": 440,
+          "fundamentalSpelling": "sharp",
+          "featureMode": "note",
+          "spellingMode": "simple",
+          "showHz": false,
+          "showRatioCents": false,
+          "showCentsDeviation": true,
+          "showCentsSign": false,
+          "directionalRatioLabels": false,
+          "hejiEnabled": true,
+          "enharmonicsEnabled": true,
+          "centsPrecision": 0
+        },
+        "playKeys": [
+          "grid:0,1,0",
+          "grid:0,1,-1",
+          "grid:1,1,0",
+          "grid:1,0,0",
+          "grid:-3,0,0"
+        ],
+        "pattern": null,
+        "lfos": null
+      }
+    ],
+    [
+      6,
+      {
+        "state": {
+          "v": 1,
+          "active": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              -1,
+              1,
+              0
+            ],
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              1,
+              1,
+              0
+            ],
+            [
+              2,
+              1,
+              0
+            ],
+            [
+              -3,
+              0,
+              0
+            ],
+            [
+              -2,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              -1,
+              0
+            ],
+            [
+              1,
+              -1,
+              0
+            ],
+            [
+              0,
+              1,
+              -1
+            ]
+          ],
+          "customNodes": [
+            {
+              "sourceExponents": [
+                4,
+                0,
+                0
+              ],
+              "customSlot": 0,
+              "factorNumerator": 11,
+              "factorDenominator": 8,
+              "octaveReduce": true,
+              "octaveShift": 1,
+              "position": {
+                "x": 540,
+                "y": -60
+              },
+              "active": false
+            }
+          ],
+          "mode3d": true,
+          "connectOrphans": false,
+          "distances": false,
+          "view": {
+            "zoom": 2.2,
+            "offsetX": 0,
+            "offsetY": 0,
+            "rotX": 0.49000000000000005,
+            "rotY": 0.685
+          },
+          "axes": true,
+          "grid": true,
+          "lineLabels": true,
+          "circles": true,
+          "keyMappings": true,
+          "ratios": [
+            13,
+            11,
+            3
+          ],
+          "exponentOffset": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "fundamental": 261.6255653005986,
+          "a4": 440,
+          "fundamentalSpelling": "sharp",
+          "featureMode": "note",
+          "spellingMode": "simple",
+          "showHz": false,
+          "showRatioCents": false,
+          "showCentsDeviation": true,
+          "showCentsSign": false,
+          "directionalRatioLabels": false,
+          "hejiEnabled": true,
+          "enharmonicsEnabled": true,
+          "centsPrecision": 0
+        },
+        "playKeys": [
+          "grid:1,0,0",
+          "grid:1,-1,0",
+          "grid:0,-1,0",
+          "grid:2,1,0",
+          "grid:0,1,0"
+        ],
+        "pattern": null,
+        "lfos": null
+      }
+    ],
+    [
+      7,
+      {
+        "state": {
+          "v": 1,
+          "active": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              -1,
+              1,
+              0
+            ],
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              1,
+              1,
+              0
+            ],
+            [
+              2,
+              1,
+              0
+            ],
+            [
+              -3,
+              0,
+              0
+            ],
+            [
+              -2,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              -1,
+              0
+            ],
+            [
+              1,
+              -1,
+              0
+            ],
+            [
+              0,
+              1,
+              -1
+            ],
+            [
+              1,
+              0,
+              -1
+            ],
+            [
+              1,
+              0,
+              -2
+            ]
+          ],
+          "customNodes": [
+            {
+              "sourceExponents": [
+                4,
+                0,
+                0
+              ],
+              "customSlot": 0,
+              "factorNumerator": 11,
+              "factorDenominator": 8,
+              "octaveReduce": true,
+              "octaveShift": 1,
+              "position": {
+                "x": 540,
+                "y": -60
+              },
+              "active": false
+            }
+          ],
+          "mode3d": true,
+          "connectOrphans": false,
+          "distances": false,
+          "view": {
+            "zoom": 2.2,
+            "offsetX": 0,
+            "offsetY": 0,
+            "rotX": 0.55,
+            "rotY": 0.8700000000000001
+          },
+          "axes": true,
+          "grid": true,
+          "lineLabels": true,
+          "circles": true,
+          "keyMappings": true,
+          "ratios": [
+            13,
+            11,
+            3
+          ],
+          "exponentOffset": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "fundamental": 261.6255653005986,
+          "a4": 440,
+          "fundamentalSpelling": "sharp",
+          "featureMode": "note",
+          "spellingMode": "simple",
+          "showHz": false,
+          "showRatioCents": false,
+          "showCentsDeviation": true,
+          "showCentsSign": false,
+          "directionalRatioLabels": false,
+          "hejiEnabled": true,
+          "enharmonicsEnabled": true,
+          "centsPrecision": 0
+        },
+        "playKeys": [
+          "grid:2,1,0",
+          "grid:1,-1,0",
+          "grid:1,0,0",
+          "grid:1,1,0",
+          "grid:1,0,-2",
+          "grid:0,-1,0"
+        ],
+        "pattern": null,
+        "lfos": null
+      }
+    ],
+    [
+      8,
+      {
+        "state": {
+          "v": 1,
+          "active": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              1,
+              0,
+              1
+            ],
+            [
+              -1,
+              1,
+              0
+            ],
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              1,
+              1,
+              0
+            ],
+            [
+              2,
+              1,
+              0
+            ],
+            [
+              -3,
+              0,
+              0
+            ],
+            [
+              -2,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              -1,
+              0
+            ],
+            [
+              1,
+              -1,
+              0
+            ],
+            [
+              0,
+              1,
+              -1
+            ],
+            [
+              1,
+              0,
+              -1
+            ],
+            [
+              1,
+              0,
+              -2
+            ]
+          ],
+          "customNodes": [
+            {
+              "sourceExponents": [
+                4,
+                0,
+                0
+              ],
+              "customSlot": 0,
+              "factorNumerator": 11,
+              "factorDenominator": 8,
+              "octaveReduce": true,
+              "octaveShift": 1,
+              "position": {
+                "x": 540,
+                "y": -60
+              },
+              "active": false
+            }
+          ],
+          "mode3d": true,
+          "connectOrphans": false,
+          "distances": false,
+          "view": {
+            "zoom": 2.2,
+            "offsetX": 0,
+            "offsetY": -0.45454545454545453,
+            "rotX": 0.88,
+            "rotY": 1.1400000000000001
+          },
+          "axes": true,
+          "grid": true,
+          "lineLabels": true,
+          "circles": true,
+          "keyMappings": true,
+          "ratios": [
+            13,
+            11,
+            3
+          ],
+          "exponentOffset": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "fundamental": 261.6255653005986,
+          "a4": 440,
+          "fundamentalSpelling": "sharp",
+          "featureMode": "note",
+          "spellingMode": "simple",
+          "showHz": false,
+          "showRatioCents": false,
+          "showCentsDeviation": true,
+          "showCentsSign": false,
+          "directionalRatioLabels": false,
+          "hejiEnabled": true,
+          "enharmonicsEnabled": true,
+          "centsPrecision": 0
+        },
+        "playKeys": [
+          "grid:1,-1,0",
+          "grid:0,-1,0",
+          "grid:1,0,0",
+          "grid:1,0,-2"
+        ],
+        "pattern": null,
+        "lfos": null
+      }
+    ],
+    [
+      9,
+      {
+        "state": {
+          "v": 1,
+          "active": [
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              1,
+              0,
+              1
+            ],
+            [
+              -1,
+              1,
+              0
+            ],
+            [
+              0,
+              1,
+              0
+            ],
+            [
+              1,
+              1,
+              0
+            ],
+            [
+              2,
+              1,
+              0
+            ],
+            [
+              -3,
+              0,
+              0
+            ],
+            [
+              -2,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              -1,
+              0
+            ],
+            [
+              1,
+              -1,
+              0
+            ],
+            [
+              0,
+              1,
+              -1
+            ],
+            [
+              1,
+              0,
+              -1
+            ],
+            [
+              1,
+              0,
+              -2
+            ]
+          ],
+          "customNodes": [
+            {
+              "sourceExponents": [
+                4,
+                0,
+                0
+              ],
+              "customSlot": 0,
+              "factorNumerator": 11,
+              "factorDenominator": 8,
+              "octaveReduce": true,
+              "octaveShift": 1,
+              "position": {
+                "x": 540,
+                "y": -60
+              },
+              "active": false
+            }
+          ],
+          "mode3d": true,
+          "connectOrphans": false,
+          "distances": false,
+          "view": {
+            "zoom": 2.2,
+            "offsetX": 0,
+            "offsetY": -0.45454545454545453,
+            "rotX": 0.865,
+            "rotY": 1.1300000000000001
+          },
+          "axes": true,
+          "grid": true,
+          "lineLabels": true,
+          "circles": true,
+          "keyMappings": true,
+          "ratios": [
+            13,
+            11,
+            3
+          ],
+          "exponentOffset": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "fundamental": 261.6255653005986,
+          "a4": 440,
+          "fundamentalSpelling": "sharp",
+          "featureMode": "note",
+          "spellingMode": "simple",
+          "showHz": false,
+          "showRatioCents": false,
+          "showCentsDeviation": true,
+          "showCentsSign": false,
+          "directionalRatioLabels": false,
+          "hejiEnabled": true,
+          "enharmonicsEnabled": true,
+          "centsPrecision": 0
+        },
+        "playKeys": [
+          "grid:1,-1,0",
+          "grid:0,-1,0",
+          "grid:1,0,0",
+          "grid:1,0,-2",
+          "grid:0,0,0"
+        ],
+        "pattern": null,
+        "lfos": null
+      }
+    ]
+  ],
+  "snapshotsLetters": [],
+  "snapshotActive": 0,
+  "snapshotActiveLetter": null,
+  "snapshotSettings": {
+    "deferToCycleEnd": false,
+    "restorePlayNodes": true,
+    "connectCommonTones": true,
+    "restoreView": false,
+    "restoreSequence": true,
+    "restoreLfos": true,
+    "restoreLfoPhase": false,
+    "useLetterKeys": false,
+    "lettersActive": false
+  }
+}

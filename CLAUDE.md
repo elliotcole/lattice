@@ -9,7 +9,9 @@ A full audit and 6-phase revision plan lives in **`AUDIT-2026-06.md`** — read 
 **Done: Phase 0** (June 10, 2026) — wiring fixes, hygiene, CI gate, dead code deleted.
 **Done: Phase 1** (June 10, 2026) — fixtures checked in (`fixtures/`), preset codec extracted to `src/serialization.js`, 100 vitest round-trip tests (`npm test`), eslint/prettier on extracted code, Vite 8.
 
-**Next action: Phase 2** (§9 of the audit) — extract the shared core (ratio math, spelling, HEJI → monzo + bigint module imported by all three apps). Start with tuner↔overtones while `analyzeRatioForTrueSpelling` is still byte-identical.
+**Done: Phase 2 core extraction** (June 10, 2026) — `src/lib/pitch.js` (ratio math, ET mapping, spelling, HEJI) imported by all three apps; copies deleted; the three drift cases resolved as documented decisions in the module header. ~1,080 duplicated lines gone.
+
+**Next actions: Phase 2 remainder, then Phase 3.** Remaining Phase 2 items: one shared `theme.css` token sheet across the five surfaces (audit §9 2.3) and splitting the tuner's calibration workbench out of the user bundle (2.4). Note: the audit's monzo+bigint exact-arithmetic representation is NOT yet done — pitch.js shares the float-based logic; exact arithmetic lands with Phase 3/4 restructuring.
 
 Decisions already made (don't re-ask):
 - Tech: open to anything; TypeScript welcome.
@@ -27,6 +29,7 @@ Decisions already made (don't re-ask):
 | `tuning-the-ear/` + `src/tuning-the-ear/` | Book-companion diagram deck; imported from Dropbox via `scripts/import-tuning-the-ear.mjs` (hardcoded path) |
 | `src/tour-steps.js` | Declarative tour content — the pattern to emulate |
 | `src/serialization.js` | Preset codec (encode/decode + LZ-string), pure, extracted Phase 1 |
+| `src/lib/pitch.js` | Shared pitch core: note tables, ratio math, ET/spelling, HEJI — imported by main, tuner, overtones. Drift decisions documented in its header |
 | `fixtures/` + `tests/` | Creator exports + snapshot-sets; vitest round-trip suite (`npm test`) — the serialization compatibility gate |
 | `vite.config.js` | Multi-page build: 6 entries (Vite 8/rolldown). `presentation.html` is NOT an entry |
 | `docs/` | Hand-built docs page + design notes |
@@ -35,7 +38,7 @@ Decisions already made (don't re-ask):
 
 - **Serialization is the crown jewel.** One state shape serves URLs, files, presets, snapshots (`buildPresetStateSkeleton` / `applyPresetState`, ~main.js:24784+). Never rename or restructure a persisted field without a versioned migration. `v: 1` is currently written but never read — that changes in Phase 4.
 - `scripts/regression-smoke.mjs` (`npm run check:regression`) greps main.js for four literal source lines guarding past bug fixes. If a legit refactor breaks a guard, update the guard in the same commit and say so — don't delete it silently. Replace guards with real tests as Phase 1 lands.
-- Known duplication traps: canvas `draw()` (main.js:14201) and SVG export (`buildLayoutSvgString`, main.js:27446) are parallel renderers — **visual changes must be made in both** until Phase 3 unifies them. Ratio/spelling/HEJI code is copy-pasted (and drifted) across main/tuner/overtones — fix in all three or extract first.
+- Known duplication traps: canvas `draw()` and SVG export (`buildLayoutSvgString`) are parallel renderers — **visual changes must be made in both** until Phase 3 unifies them. Ratio/spelling/HEJI math now lives in `src/lib/pitch.js` (shared by all three apps) — change it there, never re-inline copies. main.js's `getHejiAnnotation` (DOM-bound) is still local but consumes the shared rules/helpers.
 - State lives in module globals **and the DOM** (e.g. `fundamentalInput.value`). After mutating state, you must call `draw()` and usually `schedulePresetUrlUpdate()` — forgetting these is the house bug class.
 
 ## Rules

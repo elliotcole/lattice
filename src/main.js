@@ -6,7 +6,36 @@ const resonatorWorkletUrl = new URL("./modal-resonator-worklet.js", import.meta.
 import intervalChartData from "./interval-names.json";
 import { quickTourSteps, deepTourSteps } from "./tour-steps.js";
 import { encodePresetState, decodePresetState } from "./serialization.js";
+import {
+  noteNamesSharp,
+  noteNamesFlat,
+  noteNames,
+  LETTERS,
+  LETTER_TO_SEMITONE,
+  TRUE_SPELLING_INTERVALS,
+  HEJI_RULES,
+  mod,
+  floorDiv,
+  gcd,
+  reduceFraction,
+  parseRatioInput,
+  normalizeRatioToOctave,
+  midiToFrequency,
+  getNearestEtInfo as getNearestEtInfoCore,
+  parsePitchClass,
+  accidentalToString,
+  buildPitchClass,
+  getTrueSpellingLimit,
+  hasAccidental,
+  getAccidentalType,
+  axisMatches,
+} from "./lib/pitch.js";
 import opentype from "opentype.js";
+
+// Main editor spells ET fallbacks from its mixed default table (Eb/Bb flats).
+function getNearestEtInfo(freq, a4) {
+  return getNearestEtInfoCore(freq, a4, noteNames);
+}
 const canvas = document.getElementById("lattice");
 const ctx = canvas.getContext("2d");
 const audioToggle = document.getElementById("audio-toggle");
@@ -1339,9 +1368,6 @@ function refreshLayoutFromView({ flatten = false } = {}) {
   schedulePresetUrlUpdate();
 }
 
-const noteNamesSharp = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-const noteNamesFlat = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
-const noteNames = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "G#", "A", "Bb", "B"];
 const HEJI_STEP_OFFSETS = {
   3: 7,
   5: 4,
@@ -7901,15 +7927,6 @@ function buildRatioComponents(ratioX, ratioY, ratioZ, exponentX, exponentY, expo
   return { numerator, denominator };
 }
 
-function getNearestEtInfo(freq, a4) {
-  const midiFloat = 69 + 12 * Math.log2(freq / a4);
-  const midi = Math.min(127, Math.max(0, Math.round(midiFloat)));
-  const etFreq = a4 * Math.pow(2, (midi - 69) / 12);
-  const cents = 1200 * Math.log2(freq / etFreq);
-  const pitchClass = noteNames[midi % 12];
-  const name = `${pitchClass}${Math.floor(midi / 12) - 1}`;
-  return { midi, etFreq, cents, name, pitchClass };
-}
 
 function getCentsForPitchClass(freq, a4, pitchClass) {
   if (!Number.isFinite(freq) || !Number.isFinite(a4)) {
@@ -7998,9 +8015,6 @@ function showFundamentalSpellingDialog(midi) {
   }
 }
 
-function midiToFrequency(midi, a4) {
-  return a4 * Math.pow(2, (midi - 69) / 12);
-}
 
 function populateFundamentalNotes() {
   const startMidi = 0;
@@ -9406,145 +9420,6 @@ function getDisplayNoteInfo(node) {
   return { name, pitchClass, cents };
 }
 
-const HEJI_RULES = [
-  {
-    mode: "repeatBaseAccidental",
-    ratio: 5,
-    axis: "any",
-    base: 2,
-    posSingle: { none: "m", sharp: "u", doubleSharp: "U", flat: "d", doubleFlat: "D" },
-    negSingle: { none: "o", sharp: "w", doubleSharp: "W", flat: "f", doubleFlat: "F" },
-    posPair: { none: "l", sharp: "t", doubleSharp: "T", flat: "c", doubleFlat: "C" },
-    negPair: { none: "p", sharp: "x", doubleSharp: "X", flat: "g", doubleFlat: "G" },
-    replaceAccidental: true,
-    usePairAsSingle: true,
-    useSingleBeyondPair: true,
-    maxSymbols: 2,
-  },
-  {
-    mode: "repeat",
-    ratio: 17,
-    axis: "any",
-    glyphPos: ":",
-    glyphNeg: ";",
-  },
-  {
-    mode: "repeatBase",
-    ratio: 7,
-    axis: "any",
-    glyphPos: "<",
-    glyphNeg: ">",
-    glyphPosPair: ",",
-    glyphNegPair: ".",
-    base: 2,
-  },
-  {
-    mode: "repeat",
-    ratio: 11,
-    axis: "any",
-    glyphPos: "4",
-    glyphNeg: "5",
-  },
-  {
-    mode: "repeat",
-    ratio: 13,
-    axis: "any",
-    glyphPos: "0",
-    glyphNeg: "9",
-  },
-  {
-    mode: "repeat",
-    ratio: 19,
-    axis: "any",
-    glyphPos: "/",
-    glyphNeg: "\\",
-  },
-  {
-    mode: "repeat",
-    ratio: 23,
-    axis: "any",
-    glyphPos: "3",
-    glyphNeg: "6",
-  },
-  {
-    mode: "repeat",
-    ratio: 29,
-    axis: "any",
-    glyphPos: "2",
-    glyphNeg: "7",
-  },
-  {
-    mode: "repeat",
-    ratio: 31,
-    axis: "any",
-    glyphPos: "1",
-    glyphNeg: "8",
-  },
-  {
-    mode: "repeat",
-    ratio: 37,
-    axis: "any",
-    glyphPos: "á",
-    glyphNeg: "à",
-  },
-  {
-    mode: "repeat",
-    ratio: 41,
-    axis: "any",
-    glyphPos: "+",
-    glyphNeg: "-",
-  },
-  {
-    mode: "repeat",
-    ratio: 43,
-    axis: "any",
-    glyphPos: "é",
-    glyphNeg: "è",
-  },
-  {
-    mode: "repeat",
-    ratio: 47,
-    axis: "any",
-    glyphPos: "í",
-    glyphNeg: "ì",
-  },
-];
-
-function hasAccidental(noteName) {
-  return /[#b]/.test(noteName);
-}
-
-function getAccidentalType(noteName) {
-  if (/[#x]/.test(noteName)) {
-    return "sharp";
-  }
-  if (/b/.test(noteName)) {
-    return "flat";
-  }
-  return "none";
-}
-
-function axisMatches(rule, axisState) {
-  if (rule.axis !== "any" && rule.axis !== axisState.axis) {
-    return false;
-  }
-  if (!Number.isFinite(axisState.exponent)) {
-    return false;
-  }
-  if (Number.isFinite(rule.ratio) && axisState.ratio !== rule.ratio) {
-    return false;
-  }
-  if (rule.mode === "repeat" || rule.mode === "repeatBase" || rule.mode === "repeatBaseAccidental") {
-    return axisState.exponent !== 0;
-  }
-  if (rule.exponent === "anyNonZero" && axisState.exponent === 0) {
-    return false;
-  }
-  if (Number.isFinite(rule.exponent) && axisState.exponent !== rule.exponent) {
-    return false;
-  }
-  return true;
-}
 
 function getHejiAnnotation(node, baseText) {
   if (!node) {
@@ -10563,88 +10438,6 @@ const AXIS_EDGE_COLORS = {
 };
 const BASE_LIGHT_DIR = { x: -0.6, y: -0.8, z: 0 };
 
-const LETTERS = ["C", "D", "E", "F", "G", "A", "B"];
-const LETTER_TO_SEMITONE = {
-  C: 0,
-  D: 2,
-  E: 4,
-  F: 5,
-  G: 7,
-  A: 9,
-  B: 11,
-};
-const TRUE_SPELLING_INTERVALS = {
-  3: { letter: 4, semitones: 7 },
-  5: { letter: 2, semitones: 4 },
-  7: { letter: 6, semitones: 10 },
-  11: { letter: 3, semitones: 5 },
-  13: { letter: 5, semitones: 9 },
-  17: { letter: 0, semitones: 1, maxSteps: 2 },
-  19: { letter: 2, semitones: 3 },
-  23: { letter: 3, semitones: 6 },
-  29: { letter: 6, semitones: 10 },
-  31: { letter: 0, semitones: 0, maxSteps: 4 },
-  37: { letter: 1, semitones: 2 },
-  41: { letter: 2, semitones: 4 },
-  43: { letter: 3, semitones: 5 },
-  47: { letter: 3, semitones: 6 },
-};
-
-function floorDiv(value, divisor) {
-  return Math.floor(value / divisor);
-}
-
-function mod(value, divisor) {
-  return ((value % divisor) + divisor) % divisor;
-}
-
-function parsePitchClass(pitchClass) {
-  const match = String(pitchClass || "").match(/^([A-G])([#bx]*)$/);
-  if (!match) {
-    return { letterIndex: 0, accidental: 0 };
-  }
-  const letter = match[1];
-  const accidentalText = match[2] || "";
-  let accidental = 0;
-  for (const char of accidentalText) {
-    if (char === "#") {
-      accidental += 1;
-    } else if (char === "b") {
-      accidental -= 1;
-    } else if (char === "x") {
-      accidental += 2;
-    }
-  }
-  return { letterIndex: LETTERS.indexOf(letter), accidental };
-}
-
-function accidentalToString(accidental) {
-  if (!accidental) {
-    return "";
-  }
-  if (accidental > 0) {
-    if (accidental === 1) {
-      return "#";
-    }
-    if (accidental === 2) {
-      return "x";
-    }
-    return "#x";
-  }
-  if (accidental === -1) {
-    return "b";
-  }
-  if (accidental === -2) {
-    return "bb";
-  }
-  return "bbb";
-}
-
-function buildPitchClass(letterIndex, accidental) {
-  const letter = LETTERS[mod(letterIndex, LETTERS.length)];
-  const clamped = Math.max(-3, Math.min(3, accidental));
-  return `${letter}${accidentalToString(clamped)}`;
-}
 
 function getAccidentalForTargetPc(letterIndex, targetPc) {
   const letter = LETTERS[mod(letterIndex, LETTERS.length)];
@@ -10909,26 +10702,6 @@ function buildTrueSpellingFromAxisRatios({
   return { name, pitchClass, cents };
 }
 
-function normalizeRatioToOctave(numerator, denominator) {
-  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
-    return null;
-  }
-  let num = numerator;
-  let den = denominator;
-  let shift = 0;
-  let ratio = num / den;
-  while (ratio < 1) {
-    num *= 2;
-    shift -= 1;
-    ratio = num / den;
-  }
-  while (ratio > 2) {
-    den *= 2;
-    shift += 1;
-    ratio = num / den;
-  }
-  return { numerator: num, denominator: den, shift };
-}
 
 function analyzeCustomRatio(numerator, denominator) {
   const normalized = normalizeRatioToOctave(numerator, denominator);
@@ -10971,42 +10744,6 @@ function analyzeCustomRatio(numerator, denominator) {
     return null;
   }
   return { axisRatios, octaveShift };
-}
-
-const trueSpellingLimitCache = new Map();
-
-function getTrueSpellingLimit(ratio) {
-  const key = Number(ratio);
-  if (trueSpellingLimitCache.has(key)) {
-    return trueSpellingLimitCache.get(key);
-  }
-  const spec = TRUE_SPELLING_INTERVALS[key];
-  if (!spec) {
-    trueSpellingLimitCache.set(key, null);
-    return null;
-  }
-  if (Number.isFinite(spec.maxSteps)) {
-    trueSpellingLimitCache.set(key, spec.maxSteps);
-    return spec.maxSteps;
-  }
-  const base = { letterIndex: 0, accidental: 0 };
-  let maxSteps = 0;
-  for (let step = 1; step < 30; step += 1) {
-    const letterShift = step * spec.letter;
-    const semitoneShift = step * spec.semitones;
-    const totalLetter = base.letterIndex + letterShift;
-    const octaveShift = floorDiv(totalLetter, 7);
-    const targetLetterIndex = mod(totalLetter, 7);
-    const targetNatural = LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + octaveShift * 12;
-    const totalSemitone = base.accidental + LETTER_TO_SEMITONE[LETTERS[base.letterIndex]] + semitoneShift;
-    const accidental = totalSemitone - targetNatural;
-    if (Math.abs(accidental) > 3) {
-      break;
-    }
-    maxSteps = step;
-  }
-  trueSpellingLimitCache.set(key, maxSteps);
-  return maxSteps;
 }
 
 function getTrueSpellingPitchClass(node) {
@@ -18653,16 +18390,6 @@ function findClosestNodeForRatio(numerator, denominator) {
   return bestNode;
 }
 
-function gcd(a, b) {
-  let x = Math.abs(a);
-  let y = Math.abs(b);
-  while (y) {
-    const t = y;
-    y = x % y;
-    x = t;
-  }
-  return x || 1;
-}
 
 function formatIntervalRatio(numerator, denominator) {
   const divisor = gcd(numerator, denominator);
@@ -18784,44 +18511,7 @@ function getDistanceEdgeOverride(key) {
   return distanceEdgeOverrides.get(key) || null;
 }
 
-function reduceFraction(numerator, denominator) {
-  const divisor = gcd(numerator, denominator);
-  return {
-    numerator: numerator / divisor,
-    denominator: denominator / divisor,
-  };
-}
 
-function parseRatioInput(value) {
-  if (!value) {
-    return null;
-  }
-  const cleaned = String(value).trim().replace(/\s+/g, "");
-  if (!cleaned) {
-    return null;
-  }
-  const divider = cleaned.includes(":") ? ":" : cleaned.includes("/") ? "/" : null;
-  let numerator = null;
-  let denominator = null;
-  if (!divider) {
-    numerator = Math.trunc(Number(cleaned));
-    denominator = 1;
-  } else {
-    const parts = cleaned.split(divider);
-    if (parts.length !== 2) {
-      return null;
-    }
-    numerator = Math.trunc(Number(parts[0]));
-    denominator = Math.trunc(Number(parts[1]));
-  }
-  if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) {
-    return null;
-  }
-  if (numerator <= 0 || denominator <= 0) {
-    return null;
-  }
-  return { numerator, denominator };
-}
 
 function normalizeRatio(numerator, denominator) {
   const reduced = reduceFraction(numerator, denominator);

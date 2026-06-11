@@ -1,12 +1,9 @@
+@import "../src/theme.css";
+
 :root {
   color-scheme: light;
-  --chrome-bg: #f3f4f6;
   --chrome-panel: rgba(255, 255, 255, 0.78);
   --chrome-panel-solid: #ffffff;
-  --chrome-ink: #101316;
-  --chrome-muted-ink: rgba(16, 19, 22, 0.65);
-  --chrome-accent: #245a8d;
-  --chrome-border: rgba(16, 19, 22, 0.15);
   --chrome-soft-surface: rgba(255, 255, 255, 0.62);
   --chrome-soft-field-border: rgba(16, 19, 22, 0.12);
   --docs-max-width: 1260px;

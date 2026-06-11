@@ -1,0 +1,51 @@
+/*
+ * Shared theme tokens (audit §9 2.3) — single source for the chrome palette
+ * used by every surface: main app, tuner (desktop + mobile), overtones,
+ * docs, presentation. Imported via @import at the top of each surface's
+ * stylesheet, so surface-local definitions always come later and win.
+ *
+ * Extraction contract: only tokens whose values agreed EXACTLY across all
+ * consuming surfaces (in both light and dark) live here. This was a pure
+ * extraction with zero visual change. Known drift stays local on purpose:
+ *
+ * - --chrome-panel / --chrome-panel-solid (+ -hover): main app uses warm
+ *   translucent panels (#fffdf9 family); tuner/overtones/docs/presentation
+ *   use plain white / #121821 family. Unify deliberately in a later pass.
+ * - overtones --muted-ink light is rgba(16,19,22,0.68) vs the shared 0.65,
+ *   so overtones keeps a local --muted-ink rather than the shared token.
+ * - --viz-grid dark: tuner 0.10 vs overtones 0.11 alpha; kept local.
+ * - --text-primary/--text-secondary: tuner and overtones agree (#1e1e1e /
+ *   #2a2a2a light), but the main app defines the same names as aliases of
+ *   its per-theme --canvas-text-* tokens at :root level. Defining them here
+ *   on the dark body selector would out-cascade main's :root alias, so they
+ *   stay local until the satellites rename them into a viz namespace.
+ * - docs --chrome-soft-surface / --chrome-soft-field-border differ from
+ *   main's values; kept local to docs.
+ *
+ * Dark mode answers to both selectors in use: the main app's
+ * body[data-theme="dark"] and the satellites' body.theme-dark. The main
+ * app's sepia/solarized themes override these tokens in src/style.css.
+ * color-scheme stays surface-local alongside each surface's theme wiring.
+ */
+
+:root {
+  --chrome-bg: #f3f4f6;
+  --chrome-ink: #101316;
+  --chrome-muted-ink: rgba(16, 19, 22, 0.65);
+  --chrome-accent: #245a8d;
+  --chrome-border: rgba(16, 19, 22, 0.15);
+  /* Shared by the tuner + overtones visualizations (unused by main/docs). */
+  --viz-bg: #fdfbf7;
+  --viz-grid-strong: rgba(0, 0, 0, 0.18);
+}
+
+body.theme-dark,
+body[data-theme="dark"] {
+  --chrome-bg: #0c1117;
+  --chrome-ink: #e8edf2;
+  --chrome-muted-ink: rgba(232, 237, 242, 0.72);
+  --chrome-accent: #4aa3df;
+  --chrome-border: rgba(231, 237, 244, 0.18);
+  --viz-bg: #0a0f14;
+  --viz-grid-strong: rgba(235, 241, 247, 0.22);
+}

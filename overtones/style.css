@@ -1,3 +1,5 @@
+@import "../src/theme.css";
+
 @font-face {
   font-family: "Noto Serif";
   src: url("../src/fonts/NotoSerif-Regular.ttf") format("truetype");
@@ -89,18 +91,13 @@
   --controls-width: 252px;
   --controls-gap: 22px;
   --chart-left: calc(var(--controls-left) + var(--controls-width) + var(--controls-gap));
-  --bg: #f3f4f6;
   --panel: rgba(255, 255, 255, 0.78);
   --panel-solid: #ffffff;
-  --ink: #101316;
-  --accent: #245a8d;
-  --border: rgba(16, 19, 22, 0.15);
+  /* drifted from shared 0.65 — see src/theme.css header */
   --muted-ink: rgba(16, 19, 22, 0.68);
   --text-primary: #1e1e1e;
   --text-secondary: #2a2a2a;
-  --viz-bg: #fdfbf7;
   --viz-grid: rgba(0, 0, 0, 0.09);
-  --viz-grid-strong: rgba(0, 0, 0, 0.18);
   --viz-axis: rgba(14, 30, 49, 0.82);
   --align-band: rgba(70, 119, 160, 0.15);
   --combo-diff: #d45d4c;
@@ -110,18 +107,12 @@
 
 body.theme-dark {
   color-scheme: dark;
-  --bg: #0c1117;
   --panel: rgba(18, 24, 33, 0.8);
   --panel-solid: #121821;
-  --ink: #e8edf2;
-  --accent: #4aa3df;
-  --border: rgba(231, 237, 244, 0.18);
   --muted-ink: rgba(232, 237, 242, 0.72);
   --text-primary: #e8edf2;
   --text-secondary: #b8c1cb;
-  --viz-bg: #0a0f14;
   --viz-grid: rgba(235, 241, 247, 0.11);
-  --viz-grid-strong: rgba(235, 241, 247, 0.22);
   --viz-axis: rgba(230, 238, 246, 0.9);
   --align-band: rgba(82, 144, 196, 0.2);
   --combo-diff: #ff8f82;
@@ -137,14 +128,14 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: "Lexend", "Helvetica Neue", sans-serif;
-  background: radial-gradient(circle at top left, #ffffff, var(--bg));
+  background: radial-gradient(circle at top left, #ffffff, var(--chrome-bg));
   color: var(--muted-ink);
   overflow: hidden;
   transition: background 0.3s ease, color 0.3s ease;
 }
 
 body.theme-dark {
-  background: var(--bg);
+  background: var(--chrome-bg);
 }
 
 code {
@@ -203,17 +194,17 @@ code {
 .mode-toggle button {
   min-width: 0;
   border-radius: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--chrome-border);
   background: transparent;
-  color: var(--ink);
+  color: var(--chrome-ink);
   padding: 6px 8px;
   font-size: 12px;
 }
 
 .mode-toggle button.is-active {
-  background: var(--accent);
+  background: var(--chrome-accent);
   color: #fff;
-  border-color: var(--accent);
+  border-color: var(--chrome-accent);
   position: relative;
   z-index: 1;
 }
@@ -235,7 +226,7 @@ code {
 .panel {
   background: var(--panel);
   backdrop-filter: blur(8px);
-  border: 1px solid var(--border);
+  border: 1px solid var(--chrome-border);
   border-radius: 14px;
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
 }
@@ -309,7 +300,7 @@ body.mode-print .chart-tooltip {
   display: grid;
   gap: 4px;
   padding: 7px;
-  border: 1px solid color-mix(in srgb, var(--border), transparent 20%);
+  border: 1px solid color-mix(in srgb, var(--chrome-border), transparent 20%);
   border-radius: 10px;
   background: color-mix(in srgb, var(--panel-solid), transparent 48%);
 }
@@ -430,7 +421,7 @@ button {
   width: 100%;
   min-width: 0;
   border-radius: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--chrome-border);
   background: #ffffff;
   color: var(--text-primary);
   font-size: 12px;
@@ -466,7 +457,7 @@ button {
 
 button:hover,
 button:focus-visible {
-  border-color: color-mix(in srgb, var(--accent), #ffffff 38%);
+  border-color: color-mix(in srgb, var(--chrome-accent), #ffffff 38%);
   outline: none;
 }
 
@@ -520,7 +511,7 @@ button:active {
   padding: 8px 10px;
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel-solid), transparent 35%);
-  border: 1px solid var(--border);
+  border: 1px solid var(--chrome-border);
   font-size: 11px;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -533,7 +524,7 @@ button:active {
   max-width: min(360px, 92vw);
   padding: 7px 9px;
   border-radius: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--chrome-border);
   background: color-mix(in srgb, var(--panel-solid), transparent 6%);
   color: var(--text-primary);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
@@ -578,7 +569,7 @@ button:active {
   display: grid;
   gap: 8px;
   padding: 8px;
-  border: 1px solid color-mix(in srgb, var(--border), transparent 20%);
+  border: 1px solid color-mix(in srgb, var(--chrome-border), transparent 20%);
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel-solid), transparent 40%);
 }

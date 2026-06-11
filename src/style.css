@@ -1,3 +1,5 @@
+@import "./theme.css";
+
 @font-face {
   font-family: "iAWriterDuoS";
   src: url("./fonts/iAWriterDuoS-Regular.ttf") format("truetype");
@@ -32,15 +34,10 @@
 
 :root {
   color-scheme: light;
-  --chrome-bg: #f3f4f6;
   --chrome-panel: rgba(253, 251, 247, 0.34);
   --chrome-panel-solid: #fffdf9;
   --chrome-panel-hover: rgba(255, 255, 255, 0.92);
-  --chrome-ink: #101316;
-  --chrome-muted-ink: rgba(16, 19, 22, 0.65);
-  --chrome-accent: #245a8d;
   --chrome-bg-glow: #ffffff;
-  --chrome-border: rgba(16, 19, 22, 0.15);
   --chrome-input-bg: #ffffff;
   --chrome-input-ink: #101316;
   --chrome-input-border: rgba(16, 19, 22, 0.15);
@@ -194,15 +191,10 @@ dialog textarea,
 body.theme-dark,
 body[data-theme="dark"] {
   color-scheme: dark;
-  --chrome-bg: #0c1117;
   --chrome-panel: rgba(10, 15, 20, 0.36);
   --chrome-panel-solid: #0d1218;
   --chrome-panel-hover: rgba(14, 19, 25, 0.9);
-  --chrome-ink: #e8edf2;
-  --chrome-muted-ink: rgba(232, 237, 242, 0.72);
-  --chrome-accent: #4aa3df;
   --chrome-bg-glow: #0f151d;
-  --chrome-border: rgba(231, 237, 244, 0.18);
   --chrome-input-bg: #0f151d;
   --chrome-input-ink: #ffffff;
   --chrome-input-border: #ffffff;

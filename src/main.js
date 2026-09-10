@@ -511,6 +511,18 @@ let karplusWorkletReady = false;
 let karplusWorkletLoading = null;
 let resonatorWorkletReady = false;
 let resonatorWorkletLoading = null;
+let workletFallbackWarned = false;
+
+// The worklet modules load asynchronously after audio is enabled; a note
+// played before they land uses a plain oscillator. Say so once instead of
+// silently sounding like a sine.
+function warnWorkletFallback(waveformType) {
+  if (workletFallbackWarned) {
+    return;
+  }
+  workletFallbackWarned = true;
+  console.warn(`"${waveformType}" worklet not ready yet; this note uses a sine oscillator.`);
+}
 let soundfontData = null;
 let soundfontPreset = null;
 let soundfontLoading = null;
@@ -14821,6 +14833,7 @@ function startVoice(options) {
         oscillator = audioCtx.createOscillator();
       }
     } else {
+      warnWorkletFallback(waveformType);
       oscillator = audioCtx.createOscillator();
     }
   } else if (waveformType === RESONANT_WAVEFORM) {
@@ -14842,6 +14855,7 @@ function startVoice(options) {
         oscillator = audioCtx.createOscillator();
       }
     } else {
+      warnWorkletFallback(waveformType);
       oscillator = audioCtx.createOscillator();
     }
   } else if (waveformType === SOUNDFONT_WAVEFORM) {
@@ -14985,7 +14999,7 @@ function startVoice(options) {
 
   if (isOneShot) {
     const stopAt = now + attack + decay + release + 0.05;
-    oscillator.stop(stopAt);
+    scheduleOneShotVoiceEnd(voice, stopAt);
   }
 
   sendMidiOutNoteOn(voice);
@@ -15004,6 +15018,60 @@ function startVoice(options) {
   }
 
   return voice;
+}
+
+// Worklet voices have no stop()/onended: tell the processor to retire itself
+// (it returns false from process() and is garbage-collected) before we drop
+// the node. Safe on any node; no-op when there is no port.
+function releaseWorkletNode(node) {
+  if (!node) {
+    return;
+  }
+  if (node.port && typeof node.port.postMessage === "function") {
+    try {
+      node.port.postMessage({ type: "stop" });
+    } catch (error) {
+      // Port already closed; nothing to release.
+    }
+  }
+  if (typeof node.disconnect === "function") {
+    node.disconnect();
+  }
+}
+
+// One-shot voices ring out on their own envelope. OscillatorNodes stop via
+// stop()/onended; worklet and soundfont voices have no such hook, so schedule
+// the teardown ourselves. If stopVoice() ran first, voice.oscillator is
+// already null and this is a no-op.
+function scheduleOneShotVoiceEnd(voice, stopAtSec) {
+  const oscillator = voice.oscillator;
+  if (!oscillator || !audioCtx) {
+    return;
+  }
+  if (!voice.usesWorklet && !voice.usesSoundfont && typeof oscillator.stop === "function") {
+    oscillator.stop(stopAtSec);
+    return;
+  }
+  if (voice.usesSoundfont && voice.sfStop) {
+    voice.sfStop(stopAtSec);
+  }
+  const delayMs = Math.max(0, (stopAtSec - audioCtx.currentTime) * 1000);
+  setTimeout(() => {
+    if (voice.oscillator !== oscillator) {
+      return;
+    }
+    voice.oscillator = null;
+    releaseWorkletNode(oscillator);
+    if (voice.sfOutput) {
+      voice.sfOutput.disconnect();
+    }
+    [voice.envGain, voice.lfoGain, voice.morphGain].forEach((gainNode) => {
+      if (gainNode) {
+        gainNode.disconnect();
+      }
+    });
+    removeVoiceById(voice.id);
+  }, delayMs);
 }
 
 function stopVoice(voice, immediate = false) {
@@ -15064,9 +15132,7 @@ function stopVoice(voice, immediate = false) {
     } else {
       const timeoutMs = (release + 0.05) * 1000;
       setTimeout(() => {
-        if (typeof osc.disconnect === "function") {
-          osc.disconnect();
-        }
+        releaseWorkletNode(osc);
         if (envGain) {
           envGain.disconnect();
         }
@@ -15095,9 +15161,7 @@ function stopVoice(voice, immediate = false) {
       osc.stop(now + 0.1);
     } else {
       setTimeout(() => {
-        if (typeof osc.disconnect === "function") {
-          osc.disconnect();
-        }
+        releaseWorkletNode(osc);
         if (morphGain) {
           morphGain.disconnect();
         }
@@ -18046,8 +18110,9 @@ function ensureKarplusWorklet() {
     .then(() => {
       karplusWorkletReady = true;
     })
-    .catch(() => {
+    .catch((error) => {
       karplusWorkletReady = false;
+      console.warn("Karplus-Strong worklet failed to load; plucked notes fall back to a sine.", error);
     })
     .finally(() => {
       karplusWorkletLoading = null;
@@ -18063,8 +18128,9 @@ function ensureResonatorWorklet() {
     .then(() => {
       resonatorWorkletReady = true;
     })
-    .catch(() => {
+    .catch((error) => {
       resonatorWorkletReady = false;
+      console.warn("Resonator worklet failed to load; resonant notes fall back to a sine.", error);
     })
     .finally(() => {
       resonatorWorkletLoading = null;

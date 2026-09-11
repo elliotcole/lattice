@@ -16375,7 +16375,7 @@ function onPointerMove(event) {
     );
     setLineLabelPositionOverride(lineLabelDrag.a, lineLabelDrag.b, t);
     scheduleDraw();
-    updatePresetUrl("line-label-drag-move");
+    schedulePresetUrlUpdate("line-label-drag-move");
     return;
   }
   if (distanceCurveDrag) {
@@ -16628,7 +16628,9 @@ function onPointerMove(event) {
         }
       }
       scheduleDraw();
-      updatePresetUrl(`layout-node-drag-move:${node.isCustom ? "custom" : "base"}:${node.id}`);
+      schedulePresetUrlUpdate(
+        `layout-node-drag-move:${node.isCustom ? "custom" : "base"}:${node.id}`
+      );
     }
     return;
   }
@@ -21945,10 +21947,32 @@ function applyTheme(theme) {
   draw();
 }
 
+// localStorage throws (SecurityError) when site data is blocked or in some
+// embedded contexts. initTheme() runs during module evaluation, so a bare
+// call here would take the whole app down; every storage access must be
+// guarded.
+const THEME_STORAGE_KEY = "lattice-theme";
+
+function readStoredTheme() {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY);
+  } catch (error) {
+    return null;
+  }
+}
+
+function storeTheme(theme) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch (error) {
+    // Storage unavailable; the theme still applies for this session.
+  }
+}
+
 function toggleTheme() {
   const nextTheme = document.body.dataset.theme === "dark" ? "light" : "dark";
   applyTheme(nextTheme);
-  localStorage.setItem("lattice-theme", nextTheme);
+  storeTheme(nextTheme);
 }
 
 function onThemeSelectChange() {
@@ -21958,11 +21982,11 @@ function onThemeSelectChange() {
   const availableThemes = Array.from(themeSelect.options).map((option) => option.value);
   const selected = availableThemes.includes(themeSelect.value) ? themeSelect.value : "light";
   applyTheme(selected);
-  localStorage.setItem("lattice-theme", selected);
+  storeTheme(selected);
 }
 
 function initTheme() {
-  const saved = localStorage.getItem("lattice-theme");
+  const saved = readStoredTheme();
   const prefersDark =
     window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
   const availableThemes = themeSelect
@@ -24259,6 +24283,8 @@ function applyPresetCustomNodes(entries) {
 }
 
 // Preset URL Sync + Read
+let presetUrlWriteWarned = false;
+
 function updatePresetUrl(trigger = "direct") {
   if (!presetSyncEnabled) {
     return;
@@ -24269,7 +24295,16 @@ function updatePresetUrl(trigger = "direct") {
   if (location.hash === `#${nextHash}`) {
     return;
   }
-  history.replaceState(null, "", `${location.pathname}${location.search}#${nextHash}`);
+  try {
+    history.replaceState(null, "", `${location.pathname}${location.search}#${nextHash}`);
+  } catch (error) {
+    // Safari throws SecurityError past ~100 replaceState calls per 30 s.
+    // The in-memory state is still correct; the next update retries.
+    if (!presetUrlWriteWarned) {
+      presetUrlWriteWarned = true;
+      console.warn("Could not update the preset URL", error);
+    }
+  }
 }
 
 function schedulePresetUrlUpdate(trigger = "scheduled") {
@@ -29123,10 +29158,29 @@ const isPresentationMode =
 if (isPresentationMode) {
   document.body.classList.add("presentation-mode");
 }
+// applyPresetState is not atomic yet (Phase 4 makes it so). Until then a bad
+// file or link must not take the whole app down: report, rebuild from
+// whatever did land, and keep the page interactive.
+function applyPresetStateSafely(state, sourceLabel) {
+  try {
+    applyPresetState(state);
+    return true;
+  } catch (error) {
+    console.error(`Could not apply ${sourceLabel}`, error);
+    try {
+      rebuildLattice();
+    } catch (rebuildError) {
+      console.error("Rebuild after the failed load also failed", rebuildError);
+    }
+    showTemporaryBanner(`Couldn't fully load this ${sourceLabel}. Showing what could be loaded.`, 8000);
+    return false;
+  }
+}
+
 const presetState = readPresetFromUrl();
 const hasIncomingPresetState = Boolean(presetState);
 if (presetState) {
-  applyPresetState(presetState);
+  applyPresetStateSafely(presetState, "lattice link");
 } else {
   rebuildLattice();
 }
@@ -29160,7 +29214,9 @@ bindOptionalChange(loadLatticeInput, async () => {
   try {
     const text = await file.text();
     const state = JSON.parse(text);
-    applyPresetState(state);
+    if (!applyPresetStateSafely(state, "lattice file")) {
+      return;
+    }
     schedulePresetUrlUpdate();
     closeFilePanel();
   } catch (error) {
@@ -29188,7 +29244,7 @@ bindOptionalClick(openTunerButton, () => {
 bindOptionalEvent(window, "hashchange", () => {
   const presetState = readPresetFromUrl();
   if (presetState) {
-    applyPresetState(presetState);
+    applyPresetStateSafely(presetState, "lattice link");
   }
 });
 bindOptionalEvent(window, "beforeunload", () => {
@@ -31430,17 +31486,20 @@ bindOptionalClick(patternBuildButton, () => {
 bindOptionalClick(lfoPlayToggle, () => {
   if (lfoPresetPlaying) {
     stopLfoPresets();
+    schedulePresetUrlUpdate();
     return;
   }
   randomizeLfosForActiveNodes();
   lfoPresetPlaying = true;
   updateLfoPlayButton();
+  schedulePresetUrlUpdate();
 });
 if (patternLengthModeInputs.length) {
   patternLengthModeInputs.forEach((input) => {
     bindOptionalChange(input, () => {
       patternLengthMode = getCheckedRadioValue("pattern-length-mode", "sustain");
       updatePatternLengthReadout();
+      schedulePresetUrlUpdate();
     });
   });
 }
@@ -31493,10 +31552,10 @@ bindOptionalClick(lfoStopButton, () => {
 bindOptionalClick(allNotesOffButton, () => {
   allNotesOff();
 });
-bindOptionalInput(tempoSlider, () => {
+bindPresetInputHandler(tempoSlider, () => {
   updateTempoReadout();
 });
-bindOptionalInput(patternLengthSlider, () => {
+bindPresetInputHandler(patternLengthSlider, () => {
   updatePatternLengthReadout();
 });
 if (looperQuantizeGridSelect) {

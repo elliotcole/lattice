@@ -15,7 +15,7 @@ import {
   axisMatches,
   getHejiAnnotationForAxisRatios,
 } from "../src/lib/pitch.js";
-import { customOscillators } from "../src/custom-oscillators";
+import { localOscillators as customOscillators } from "../src/custom-oscillator-types.js";
 import intervalChartData from "../src/interval-names.json";
 
 const SVG_NS = "http://www.w3.org/2000/svg";

@@ -9,6 +9,8 @@ export default [
     files: [
       "src/serialization.js",
       "src/state-merge.js",
+      "src/custom-oscillator-types.js",
+      "src/custom-oscillators.js",
       "src/lib/**/*.js",
       "tests/**/*.js",
       "scripts/**/*.mjs",

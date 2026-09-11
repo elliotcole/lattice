@@ -1,9 +1,8 @@
-import { customOscillatorTypes, customOscillators } from "./custom-oscillators";
+import { CUSTOM_OSCILLATOR_TYPES as customOscillatorTypes } from "./custom-oscillator-types.js";
 import { loadSoundfont, startPresetNote } from "sfumato";
 import soundfontUrl from "./soundfonts/HSStrings.sf2?url";
 const karplusWorkletUrl = new URL("./karplus-worklet.js", import.meta.url);
 const resonatorWorkletUrl = new URL("./modal-resonator-worklet.js", import.meta.url);
-import intervalChartData from "./interval-names.json";
 import { quickTourSteps, deepTourSteps } from "./tour-steps.js";
 import { encodePresetState, decodePresetState } from "./serialization.js";
 import {
@@ -1428,6 +1427,56 @@ let GRID_DEPTH = DEFAULT_GRID_DEPTH;
 const GRID_SPACING = 120;
 const BUILTIN_WAVEFORMS = ["sine", "triangle", "square", "sawtooth"];
 const CUSTOM_WAVEFORMS = new Set(customOscillatorTypes || []);
+
+// The custom-waveform wavetables (~900 kB) load on demand: when a custom
+// waveform is selected, when audio is enabled with one selected, or on the
+// first note that needs one (that note falls back to a plain sine).
+let customOscillators = null;
+let customOscillatorsLoading = null;
+let customOscillatorFallbackWarned = false;
+
+function ensureCustomOscillators() {
+  if (customOscillators || customOscillatorsLoading) {
+    return customOscillatorsLoading || Promise.resolve(customOscillators);
+  }
+  customOscillatorsLoading = import("./custom-oscillators.js")
+    .then((module) => {
+      customOscillators = module.customOscillators;
+      return customOscillators;
+    })
+    .catch((error) => {
+      console.warn("Custom waveforms failed to load; falling back to a sine.", error);
+      return null;
+    })
+    .finally(() => {
+      customOscillatorsLoading = null;
+    });
+  return customOscillatorsLoading;
+}
+
+// interval-names.json (130 kB) backs the Interval Chart and comma names. It
+// is fetched once, on first use, as a plain asset: a dynamic import() of the
+// JSON would make rolldown wrap it in a runtime helper that lives in this
+// chunk, and any other page importing the JSON would then pull the whole
+// editor in with it.
+let intervalNamesLoading = null;
+
+function loadIntervalNames() {
+  if (!intervalNamesLoading) {
+    intervalNamesLoading = fetch(new URL("./interval-names.json", import.meta.url))
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Interval names fetch failed: ${response.status}`);
+        }
+        return response.json();
+      })
+      .catch((error) => {
+        intervalNamesLoading = null;
+        throw error;
+      });
+  }
+  return intervalNamesLoading;
+}
 const KEYBOARD_MAP = {
   z: 0,
   s: 1,
@@ -8116,6 +8165,9 @@ function handleSynthTypeChange(options = {}) {
   if (nextType === RESONANT_WAVEFORM) {
     ensureResonatorWorklet();
   }
+  if (CUSTOM_WAVEFORMS.has(nextType)) {
+    ensureCustomOscillators();
+  }
   if (currentSynthWaveform === nextType) {
     schedulePresetUrlUpdate();
     return;
@@ -14756,7 +14808,16 @@ function startVoice(options) {
       oscillator = audioCtx.createOscillator();
     }
   } else if (CUSTOM_WAVEFORMS.has(waveformType)) {
-    oscillator = customOscillators[waveformType](audioCtx);
+    if (customOscillators && typeof customOscillators[waveformType] === "function") {
+      oscillator = customOscillators[waveformType](audioCtx);
+    } else {
+      ensureCustomOscillators();
+      if (!customOscillatorFallbackWarned) {
+        customOscillatorFallbackWarned = true;
+        console.warn(`"${waveformType}" wavetable not loaded yet; this note uses a sine oscillator.`);
+      }
+      oscillator = audioCtx.createOscillator();
+    }
   } else {
     oscillator = audioCtx.createOscillator();
   }
@@ -15090,6 +15151,9 @@ function enableAudio() {
   ensureKarplusWorklet();
   ensureResonatorWorklet();
   ensureSoundfontLoaded();
+  if (CUSTOM_WAVEFORMS.has(getCurrentWaveformType())) {
+    ensureCustomOscillators();
+  }
   if (audioCtx.state === "suspended") {
     audioCtx.resume();
   }
@@ -22799,11 +22863,7 @@ async function loadCommas() {
   commaRatioMap.clear();
   const seenCommaEntries = new Set();
   try {
-    const response = await fetch(new URL("./interval-names.json", import.meta.url));
-    if (!response.ok) {
-      throw new Error(`Comma fetch failed: ${response.status}`);
-    }
-    const data = await response.json();
+    const data = await loadIntervalNames();
     const entries = Array.isArray(data)
       ? data
       : Array.isArray(data && data.intervals)
@@ -22856,7 +22916,8 @@ async function loadIntervalChartEntries() {
   intervalChartTypes = [];
   intervalChartSelectedTypes = new Set();
   try {
-    const entries = Array.isArray(intervalChartData) ? intervalChartData : [];
+    const data = await loadIntervalNames();
+    const entries = Array.isArray(data) ? data : [];
     entries.forEach((entry) => {
       if (!entry || typeof entry !== "object") {
         return;

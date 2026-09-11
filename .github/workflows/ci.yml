@@ -1,20 +1,21 @@
-name: Deploy to GitHub Pages
+name: CI
+
+# Lint, tests, and the regression check on pull requests and on pushes to any
+# branch other than main. Pushes to main run the same gates inside deploy.yml
+# before publishing.
 
 on:
+  pull_request:
   push:
-    branches:
+    branches-ignore:
       - main
 
-permissions:
-  contents: write
-
-# One deploy at a time; a newer push waits rather than racing an older one.
 concurrency:
-  group: pages-deploy
-  cancel-in-progress: false
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
+  check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,14 +33,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Format check
+        run: npm run format:check
+
       - name: Tests
         run: npm test
 
       - name: Regression check (includes build)
         run: npm run check:regression
-
-      - name: Deploy
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist

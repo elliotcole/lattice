@@ -2,12 +2,8 @@ import {
   noteNamesSharp,
   noteNamesFlat,
   noteNames,
-  LETTERS,
-  LETTER_TO_SEMITONE,
-  TRUE_SPELLING_INTERVALS,
   HEJI_RULES,
   mod,
-  floorDiv,
   gcd,
   reduceFraction,
   parseRatioInput,
@@ -15,11 +11,9 @@ import {
   midiToFrequency,
   getNearestEtInfo,
   parsePitchClass,
-  accidentalToString,
-  buildPitchClass,
   getPitchClassSemitoneValue,
   analyzeRatioForTrueSpelling,
-  getTrueSpellingLimit,
+  spellPitchClassFromAxisRatios,
   getAccidentalType,
   axisMatches,
   getHejiAnnotationForAxisRatios,
@@ -690,21 +684,6 @@ function percentile(values, p) {
 }
 
 
-function reduceToOctave(numerator, denominator) {
-  let num = numerator;
-  let den = denominator;
-  let ratio = num / den;
-  while (ratio < 1) {
-    num *= 2;
-    ratio = num / den;
-  }
-  while (ratio > 2) {
-    den *= 2;
-    ratio = num / den;
-  }
-  return { numerator: num, denominator: den, ratio };
-}
-
 
 function parseRatiosList(value) {
   const tokens = String(value || "")
@@ -720,7 +699,8 @@ function parseRatiosList(value) {
     if (!ratio) continue;
     const reduced = reduceFraction(ratio.numerator, ratio.denominator);
     if (!reduced.numerator || !reduced.denominator) continue;
-    const octave = reduceToOctave(reduced.numerator, reduced.denominator);
+    const octave = normalizeRatioToOctave(reduced.numerator, reduced.denominator);
+    if (!octave) continue;
     const octaveReduced = reduceFraction(octave.numerator, octave.denominator);
     const key = `${octaveReduced.numerator}/${octaveReduced.denominator}`;
     if (seen.has(key)) continue;
@@ -805,39 +785,9 @@ function getPitchClassFromRatio(ratio) {
     return { pitchClass: nearestPitchClass, axisRatios: [] };
   }
   const axisRatios = analysis.axisRatios;
-  const beyondLimit = axisRatios.some((axis) => {
-    if (!axis.exp) return false;
-    const limit = getTrueSpellingLimit(axis.ratio);
-    return Number.isFinite(limit) && Math.abs(axis.exp) > limit;
-  });
-  const hasUnknownInterval = axisRatios.some((axis) => axis.exp && !TRUE_SPELLING_INTERVALS[axis.ratio]);
-  const hasHigherPrime = axisRatios.some((axis) => axis.exp && Number(axis.ratio) >= 53);
-  if (beyondLimit || hasUnknownInterval || hasHigherPrime) {
-    return { pitchClass: nearestPitchClass, axisRatios };
-  }
-
-  let totalLetterShift = 0;
-  let totalSemitoneShift = 0;
-  axisRatios.forEach((axis) => {
-    if (!axis.exp) return;
-    const spec = TRUE_SPELLING_INTERVALS[axis.ratio];
-    if (!spec) return;
-    totalLetterShift += axis.exp * spec.letter;
-    totalSemitoneShift += axis.exp * spec.semitones;
-  });
-  const basePitchClassText = getFundamentalPitchClassForSpelling();
-  const base = parsePitchClass(basePitchClassText);
-  const baseLetterIndex = Number.isFinite(base.letterIndex) ? base.letterIndex : 0;
-  const baseAccidental = Number.isFinite(base.accidental) ? base.accidental : 0;
-  const totalLetter = baseLetterIndex + totalLetterShift;
-  const octaveShift = floorDiv(totalLetter, 7);
-  const targetLetterIndex = mod(totalLetter, 7);
-  const targetNatural = LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + octaveShift * 12;
-  const totalSemitone =
-    baseAccidental + LETTER_TO_SEMITONE[LETTERS[baseLetterIndex]] + totalSemitoneShift;
-  const accidental = totalSemitone - targetNatural;
+  const spelled = spellPitchClassFromAxisRatios(axisRatios, getFundamentalPitchClassForSpelling());
   return {
-    pitchClass: buildPitchClass(targetLetterIndex, accidental),
+    pitchClass: spelled ? spelled.pitchClass : nearestPitchClass,
     axisRatios,
   };
 }
@@ -985,7 +935,10 @@ function getOctaveReducedDisplayRatioLabel(ratio) {
   if (!ratio || !Number.isFinite(ratio.ratio) || ratio.ratio <= 2) {
     return ratio && ratio.label ? ratio.label : "";
   }
-  const normalized = reduceToOctave(ratio.numerator, ratio.denominator);
+  const normalized = normalizeRatioToOctave(ratio.numerator, ratio.denominator);
+  if (!normalized) {
+    return ratio.label || "";
+  }
   const reduced = reduceFraction(normalized.numerator, normalized.denominator);
   return `${reduced.numerator}/${reduced.denominator}`;
 }

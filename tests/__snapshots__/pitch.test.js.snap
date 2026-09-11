@@ -1,0 +1,194 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`rule tables are frozen > HEJI_RULES 1`] = `
+[
+  {
+    "axis": "any",
+    "base": 2,
+    "maxSymbols": 2,
+    "mode": "repeatBaseAccidental",
+    "negPair": {
+      "doubleFlat": "G",
+      "doubleSharp": "X",
+      "flat": "g",
+      "none": "p",
+      "sharp": "x",
+    },
+    "negSingle": {
+      "doubleFlat": "F",
+      "doubleSharp": "W",
+      "flat": "f",
+      "none": "o",
+      "sharp": "w",
+    },
+    "posPair": {
+      "doubleFlat": "C",
+      "doubleSharp": "T",
+      "flat": "c",
+      "none": "l",
+      "sharp": "t",
+    },
+    "posSingle": {
+      "doubleFlat": "D",
+      "doubleSharp": "U",
+      "flat": "d",
+      "none": "m",
+      "sharp": "u",
+    },
+    "ratio": 5,
+    "replaceAccidental": true,
+    "usePairAsSingle": true,
+    "useSingleBeyondPair": true,
+  },
+  {
+    "axis": "any",
+    "glyphNeg": ";",
+    "glyphPos": ":",
+    "mode": "repeat",
+    "ratio": 17,
+  },
+  {
+    "axis": "any",
+    "base": 2,
+    "glyphNeg": ">",
+    "glyphNegPair": ".",
+    "glyphPos": "<",
+    "glyphPosPair": ",",
+    "mode": "repeatBase",
+    "ratio": 7,
+  },
+  {
+    "axis": "any",
+    "glyphNeg": "5",
+    "glyphPos": "4",
+    "mode": "repeat",
+    "ratio": 11,
+  },
+  {
+    "axis": "any",
+    "glyphNeg": "9",
+    "glyphPos": "0",
+    "mode": "repeat",
+    "ratio": 13,
+  },
+  {
+    "axis": "any",
+    "glyphNeg": "\\",
+    "glyphPos": "/",
+    "mode": "repeat",
+    "ratio": 19,
+  },
+  {
+    "axis": "any",
+    "glyphNeg": "6",
+    "glyphPos": "3",
+    "mode": "repeat",
+    "ratio": 23,
+  },
+  {
+    "axis": "any",
+    "glyphNeg": "7",
+    "glyphPos": "2",
+    "mode": "repeat",
+    "ratio": 29,
+  },
+  {
+    "axis": "any",
+    "glyphNeg": "8",
+    "glyphPos": "1",
+    "mode": "repeat",
+    "ratio": 31,
+  },
+  {
+    "axis": "any",
+    "glyphNeg": "à",
+    "glyphPos": "á",
+    "mode": "repeat",
+    "ratio": 37,
+  },
+  {
+    "axis": "any",
+    "glyphNeg": "-",
+    "glyphPos": "+",
+    "mode": "repeat",
+    "ratio": 41,
+  },
+  {
+    "axis": "any",
+    "glyphNeg": "è",
+    "glyphPos": "é",
+    "mode": "repeat",
+    "ratio": 43,
+  },
+  {
+    "axis": "any",
+    "glyphNeg": "ì",
+    "glyphPos": "í",
+    "mode": "repeat",
+    "ratio": 47,
+  },
+]
+`;
+
+exports[`rule tables are frozen > TRUE_SPELLING_INTERVALS 1`] = `
+{
+  "11": {
+    "letter": 3,
+    "semitones": 5,
+  },
+  "13": {
+    "letter": 5,
+    "semitones": 9,
+  },
+  "17": {
+    "letter": 0,
+    "maxSteps": 2,
+    "semitones": 1,
+  },
+  "19": {
+    "letter": 2,
+    "semitones": 3,
+  },
+  "23": {
+    "letter": 3,
+    "semitones": 6,
+  },
+  "29": {
+    "letter": 6,
+    "semitones": 10,
+  },
+  "3": {
+    "letter": 4,
+    "semitones": 7,
+  },
+  "31": {
+    "letter": 0,
+    "maxSteps": 4,
+    "semitones": 0,
+  },
+  "37": {
+    "letter": 1,
+    "semitones": 2,
+  },
+  "41": {
+    "letter": 2,
+    "semitones": 4,
+  },
+  "43": {
+    "letter": 3,
+    "semitones": 5,
+  },
+  "47": {
+    "letter": 3,
+    "semitones": 6,
+  },
+  "5": {
+    "letter": 2,
+    "semitones": 4,
+  },
+  "7": {
+    "letter": 6,
+    "semitones": 10,
+  },
+}
+`;

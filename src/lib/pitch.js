@@ -1,7 +1,8 @@
 // Shared pitch core — ratio math, ET mapping, true-spelling, HEJI annotation.
 // Pure functions and data tables, no DOM, no app state. Imported by the main
 // editor, the tuner, and the overtones explorer (Phase 2 of the staged
-// rebuild — this module ends the copy-paste drift in the foundational math).
+// rebuild — this module ends the copy-paste drift in the foundational math;
+// the shared spelling walk, spellPitchClassFromAxisRatios, landed Sept 2026).
 //
 // Drift resolutions (June 2026), made explicit here so they stay decisions:
 // 1. gcd/reduceFraction: the defensive variant (overtones lineage) is
@@ -95,9 +96,16 @@ export function floorDiv(value, divisor) {
   return Math.floor(value / divisor);
 }
 
+// Exactness ends at 2^53: past that, doubles cannot hold the integers and
+// the Euclidean algorithm returns wrong divisors. Treat such inputs as
+// coprime rather than reduce them wrongly (bigint/monzo arithmetic is the
+// planned fix, Phase 3/4).
 export function gcd(a, b) {
   let x = Math.abs(Math.round(a));
   let y = Math.abs(Math.round(b));
+  if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)) {
+    return 1;
+  }
   while (y !== 0) {
     const t = x % y;
     x = y;
@@ -144,8 +152,17 @@ export function parseRatioInput(value) {
   return { numerator, denominator };
 }
 
+export function ratioToCents(numerator, denominator = 1) {
+  return 1200 * Math.log2(numerator / denominator);
+}
+
+// Octave-reduce a positive ratio into [1, 2]. Non-positive or non-finite
+// input returns null (a ratio <= 0 would otherwise never reach 1).
 export function normalizeRatioToOctave(numerator, denominator) {
-  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) {
+    return null;
+  }
+  if (numerator <= 0 || denominator <= 0) {
     return null;
   }
   let num = numerator;
@@ -162,7 +179,7 @@ export function normalizeRatioToOctave(numerator, denominator) {
     shift += 1;
     ratio = num / den;
   }
-  return { numerator: num, denominator: den, shift };
+  return { numerator: num, denominator: den, shift, ratio };
 }
 
 // ---- ET mapping ----
@@ -314,10 +331,54 @@ export function getTrueSpellingLimit(ratio) {
   return maxSteps;
 }
 
+// ---- Axis-ratio spelling ----
+
+// Spell a pitch class from prime-axis exponents relative to a base pitch
+// class ("C", "Bb", ...). Each prime moves the letter and the semitone count
+// by its TRUE_SPELLING_INTERVALS entry; the accidental is whatever is left
+// over. Returns null when the ratio is not spellable this way: an axis past
+// its step limit, an axis without a table entry, a prime >= 53, or no
+// non-zero exponent at all. Callers fall back to the nearest ET name.
+// Shared by the editor, the tuner, and the overtones explorer.
+export function spellPitchClassFromAxisRatios(axisRatios, basePitchClassText) {
+  const axes = (axisRatios || []).filter((axis) => axis && Number(axis.exp));
+  if (!axes.length) {
+    return null;
+  }
+  for (const axis of axes) {
+    const ratio = Number(axis.ratio);
+    if (ratio >= 53 || !TRUE_SPELLING_INTERVALS[ratio]) {
+      return null;
+    }
+    const limit = getTrueSpellingLimit(ratio);
+    if (Number.isFinite(limit) && Math.abs(Number(axis.exp)) > limit) {
+      return null;
+    }
+  }
+  let totalLetterShift = 0;
+  let totalSemitoneShift = 0;
+  axes.forEach((axis) => {
+    const spec = TRUE_SPELLING_INTERVALS[Number(axis.ratio)];
+    totalLetterShift += Number(axis.exp) * spec.letter;
+    totalSemitoneShift += Number(axis.exp) * spec.semitones;
+  });
+  const base = parsePitchClass(basePitchClassText);
+  const baseLetterIndex = Number.isFinite(base.letterIndex) ? base.letterIndex : 0;
+  const baseAccidental = Number.isFinite(base.accidental) ? base.accidental : 0;
+  const totalLetter = baseLetterIndex + totalLetterShift;
+  const octaveShift = floorDiv(totalLetter, 7);
+  const letterIndex = mod(totalLetter, 7);
+  const targetNatural = LETTER_TO_SEMITONE[LETTERS[letterIndex]] + octaveShift * 12;
+  const totalSemitone =
+    baseAccidental + LETTER_TO_SEMITONE[LETTERS[baseLetterIndex]] + totalSemitoneShift;
+  const accidental = totalSemitone - targetNatural;
+  return { pitchClass: buildPitchClass(letterIndex, accidental), letterIndex, accidental };
+}
+
 // ---- HEJI annotation ----
 
 export function hasAccidental(noteName) {
-  return /[#b]/.test(noteName);
+  return /[#bx]/.test(String(noteName || ""));
 }
 
 export function getAccidentalType(noteName) {
@@ -343,16 +404,17 @@ export function axisMatches(rule, axisState) {
 }
 
 export function getHejiAnnotationForAxisRatios(axisRatios, baseText) {
-  const accidentalType = getAccidentalType(baseText || "");
-  const sharpCount = (baseText.match(/#/g) || []).length;
-  const flatCount = (baseText.match(/b/g) || []).length;
-  const doubleSharpCount = (baseText.match(/x/g) || []).length;
+  const text = String(baseText || "");
+  const accidentalType = getAccidentalType(text);
+  const sharpCount = (text.match(/#/g) || []).length;
+  const flatCount = (text.match(/b/g) || []).length;
+  const doubleSharpCount = (text.match(/x/g) || []).length;
   const axisStates = (axisRatios || []).map((axis) => ({
     axis: "any",
     ratio: Number(axis.ratio),
     exponent: Number(axis.exp),
   }));
-  const nextBase = String(baseText || "").replace(/[x#b]/g, "");
+  const nextBase = text.replace(/[x#b]/g, "");
   const suffixParts = [];
 
   for (let i = 0; i < sharpCount; i += 1) {

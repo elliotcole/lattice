@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "lint": "eslint .",
+    "lint": "eslint . --quiet",
+    "lint:warn": "eslint .",
     "format": "prettier --write src/serialization.js src/state-merge.js src/lib tests scripts eslint.config.js",
     "format:check": "prettier --check src/serialization.js src/state-merge.js src/lib tests scripts eslint.config.js",
     "check:regression": "node scripts/regression-smoke.mjs"
@@ -16,6 +17,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.4.1",
+    "globals": "^17.12.0",
     "prettier": "^3.8.4",
     "vite": "^8.0.16",
     "vitest": "^4.1.8"

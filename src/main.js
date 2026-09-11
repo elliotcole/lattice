@@ -31,10 +31,10 @@ import {
   midiToFrequency,
   getNearestEtInfo as getNearestEtInfoCore,
   parsePitchClass,
-  accidentalToString,
   buildPitchClass,
+  analyzeRatioForTrueSpelling,
   getTrueSpellingLimit,
-  hasAccidental,
+  spellPitchClassFromAxisRatios,
   getAccidentalType,
   axisMatches,
 } from "./lib/pitch.js";
@@ -5838,7 +5838,7 @@ function getCustomNodeDisplayInfo(node) {
   const nearestName = `${nearestPitchClass}${Math.floor(nearest.midi / 12) - 1}`;
   const nearestCents = Number.isFinite(node.cents_from_et) ? node.cents_from_et : nearest.cents;
   if (spellingMode === "true" || hejiEnabled) {
-    const analysis = analyzeCustomRatio(node.derivedNumerator || node.numerator, node.derivedDenominator || node.denominator);
+    const analysis = analyzeRatioForTrueSpelling(node.derivedNumerator || node.numerator, node.derivedDenominator || node.denominator);
     if (analysis) {
       const info = buildTrueSpellingFromAxisRatios({
         node,
@@ -5918,7 +5918,7 @@ function refreshCustomNodes() {
     customNode.cents_from_et = etInfo.cents;
     customNode.note_name = etInfo.name;
     customNode.pitch_class = etInfo.pitchClass;
-    const analysis = analyzeCustomRatio(
+    const analysis = analyzeRatioForTrueSpelling(
       customNode.derivedNumerator || customNode.numerator,
       customNode.derivedDenominator || customNode.denominator
     );
@@ -6482,7 +6482,7 @@ function buildLattice() {
           exponentY,
           exponentZ
         );
-        const reduced = reduceToOctave(baseRatio.numerator, baseRatio.denominator);
+        const reduced = normalizeRatioToOctave(baseRatio.numerator, baseRatio.denominator);
         const etInfo = getNearestEtInfo(fundamental * reduced.ratio, a4);
         const isCenter = exponentX === 0 && exponentY === 0 && exponentZ === 0;
         result.push({
@@ -6560,7 +6560,7 @@ function updateNodeRatios() {
       node.exponentY,
       node.exponentZ || 0
     );
-    const reduced = reduceToOctave(baseRatio.numerator, baseRatio.denominator);
+    const reduced = normalizeRatioToOctave(baseRatio.numerator, baseRatio.denominator);
     node.numerator = reduced.numerator;
     node.denominator = reduced.denominator;
     node.freq = fundamental * reduced.ratio;
@@ -6597,7 +6597,7 @@ function recomputeNodeRatiosFromExponents() {
       node.exponentY,
       node.exponentZ || 0
     );
-    const reduced = reduceToOctave(baseRatio.numerator, baseRatio.denominator);
+    const reduced = normalizeRatioToOctave(baseRatio.numerator, baseRatio.denominator);
     node.numerator = reduced.numerator;
     node.denominator = reduced.denominator;
     node.freq = fundamental * reduced.ratio;
@@ -7817,24 +7817,6 @@ function buildEdges(nodesList, cols, rows, depth) {
   });
 
   return edgesList;
-}
-
-function reduceToOctave(numerator, denominator) {
-  let num = numerator;
-  let den = denominator;
-  let ratio = num / den;
-
-  while (ratio < 1) {
-    num *= 2;
-    ratio = num / den;
-  }
-
-  while (ratio > 2) {
-    den *= 2;
-    ratio = num / den;
-  }
-
-  return { numerator: num, denominator: den, ratio };
 }
 
 function buildRatioComponents(ratioX, ratioY, ratioZ, exponentX, exponentY, exponentZ) {
@@ -10606,65 +10588,6 @@ function buildTrueSpellingFromAxisRatios({
       cents: nearestCents,
     };
   }
-  const beyondLimit = axisRatios.some((axis) => {
-    if (!axis.exp) {
-      return false;
-    }
-    const limit = getTrueSpellingLimit(axis.ratio);
-    if (!Number.isFinite(limit)) {
-      return false;
-    }
-    return Math.abs(axis.exp) > limit;
-  });
-  if (beyondLimit) {
-    return {
-      name: nearestName,
-      pitchClass: nearestPitchClass,
-      cents: nearestCents,
-    };
-  }
-  const hasUnknownInterval = axisRatios.some(
-    (axis) => axis.exp && !TRUE_SPELLING_INTERVALS[axis.ratio]
-  );
-  if (hasUnknownInterval) {
-    return {
-      name: nearestName,
-      pitchClass: nearestPitchClass,
-      cents: nearestCents,
-    };
-  }
-  const hasHigherPrime = axisRatios.some(
-    (axis) => axis.exp && Number(axis.ratio) >= 53
-  );
-  if (hasHigherPrime) {
-    return {
-      name: nearestName,
-      pitchClass: nearestPitchClass,
-      cents: nearestCents,
-    };
-  }
-  let totalLetterShift = 0;
-  let totalSemitoneShift = 0;
-  let hasOffsetAxis = false;
-  axisRatios.forEach((axis) => {
-    if (!axis.exp) {
-      return;
-    }
-    const spec = TRUE_SPELLING_INTERVALS[axis.ratio];
-    if (!spec) {
-      return;
-    }
-    hasOffsetAxis = true;
-    totalLetterShift += axis.exp * spec.letter;
-    totalSemitoneShift += axis.exp * spec.semitones;
-  });
-  if (!hasOffsetAxis) {
-    return {
-      name: nearestName,
-      pitchClass: nearestPitchClass,
-      cents: nearestCents,
-    };
-  }
   let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
   if (!Number.isFinite(fundamentalMidi)) {
     const fallback = getNearestEtInfo(
@@ -10674,18 +10597,15 @@ function buildTrueSpellingFromAxisRatios({
     fundamentalMidi = fallback.midi;
   }
   const basePitchClassText = getFundamentalNoteNames()[mod(fundamentalMidi, 12)];
-  const base = parsePitchClass(basePitchClassText);
-  const baseLetterIndex = Number.isFinite(base.letterIndex) ? base.letterIndex : 0;
-  const baseAccidental = Number.isFinite(base.accidental) ? base.accidental : 0;
-  const totalLetter = baseLetterIndex + totalLetterShift;
-  const octaveShift = floorDiv(totalLetter, 7);
-  const targetLetterIndex = mod(totalLetter, 7);
-  const targetNatural =
-    LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + octaveShift * 12;
-  const totalSemitone =
-    baseAccidental + LETTER_TO_SEMITONE[LETTERS[baseLetterIndex]] + totalSemitoneShift;
-  const accidental = totalSemitone - targetNatural;
-  const pitchClass = buildPitchClass(targetLetterIndex, accidental);
+  const spelled = spellPitchClassFromAxisRatios(axisRatios, basePitchClassText);
+  if (!spelled) {
+    return {
+      name: nearestName,
+      pitchClass: nearestPitchClass,
+      cents: nearestCents,
+    };
+  }
+  const { pitchClass, letterIndex: targetLetterIndex, accidental } = spelled;
   const targetPc = mod(
     LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + accidental,
     12
@@ -10707,49 +10627,6 @@ function buildTrueSpellingFromAxisRatios({
   return { name, pitchClass, cents };
 }
 
-
-function analyzeCustomRatio(numerator, denominator) {
-  const normalized = normalizeRatioToOctave(numerator, denominator);
-  if (!normalized) {
-    return null;
-  }
-  const reduced = reduceFraction(normalized.numerator, normalized.denominator);
-  let num = Math.abs(reduced.numerator);
-  let den = Math.abs(reduced.denominator);
-  let octaveShift = normalized.shift;
-  while (num % 2 === 0 && den % 2 === 0) {
-    num /= 2;
-    den /= 2;
-  }
-  while (num % 2 === 0) {
-    num /= 2;
-    octaveShift += 1;
-  }
-  while (den % 2 === 0) {
-    den /= 2;
-    octaveShift -= 1;
-  }
-  const axisRatios = [];
-  for (const primeKey of Object.keys(TRUE_SPELLING_INTERVALS)) {
-    const prime = Number(primeKey);
-    let exponent = 0;
-    while (num % prime === 0) {
-      num /= prime;
-      exponent += 1;
-    }
-    while (den % prime === 0) {
-      den /= prime;
-      exponent -= 1;
-    }
-    if (exponent) {
-      axisRatios.push({ ratio: prime, exp: exponent });
-    }
-  }
-  if (num !== 1 || den !== 1 || !axisRatios.length) {
-    return null;
-  }
-  return { axisRatios, octaveShift };
-}
 
 function getTrueSpellingPitchClass(node) {
   const a4 = Number(a4Input.value) || 440;
@@ -11938,8 +11815,8 @@ function formatAxisRatioLabel(ratioValue) {
   if (!Number.isFinite(ratioValue) || ratioValue === 0) {
     return null;
   }
-  const reduced = reduceToOctave(Math.abs(ratioValue), 1);
-  if (!Number.isFinite(reduced.numerator) || !Number.isFinite(reduced.denominator)) {
+  const reduced = normalizeRatioToOctave(Math.abs(ratioValue), 1);
+  if (!reduced || !Number.isFinite(reduced.numerator) || !Number.isFinite(reduced.denominator)) {
     return null;
   }
   return `${reduced.numerator}:${reduced.denominator}`;
@@ -11949,8 +11826,8 @@ function formatAxisRatioLabelDirectional(ratioValue, direction) {
   if (!Number.isFinite(ratioValue) || ratioValue === 0) {
     return null;
   }
-  const reduced = reduceToOctave(Math.abs(ratioValue), 1);
-  if (!Number.isFinite(reduced.numerator) || !Number.isFinite(reduced.denominator)) {
+  const reduced = normalizeRatioToOctave(Math.abs(ratioValue), 1);
+  if (!reduced || !Number.isFinite(reduced.numerator) || !Number.isFinite(reduced.denominator)) {
     return null;
   }
   if (direction < 0) {
@@ -12831,9 +12708,9 @@ function getAxisLegendSettings() {
   const xRatio = Number(ratioXSelect.value) || 3;
   const yRatio = Number(ratioYSelect.value) || 5;
   const zRatio = Number(ratioZSelect.value) || 7;
-  const xReduced = reduceToOctave(xRatio, 1);
-  const yReduced = reduceToOctave(yRatio, 1);
-  const zReduced = reduceToOctave(zRatio, 1);
+  const xReduced = normalizeRatioToOctave(xRatio, 1);
+  const yReduced = normalizeRatioToOctave(yRatio, 1);
+  const zReduced = normalizeRatioToOctave(zRatio, 1);
   const xLabel = `${xReduced.numerator}:${xReduced.denominator}`;
   const yLabel = `${yReduced.numerator}:${yReduced.denominator}`;
   const zLabel = `${zReduced.numerator}:${zReduced.denominator}`;
@@ -18645,7 +18522,7 @@ function getDistanceEdgeOverride(key) {
 
 function normalizeRatio(numerator, denominator) {
   const reduced = reduceFraction(numerator, denominator);
-  return reduceToOctave(reduced.numerator, reduced.denominator);
+  return normalizeRatioToOctave(reduced.numerator, reduced.denominator);
 }
 
 function factorizeInteger(value) {
@@ -19122,8 +18999,8 @@ function findOrCreateRatioTargetNode(target) {
   const factorNumerator = target.numerator * parent.denominator;
   const factorDenominator = target.denominator * parent.numerator;
   const factorReduced = reduceFraction(factorNumerator, factorDenominator);
-  const factorOctave = reduceToOctave(factorReduced.numerator, factorReduced.denominator);
-  if (factorOctave.numerator === 1 && factorOctave.denominator === 1) {
+  const factorOctave = normalizeRatioToOctave(factorReduced.numerator, factorReduced.denominator);
+  if (!factorOctave || (factorOctave.numerator === 1 && factorOctave.denominator === 1)) {
     return null;
   }
   const slot = findNextCustomSlot(parent.id);
@@ -19680,7 +19557,10 @@ function normalizeCommaRatio(numerator, denominator) {
     return null;
   }
   const reduced = reduceFraction(numerator, denominator);
-  const octaveReduced = reduceToOctave(reduced.numerator, reduced.denominator);
+  const octaveReduced = normalizeRatioToOctave(reduced.numerator, reduced.denominator);
+  if (!octaveReduced) {
+    return null;
+  }
   return reduceFraction(octaveReduced.numerator, octaveReduced.denominator);
 }
 

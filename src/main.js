@@ -7,6 +7,14 @@ import intervalChartData from "./interval-names.json";
 import { quickTourSteps, deepTourSteps } from "./tour-steps.js";
 import { encodePresetState, decodePresetState } from "./serialization.js";
 import {
+  isPlainObject,
+  deepClonePresetValue,
+  deepMergePresetState,
+  deepEqualSnapshotValue,
+  diffSnapshotState,
+  mergeSnapshotState,
+} from "./state-merge.js";
+import {
   noteNamesSharp,
   noteNamesFlat,
   noteNames,
@@ -1762,6 +1770,9 @@ let pendingLayoutSpacing = null;
 let customNodeDrag = null;
 let layoutNodeShapes = new Map();
 let nodeSpellingOverrides = new Map();
+// Legacy files key spelling overrides by positional node id; those ids only
+// exist once the file's lattice is rebuilt, so they wait here until then.
+let pendingLegacySpellingOverrides = new Map();
 let nodeOctaveOffsets = new Map();
 let octaveShiftTargetId = null;
 let layoutNodeSize = 35;
@@ -3262,7 +3273,7 @@ function resetPatternCycle({ restart = false } = {}) {
 }
 
 function buildSnapshotState() {
-  const state = getPresetState();
+  const state = getPresetState({ keepEmptyCollections: true });
   if (!state) {
     return null;
   }
@@ -3346,28 +3357,30 @@ function quantizeSnapshotSynthState(synthState) {
   return next;
 }
 
+// A recalled snapshot goes through applyPresetState, where an absent section
+// is refilled from the boot defaults. "Don't restore the view" must mean
+// "keep the current view", so sections the snapshot doesn't carry (or that
+// a restore toggle excludes) are filled from the live state instead.
 function prepareSnapshotStateForRecall(snapshotState) {
   const nextState = JSON.parse(JSON.stringify(snapshotState));
-  if (!snapshotRestoreView && nextState.view) {
-    delete nextState.view;
+  const current = getPresetState({ includeDefaults: true });
+  if (!snapshotRestoreView || !isPlainObject(nextState.view)) {
+    nextState.view = current.view;
   }
   const keyboardModeValue =
     nextState.synth && typeof nextState.synth.keyboardMode === "string"
       ? nextState.synth.keyboardMode
       : null;
-  if (!snapshotRestoreSynthSettings && nextState.synth) {
-    delete nextState.synth;
+  if (!snapshotRestoreSynthSettings || !isPlainObject(nextState.synth)) {
+    nextState.synth = current.synth;
   }
   if (snapshotRestoreKeyboardMode && typeof keyboardModeValue === "string") {
-    if (!nextState.synth || typeof nextState.synth !== "object") {
-      nextState.synth = {};
-    }
     nextState.synth.keyboardMode = keyboardModeValue;
-  } else if (nextState.synth && typeof nextState.synth === "object") {
-    delete nextState.synth.keyboardMode;
-    if (!Object.keys(nextState.synth).length) {
-      delete nextState.synth;
-    }
+  } else if (current.synth && typeof current.synth.keyboardMode === "string") {
+    nextState.synth.keyboardMode = current.synth.keyboardMode;
+  }
+  if (!isPlainObject(nextState.layout) && current.layout) {
+    nextState.layout = current.layout;
   }
   return nextState;
 }
@@ -3496,106 +3509,6 @@ function getPlayingSnapshotKeys({ excludePattern = false } = {}) {
     }
   });
   return Array.from(keys);
-}
-
-function deepEqualSnapshotValue(a, b) {
-  if (a === b) {
-    return true;
-  }
-  if (typeof a !== typeof b) {
-    return false;
-  }
-  if (a == null || b == null) {
-    return false;
-  }
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) {
-      return false;
-    }
-    for (let i = 0; i < a.length; i += 1) {
-      if (!deepEqualSnapshotValue(a[i], b[i])) {
-        return false;
-      }
-    }
-    return true;
-  }
-  if (typeof a === "object") {
-    const keysA = Object.keys(a);
-    const keysB = Object.keys(b);
-    if (keysA.length !== keysB.length) {
-      return false;
-    }
-    for (const key of keysA) {
-      if (!Object.prototype.hasOwnProperty.call(b, key)) {
-        return false;
-      }
-      if (!deepEqualSnapshotValue(a[key], b[key])) {
-        return false;
-      }
-    }
-    return true;
-  }
-  return false;
-}
-
-function diffSnapshotState(base, next) {
-  if (!base || !next || typeof base !== "object" || typeof next !== "object") {
-    return next;
-  }
-  const diff = {};
-  Object.keys(next).forEach((key) => {
-    if (!Object.prototype.hasOwnProperty.call(next, key)) {
-      return;
-    }
-    const nextValue = next[key];
-    const baseValue = base[key];
-    if (deepEqualSnapshotValue(baseValue, nextValue)) {
-      return;
-    }
-    if (
-      nextValue &&
-      baseValue &&
-      typeof nextValue === "object" &&
-      typeof baseValue === "object" &&
-      !Array.isArray(nextValue) &&
-      !Array.isArray(baseValue)
-    ) {
-      const childDiff = diffSnapshotState(baseValue, nextValue);
-      if (childDiff && Object.keys(childDiff).length) {
-        diff[key] = childDiff;
-      }
-      return;
-    }
-    diff[key] = nextValue;
-  });
-  return diff;
-}
-
-function mergeSnapshotState(base, diff) {
-  if (!diff || typeof diff !== "object") {
-    return base ? JSON.parse(JSON.stringify(base)) : diff;
-  }
-  if (!base || typeof base !== "object") {
-    return JSON.parse(JSON.stringify(diff));
-  }
-  const result = Array.isArray(base) ? [...base] : { ...base };
-  Object.keys(diff).forEach((key) => {
-    const value = diff[key];
-    if (
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      base &&
-      typeof base[key] === "object" &&
-      base[key] &&
-      !Array.isArray(base[key])
-    ) {
-      result[key] = mergeSnapshotState(base[key], value);
-    } else {
-      result[key] = JSON.parse(JSON.stringify(value));
-    }
-  });
-  return result;
 }
 
 function serializeSnapshotsForPreset() {
@@ -6717,13 +6630,15 @@ function rebaseLatticeFromNode(node) {
     y: (Number(latticeExponentOffset.y) || 0) + deltaY,
     z: (Number(latticeExponentOffset.z) || 0) + deltaZ,
   };
-  nodeOctaveOffsets = shiftExponentMap(nodeOctaveOffsets, deltaX, deltaY, deltaZ);
-  const shiftedVolumes = shiftExponentMap(nodeVolumeLimits, deltaX, deltaY, deltaZ);
+  nodeOctaveOffsets = shiftNodeKeyedMap(nodeOctaveOffsets, deltaX, deltaY, deltaZ);
+  const shiftedVolumes = shiftNodeKeyedMap(nodeVolumeLimits, deltaX, deltaY, deltaZ);
   nodeVolumeLimits.clear();
   if (shiftedVolumes && shiftedVolumes.size) {
     shiftedVolumes.forEach((value, key) => nodeVolumeLimits.set(key, value));
   }
+  nodeSpellingOverrides = shiftNodeKeyedMap(nodeSpellingOverrides, deltaX, deltaY, deltaZ);
   shiftLineLabelOverrides(deltaX, deltaY, deltaZ);
+  shiftDistanceState(deltaX, deltaY, deltaZ);
   nodes.forEach((entry) => {
     if (entry.isCustom) {
       return;
@@ -6735,6 +6650,14 @@ function rebaseLatticeFromNode(node) {
     entry.isCenter = isCenter;
     if (isCenter) {
       entry.active = true;
+    }
+  });
+  // Custom nodes are addressed by their source node's exponents; keep that
+  // address in step with the rebased source.
+  customNodes.forEach((customNode) => {
+    const source = nodeById.get(customNode.sourceNodeId);
+    if (source && !source.isCustom) {
+      customNode.sourceExponents = [source.exponentX, source.exponentY, source.exponentZ || 0];
     }
   });
   applyNodeOctaveOffsets();
@@ -9077,6 +9000,76 @@ function shiftExponentKey(key, deltaX, deltaY, deltaZ) {
   return `${parsed.x - deltaX},${parsed.y - deltaY},${parsed.z - deltaZ}`;
 }
 
+// Shift any node-keyed map key by a lattice rebase: "x,y,z", "grid:x,y,z",
+// or "custom:x,y,z|slot" (custom nodes move with their source node). Legacy
+// "custom:<id>" keys are left as they are.
+function shiftNodeKey(key, deltaX, deltaY, deltaZ) {
+  if (typeof key !== "string") {
+    return null;
+  }
+  if (key.startsWith("grid:")) {
+    const shifted = shiftExponentKey(key.slice(5), deltaX, deltaY, deltaZ);
+    return shifted ? `grid:${shifted}` : null;
+  }
+  if (key.startsWith("custom:")) {
+    const rest = key.slice(7);
+    const bar = rest.indexOf("|");
+    if (bar < 0) {
+      return key;
+    }
+    const shifted = shiftExponentKey(rest.slice(0, bar), deltaX, deltaY, deltaZ);
+    return shifted ? `custom:${shifted}|${rest.slice(bar + 1)}` : null;
+  }
+  return shiftExponentKey(key, deltaX, deltaY, deltaZ);
+}
+
+function shiftNodeKeyedMap(map, deltaX, deltaY, deltaZ) {
+  if (!map || !map.size) {
+    return map;
+  }
+  const next = new Map();
+  map.forEach((value, key) => {
+    const nextKey = shiftNodeKey(key, deltaX, deltaY, deltaZ);
+    if (nextKey) {
+      next.set(nextKey, value);
+    }
+  });
+  return next;
+}
+
+function shiftDistanceState(deltaX, deltaY, deltaZ) {
+  if (!distanceSelectedEdges.size && !distanceEdgeOverrides.size) {
+    return;
+  }
+  const remapEdge = (edgeKey) => {
+    const parts = parseDistanceEdgeKey(edgeKey);
+    if (!parts) {
+      return null;
+    }
+    const a = shiftNodeKey(parts[0], deltaX, deltaY, deltaZ);
+    const b = shiftNodeKey(parts[1], deltaX, deltaY, deltaZ);
+    return a && b ? getDistanceEdgeKey(a, b) : null;
+  };
+  const nextEdges = [];
+  distanceSelectedEdges.forEach((edgeKey) => {
+    const nextKey = remapEdge(edgeKey);
+    if (nextKey) {
+      nextEdges.push(nextKey);
+    }
+  });
+  distanceSelectedEdges.clear();
+  nextEdges.forEach((edgeKey) => distanceSelectedEdges.add(edgeKey));
+  const nextOverrides = [];
+  distanceEdgeOverrides.forEach((value, edgeKey) => {
+    const nextKey = remapEdge(edgeKey);
+    if (nextKey) {
+      nextOverrides.push([nextKey, value]);
+    }
+  });
+  distanceEdgeOverrides.clear();
+  nextOverrides.forEach(([edgeKey, value]) => distanceEdgeOverrides.set(edgeKey, value));
+}
+
 function shiftExponentMap(map, deltaX, deltaY, deltaZ) {
   if (!map || !map.size) {
     return map;
@@ -10588,7 +10581,7 @@ function getPreferredEnharmonicPitchClass(baseText, targetPc, fallbackPitchClass
 
 function getManualSpellingForNode(node, targetPc) {
   const options = getManualSpellingOptions(targetPc);
-  const override = nodeSpellingOverrides.get(node.id);
+  const override = nodeSpellingOverrides.get(getSnapshotNodeKey(node));
   const selected = options.find((option) => option.key === override);
   if (selected) {
     return selected.pitchClass;
@@ -13073,8 +13066,8 @@ function drawDistanceConnections(nodePosMap) {
     if (!edgeKey) {
       return;
     }
-    const parts = edgeKey.split("|");
-    if (parts.length !== 2) {
+    const parts = parseDistanceEdgeKey(edgeKey);
+    if (!parts) {
       return;
     }
     const [aKey, bKey] = parts;
@@ -13721,8 +13714,8 @@ function addDistanceLineSegments(nodePosMap, segments) {
     if (!edgeKey) {
       continue;
     }
-    const partsKey = edgeKey.split("|");
-    if (partsKey.length !== 2) {
+    const partsKey = parseDistanceEdgeKey(edgeKey);
+    if (!partsKey) {
       continue;
     }
     const [aKey, bKey] = partsKey;
@@ -15819,7 +15812,8 @@ function onPointerDown(event) {
         }
       }
       const options = getManualSpellingOptions(targetPc);
-      const currentKey = nodeSpellingOverrides.get(hit.id);
+      const hitKey = getSnapshotNodeKey(hit);
+      const currentKey = nodeSpellingOverrides.get(hitKey);
       let currentIndex = options.findIndex((option) => option.key === currentKey);
       if (currentIndex < 0) {
         currentIndex = -1;
@@ -15827,9 +15821,9 @@ function onPointerDown(event) {
       const nextIndex = (currentIndex + 1) % options.length;
       const nextKey = options[nextIndex].key;
       if (nextKey === "base") {
-        nodeSpellingOverrides.delete(hit.id);
+        nodeSpellingOverrides.delete(hitKey);
       } else {
-        nodeSpellingOverrides.set(hit.id, nextKey);
+        nodeSpellingOverrides.set(hitKey, nextKey);
       }
       invalidateLabelCache();
       suppressClickAfterRespell = true;
@@ -18517,8 +18511,8 @@ function getDistanceEdgeNodes(edgeKey) {
   if (!edgeKey) {
     return null;
   }
-  const parts = String(edgeKey).split("|");
-  if (parts.length !== 2) {
+  const parts = parseDistanceEdgeKey(String(edgeKey));
+  if (!parts) {
     return null;
   }
   const [aKey, bKey] = parts;
@@ -18570,6 +18564,74 @@ function getDistanceEdgeKey(aKey, bKey) {
     return "";
   }
   return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+}
+
+// Edge keys join two node keys with "|". A custom node key itself contains a
+// "|" (custom:x,y,z|slot), so split only at a "|" that starts the next node
+// key. Legacy keys made of two bare numeric ids ("123|456") still split.
+function parseDistanceEdgeKey(edgeKey) {
+  if (!edgeKey || typeof edgeKey !== "string") {
+    return null;
+  }
+  let parts = edgeKey.split(/\|(?=grid:|custom:)/);
+  if (parts.length !== 2) {
+    parts = edgeKey.split("|");
+    if (parts.length !== 2 || parts.some((part) => /^(grid|custom):/.test(part))) {
+      return null;
+    }
+  }
+  return parts[0] && parts[1] ? parts : null;
+}
+
+// Pre-September-2026 files keyed custom nodes in distance edges by runtime
+// id, handed out as 200000 + index into the file's own customNodes array.
+// Rewrite such keys to the stable address using that same array.
+function migrateLegacyDistanceNodeKey(nodeKey, customEntries) {
+  if (!nodeKey.startsWith("custom:") || nodeKey.includes("|")) {
+    return nodeKey;
+  }
+  const index = Number(nodeKey.slice(7)) - 200000;
+  const entries = Array.isArray(customEntries) ? customEntries : [];
+  const entry = Number.isInteger(index) && index >= 0 ? entries[index] : null;
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const source = Array.isArray(entry.sourceExponents)
+    ? entry.sourceExponents
+    : Array.isArray(entry.exponents)
+    ? entry.exponents
+    : null;
+  if (!source || source.length < 2) {
+    return null;
+  }
+  const [x, y, z = 0] = source.map(Number);
+  if (![x, y, z].every(Number.isFinite)) {
+    return null;
+  }
+  let slot = Number.isFinite(Number(entry.customSlot)) ? Math.trunc(Number(entry.customSlot)) : null;
+  if (slot == null) {
+    // Slots were assigned in file order per source node.
+    slot = entries.slice(0, index).filter((other) => {
+      const otherSource = other && (other.sourceExponents || other.exponents);
+      return (
+        Array.isArray(otherSource) &&
+        Number(otherSource[0]) === x &&
+        Number(otherSource[1]) === y &&
+        Number(otherSource[2] || 0) === z
+      );
+    }).length;
+  }
+  return `custom:${x},${y},${z}|${slot}`;
+}
+
+function migrateLegacyDistanceEdgeKey(edgeKey, customEntries) {
+  const parts = parseDistanceEdgeKey(edgeKey);
+  if (!parts) {
+    return null;
+  }
+  const a = migrateLegacyDistanceNodeKey(parts[0], customEntries);
+  const b = migrateLegacyDistanceNodeKey(parts[1], customEntries);
+  return a && b ? getDistanceEdgeKey(a, b) : null;
 }
 
 function getDistanceEdgeOverride(key) {
@@ -21421,6 +21483,12 @@ function setLayoutMode(enabled, { force = false } = {}) {
   uiHintKey = "";
   uiHintDismissed = false;
   resetUiHintToDefault();
+  if (enabled && analysisLayers.microtonal) {
+    // The Interval Overlay is canvas-only; it never reaches SVG/PDF export.
+    analysisLayers.microtonal = false;
+    clearMicrotonalModeState();
+    syncAnalysisLayerToggles();
+  }
   if (enabled && !wasLayoutMode) {
     layoutPrevState = {
       is3DMode,
@@ -22563,7 +22631,9 @@ function getDistanceNodeKey(node) {
     return "";
   }
   if (node.isCustom) {
-    return `custom:${node.id}`;
+    // Stable address (custom:x,y,z|slot); the runtime id is a fallback only
+    // for a custom node whose source is unknown.
+    return getSnapshotNodeKey(node) || `custom:${node.id}`;
   }
   return `grid:${node.exponentX},${node.exponentY},${node.exponentZ || 0}`;
 }
@@ -22573,6 +22643,9 @@ function getNodeByDistanceKey(key) {
     return null;
   }
   if (key.startsWith("custom:")) {
+    if (key.includes("|")) {
+      return getNodeBySnapshotKey(key);
+    }
     const id = Number(key.slice(7));
     return nodeById.get(id) || null;
   }
@@ -24117,6 +24190,9 @@ function buildPresetStateSkeleton(active, customState, lineLabelState, distanceS
 
 function getPresetState(options = {}) {
   const includeDefaults = Boolean(options && options.includeDefaults);
+  // Snapshot states must spell out empty collections: the snapshot-set diff
+  // cannot express "this key was removed", only "this key is now []".
+  const keepEmptyCollections = Boolean(options && options.keepEmptyCollections);
   const isEmptyObject = (value) =>
     !value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length;
   const active = serializePresetActiveNodes();
@@ -24134,7 +24210,9 @@ function getPresetState(options = {}) {
 
   const state = buildPresetStateSkeleton(active, customState, lineLabelState, distanceState, muted);
 
-  pruneEmptyPresetCollections(state);
+  if (!keepEmptyCollections) {
+    pruneEmptyPresetCollections(state);
+  }
   if (!includeDefaults && isEmptyObject(layoutState)) {
     delete state.layout;
   } else {
@@ -24156,48 +24234,6 @@ function getPresetState(options = {}) {
 }
 
 // Preset Normalize
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function deepClonePresetValue(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => deepClonePresetValue(item));
-  }
-  if (isPlainObject(value)) {
-    const next = {};
-    Object.entries(value).forEach(([key, child]) => {
-      next[key] = deepClonePresetValue(child);
-    });
-    return next;
-  }
-  return value;
-}
-
-function deepMergePresetState(defaultValue, incomingValue) {
-  if (incomingValue === undefined) {
-    return deepClonePresetValue(defaultValue);
-  }
-  if (Array.isArray(incomingValue)) {
-    return deepClonePresetValue(incomingValue);
-  }
-  if (isPlainObject(defaultValue) && isPlainObject(incomingValue)) {
-    const merged = {};
-    const keys = new Set([
-      ...Object.keys(defaultValue || {}),
-      ...Object.keys(incomingValue || {}),
-    ]);
-    keys.forEach((key) => {
-      merged[key] = deepMergePresetState(defaultValue[key], incomingValue[key]);
-    });
-    return merged;
-  }
-  if (isPlainObject(incomingValue)) {
-    return deepClonePresetValue(incomingValue);
-  }
-  return incomingValue;
-}
-
 function normalizePresetStateWithDefaults(state) {
   if (!presetStateDefaults || !isPlainObject(state)) {
     return state;
@@ -24387,55 +24423,6 @@ function syncSnapshotSettingsControls() {
   setControlDisabled(snapshotKeyboardActiveToggle, !snapshotKeyboardMode);
 }
 
-function applyPresetSnapshotSettings(settings) {
-  if (!settings || typeof settings !== "object") {
-    return;
-  }
-  if (typeof settings.deferToCycleEnd === "boolean") {
-    snapshotDeferToCycleEnd = settings.deferToCycleEnd;
-  }
-  if (typeof settings.restorePlayNodes === "boolean") {
-    snapshotRestorePlayNodes = settings.restorePlayNodes;
-  }
-  if (typeof settings.connectCommonTones === "boolean") {
-    snapshotConnectCommonTones = settings.connectCommonTones;
-  }
-  if (typeof settings.morphEnabled === "boolean") {
-    snapshotMorphEnabled = settings.morphEnabled;
-  }
-  if (Number.isFinite(settings.morphTimeMs)) {
-    snapshotMorphTimeMs = Math.max(1, Math.round(settings.morphTimeMs));
-  }
-  if (typeof settings.restoreView === "boolean") {
-    snapshotRestoreView = settings.restoreView;
-  }
-  if (typeof settings.restoreSequence === "boolean") {
-    snapshotRestoreSequence = settings.restoreSequence;
-  }
-  if (typeof settings.restoreSynthSettings === "boolean") {
-    snapshotRestoreSynthSettings = settings.restoreSynthSettings;
-  }
-  if (typeof settings.restoreKeyboardMode === "boolean") {
-    snapshotRestoreKeyboardMode = settings.restoreKeyboardMode;
-  }
-  if (typeof settings.restoreLfos === "boolean") {
-    snapshotRestoreLfos = settings.restoreLfos;
-  }
-  if (typeof settings.restoreLfoPhase === "boolean") {
-    snapshotRestoreLfoPhase = settings.restoreLfoPhase;
-  }
-  if (typeof settings.useLetterKeys === "boolean") {
-    snapshotKeyboardMode = settings.useLetterKeys;
-  }
-  if (typeof settings.lettersActive === "boolean") {
-    snapshotKeyboardActive = settings.lettersActive;
-  }
-  normalizeSnapshotMorphSettings();
-  syncSnapshotSettingsControls();
-  setKeyboardModeDisabled(snapshotKeyboardMode);
-  updateSnapshotUi();
-}
-
 // Preset Apply Pipeline (Transient + Geometry + Rebuild)
 function resetPresetAnalysisState() {
   analysisLayers.distances = false;
@@ -24596,10 +24583,14 @@ function applyPresetDisplayToggleState(state) {
 }
 
 function applyPresetDistanceState(state) {
+  const customEntries = state.customNodes;
   if (Array.isArray(state.distanceEdges)) {
     state.distanceEdges.forEach((edgeKey) => {
       if (typeof edgeKey === "string" && edgeKey) {
-        distanceSelectedEdges.add(edgeKey);
+        const migrated = migrateLegacyDistanceEdgeKey(edgeKey, customEntries);
+        if (migrated) {
+          distanceSelectedEdges.add(migrated);
+        }
       }
     });
   }
@@ -24607,16 +24598,27 @@ function applyPresetDistanceState(state) {
     state.distanceEdgeOverrides,
     normalizeDistanceEdgeOverrideEntry,
     (normalized) => {
-      distanceEdgeOverrides.set(normalized.key, normalized.value);
+      const migrated = migrateLegacyDistanceEdgeKey(normalized.key, customEntries);
+      if (migrated) {
+        distanceEdgeOverrides.set(migrated, normalized.value);
+      }
     }
   );
 }
 
 function applyPresetSpellingAndOctaveState(state) {
+  // Absent means none: a preset without spellings must not inherit the
+  // previous lattice's overrides (hash navigation reuses the module state).
+  nodeSpellingOverrides = new Map();
+  pendingLegacySpellingOverrides = new Map();
   if (Array.isArray(state.noteSpellings)) {
-    nodeSpellingOverrides = new Map();
     forEachNormalizedPresetEntry(state.noteSpellings, normalizePresetSpellingEntry, (normalized) => {
-        nodeSpellingOverrides.set(normalized[0], normalized[1]);
+      const key = normalized[0];
+      if (typeof key === "string" && (key.startsWith("grid:") || key.startsWith("custom:"))) {
+        nodeSpellingOverrides.set(key, normalized[1]);
+      } else if (Number.isFinite(Number(key))) {
+        pendingLegacySpellingOverrides.set(Number(key), normalized[1]);
+      }
     });
   }
   nodeOctaveOffsets = new Map();
@@ -25567,25 +25569,6 @@ function applyPresetModeUiState(wants3D, preserveViewMode) {
   updateUiHint();
 }
 
-function applyPresetSnapshotPayloadState(state) {
-  snapshotBaseState = state.snapshotBase || null;
-  if (Array.isArray(state.snapshots)) {
-    applySnapshotsFromPreset(state.snapshots);
-    snapshotActiveIndex = Number.isFinite(state.snapshotActive)
-      ? Math.trunc(state.snapshotActive)
-      : snapshotActiveIndex;
-    updateSnapshotUi();
-  }
-  if (Array.isArray(state.snapshotsLetters)) {
-    applyLetterSnapshotsFromPreset(state.snapshotsLetters);
-    snapshotActiveLetterKey = typeof state.snapshotActiveLetter === "string"
-      ? state.snapshotActiveLetter
-      : snapshotActiveLetterKey;
-    updateSnapshotUi();
-  }
-  applyPresetSnapshotSettings(state.snapshotSettings);
-}
-
 function resolvePresetLayoutState(state) {
   return state.layout && typeof state.layout === "object" ? state.layout : null;
 }
@@ -25616,7 +25599,6 @@ function applyPresetModeAndGeometrySetup(state, layoutState, options = {}) {
 }
 
 function initializePresetApplyContext(state, options = {}) {
-  applyPresetSnapshotPayloadState(state);
   const layoutState = resolvePresetLayoutState(state);
   const presetModeAndGeometry = applyPresetModeAndGeometrySetup(state, layoutState, options);
   return {
@@ -25769,7 +25751,24 @@ function applyPresetPreRebuildPipeline(state, presetContext, options) {
   return applyPresetPreRebuildState(state, presetContext);
 }
 
+// Pre-September-2026 files keyed spelling overrides by the positional node id
+// from buildLattice(). The rebuild reproduces those ids for the file's grid,
+// so resolve them now and re-key by the node's stable address.
+function resolvePendingLegacySpellingOverrides() {
+  if (!pendingLegacySpellingOverrides.size) {
+    return;
+  }
+  pendingLegacySpellingOverrides.forEach((spelling, id) => {
+    const key = getSnapshotNodeKey(nodeById.get(id));
+    if (key) {
+      nodeSpellingOverrides.set(key, spelling);
+    }
+  });
+  pendingLegacySpellingOverrides = new Map();
+}
+
 function applyPresetPostRebuildPipeline(state, presetContext) {
+  resolvePendingLegacySpellingOverrides();
   applyPresetPostRebuildState(state, presetContext);
 }
 
@@ -27215,8 +27214,8 @@ async function buildLayoutSvgString(
       if (!edgeKey) {
         continue;
       }
-      const partsKey = edgeKey.split("|");
-      if (partsKey.length !== 2) {
+      const partsKey = parseDistanceEdgeKey(edgeKey);
+      if (!partsKey) {
         continue;
       }
       const [aKey, bKey] = partsKey;

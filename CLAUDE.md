@@ -11,9 +11,9 @@ A full audit and 6-phase revision plan lives in **`AUDIT-2026-06.md`** — read 
 
 **Done: Phase 2** (June 10–11, 2026) — `src/lib/pitch.js` (ratio math, ET mapping, spelling, HEJI) imported by all three apps, ~1,080 duplicated lines gone, drift decisions documented in its header. Tuner calibration workbench split into lazy-loaded `tuner/calibration.js` (2.4) — loads on first use, tuner entry 68→56 kB. Shared `src/theme.css` token sheet @imported by all five surfaces (2.3) — exactly-agreeing tokens only; remaining drift documented in its header (panel family, overtones muted-ink, viz-grid dark, satellites' text-primary). Audit 2.3's type/spacing/z-index scales and main-app alias-layer deletion are NOT done — they land with Phase 3 styling work. The monzo+bigint exact-arithmetic representation is also NOT done — pitch.js shares the float-based logic; exact arithmetic lands with Phase 3/4 restructuring.
 
-**September 2026 delta audit: `AUDIT-2026-09.md`** — 33 defects found after Phase 2, with a pre-Phase-3 fix order in its §3. Batch 1 (worklet voice lifecycle) landed September 10, 2026. Decisions: the Interval Overlay stays canvas-only (page-layout mode should clear it; batch 3); `presentation.html` is tabled.
+**September 2026 delta audit: `AUDIT-2026-09.md`** — 33 defects found after Phase 2, with a pre-Phase-3 fix order in its §3. Batches 1–3 (worklet lifecycle; guarded apply/storage/URL sync; node identity + snapshot semantics) landed September 10, 2026. Decisions: the Interval Overlay stays canvas-only (page-layout mode clears it); `presentation.html` is tabled.
 
-**Next action: AUDIT-2026-09 §3 batches 2–6, then Phase 3.**
+**Next action: AUDIT-2026-09 §3 batches 4–6, then Phase 3.**
 
 Decisions already made (don't re-ask):
 - Tech: open to anything; TypeScript welcome.
@@ -41,6 +41,7 @@ Decisions already made (don't re-ask):
 - **Serialization is the crown jewel.** One state shape serves URLs, files, presets, snapshots (`buildPresetStateSkeleton` / `applyPresetState`, ~main.js:24784+). Never rename or restructure a persisted field without a versioned migration. `v: 1` is currently written but never read — that changes in Phase 4.
 - `scripts/regression-smoke.mjs` (`npm run check:regression`) greps main.js for four literal source lines guarding past bug fixes. If a legit refactor breaks a guard, update the guard in the same commit and say so — don't delete it silently. Replace guards with real tests as Phase 1 lands.
 - Known duplication traps: canvas `draw()` and SVG export (`buildLayoutSvgString`) are parallel renderers — **visual changes must be made in both** until Phase 3 unifies them. Ratio/spelling/HEJI math now lives in `src/lib/pitch.js` (shared by all three apps) — change it there, never re-inline copies. main.js's `getHejiAnnotation` (DOM-bound) is still local but consumes the shared rules/helpers.
+- **Node identity:** every persisted per-node map is keyed by the stable address `grid:x,y,z` or `custom:x,y,z|slot` (`getSnapshotNodeKey`), never by runtime `node.id`. Readers still accept the pre-September-2026 forms (numeric spelling ids, `custom:<id>` distance keys) and rewrite them on load. Edge keys join two node keys with `|`; always split them with `parseDistanceEdgeKey`. Snapshot states keep empty collections as `[]` (`getPresetState({ keepEmptyCollections: true })`) so snapshot-set diffs can express deletions.
 - State lives in module globals **and the DOM** (e.g. `fundamentalInput.value`). After mutating state, you must call `draw()` and usually `schedulePresetUrlUpdate()` — forgetting these is the house bug class.
 
 ## Rules

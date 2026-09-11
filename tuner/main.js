@@ -3382,6 +3382,11 @@ function loadCalibration() {
         calibrateToggle,
       });
       return calibrationApi;
+    }).catch((error) => {
+      // Don't cache the failure: the next click retries the load.
+      calibrationLoadPromise = null;
+      setCalibrationStatus("Calibration tools failed to load. Check your connection and try again.");
+      throw error;
     });
   }
   return calibrationLoadPromise;
@@ -3694,7 +3699,7 @@ if (calibrateToggle) {
     setToolPanelOpen(calibratePanel, calibrateToggle, willOpen);
     setToolPanelOpen(analysisPanel, analysisToggle, false);
     if (willOpen) {
-      void loadCalibration();
+      loadCalibration().catch(() => {});
     } else {
       setCalibrationFocus(false);
     }
@@ -3794,15 +3799,23 @@ if (calPlayToggle) {
 
 if (calRunButton) {
   calRunButton.addEventListener("click", async () => {
-    const api = await loadCalibration();
-    void api.run();
+    try {
+      const api = await loadCalibration();
+      void api.run();
+    } catch (_error) {
+      // status already shown by loadCalibration
+    }
   });
 }
 
 if (calResetButton) {
   calResetButton.addEventListener("click", async () => {
-    const api = await loadCalibration();
-    api.reset();
+    try {
+      const api = await loadCalibration();
+      api.reset();
+    } catch (_error) {
+      // status already shown by loadCalibration
+    }
   });
 }
 

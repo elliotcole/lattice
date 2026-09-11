@@ -11,9 +11,9 @@ A full audit and 6-phase revision plan lives in **`AUDIT-2026-06.md`** — read 
 
 **Done: Phase 2** (June 10–11, 2026) — `src/lib/pitch.js` (ratio math, ET mapping, spelling, HEJI) imported by all three apps, ~1,080 duplicated lines gone, drift decisions documented in its header. Tuner calibration workbench split into lazy-loaded `tuner/calibration.js` (2.4) — loads on first use, tuner entry 68→56 kB. Shared `src/theme.css` token sheet @imported by all five surfaces (2.3) — exactly-agreeing tokens only; remaining drift documented in its header (panel family, overtones muted-ink, viz-grid dark, satellites' text-primary). Audit 2.3's type/spacing/z-index scales and main-app alias-layer deletion are NOT done — they land with Phase 3 styling work. The monzo+bigint exact-arithmetic representation is also NOT done — pitch.js shares the float-based logic; exact arithmetic lands with Phase 3/4 restructuring.
 
-**September 2026 delta audit: `AUDIT-2026-09.md`** — 33 defects found after Phase 2, with a pre-Phase-3 fix order in its §3. Batches 1–5 (worklet lifecycle; guarded apply/storage/URL sync; node identity + snapshot semantics; shared-core hardening + `spellPitchClassFromAxisRatios`; lazy wavetables/interval names, CI dedupe + PR workflow, font licences, audit fix, git gc) landed September 10, 2026. Decisions: the Interval Overlay stays canvas-only (page-layout mode clears it); `presentation.html` is tabled.
+**September 2026 delta audit: `AUDIT-2026-09.md`** — 33 defects found after Phase 2, with a pre-Phase-3 fix order in its §3. All six §3 batches landed September 10, 2026 (worklet lifecycle; guarded apply/storage/URL sync; node identity + snapshot semantics; shared-core hardening + `spellPitchClassFromAxisRatios`; lazy wavetables/interval names, CI dedupe + PR workflow, font licences, audit fix, git gc; dialog names, contrast, theme bootstrap, focus ring, reduced motion, tour copy, tuner redirect opt-out + calibration retry, deck import hardening). Headless smokes for each live in the gitignored `.claude/` (see memory). Decisions: the Interval Overlay stays canvas-only (page-layout mode clears it); `presentation.html` is tabled.
 
-**Next action: AUDIT-2026-09 §3 batch 6 (UI/tuner/deck quick wins), then Phase 3.**
+**Next action: Phase 3** (scene builder; see AUDIT-2026-09 §7 for the notes gathered since June).
 
 Decisions already made (don't re-ask):
 - Tech: open to anything; TypeScript welcome.
@@ -26,9 +26,9 @@ Decisions already made (don't re-ask):
 |---|---|
 | `index.html` + `src/main.js` | Main editor. **main.js is 33k lines / 1MB — beyond a single read window. Never read it whole; grep for line numbers, read targeted slices. Do not let it grow.** |
 | `src/style.css` | 4,733 lines; token system at top, five themes via `body[data-theme]` |
-| `tuner/` | Standalone mic tuner (own monolith, `mobile/` variant, UA-sniff redirect) |
+| `tuner/` | Standalone mic tuner (own monolith, `mobile/` variant, UA-sniff redirect; `?desktop=1` opts out and is remembered) |
 | `overtones/` | Overtone explorer (imports `src/custom-oscillator-types.js` for its semisine wave) |
-| `tuning-the-ear/` + `src/tuning-the-ear/` | Book-companion diagram deck; imported from Dropbox via `scripts/import-tuning-the-ear.mjs` (hardcoded path) |
+| `tuning-the-ear/` + `src/tuning-the-ear/` | Book-companion diagram deck; imported via `scripts/import-tuning-the-ear.mjs [sourceDir]` (defaults to the Dropbox "Diagrams v2" folder; refuses to write on bad JSON or slug collisions) |
 | `src/tour-steps.js` | Declarative tour content — the pattern to emulate |
 | `src/serialization.js` | Preset codec (encode/decode + LZ-string), pure, extracted Phase 1 |
 | `src/lib/pitch.js` | Shared pitch core: note tables, ratio math, ET/spelling, HEJI — imported by main, tuner, overtones. Drift decisions documented in its header |

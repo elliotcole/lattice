@@ -28821,6 +28821,7 @@ function initPresentationMode() {
       setActive(slide.slug);
     } catch (err) {
       console.warn("Failed to load slide", slide, err);
+      showTemporaryBanner(`Couldn't load "${slide.title || slide.slug}". Try the next diagram.`, 6000);
     }
   };
 

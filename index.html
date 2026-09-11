@@ -58,6 +58,19 @@
     </script>
   </head>
   <body>
+    <script>
+      // Apply the saved theme before first paint so dark/sepia users don't
+      // see a light flash. initTheme() in main.js repeats this idempotently.
+      (function () {
+        try {
+          var theme = localStorage.getItem("lattice-theme");
+          if (!theme && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches) {
+            theme = "dark";
+          }
+          if (theme) document.body.dataset.theme = theme;
+        } catch (e) {}
+      })();
+    </script>
     <canvas id="lattice" tabindex="0" aria-label="Tuning lattice"></canvas>
     <div id="welcome-overlay" class="welcome-overlay" hidden>
       <div class="welcome-backdrop"></div>
@@ -246,9 +259,9 @@
           </div>
         </div>
         </div>
-        <dialog id="fundamental-spelling-dialog" class="custom-ratio-dialog">
+        <dialog id="fundamental-spelling-dialog" aria-labelledby="fundamental-spelling-dialog-title" class="custom-ratio-dialog">
           <div class="dialog-content">
-            <h2>Spell fundamental:</h2>
+            <h2 id="fundamental-spelling-dialog-title">Spell fundamental:</h2>
             <div class="dialog-actions fundamental-spelling-actions">
               <button id="fundamental-spelling-sharp" type="button"></button>
               <button id="fundamental-spelling-flat" type="button"></button>
@@ -1527,9 +1540,9 @@
       </div>
     </aside>
 
-    <dialog id="custom-ratio-dialog" class="custom-ratio-dialog">
+    <dialog id="custom-ratio-dialog" aria-labelledby="custom-ratio-dialog-title" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form">
-        <div class="dialog-title">Add Custom Factor</div>
+        <div class="dialog-title" id="custom-ratio-dialog-title">Add Custom Factor</div>
         <label>
           Numerator
           <input id="custom-ratio-numerator" type="number" min="1" step="1" required />
@@ -1548,9 +1561,9 @@
         </menu>
       </form>
     </dialog>
-    <dialog id="learn-help-dialog" class="custom-ratio-dialog learn-help-dialog">
+    <dialog id="learn-help-dialog" aria-labelledby="learn-help-dialog-title" class="custom-ratio-dialog learn-help-dialog">
       <div class="learn-help-content">
-        <div class="dialog-title">Learn &amp; Get Help</div>
+        <div class="dialog-title" id="learn-help-dialog-title">Learn &amp; Get Help</div>
         <ul class="learn-help-list">
           <li>
             <a class="learn-help-item" href="/docs/" target="_blank" rel="noreferrer">
@@ -1598,9 +1611,9 @@
         <p class="learn-help-close-hint">[click anywhere to close]</p>
       </div>
     </dialog>
-    <dialog id="credits-dialog" class="custom-ratio-dialog credits-dialog">
+    <dialog id="credits-dialog" aria-labelledby="credits-dialog-title" class="custom-ratio-dialog credits-dialog">
       <div class="credits-content">
-        <div class="dialog-title">Tuning Lattice v1.1b</div>
+        <div class="dialog-title" id="credits-dialog-title">Tuning Lattice v1.1b</div>
        
         <p>
           thanks to Michael Harrison, Johnny MacMillan, Ben Hjertmann, and Chris Otto for feedback
@@ -1615,9 +1628,9 @@
       </div>
     </dialog>
 
-    <dialog id="layout-custom-label-dialog" class="custom-ratio-dialog">
+    <dialog id="layout-custom-label-dialog" aria-labelledby="layout-custom-label-dialog-title" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form">
-        <div class="dialog-title">Custom Text</div>
+        <div class="dialog-title" id="layout-custom-label-dialog-title">Custom Text</div>
         <label>
           Text:
           <textarea id="layout-custom-label-input" rows="6"></textarea>
@@ -1629,9 +1642,9 @@
         </menu>
       </form>
     </dialog>
-    <dialog id="layout-key-mapping-text-dialog" class="custom-ratio-dialog">
+    <dialog id="layout-key-mapping-text-dialog" aria-labelledby="layout-key-mapping-text-dialog-title" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form">
-        <div class="dialog-title">Key Mapping Text</div>
+        <div class="dialog-title" id="layout-key-mapping-text-dialog-title">Key Mapping Text</div>
         <label>
           Before
           <input id="layout-key-mapping-prefix" type="text" maxlength="12" />
@@ -1646,9 +1659,9 @@
         </menu>
       </form>
     </dialog>
-    <dialog id="octave-shift-dialog" class="custom-ratio-dialog">
+    <dialog id="octave-shift-dialog" aria-labelledby="octave-shift-dialog-title" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form">
-        <div class="dialog-title">Octave Shift</div>
+        <div class="dialog-title" id="octave-shift-dialog-title">Octave Shift</div>
         <label>
           Octaves to transpose on playback
           <input id="octave-shift-input" type="number" min="-6" max="6" step="1" />
@@ -1659,9 +1672,9 @@
         </menu>
       </form>
     </dialog>
-    <dialog id="triangle-label-dialog" class="custom-ratio-dialog">
+    <dialog id="triangle-label-dialog" aria-labelledby="triangle-label-dialog-title" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form">
-        <div class="dialog-title">Label</div>
+        <div class="dialog-title" id="triangle-label-dialog-title">Label</div>
         <label>
           Label:
           <input type="text" id="triangle-label-input" maxlength="40" />
@@ -1672,9 +1685,9 @@
         </menu>
       </form>
     </dialog>
-    <dialog id="distance-label-dialog" class="custom-ratio-dialog">
+    <dialog id="distance-label-dialog" aria-labelledby="distance-label-dialog-title" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form">
-        <div class="dialog-title">Interval Name</div>
+        <div class="dialog-title" id="distance-label-dialog-title">Interval Name</div>
         <label>
           Text
           <input type="text" id="distance-label-input" maxlength="80" />
@@ -1686,9 +1699,9 @@
         </menu>
       </form>
     </dialog>
-    <dialog id="find-ratio-dialog" class="custom-ratio-dialog">
+    <dialog id="find-ratio-dialog" aria-labelledby="find-ratio-dialog-title" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form" id="find-ratio-form">
-        <div class="dialog-title">Find Ratios</div>
+        <div class="dialog-title" id="find-ratio-dialog-title">Find Ratios</div>
         <label>
           Enter ratios (1485:1024 or 1485/1024)
           <textarea id="find-ratio-input" rows="6" required></textarea>
@@ -1702,9 +1715,9 @@
         </menu>
       </form>
     </dialog>
-    <dialog id="find-ratio-axis-dialog" class="custom-ratio-dialog">
+    <dialog id="find-ratio-axis-dialog" aria-labelledby="find-ratio-axis-dialog-title" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form" id="find-ratio-axis-form">
-        <div class="dialog-title">Update Axes?</div>
+        <div class="dialog-title" id="find-ratio-axis-dialog-title">Update Axes?</div>
         <div id="find-ratio-axis-message" class="dialog-help">
           Your three axes are (3 5 7). These ratios would be diagrammed best if they were
           (3 7 11). Set these axes?
@@ -1715,9 +1728,9 @@
         </menu>
       </form>
     </dialog>
-    <dialog id="build-intervals-dialog" class="custom-ratio-dialog">
+    <dialog id="build-intervals-dialog" aria-labelledby="build-intervals-dialog-title" class="custom-ratio-dialog">
       <form method="dialog" class="custom-ratio-form" id="build-intervals-form">
-        <div class="dialog-title">Build from intervals</div>
+        <div class="dialog-title" id="build-intervals-dialog-title">Build from intervals</div>
         <label>
           One ratio per line (e.g. 5/3, 9/8)
           <textarea id="build-intervals-input" rows="8"></textarea>
@@ -1738,9 +1751,9 @@
         </div>
       </form>
     </dialog>
-    <dialog id="add-interval-dialog" class="custom-ratio-dialog interval-dialog">
+    <dialog id="add-interval-dialog" aria-labelledby="add-interval-dialog-title" class="custom-ratio-dialog interval-dialog">
       <form method="dialog" class="custom-ratio-form" id="add-interval-form">
-        <div class="dialog-title">Select interval</div>
+        <div class="dialog-title" id="add-interval-dialog-title">Select interval</div>
         <label>
           Interval list
           <select id="add-interval-select"></select>

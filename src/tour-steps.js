@@ -55,7 +55,7 @@ export const quickTourSteps = [
   {
     id: "step-mnqsvr1k",
     title: "Composing with Snapshots",
-    body: "You can easily save and recall any lattice or sonic state with Snapshots.\n\nTry it now: press OPTION-1 to save this state in slot 1.\n\nMake some changes, and then press 1 again to return.\n\nMake a few more snapshots with OPTION-2, OPTION-3. Use Snapshot Options below to change what gets recalled, and Export your composition to save it for later.\n",
+    body: "You can easily save and recall any lattice or sonic state with Snapshots.\n\nTry it now: press OPTION-1 to save this state in slot 1.\n\nMake some changes, and then press 1 again to return.\n\nMake a few more snapshots with OPTION-2, OPTION-3. Use the Options button below to change what gets recalled, and Export your composition to save it for later.\n",
     anchor: { corner: "bottom-left", dx: 132, dy: -80 },
   },
   {
@@ -123,7 +123,7 @@ export const deepTourSteps = [
   {
     id: "deep-welcome-copy-mnssiq7m-copy-mnsspixt-copy-mnssznav-copy-mnst5jwk",
     title: "Distances",
-    body: "Distances let you draw connecting lines between any node to show their relationship. \n\nTry it:\n- Create some nodes (SHIFT-Click)\n- Edit distances\n- Click and drag between nodes\n- Double-click the label to change the text\n- Click and drag on the dotted line to curve it\n- Click exit or double click on the background to return\n\nThe Interval Overlay lets you see all distance relationships within your graph. It is essentially a preview – to permanently label a relationship, use Distances.\n",
+    body: "Distances let you draw connecting lines between any node to show their relationship. \n\nTry it:\n- Create some nodes (SHIFT-Click)\n- Click edit next to Distances\n- Click and drag between nodes\n- Double-click the label to change the text\n- Click and drag on the dotted line to curve it\n- Click exit or double click on the background to return\n\nThe Interval Overlay lets you see all distance relationships within your graph. It is essentially a preview – to permanently label a relationship, use Distances.\n",
     anchor: { corner: "bottom-left", dx: 197, dy: -144 },
     arrow: { x: 26.6, y: 6.2 },
   },
@@ -220,7 +220,7 @@ export const deepTourSteps = [
   {
     id: "deep-snapshot-options",
     title: "Snapshot options",
-    body: "Snapshots save more than just which notes are on. Open Snapshot Options to control what gets recalled:\n\n• Play state (active nodes)\n• View (zoom, pan, rotation)\n• Synth settings (waveform, envelope)\n• Sequence/pattern state\n• Keyboard mode\n• LFO state\n\nToggle each independently to build the recall behavior you want.",
+    body: "Snapshots save more than just which notes are on. Open Options in the Snapshots panel to control what gets recalled:\n\n• Play state (active nodes)\n• View (zoom, pan, rotation)\n• Synth settings (waveform, envelope)\n• Sequence/pattern state\n• Keyboard mode\n• LFO state\n\nToggle each independently to build the recall behavior you want.",
     anchor: { corner: "bottom-left", dx: 360, dy: -79 },
   },
   {
@@ -280,7 +280,7 @@ export const deepTourSteps = [
   {
     id: "deep-midi",
     title: "MIDI in and out",
-    body: "Enable MIDI in the MIDI panel to play your lattice from a controller.\n\nMIDI Output sends retuned pitch-bend messages — connect to any MPE-compatible software instrument to hear your tuning in any sound.\n\nSet the pitch bend range to match your synth (usually ±48 semitones for MPE).",
+    body: "Enable MIDI in the MIDI panel to play your lattice from a controller.\n\nMIDI Out sends retuned pitch-bend messages — connect to any MPE-compatible software instrument to hear your tuning in any sound.\n\nSet the pitch bend range to match your synth (usually ±48 semitones for MPE).",
     anchor: { corner: "bottom-left", dx: 16, dy: -84 },
   },
   {

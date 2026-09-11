@@ -8,7 +8,11 @@
  * overrides are preserved from the existing manifest on re-import.
  *
  * Usage:
- *   node scripts/import-tuning-the-ear.mjs
+ *   node scripts/import-tuning-the-ear.mjs [sourceDir]
+ *   (or set TUNING_THE_EAR_SRC; defaults to the Dropbox "Diagrams v2" folder)
+ *
+ * Fails, without touching src/tuning-the-ear/, if any source file is not
+ * valid JSON, lacks a leading number, or would collide with another slug.
  */
 
 import { readdirSync, readFileSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
@@ -16,7 +20,9 @@ import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SRC_DIR = "/Users/elliot/Library/CloudStorage/Dropbox/_Projects/Tuning the Ear/Diagrams v2";
+const DEFAULT_SRC_DIR =
+  "/Users/elliot/Library/CloudStorage/Dropbox/_Projects/Tuning the Ear/Diagrams v2";
+const SRC_DIR = process.argv[2] || process.env.TUNING_THE_EAR_SRC || DEFAULT_SRC_DIR;
 const DECK_DIR = join(__dirname, "..", "src", "tuning-the-ear");
 const DIAGRAMS_DIR = join(DECK_DIR, "diagrams");
 const MANIFEST_PATH = join(DECK_DIR, "manifest.json");
@@ -106,31 +112,46 @@ function main() {
     }
   }
 
-  rmSync(DIAGRAMS_DIR, { recursive: true, force: true });
-  mkdirSync(DIAGRAMS_DIR, { recursive: true });
-
   const files = readdirSync(SRC_DIR)
     .filter((f) => f.endsWith(".json"))
     .sort();
-  const slides = [];
-  const seenSlugs = new Set();
 
+  // Parse and validate everything before touching the deck directory, so a
+  // bad source file can never leave a half-imported deck behind.
+  const built = [];
+  const problems = [];
+  const seenSlugs = new Map();
   for (const f of files) {
-    const built = buildSlide(f);
-    if (!built) continue;
-    let slug = built.slug;
-    if (seenSlugs.has(slug)) {
-      let i = 2;
-      while (seenSlugs.has(`${slug}-${i}`)) i++;
-      slug = `${slug}-${i}`;
+    const slide = buildSlide(f);
+    if (!slide) {
+      problems.push(f);
+      continue;
     }
-    seenSlugs.add(slug);
-    const outName = `${slug}.json`;
-    writeFileSync(join(DIAGRAMS_DIR, outName), built.raw);
+    if (seenSlugs.has(slide.slug)) {
+      problems.push(`${f} (slug "${slide.slug}" collides with ${seenSlugs.get(slide.slug)})`);
+      continue;
+    }
+    seenSlugs.set(slide.slug, f);
+    built.push(slide);
+  }
+  if (problems.length) {
+    console.error(`\n${problems.length} source file(s) rejected; nothing written:`);
+    for (const problem of problems) console.error(`  ${problem}`);
+    process.exit(1);
+  }
+
+  rmSync(DIAGRAMS_DIR, { recursive: true, force: true });
+  mkdirSync(DIAGRAMS_DIR, { recursive: true });
+
+  const slides = [];
+  for (const entry of built) {
+    const outName = `${entry.slug}.json`;
+    writeFileSync(join(DIAGRAMS_DIR, outName), entry.raw);
+    const slug = entry.slug;
     const slide = {
       slug,
-      number: built.number,
-      title: built.title,
+      number: entry.number,
+      title: entry.title,
       file: outName,
     };
     if (overridesBySlug.has(slug)) {

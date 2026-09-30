@@ -29125,10 +29125,32 @@ if (presetState) {
 } else {
   rebuildLattice();
 }
-maybeShowWelcomeOverlay(hasIncomingPresetState, isEmbedMode || isPresentationMode);
+// tuninglattice.com/tour (public/tour/index.html) redirects to ?tour, which
+// starts the quick tour regardless of the welcome flag; ?tour=deep starts the
+// deep tour. The param is stripped first so share links don't carry it.
+const requestedTour =
+  isEmbedMode || isPresentationMode ? null : new URLSearchParams(window.location.search).get("tour");
+if (requestedTour !== null) {
+  const params = new URLSearchParams(window.location.search);
+  params.delete("tour");
+  const search = params.toString();
+  history.replaceState(null, "", `${location.pathname}${search ? `?${search}` : ""}${location.hash}`);
+  markWelcomed();
+} else {
+  maybeShowWelcomeOverlay(hasIncomingPresetState, isEmbedMode || isPresentationMode);
+}
 presetSyncEnabled = !isEmbedMode && !isPresentationMode;
 if (!isEmbedMode && !isPresentationMode) {
   updatePresetUrl();
+}
+if (requestedTour !== null) {
+  requestAnimationFrame(() => {
+    if (requestedTour === "deep") {
+      startDeepTour();
+    } else {
+      startQuickTour();
+    }
+  });
 }
 if (isPresentationMode) {
   initPresentationMode();

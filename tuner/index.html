@@ -7,12 +7,21 @@
       (() => {
         const path = window.location.pathname;
         if (/\/mobile\/?$/.test(path)) return;
+        // ?desktop=1 opts out of the mobile redirect and is remembered;
+        // ?desktop=0 forgets it. The mobile page links here with desktop=1.
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const flag = params.get("desktop");
+          if (flag === "1") localStorage.setItem("tuner-prefer-desktop", "1");
+          if (flag === "0") localStorage.removeItem("tuner-prefer-desktop");
+          if (localStorage.getItem("tuner-prefer-desktop") === "1") return;
+        } catch (e) {}
         const ua = navigator.userAgent || "";
         const coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
         const narrow = window.matchMedia && window.matchMedia("(max-width: 1024px)").matches;
         const mobileUa = /Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(ua);
         if (!(mobileUa || (coarse && narrow))) return;
-        const nextPath = path.replace(/\/$/, "") + "/mobile/";
+        const nextPath = path.replace(/index\.html$/, "").replace(/\/$/, "") + "/mobile/";
         window.location.replace(`${nextPath}${window.location.search}${window.location.hash}`);
       })();
     </script>
@@ -23,9 +32,10 @@
       href="https://fonts.googleapis.com/css2?family=Lexend:wght@200..700&family=Noto+Serif:wght@400..700&family=IBM+Plex+Sans:wght@300..700&display=swap"
       rel="stylesheet"
     />
-    <script type="module" crossorigin src="../assets/pitch-DQa-UbjN.js"></script>
-    <script type="module" crossorigin src="../assets/main-DRKoaZKT.js"></script>
-    <link rel="stylesheet" crossorigin href="../assets/main-BsHh3II6.css">
+    <script type="module" crossorigin src="../assets/pitch-VYIU4YM2.js"></script>
+    <script type="module" crossorigin src="../assets/preload-helper-kNaey6uv.js"></script>
+    <script type="module" crossorigin src="../assets/main-Dp-OXcXe.js"></script>
+    <link rel="stylesheet" crossorigin href="../assets/main-B3exz0_D.css">
   </head>
   <body>
     <div id="tuner-headphones-tip" class="tuner-tip" hidden role="dialog" aria-modal="true" aria-labelledby="tuner-headphones-tip-title">

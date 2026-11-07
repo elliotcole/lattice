@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrow, text } from "../src/scene/display-list.js";
+import { arrow, line, offsetDisplayList, text } from "../src/scene/display-list.js";
 import { emitDisplayListSvg, svgColorAttr } from "../src/scene/emit-svg.js";
 import { paintDisplayList } from "../src/scene/paint-canvas.js";
 
@@ -101,21 +101,31 @@ describe("emitDisplayListSvg", () => {
   });
 });
 
-describe("paintDisplayList", () => {
-  it("offsets by the page origin and honours the filter", () => {
-    const calls = [];
-    const ctx = new Proxy(
-      {},
-      {
-        get: (_, key) =>
-          key in ctx_state ? ctx_state[key] : (...args) => calls.push([key, ...args]),
-        set: (_, key, value) => {
-          ctx_state[key] = value;
-          return true;
-        },
+function recordingContext() {
+  const calls = [];
+  const state = {};
+  const ctx = new Proxy(
+    {},
+    {
+      get: (_, key) =>
+        key in state
+          ? state[key]
+          : (...args) => {
+              calls.push([key, ...args]);
+            },
+      set: (_, key, value) => {
+        state[key] = value;
+        calls.push([`set ${String(key)}`, value]);
+        return true;
       },
-    );
-    const ctx_state = {};
+    },
+  );
+  return { ctx, calls };
+}
+
+describe("paintDisplayList", () => {
+  it("draws text lines and honours the filter", () => {
+    const { ctx, calls } = recordingContext();
     paintDisplayList(
       ctx,
       [
@@ -141,12 +151,53 @@ describe("paintDisplayList", () => {
           ref: { type: "drop" },
         }),
       ],
-      { originX: 100, originY: 200, filter: ({ ref }) => ref.type === "keep" },
+      { filter: ({ ref }) => ref.type === "keep" },
     );
-    const fills = calls.filter(([key]) => key === "fillText");
-    expect(fills).toEqual([
-      ["fillText", "a", 101, 202],
-      ["fillText", "b", 101, 212],
+    expect(calls.filter(([key]) => key === "fillText")).toEqual([
+      ["fillText", "a", 1, 2],
+      ["fillText", "b", 1, 12],
     ]);
+  });
+
+  it("stacks rotated lines from offsetY in the rotated frame, with alpha and dash", () => {
+    const { ctx, calls } = recordingContext();
+    paintDisplayList(ctx, [
+      line({ x1: 0, y1: 0, x2: 5, y2: 0, color: "#000", width: 1, alpha: 0.4, dash: [6, 4] }),
+      text({
+        lines: ["a", "b"],
+        lineHeight: 10,
+        x: 50,
+        y: 60,
+        rotation: 0.5,
+        offsetY: -10,
+        font: "F",
+        size: 9,
+        weight: 400,
+        color: "#000",
+      }),
+    ]);
+    expect(calls).toContainEqual(["set globalAlpha", 0.4]);
+    expect(calls).toContainEqual(["setLineDash", [6, 4]]);
+    expect(calls).toContainEqual(["translate", 50, 60]);
+    expect(calls).toContainEqual(["rotate", 0.5]);
+    expect(calls.filter(([key]) => key === "fillText")).toEqual([
+      ["fillText", "a", 0, -10],
+      ["fillText", "b", 0, 0],
+    ]);
+  });
+});
+
+describe("offsetDisplayList", () => {
+  it("translates every primitive kind without mutating the input", () => {
+    const scene = [
+      text({ text: "t", x: 10, y: 20 }),
+      line({ x1: 1, y1: 2, x2: 3, y2: 4 }),
+      ...arrow({ x1: 0, y1: 0, x2: 10, y2: 0, color: "#000", width: 1 }),
+    ];
+    const moved = offsetDisplayList(scene, -100, -200);
+    expect(moved[0]).toMatchObject({ x: -90, y: -180 });
+    expect(moved[1]).toMatchObject({ x1: -99, y1: -198, x2: -97, y2: -196 });
+    expect(moved[3].points[0]).toEqual([-90, -200]);
+    expect(scene[0].x).toBe(10);
   });
 });

@@ -1,19 +1,25 @@
 // Display list: the shared scene both renderers consume (Phase 3).
 //
-// A scene is a flat array of primitives in PAGE coordinates (origin at the
-// page's top-left, CSS px). The canvas painter offsets them by the page's
-// on-screen origin; the SVG emitter writes them as-is. Builders live in
-// main.js for now (they read its globals, strangler-style); painters and
-// emitters here are pure.
+// A scene is a flat array of primitives in SCREEN coordinates (CSS px on the
+// lattice canvas), painted in order. The canvas painter draws them as-is; the
+// SVG export shifts them by the page's on-screen origin (offsetDisplayList).
+// The canvas is the reference rendering: SVG output is made to match it.
+// Builders live in main.js for now (they read its globals, strangler-style);
+// painters and emitters here are pure.
 //
-// Primitive shapes (all colours are CSS colour strings):
-//   { kind: "text", text, x, y, font, size, weight, color,
+// Primitive shapes (colours are CSS colour strings; `alpha` defaults to 1):
+//   { kind: "text", text, x, y, font, size, weight, color, alpha?,
 //     align: "left" | "center" | "right", baseline: "top" | "middle",
-//     lines?: string[], lineHeight?: number, rotation?: radians }
+//     lines?: string[], lineHeight?: number,
+//     rotation?: radians, offsetY?: number }
 //     `lines` (with `lineHeight`) replaces `text` for multi-line blocks.
-//     `rotation` turns the text about (x, y).
-//   { kind: "line", x1, y1, x2, y2, color, width }
-//   { kind: "polygon", points: [[x, y], ...], color }  (filled)
+//     With `rotation`, the frame is rotated about (x, y) and lines start at
+//     local y = offsetY.
+//   { kind: "line", x1, y1, x2, y2, color, width, alpha?, dash?: number[] }
+//   { kind: "stroke", subpaths: [[[x, y], ...], ...], color, width, alpha?, dash? }
+//     one stroked path of open polylines (a broken edge is one path with two
+//     subpaths, which antialiases differently from two separate lines)
+//   { kind: "polygon", points: [[x, y], ...], color, alpha? }  (filled)
 //
 // Every primitive may carry `ref: { type, ... }` naming the scene element it
 // came from, so the interactive canvas pass can filter (e.g. hide a label
@@ -25,6 +31,10 @@ export function text(props) {
 
 export function line(props) {
   return { kind: "line", ...props };
+}
+
+export function stroke(props) {
+  return { kind: "stroke", ...props };
 }
 
 export function polygon(props) {
@@ -55,4 +65,25 @@ export function arrow({ x1, y1, x2, y2, color, width, headLength = 10, ref }) {
       ref,
     }),
   ];
+}
+
+/** Copy of `list` translated by (dx, dy). Rotations pivot on (x, y), so they follow. */
+export function offsetDisplayList(list, dx, dy) {
+  return list.map((item) => {
+    switch (item.kind) {
+      case "text":
+        return { ...item, x: item.x + dx, y: item.y + dy };
+      case "line":
+        return { ...item, x1: item.x1 + dx, y1: item.y1 + dy, x2: item.x2 + dx, y2: item.y2 + dy };
+      case "polygon":
+        return { ...item, points: item.points.map(([x, y]) => [x + dx, y + dy]) };
+      case "stroke":
+        return {
+          ...item,
+          subpaths: item.subpaths.map((points) => points.map(([x, y]) => [x + dx, y + dy])),
+        };
+      default:
+        return item;
+    }
+  });
 }

@@ -26,7 +26,22 @@ export async function emitDisplayListSvg(list, { measure, outline }) {
           `<line x1="${item.x1}" y1="${item.y1}" x2="${item.x2}" y2="${item.y2}" ${svgColorAttr(
             "stroke",
             item.color,
-          )} stroke-width="${item.width}" />`,
+          )} stroke-width="${item.width}"${
+            item.dash && item.dash.length ? ` stroke-dasharray="${item.dash.join(" ")}"` : ""
+          }${opacityAttr(item)} />`,
+        );
+        break;
+      case "stroke":
+        parts.push(
+          `<path d="${item.subpaths
+            .map((points) =>
+              points.map(([x, y], index) => `${index ? "L" : "M"}${x} ${y}`).join(""),
+            )
+            .join(
+              "",
+            )}" fill="none" ${svgColorAttr("stroke", item.color)} stroke-width="${item.width}"${
+            item.dash && item.dash.length ? ` stroke-dasharray="${item.dash.join(" ")}"` : ""
+          }${opacityAttr(item)} />`,
         );
         break;
       case "polygon":
@@ -34,7 +49,7 @@ export async function emitDisplayListSvg(list, { measure, outline }) {
           `<polygon points="${item.points.map(([x, y]) => `${x},${y}`).join(" ")}" ${svgColorAttr(
             "fill",
             item.color,
-          )} />`,
+          )}${opacityAttr(item)} />`,
         );
         break;
       default:
@@ -55,14 +70,17 @@ export async function emitText(item, { measure, outline }) {
     item.rotation != null
       ? ` transform="rotate(${(item.rotation * 180) / Math.PI} ${item.x} ${item.y})"`
       : "";
-  const fill = svgColorAttr("fill", item.color);
+  const fill = `${svgColorAttr("fill", item.color)}${opacityAttr(item)}`;
+  // Rotated text is laid out in a frame pivoting on (x, y), starting offsetY
+  // down; the rotate() transform turns the whole run about the same pivot.
+  const startY = item.rotation != null ? item.y + (item.offsetY || 0) : item.y;
   const out = [];
   for (let index = 0; index < lines.length; index += 1) {
     const lineText = lines[index] == null ? "" : String(lines[index]);
     if (!lineText) {
       continue;
     }
-    const y = item.y + index * (item.lineHeight || 0);
+    const y = startY + index * (item.lineHeight || 0);
     const { width, alphabeticBaseline } = measure({
       text: lineText,
       font: item.font,
@@ -92,6 +110,10 @@ export async function emitText(item, { measure, outline }) {
     }
   }
   return out;
+}
+
+function opacityAttr(item) {
+  return item.alpha != null && item.alpha !== 1 ? ` opacity="${item.alpha}"` : "";
 }
 
 export function escapeXml(value) {

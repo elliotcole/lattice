@@ -38,7 +38,12 @@ import {
   axisMatches,
 } from "./lib/pitch.js";
 import opentype from "opentype.js";
-import { text as sceneText, arrow as sceneArrow } from "./scene/display-list.js";
+import {
+  text as sceneText,
+  stroke as sceneStroke,
+  arrow as sceneArrow,
+  offsetDisplayList,
+} from "./scene/display-list.js";
 import { paintDisplayList } from "./scene/paint-canvas.js";
 import { emitDisplayListSvg, svgColorAttr } from "./scene/emit-svg.js";
 
@@ -11993,7 +11998,14 @@ function toggleEdgeLabelOverride(a, b) {
   }
 }
 
-function drawCanvasEdgeSegment({
+function drawCanvasEdgeSegment(options) {
+  paintDisplayList(ctx, buildEdgeSegmentScene(options));
+}
+
+// One lattice-style connection between two node circles: trimmed to the
+// circles, broken around an optional label (which shrinks to fit short
+// segments and can slide along to avoid nodes). Screen coordinates.
+function buildEdgeSegmentScene({
   start,
   end,
   startRadius,
@@ -12003,22 +12015,20 @@ function drawCanvasEdgeSegment({
   labelFont,
   labelWeight,
   labelSize,
-  forceLabel = false,
   alpha = 1,
   dash = null,
   lineWidth = 1.5,
   labelT = 0.5,
   labelAvoidNodes = null,
   labelAlpha = null,
+  ref = null,
 }) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
   const dist = Math.hypot(dx, dy);
   if (dist === 0) {
-    return;
+    return [];
   }
-  ctx.save();
-  ctx.globalAlpha = alpha;
   const ux = dx / dist;
   const uy = dy / dist;
   const lineStart = {
@@ -12030,127 +12040,117 @@ function drawCanvasEdgeSegment({
     y: end.y - uy * endRadius,
   };
   const lineLen = Math.max(0, dist - startRadius - endRadius);
-  const shouldLabel = Boolean(label);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth;
-  if (dash && dash.length) {
-    ctx.setLineDash(dash);
-  } else {
-    ctx.setLineDash([]);
-  }
-  if (shouldLabel && lineLen > 0) {
-    const labelLines = String(label).split("\n");
-    ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
-    const baseWidth = labelLines.reduce(
-      (maxWidth, line) => Math.max(maxWidth, ctx.measureText(line).width),
-      0
-    );
-    const layout = computeEdgeLabelLayoutFromWidth({
-      baseSize: labelSize,
-      baseWidth,
-      lineLen,
-      minSize: 4,
+  const stroke = (...runs) =>
+    sceneStroke({
+      subpaths: runs.map(([from, to]) => [
+        [from.x, from.y],
+        [to.x, to.y],
+      ]),
+      color,
+      width: lineWidth,
+      alpha,
+      dash,
+      ref,
     });
-    const size = layout.size;
-    const gap = layout.gap;
-    if (size !== labelSize) {
-      ctx.font = `${labelWeight} ${size}px ${labelFont}`;
-    }
-    const textWidth = labelLines.reduce(
-      (maxWidth, line) => Math.max(maxWidth, ctx.measureText(line).width),
-      0
-    );
-    const lineGap = Math.max(2, Math.round(size * 0.25));
-    const textHeight = labelLines.length * size + (labelLines.length - 1) * lineGap;
-    let clampedT = Math.min(1, Math.max(0, labelT));
-    if (Array.isArray(labelAvoidNodes) && labelAvoidNodes.length) {
-      const labelRadius = Math.hypot(textWidth / 2 + 6, textHeight / 2 + 4);
-      const intersectsNodeAt = (t) => {
-        const x = lineStart.x + (lineEnd.x - lineStart.x) * t;
-        const y = lineStart.y + (lineEnd.y - lineStart.y) * t;
-        for (let i = 0; i < labelAvoidNodes.length; i += 1) {
-          const circle = labelAvoidNodes[i];
-          const clearance = (Number(circle.r) || 0) + labelRadius;
-          if (clearance <= 0) {
-            continue;
-          }
-          if (Math.hypot(x - circle.x, y - circle.y) < clearance) {
-            return true;
-          }
-        }
-        return false;
-      };
-      if (intersectsNodeAt(clampedT)) {
-        const step = 0.04;
-        const maxSteps = 24;
-        let bestT = clampedT;
-        for (let i = 1; i <= maxSteps; i += 1) {
-          const delta = i * step;
-          const left = Math.max(0, clampedT - delta);
-          const right = Math.min(1, clampedT + delta);
-          if (!intersectsNodeAt(left)) {
-            bestT = left;
-            break;
-          }
-          if (!intersectsNodeAt(right)) {
-            bestT = right;
-            break;
-          }
-        }
-        clampedT = bestT;
-      }
-    }
-    const gapHalf = gap / 2;
-    const midX = lineStart.x + (lineEnd.x - lineStart.x) * clampedT;
-    const midY = lineStart.y + (lineEnd.y - lineStart.y) * clampedT;
-    const gapStart = {
-      x: midX - ux * gapHalf,
-      y: midY - uy * gapHalf,
-    };
-    const gapEnd = {
-      x: midX + ux * gapHalf,
-      y: midY + uy * gapHalf,
-    };
-    ctx.beginPath();
-    ctx.moveTo(lineStart.x, lineStart.y);
-    ctx.lineTo(gapStart.x, gapStart.y);
-    ctx.moveTo(gapEnd.x, gapEnd.y);
-    ctx.lineTo(lineEnd.x, lineEnd.y);
-    ctx.stroke();
-    let angle = 0;
-    if (Math.abs(dx) > 1e-6 || Math.abs(dy) > 1e-6) {
-      angle = Math.atan2(dy, dx);
-      if (!shouldUseHorizontalText(angle)) {
-        if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
-          angle += Math.PI;
-        }
-      } else {
-        angle = 0;
-      }
-    }
+  if (!label || lineLen <= 0) {
+    return [stroke([lineStart, lineEnd])];
+  }
+  const labelLines = String(label).split("\n");
+  const measureLines = (size) => {
     ctx.save();
-    const effectiveLabelAlpha = Number.isFinite(labelAlpha) ? labelAlpha : alpha;
-    ctx.globalAlpha = effectiveLabelAlpha;
-    const labelNudgeX = Math.max(0.5, size * 0.04);
-    const labelNudgeY = Math.max(1, size * 0.14);
-    ctx.translate(midX - labelNudgeX, midY - labelNudgeY);
-    ctx.rotate(angle);
-    ctx.fillStyle = themeColors.textSecondary;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    const textStartY = -textHeight / 2;
-    labelLines.forEach((line, index) => {
-      const y = textStartY + index * (size + lineGap);
-      ctx.fillText(line, 0, y);
-    });
+    ctx.font = `${labelWeight} ${size}px ${labelFont}`;
+    const width = labelLines.reduce(
+      (maxWidth, line) => Math.max(maxWidth, ctx.measureText(line).width),
+      0
+    );
     ctx.restore();
-  } else {
-    ctx.beginPath();
-    ctx.moveTo(lineStart.x, lineStart.y);
-    ctx.lineTo(lineEnd.x, lineEnd.y);
-    ctx.stroke();
+    return width;
+  };
+  const layout = computeEdgeLabelLayoutFromWidth({
+    baseSize: labelSize,
+    baseWidth: measureLines(labelSize),
+    lineLen,
+    minSize: 4,
+  });
+  const size = layout.size;
+  const gap = layout.gap;
+  const textWidth = measureLines(size);
+  const lineGap = Math.max(2, Math.round(size * 0.25));
+  const textHeight = labelLines.length * size + (labelLines.length - 1) * lineGap;
+  let clampedT = Math.min(1, Math.max(0, labelT));
+  if (Array.isArray(labelAvoidNodes) && labelAvoidNodes.length) {
+    const labelRadius = Math.hypot(textWidth / 2 + 6, textHeight / 2 + 4);
+    const intersectsNodeAt = (t) => {
+      const x = lineStart.x + (lineEnd.x - lineStart.x) * t;
+      const y = lineStart.y + (lineEnd.y - lineStart.y) * t;
+      for (let i = 0; i < labelAvoidNodes.length; i += 1) {
+        const circle = labelAvoidNodes[i];
+        const clearance = (Number(circle.r) || 0) + labelRadius;
+        if (clearance <= 0) {
+          continue;
+        }
+        if (Math.hypot(x - circle.x, y - circle.y) < clearance) {
+          return true;
+        }
+      }
+      return false;
+    };
+    if (intersectsNodeAt(clampedT)) {
+      const step = 0.04;
+      const maxSteps = 24;
+      let bestT = clampedT;
+      for (let i = 1; i <= maxSteps; i += 1) {
+        const delta = i * step;
+        const left = Math.max(0, clampedT - delta);
+        const right = Math.min(1, clampedT + delta);
+        if (!intersectsNodeAt(left)) {
+          bestT = left;
+          break;
+        }
+        if (!intersectsNodeAt(right)) {
+          bestT = right;
+          break;
+        }
+      }
+      clampedT = bestT;
+    }
   }
-  ctx.restore();
+  const gapHalf = gap / 2;
+  const midX = lineStart.x + (lineEnd.x - lineStart.x) * clampedT;
+  const midY = lineStart.y + (lineEnd.y - lineStart.y) * clampedT;
+  let angle = 0;
+  if (Math.abs(dx) > 1e-6 || Math.abs(dy) > 1e-6) {
+    angle = Math.atan2(dy, dx);
+    if (!shouldUseHorizontalText(angle)) {
+      if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+        angle += Math.PI;
+      }
+    } else {
+      angle = 0;
+    }
+  }
+  return [
+    stroke(
+      [lineStart, { x: midX - ux * gapHalf, y: midY - uy * gapHalf }],
+      [{ x: midX + ux * gapHalf, y: midY + uy * gapHalf }, lineEnd]
+    ),
+    sceneText({
+      lines: labelLines,
+      lineHeight: size + lineGap,
+      x: midX - Math.max(0.5, size * 0.04),
+      y: midY - Math.max(1, size * 0.14),
+      rotation: angle,
+      offsetY: -textHeight / 2,
+      font: labelFont,
+      size,
+      weight: labelWeight,
+      align: "center",
+      baseline: "top",
+      color: themeColors.textSecondary,
+      alpha: Number.isFinite(labelAlpha) ? labelAlpha : alpha,
+      ref,
+    }),
+  ];
 }
 
 function computeEdgeLabelLayoutFromWidth({ baseSize, baseWidth, lineLen, minSize = 4 }) {
@@ -12833,15 +12833,13 @@ function getAxisLegendInfo(axis, settings = getAxisLegendSettings()) {
 // its shadow, and the axis-edit handles are canvas-only.
 function buildPageChromeScene() {
   const scene = [];
-  const { widthPx } = getLayoutPageDimensions();
-  const { left, top } = getLayoutPageRect();
   if (layoutTitle) {
     const titlePos = getLayoutTitlePosition();
     scene.push(
       sceneText({
         text: layoutTitle,
-        x: layoutTitlePosition ? layoutTitlePosition.x : widthPx / 2,
-        y: layoutTitlePosition ? layoutTitlePosition.y : Math.max(12, titlePos.y - top),
+        x: titlePos.x,
+        y: titlePos.y,
         font: layoutTitleFont,
         size: Math.max(12, Math.round(layoutTitleSize)),
         weight: layoutTitleFontWeight,
@@ -12857,8 +12855,8 @@ function buildPageChromeScene() {
     scene.push(
       sceneText({
         text: layoutCreator,
-        x: creatorPos.x - left,
-        y: Math.max(12, creatorPos.y - top),
+        x: creatorPos.x,
+        y: creatorPos.y,
         font: layoutCreatorFont,
         size: getLayoutCreatorSize(),
         weight: layoutCreatorFontWeight,
@@ -12877,31 +12875,29 @@ function buildPageChromeScene() {
       continue;
     }
     const ref = { type: "axisLegend", axis };
-    const centerX = info.center.x - left;
-    const centerY = info.center.y - top;
     scene.push(
       ...sceneArrow({
-        x1: centerX - info.gapVec.x,
-        y1: centerY - info.gapVec.y,
-        x2: info.leftEnd.x - left,
-        y2: info.leftEnd.y - top,
+        x1: info.center.x - info.gapVec.x,
+        y1: info.center.y - info.gapVec.y,
+        x2: info.leftEnd.x,
+        y2: info.leftEnd.y,
         color: axisColor,
         width: 1.5,
         ref,
       }),
       ...sceneArrow({
-        x1: centerX + info.gapVec.x,
-        y1: centerY + info.gapVec.y,
-        x2: info.rightEnd.x - left,
-        y2: info.rightEnd.y - top,
+        x1: info.center.x + info.gapVec.x,
+        y1: info.center.y + info.gapVec.y,
+        x2: info.rightEnd.x,
+        y2: info.rightEnd.y,
         color: axisColor,
         width: 1.5,
         ref,
       }),
       sceneText({
         text: info.label,
-        x: centerX,
-        y: centerY,
+        x: info.center.x,
+        y: info.center.y,
         font: layoutAxisLegendFont,
         size: axisSettings.fontSize,
         weight: layoutAxisLegendFontWeight,
@@ -12919,13 +12915,14 @@ function buildPageChromeScene() {
       if (!entry.text || !entry.position) {
         continue;
       }
+      const pos = getLayoutCustomLabelPosition(entry);
       const { lines, lineHeight } = getLayoutCustomLabelMetrics(entry);
       scene.push(
         sceneText({
           lines,
           lineHeight,
-          x: entry.position.x,
-          y: entry.position.y,
+          x: pos.x,
+          y: pos.y,
           font: layoutCustomLabelFont,
           size: customSize,
           weight: layoutCustomLabelFontWeight,
@@ -12959,8 +12956,6 @@ function drawLayoutPage(pageScene) {
   // (drawLayoutAxisEditOverlay); the label under the text editor is hidden.
   const editingLabelId = layoutCustomTextEditorState ? layoutCustomTextEditorState.id : null;
   paintDisplayList(ctx, pageScene, {
-    originX: left,
-    originY: top,
     filter: ({ ref }) =>
       !(ref && ref.type === "axisLegend" && layoutAxisEdit) &&
       !(ref && ref.type === "customLabel" && editingLabelId != null && ref.id === editingLabelId),
@@ -12968,14 +12963,11 @@ function drawLayoutPage(pageScene) {
 }
 
 function drawLayoutAxisEditOverlay(pageScene) {
-  const { left, top } = getLayoutPageRect();
   ctx.save();
   ctx.fillStyle = "rgba(128, 128, 128, 0.25)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.restore();
   paintDisplayList(ctx, pageScene, {
-    originX: left,
-    originY: top,
     filter: ({ ref }) => Boolean(ref && ref.type === "axisLegend" && ref.axis === layoutAxisEdit),
   });
   const info = getAxisLegendInfo(layoutAxisEdit);
@@ -13739,6 +13731,66 @@ function addDistanceLineSegments(nodePosMap, segments) {
   }
 }
 
+// The 2D lattice edges (page layout always uses this path): each active edge
+// trimmed to its node circles, with its interval label. Screen coordinates.
+function buildLatticeEdgesScene(nodePosMap) {
+  const scene = [];
+  const labelFont = layoutMode ? layoutLineLabelFont : "Noto Serif";
+  const labelWeight = layoutMode ? layoutLineLabelFontWeight : 400;
+  const labelSize = layoutMode ? getLayoutLineLabelSize() : EDGE_LABEL_SIZE_DEFAULT;
+  edges.forEach(([a, b]) => {
+    if (!a.active || !b.active) {
+      return;
+    }
+    if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
+      return;
+    }
+    const startEntry = nodePosMap.get(a.id);
+    const endEntry = nodePosMap.get(b.id);
+    const start = startEntry ? startEntry.pos : worldToScreen(getNodeDisplayCoordinate(a));
+    const end = endEntry ? endEntry.pos : worldToScreen(getNodeDisplayCoordinate(b));
+    const radiusA = startEntry
+      ? startEntry.radius
+      : layoutMode
+        ? getLayoutNodeRadius(start)
+        : getNodeRadius(a) * (start.scale || 1);
+    const radiusB = endEntry
+      ? endEntry.radius
+      : layoutMode
+        ? getLayoutNodeRadius(end)
+        : getNodeRadius(b) * (end.scale || 1);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist === 0) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const eitherMuted = Boolean(a.muted) || Boolean(b.muted);
+    scene.push(
+      ...buildEdgeSegmentScene({
+        start,
+        end,
+        startRadius: getNodeEdgeRadius(a, ux, uy, radiusA),
+        endRadius: getNodeEdgeRadius(b, ux, uy, radiusB),
+        color: getInkEdgeColor(eitherMuted),
+        label: shouldShowEdgeLabel(a, b) ? getEdgeLabelText(a, b) : null,
+        labelFont,
+        labelWeight,
+        labelSize,
+        labelT: getLineLabelPositionOverride(a, b) ?? 0.5,
+        alpha: eitherMuted ? 0.4 : 1,
+        dash: eitherMuted ? [6, 4] : null,
+        lineWidth: getInkEdgeLineWidth(eitherMuted),
+        labelAlpha: eitherMuted ? 1 : null,
+        ref: { type: "edge", a: a.id, b: b.id },
+      })
+    );
+  });
+  return scene;
+}
+
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   layoutRenderedNoteLabelHitboxes.clear();
@@ -13844,65 +13896,7 @@ function draw() {
   if (is3DMode && !showMicrotonal) {
     draw3DEdges(nodePosMap, axisEntry);
   } else if (!showMicrotonal) {
-    const labelFont = layoutMode ? layoutLineLabelFont : "Noto Serif";
-    const labelWeight = layoutMode ? layoutLineLabelFontWeight : 400;
-    const labelSize = layoutMode ? getLayoutLineLabelSize() : EDGE_LABEL_SIZE_DEFAULT;
-    edges.forEach(([a, b]) => {
-      if (!a.active || !b.active) {
-        return;
-      }
-      if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
-        return;
-      }
-      const startEntry = nodePosMap.get(a.id);
-      const endEntry = nodePosMap.get(b.id);
-      const start = startEntry
-        ? startEntry.pos
-        : worldToScreen(getNodeDisplayCoordinate(a));
-      const end = endEntry
-        ? endEntry.pos
-        : worldToScreen(getNodeDisplayCoordinate(b));
-      const radiusA = startEntry
-        ? startEntry.radius
-        : layoutMode
-          ? getLayoutNodeRadius(start)
-          : getNodeRadius(a) * (start.scale || 1);
-      const radiusB = endEntry
-        ? endEntry.radius
-        : layoutMode
-          ? getLayoutNodeRadius(end)
-          : getNodeRadius(b) * (end.scale || 1);
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist === 0) {
-        return;
-      }
-      const ux = dx / dist;
-      const uy = dy / dist;
-      const startRadius = getNodeEdgeRadius(a, ux, uy, radiusA);
-      const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
-      const labelText = getEdgeLabelText(a, b);
-      const eitherMuted = Boolean(a.muted) || Boolean(b.muted);
-      const label = shouldShowEdgeLabel(a, b) ? labelText : null;
-      const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
-      drawCanvasEdgeSegment({
-        start,
-        end,
-        startRadius,
-        endRadius,
-        color: getInkEdgeColor(eitherMuted),
-        label,
-        labelFont,
-        labelWeight,
-        labelSize,
-        labelT,
-        alpha: eitherMuted ? 0.4 : 1,
-        dash: eitherMuted ? [6, 4] : null,
-        lineWidth: getInkEdgeLineWidth(eitherMuted),
-        labelAlpha: eitherMuted ? 1 : null,
-      });
-    });
+    paintDisplayList(ctx, buildLatticeEdgesScene(nodePosMap));
   }
 
   if (showDistances) {
@@ -26712,7 +26706,9 @@ async function buildLayoutSvgString(
   }
   parts.push(`<rect width="100%" height="100%" ${svgFill(themeColors.page)}/>`);
 
-  parts.push(...(await emitDisplayListSvg(buildPageChromeScene(), SCENE_SVG_TEXT)));
+  parts.push(
+    ...(await emitDisplayListSvg(offsetDisplayList(buildPageChromeScene(), -left, -top), SCENE_SVG_TEXT))
+  );
 
   const exportNodeRenderList = nodes
     .map((node) => ({
@@ -26876,118 +26872,10 @@ async function buildLayoutSvgString(
   const edgeLabelSize = getLayoutLineLabelSize();
   const lineLabelFont = layoutLineLabelFont;
   const lineLabelWeight = layoutLineLabelFontWeight;
-  for (const [a, b] of edges) {
-    if (!a.active || !b.active) {
-      continue;
-    }
-    if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
-      continue;
-    }
-    const startEntry = exportNodePosMap.get(a.id);
-    const endEntry = exportNodePosMap.get(b.id);
-    if (!startEntry || !endEntry) {
-      continue;
-    }
-    const start = startEntry.pos;
-    const end = endEntry.pos;
-    const radiusA = startEntry.radius;
-    const radiusB = endEntry.radius;
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const dist = Math.hypot(dx, dy);
-    if (!dist) {
-      continue;
-    }
-    const ux = dx / dist;
-    const uy = dy / dist;
-    const startRadius = getNodeEdgeRadius(a, ux, uy, radiusA);
-    const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
-    const edgeStart = {
-      x: start.x + ux * startRadius - left,
-      y: start.y + uy * startRadius - top,
-    };
-    const edgeEnd = {
-      x: end.x - ux * endRadius - left,
-      y: end.y - uy * endRadius - top,
-    };
-    const lineLen = Math.max(0, dist - startRadius - endRadius);
-    const labelText = getEdgeLabelText(a, b);
-    const eitherMuted = Boolean(a.muted) || Boolean(b.muted);
-    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
-    const edgeStrokeColor = eitherMuted
-      ? blendOverPage(themeColors.edge, 0.4)
-      : getInkEdgeColor(false);
-    const edgeStrokeWidth = getInkEdgeLineWidth(eitherMuted);
-    const edgeDashAttr = eitherMuted ? ' stroke-dasharray="6 4"' : "";
-    const pushLine = (from, to) => {
-      parts.push(
-        `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" ${svgStroke(
-          edgeStrokeColor
-        )} stroke-width="${edgeStrokeWidth}"${edgeDashAttr} />`
-      );
-    };
-    if (label && lineLen > 0) {
-      const baseWidth = await measureSvgTextWidth(
-        label,
-        edgeLabelSize,
-        lineLabelFont,
-        lineLabelWeight
-      );
-      const layout = computeEdgeLabelLayoutFromWidth({
-        baseSize: edgeLabelSize,
-        baseWidth,
-        lineLen,
-        minSize: 4,
-      });
-      const size = layout.size;
-      const gap = layout.gap;
-      const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
-      if (gap > 0) {
-        const gapHalf = gap / 2;
-        const midX = edgeStart.x + (edgeEnd.x - edgeStart.x) * labelT;
-        const midY = edgeStart.y + (edgeEnd.y - edgeStart.y) * labelT;
-        const gapStart = {
-          x: midX - ux * gapHalf,
-          y: midY - uy * gapHalf,
-        };
-        const gapEnd = {
-          x: midX + ux * gapHalf,
-          y: midY + uy * gapHalf,
-        };
-        pushLine(edgeStart, gapStart);
-        pushLine(gapEnd, edgeEnd);
-        let angle = 0;
-        if (Math.abs(edgeEnd.x - edgeStart.x) > 1e-6 || Math.abs(edgeEnd.y - edgeStart.y) > 1e-6) {
-          angle = Math.atan2(edgeEnd.y - edgeStart.y, edgeEnd.x - edgeStart.x);
-          if (!shouldUseHorizontalText(angle)) {
-            if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
-              angle += Math.PI;
-            }
-          } else {
-            angle = 0;
-          }
-        }
-        const rotation = (angle * 180) / Math.PI;
-        parts.push(
-          await buildSvgTextElement({
-            text: label,
-            x: midX,
-            y: midY,
-            font: lineLabelFont,
-            size,
-            fontWeight: lineLabelWeight,
-            anchor: "middle",
-            baseline: "middle",
-            color: themeColors.textSecondary,
-            transform: `rotate(${rotation} ${midX} ${midY})`,
-          })
-        );
-      } else {
-        pushLine(edgeStart, edgeEnd);
-      }
-    } else {
-      pushLine(edgeStart, edgeEnd);
-    }
+  const emitScene = async (scene) =>
+    parts.push(...(await emitDisplayListSvg(offsetDisplayList(scene, -left, -top), SCENE_SVG_TEXT)));
+  if (!analysisLayers.microtonal) {
+    await emitScene(buildLatticeEdgesScene(exportNodePosMap));
   }
 
   if (analysisLayers.distances && distanceSelectedEdges.size) {

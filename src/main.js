@@ -3495,40 +3495,42 @@ function getPlayingSnapshotKeys({ excludePattern = false } = {}) {
   return Array.from(keys);
 }
 
-function serializeSnapshotsForPreset() {
+// Snapshots live in two banks of the same slot type: numeric slots 1–0
+// (`snapshotSlots`) and letter slots on the snapshot keyboard
+// (`snapshotLetterSlots`). A slot is { state, playKeys, pattern, looper, lfos,
+// caption } — a preset state doc plus the performance overlay around it.
+// Both banks share every function below; only the active-slot marker
+// (snapshotActiveIndex vs snapshotActiveLetterKey) and banner text differ.
+
+function serializeSnapshotSlots(slots) {
   const entries = [];
-  snapshotSlots.forEach((snapshot, index) => {
+  slots.forEach((snapshot, index) => {
     if (!snapshot) {
       return;
     }
     entries.push([index, snapshot]);
   });
   return entries;
+}
+
+function serializeSnapshotsForPreset() {
+  return serializeSnapshotSlots(snapshotSlots);
 }
 
 function serializeLetterSnapshotsForPreset() {
-  const entries = [];
-  snapshotLetterSlots.forEach((snapshot, index) => {
-    if (!snapshot) {
-      return;
-    }
-    entries.push([index, snapshot]);
-  });
-  return entries;
+  return serializeSnapshotSlots(snapshotLetterSlots);
 }
 
-function applySnapshotsFromPreset(value) {
-  if (!Array.isArray(value)) {
-    return;
-  }
-  snapshotSlots.fill(null);
+/** Fill `slots` from persisted [index, entry] pairs (diff entries expand over the base). */
+function loadSnapshotSlots(slots, value) {
+  slots.fill(null);
   value.forEach((entry) => {
     if (!Array.isArray(entry) || entry.length < 2) {
       return;
     }
     const index = Number(entry[0]);
     const snapshot = entry[1];
-    if (!Number.isFinite(index) || index < 0 || index >= snapshotSlots.length) {
+    if (!Number.isFinite(index) || index < 0 || index >= slots.length) {
       return;
     }
     if (!snapshot || typeof snapshot !== "object") {
@@ -3541,8 +3543,15 @@ function applySnapshotsFromPreset(value) {
       return;
     }
     snapshot.state = migrateState(snapshot.state).state;
-    snapshotSlots[index] = snapshot;
+    slots[index] = snapshot;
   });
+}
+
+function applySnapshotsFromPreset(value) {
+  if (!Array.isArray(value)) {
+    return;
+  }
+  loadSnapshotSlots(snapshotSlots, value);
   updateSnapshotUi();
 }
 
@@ -3550,29 +3559,27 @@ function applyLetterSnapshotsFromPreset(value) {
   if (!Array.isArray(value)) {
     return;
   }
-  snapshotLetterSlots.fill(null);
-  value.forEach((entry) => {
-    if (!Array.isArray(entry) || entry.length < 2) {
-      return;
-    }
-    const index = Number(entry[0]);
-    const snapshot = entry[1];
-    if (!Number.isFinite(index) || index < 0 || index >= snapshotLetterSlots.length) {
-      return;
-    }
-    if (!snapshot || typeof snapshot !== "object") {
-      return;
-    }
-    if (!snapshot.state && snapshot.diff && snapshotBaseState) {
-      snapshot.state = mergeSnapshotState(snapshotBaseState, snapshot.diff);
-    }
-    if (!snapshot.state) {
-      return;
-    }
-    snapshot.state = migrateState(snapshot.state).state;
-    snapshotLetterSlots[index] = snapshot;
-  });
+  loadSnapshotSlots(snapshotLetterSlots, value);
   updateSnapshotUi();
+}
+
+/** A slot as written to a snapshot-set file: its state as a diff against `base`. */
+function compactSnapshotEntry(base, snapshot) {
+  const diff = base && snapshot.state ? diffSnapshotState(base, snapshot.state) : null;
+  const entry = {
+    diff: diff && Object.keys(diff).length ? diff : null,
+    playKeys: snapshot.playKeys,
+    pattern: snapshot.pattern,
+    looper: snapshot.looper,
+    lfos: snapshot.lfos,
+  };
+  if (!entry.diff) {
+    entry.state = snapshot.state;
+  }
+  if (snapshot.caption) {
+    entry.caption = snapshot.caption;
+  }
+  return entry;
 }
 
 function buildSnapshotSetPayload({ compact = true } = {}) {
@@ -3584,42 +3591,10 @@ function buildSnapshotSetPayload({ compact = true } = {}) {
     buildSnapshotState();
   const base = baseCandidate ? JSON.parse(JSON.stringify(baseCandidate)) : null;
   const compactSnapshots = compact
-    ? snapshots.map(([index, snapshot]) => {
-        const diff = base && snapshot.state ? diffSnapshotState(base, snapshot.state) : null;
-        const entry = {
-          diff: diff && Object.keys(diff).length ? diff : null,
-          playKeys: snapshot.playKeys,
-          pattern: snapshot.pattern,
-          looper: snapshot.looper,
-          lfos: snapshot.lfos,
-        };
-        if (!entry.diff) {
-          entry.state = snapshot.state;
-        }
-        if (snapshot.caption) {
-          entry.caption = snapshot.caption;
-        }
-        return [index, entry];
-      })
+    ? snapshots.map(([index, snapshot]) => [index, compactSnapshotEntry(base, snapshot)])
     : snapshots;
   const compactLetters = compact
-    ? letterSnapshots.map(([index, snapshot]) => {
-        const diff = base && snapshot.state ? diffSnapshotState(base, snapshot.state) : null;
-        const entry = {
-          diff: diff && Object.keys(diff).length ? diff : null,
-          playKeys: snapshot.playKeys,
-          pattern: snapshot.pattern,
-          looper: snapshot.looper,
-          lfos: snapshot.lfos,
-        };
-        if (!entry.diff) {
-          entry.state = snapshot.state;
-        }
-        if (snapshot.caption) {
-          entry.caption = snapshot.caption;
-        }
-        return [index, entry];
-      })
+    ? letterSnapshots.map(([index, snapshot]) => [index, compactSnapshotEntry(base, snapshot)])
     : letterSnapshots;
   return {
     v: 1,
@@ -4764,15 +4739,13 @@ if (typeof window !== "undefined") {
   };
 }
 
-function saveSnapshot(index) {
-  if (index < 0 || index >= snapshotSlots.length) {
-    return;
-  }
+/** The current editor + performance state as a snapshot slot, or null. */
+function captureSnapshotSlot() {
   const state = buildSnapshotState();
   if (!state) {
-    return;
+    return null;
   }
-  snapshotSlots[index] = {
+  return {
     state,
     playKeys: getPlayingSnapshotKeys({ excludePattern: patternPlayerState === "playing" }),
     pattern: getSnapshotPatternState(),
@@ -4780,6 +4753,17 @@ function saveSnapshot(index) {
     lfos: getSnapshotLfoState(),
     caption: cloneCaption(activeCaption),
   };
+}
+
+function saveSnapshot(index) {
+  if (index < 0 || index >= snapshotSlots.length) {
+    return;
+  }
+  const slot = captureSnapshotSlot();
+  if (!slot) {
+    return;
+  }
+  snapshotSlots[index] = slot;
   updateSnapshotUi();
   const displayIndex = index === 9 ? 0 : index + 1;
   showTemporaryBanner(`Snapshot ${displayIndex} saved`);
@@ -4789,18 +4773,11 @@ function saveSnapshotLetter(letter, index) {
   if (index < 0 || index >= snapshotLetterSlots.length) {
     return;
   }
-  const state = buildSnapshotState();
-  if (!state) {
+  const slot = captureSnapshotSlot();
+  if (!slot) {
     return;
   }
-  snapshotLetterSlots[index] = {
-    state,
-    playKeys: getPlayingSnapshotKeys({ excludePattern: patternPlayerState === "playing" }),
-    pattern: getSnapshotPatternState(),
-    looper: getSnapshotLooperState(),
-    lfos: getSnapshotLfoState(),
-    caption: cloneCaption(activeCaption),
-  };
+  snapshotLetterSlots[index] = slot;
   snapshotActiveLetterKey = letter;
   updateSnapshotUi();
   showTemporaryBanner(`Snapshot ${letter.toUpperCase()} saved`);
@@ -4810,82 +4787,44 @@ function recallSnapshotLetter(letter, index) {
   if (index < 0 || index >= snapshotLetterSlots.length) {
     return;
   }
-  const snapshot = snapshotLetterSlots[index];
-  if (!snapshot || !snapshot.state) {
-    return;
-  }
-  const snapshotState = prepareSnapshotStateForRecall(snapshot.state);
-  if (snapshotDeferToCycleEnd && patternPlayerState === "playing") {
-    pendingSnapshotIndex = -1;
-    pendingSnapshotState = { ...snapshot, state: snapshotState };
-    pendingSnapshotLetterKey = letter;
-    snapshotActiveLetterKey = letter;
-    updateSnapshotUi();
-    pendingSnapshotAtNextEvent = false;
-    return;
-  }
-  if (patternPlayerState === "playing") {
-    pendingSnapshotIndex = -1;
-    pendingSnapshotState = { ...snapshot, state: snapshotState };
-    pendingSnapshotLetterKey = letter;
-    snapshotActiveLetterKey = letter;
-    updateSnapshotUi();
-    pendingSnapshotAtNextEvent = true;
-    return;
-  }
-  snapshotActiveLetterKey = letter;
-  applyPresetState(snapshotState, {
-    skipLayoutModeSwitch: true,
-    skipStopVoices: true,
-    preserveViewMode: true,
-    preserveActiveVoicesOnSynthChange: true,
-  });
-  if (snapshotRestoreSequence) {
-    if (snapshot.pattern) {
-      stopPatternPlayback();
-      applySnapshotPatternState(snapshot.pattern);
-      startPatternPlaybackFromSnapshot();
-    } else {
-      stopPatternPlayback();
-      buildPatternStates(true);
-    }
-    restoreSnapshotLooper(snapshot);
-  } else {
-    buildPatternStates(true);
-  }
-  const playSnapshot = excludeLooperNodesFromPlayKeys(snapshot);
-  const morphHandled = restoreSnapshotPlayState(playSnapshot);
-  if (!morphHandled) {
-    restoreSnapshotLfos(playSnapshot);
-  }
-  setActiveCaption(snapshot.caption || null, { updateUrl: false });
-  updateSnapshotUi();
+  recallSnapshotSlot(snapshotLetterSlots[index], { letter });
 }
 
 function recallSnapshot(index) {
   if (index < 0 || index >= snapshotSlots.length) {
     return;
   }
-  const snapshot = snapshotSlots[index];
+  recallSnapshotSlot(snapshotSlots[index], { index });
+}
+
+/**
+ * Recall a slot from either bank: `{ index }` for a numeric slot, `{ letter }`
+ * for a letter slot. While a pattern plays, the recall is queued for the next
+ * event (or the cycle end) and applied by applyPendingSnapshotForPattern.
+ * A letter recall marks its key active immediately; a numeric one only when
+ * applied.
+ */
+function recallSnapshotSlot(snapshot, { index = -1, letter = "" }) {
   if (!snapshot || !snapshot.state) {
     return;
   }
   const snapshotState = prepareSnapshotStateForRecall(snapshot.state);
-  if (snapshotDeferToCycleEnd && patternPlayerState === "playing") {
-    pendingSnapshotIndex = index;
-    pendingSnapshotState = { ...snapshot, state: snapshotState };
-    pendingSnapshotLetterKey = "";
-    pendingSnapshotAtNextEvent = false;
-    return;
-  }
   if (patternPlayerState === "playing") {
-    pendingSnapshotIndex = index;
+    pendingSnapshotIndex = letter ? -1 : index;
     pendingSnapshotState = { ...snapshot, state: snapshotState };
-    pendingSnapshotLetterKey = "";
-    pendingSnapshotAtNextEvent = true;
+    pendingSnapshotLetterKey = letter;
+    pendingSnapshotAtNextEvent = !snapshotDeferToCycleEnd;
+    if (letter) {
+      snapshotActiveLetterKey = letter;
+      updateSnapshotUi();
+    }
     return;
   }
-  snapshotActiveIndex = index;
+  if (letter) {
+    snapshotActiveLetterKey = letter;
+  } else {
+    snapshotActiveIndex = index;
+  }
   applyPresetState(snapshotState, {
     skipLayoutModeSwitch: true,
     skipStopVoices: true,

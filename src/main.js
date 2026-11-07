@@ -46,11 +46,13 @@ import {
   nodeShape as sceneNodeShape,
   curve as sceneCurve,
   rect as sceneRect,
+  hitArea as sceneHitArea,
   offsetDisplayList,
   DIAMOND_RADIUS_SCALE,
 } from "./scene/display-list.js";
 import { paintDisplayList, traceNodeShape } from "./scene/paint-canvas.js";
 import { emitDisplayListSvg, svgColorAttr } from "./scene/emit-svg.js";
+import { hitTestDisplayList } from "./scene/hit-test.js";
 
 // Main editor spells ET fallbacks from its mixed default table (Eb/Bb flats).
 function getNearestEtInfo(freq, a4) {
@@ -626,7 +628,9 @@ const TRIANGLE_TRI_TO_DIAG = {
   bcd: "slash",
 };
 let layoutLabelHitboxVisible = false;
-const layoutRenderedNoteLabelHitboxes = new Map();
+// Hit areas from the last painted frame (node detail labels, key-mapping
+// labels, distance labels): hit-tests read these, so only drawn labels click.
+const frameHitAreas = [];
 
 function clearTriangleLabelsForCell(entry) {
   TRIANGLE_TRI_IDS.forEach((tri) => {
@@ -667,72 +671,6 @@ function computeTriangleLabelLayout(text, font, baseSize, points, fontWeight = 4
     size = baseSize * scale;
   }
   return { size };
-}
-
-function getLayoutNoteLabelHitbox(node, pos, radius) {
-  const rendered = layoutRenderedNoteLabelHitboxes.get(node.id);
-  if (rendered) {
-    return rendered;
-  }
-  const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
-  const labelPos = { x: rawLabelPos.x, y: rawLabelPos.y };
-  let width = 0;
-  let height = layoutNoteTextSize;
-  if (featureMode === "ratio") {
-    if (!node.active && !node.isCustom && !node.isCenter) {
-      return;
-    }
-    const displayInfo = getCachedDisplayInfo(node);
-    const centsLabel = getCachedCentsReadout(
-      node,
-      {
-        wrap: enharmonicsEnabled,
-        requireHejiDetail: true,
-        baseTextForHeji: displayInfo.pitchClass,
-      },
-      displayInfo
-    );
-    ctx.save();
-    ctx.font = `${layoutNoteFontWeight} ${layoutNoteTextSize}px ${layoutNoteFont}`;
-    const noteWidth = ctx.measureText(displayInfo.pitchClass || "").width;
-    const centsWidth = centsLabel ? ctx.measureText(centsLabel).width : 0;
-    ctx.restore();
-    width = Math.max(noteWidth, centsWidth);
-    if (hejiEnabled && centsLabel) {
-      height += layoutNoteTextSize + 4;
-    }
-  } else {
-    const ratioText = `${node.numerator}:${node.denominator}`;
-    const displayInfo = getCachedDisplayInfo(node);
-    const centsLabel = getCachedCentsReadout(
-      node,
-      { wrap: enharmonicsEnabled },
-      displayInfo
-    );
-    width = Math.max(
-      measureTextWidthWithWeight(
-        ratioText,
-        layoutNoteTextSize,
-        layoutNoteFont,
-        layoutNoteFontWeight
-      ),
-      measureTextWidthWithWeight(
-        centsLabel,
-        layoutNoteTextSize,
-        layoutNoteFont,
-        layoutNoteFontWeight
-      )
-    );
-    height = centsLabel ? layoutNoteTextSize * 2 + 4 : layoutNoteTextSize;
-  }
-  const padding = Math.max(4, Math.round(layoutNoteTextSize * 0.25));
-  return {
-    left: labelPos.x - padding,
-    top: labelPos.y - padding,
-    width: width + padding * 2,
-    height: height + padding * 2,
-    labelPos,
-  };
 }
 
 function serializeLayoutLabelOffsets() {
@@ -12792,7 +12730,8 @@ function buildPageChromeScene() {
         baseline: "top",
         color: themeColors.textPrimary,
         ref: { type: "title" },
-      })
+      }),
+      textHitArea(layoutTitle, titlePos, layoutTitleFont, Math.max(12, Math.round(layoutTitleSize)), layoutTitleFontWeight, { type: "title" })
     );
   }
   if (layoutCreator) {
@@ -12809,7 +12748,8 @@ function buildPageChromeScene() {
         baseline: "top",
         color: themeColors.textSecondary,
         ref: { type: "creator" },
-      })
+      }),
+      textHitArea(layoutCreator, creatorPos, layoutCreatorFont, getLayoutCreatorSize(), layoutCreatorFontWeight, { type: "creator" })
     );
   }
   const axisSettings = getAxisLegendSettings();
@@ -12853,15 +12793,35 @@ function buildPageChromeScene() {
         ref,
       })
     );
+    const labelWidth = measureTextWidthWithWeight(
+      info.label,
+      axisSettings.fontSize,
+      layoutAxisLegendFont,
+      layoutAxisLegendFontWeight
+    );
+    const halfW = labelWidth / 2 + 12;
+    const halfH = axisSettings.fontSize / 2 + 8;
+    scene.push(
+      sceneHitArea({
+        left: info.center.x - halfW,
+        top: info.center.y - halfH,
+        width: halfW * 2,
+        height: halfH * 2,
+        rotation: info.textAngle,
+        pivot: info.center,
+        ref,
+      })
+    );
   }
   if (layoutCustomLabels.length) {
     const customSize = Math.max(8, Math.round(layoutCustomLabelTextSize));
-    for (const entry of layoutCustomLabels) {
+    layoutCustomLabels.forEach((entry, index) => {
       if (!entry.text || !entry.position) {
-        continue;
+        return;
       }
       const pos = getLayoutCustomLabelPosition(entry);
-      const { lines, lineHeight } = getLayoutCustomLabelMetrics(entry);
+      const { lines, lineHeight, width, height } = getLayoutCustomLabelMetrics(entry);
+      const align = getLayoutCustomLabelAlign(entry);
       scene.push(
         sceneText({
           lines,
@@ -12871,15 +12831,29 @@ function buildPageChromeScene() {
           font: layoutCustomLabelFont,
           size: customSize,
           weight: layoutCustomLabelFontWeight,
-          align: getLayoutCustomLabelAlign(entry),
+          align,
           baseline: "top",
           color: themeColors.textSecondary,
           ref: { type: "customLabel", id: entry.id },
+        }),
+        // The stored wrap width, not the ink, is the clickable box.
+        sceneHitArea({
+          left: getLayoutCustomLabelLeft(pos, width, align),
+          top: pos.y,
+          width,
+          height,
+          ref: { type: "customLabel", id: entry.id, index },
         })
       );
-    }
+    });
   }
   return scene;
+}
+
+// Clickable box of a centred, top-baseline text run (title, creator).
+function textHitArea(text, pos, font, size, weight, ref) {
+  const width = measureTextWidthWithWeight(text, size, font, weight);
+  return sceneHitArea({ left: pos.x - width / 2, top: pos.y, width, height: size, ref });
 }
 
 function drawLayoutPage(pageScene) {
@@ -12940,12 +12914,21 @@ function scheduleDraw() {
   });
 }
 
+function collectHitAreas(scene) {
+  for (const item of scene) {
+    if (item.kind === "hitArea") {
+      frameHitAreas.push(item);
+    }
+  }
+}
+
 function drawDistanceConnections(nodePosMap) {
   const { scene, hits, nodeKeys } = buildDistanceConnectionsScene(nodePosMap);
   distanceEdges.length = 0;
   distanceEdges.push(...hits);
   distanceSelectedNodeKeys.clear();
   nodeKeys.forEach((key) => distanceSelectedNodeKeys.add(key));
+  collectHitAreas(scene);
   paintDisplayList(ctx, scene);
 }
 
@@ -13106,6 +13089,15 @@ function buildDistanceConnectionsScene(nodePosMap) {
       tangent,
     });
     const baseWidth = measureTextWidthWithWeight(label, labelSize, labelFont, labelWeight);
+    scene.push(
+      sceneHitArea({
+        left: labelPos.x - baseWidth / 2 - 6,
+        top: labelPos.y - labelSize / 2 - 4,
+        width: baseWidth + 12,
+        height: labelSize + 8,
+        ref: { type: "distanceLabel", key: edgeKey },
+      })
+    );
     let angle = 0;
     let useHorizontal = false;
     if (Math.abs(tangent.x) > 1e-6 || Math.abs(tangent.y) > 1e-6) {
@@ -13955,7 +13947,8 @@ function buildNodeInnerLabelScene(node, pos, radius, state) {
 
 // The detail block beside a node: ratio / note name, cents, octave shift,
 // ratio-cents and Hz lines, placed to avoid other nodes, edges and labels
-// (pushes onto `collision`). Returns the scene and the layout hitbox.
+// (pushes onto `collision`). In page layout the scene includes the label's
+// padded hit area. Returns { scene }.
 function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
   const scene = [];
   const ref = { type: "nodeDetail", id: node.id };
@@ -13997,20 +13990,21 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
         bottom: labelPos.y + labelHeight,
       });
     }
-    let hitbox = null;
     if (layoutMode) {
       const padding = Math.max(4, Math.round(detailSize * 0.25));
-      hitbox = {
-        left: labelPos.x - padding,
-        top: labelPos.y - padding,
-        width: labelWidth + padding * 2,
-        height: labelHeight + padding * 2,
-        labelPos: { x: labelPos.x, y: labelPos.y },
-      };
+      scene.push(
+        sceneHitArea({
+          left: labelPos.x - padding,
+          top: labelPos.y - padding,
+          width: labelWidth + padding * 2,
+          height: labelHeight + padding * 2,
+          ref: { type: "noteLabel", id: node.id, labelPos: { x: labelPos.x, y: labelPos.y } },
+        })
+      );
     }
-    return { labelPos, hitbox };
+    return { labelPos };
   };
-  const result = (hitbox) => ({ scene, hitbox });
+  const result = () => ({ scene });
 
   if (featureMode === "note") {
     const measure = (text) =>
@@ -14027,7 +14021,7 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
       hzText ? measure(hzText) : 0
     );
     const lineCount = 1 + (centsLabel ? 1 : 0) + (ratioCentsLabel ? 1 : 0) + (hzText ? 1 : 0);
-    const { labelPos, hitbox } = place(labelWidth, lineCount);
+    const { labelPos } = place(labelWidth, lineCount);
     let y = labelPos.y;
     scene.push(line(ratioText, labelPos.x, y));
     y += lineStep;
@@ -14058,7 +14052,7 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
     if (hzText) {
       scene.push(line(hzText, labelPos.x, y));
     }
-    return result(hitbox);
+    return result();
   }
 
   // Ratio mode.
@@ -14097,7 +14091,7 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
     (octaveLabel ? 1 : 0) +
     (ratioCentsLabel ? 1 : 0) +
     (hzText ? 1 : 0);
-  const { labelPos, hitbox } = place(labelWidth, lineCount);
+  const { labelPos } = place(labelWidth, lineCount);
   let y = labelPos.y;
   scene.push(
     ...tag(
@@ -14151,7 +14145,7 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
   if (hzText) {
     scene.push(line(hzText, labelPos.x, y, '"Lexend", sans-serif', 200));
   }
-  return result(hitbox);
+  return result();
 }
 
 // A node's custom piano-key label on the page (bottom-right anchored, plain
@@ -14161,6 +14155,14 @@ function buildLayoutKeyMappingScene(node, pos, radius, keyLabel, alpha) {
   const labelPos = getLayoutKeyMappingLabelPosition(node, pos, radius);
   const fontSize = Math.max(8, Math.round(layoutKeyMappingTextSize));
   const ref = { type: "keyMapping", id: node.id };
+  const hitbox = getLayoutKeyMappingLabelHitbox(labelText, node, pos, radius);
+  const hit = sceneHitArea({
+    left: hitbox.left,
+    top: hitbox.top,
+    width: hitbox.width,
+    height: hitbox.height,
+    ref: { ...ref, labelPos: hitbox.labelPos },
+  });
   const textProps = {
     text: labelText,
     font: layoutKeyMappingFont,
@@ -14172,7 +14174,10 @@ function buildLayoutKeyMappingScene(node, pos, radius, keyLabel, alpha) {
     ref,
   };
   if (!layoutKeyMappingDark) {
-    return [sceneText({ ...textProps, x: labelPos.x, y: labelPos.y, color: themeColors.textSecondary })];
+    return [
+      sceneText({ ...textProps, x: labelPos.x, y: labelPos.y, color: themeColors.textSecondary }),
+      hit,
+    ];
   }
   const paddingX = 6;
   const paddingY = 3;
@@ -14198,6 +14203,7 @@ function buildLayoutKeyMappingScene(node, pos, radius, keyLabel, alpha) {
       ref,
     }),
     sceneText({ ...textProps, x: labelPos.x - paddingX, y: labelPos.y - paddingY, color: "#ffffff" }),
+    hit,
   ];
 }
 
@@ -14263,7 +14269,7 @@ function buildLatticeEdgesScene(nodePosMap) {
 
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  layoutRenderedNoteLabelHitboxes.clear();
+  frameHitAreas.length = 0;
 
   if (!themeColors) {
     refreshThemeColors();
@@ -14619,12 +14625,10 @@ function draw() {
     if (!showMicrotonal) {
       const detail = buildNodeDetailLabelScene(node, pos, radius, state, detailLabelCollision);
       paintDisplayList(ctx, detail.scene);
-      if (detail.hitbox) {
-        layoutRenderedNoteLabelHitboxes.set(node.id, detail.hitbox);
-      }
+      collectHitAreas(detail.scene);
+      const hitbox = detail.scene.find((item) => item.kind === "hitArea");
 
-      if (layoutMode && layoutLabelHitboxVisible) {
-        const hitbox = getLayoutNoteLabelHitbox(node, pos, radius);
+      if (layoutMode && layoutLabelHitboxVisible && hitbox) {
         ctx.save();
         ctx.strokeStyle = "rgba(255, 80, 80, 0.8)";
         ctx.fillStyle = "rgba(255, 80, 80, 0.12)";
@@ -14681,7 +14685,9 @@ function draw() {
         : true;
       if (keyLabel && showLabel) {
         if (layoutMode) {
-          paintDisplayList(ctx, buildLayoutKeyMappingScene(node, pos, radius, keyLabel, alpha));
+          const keyScene = buildLayoutKeyMappingScene(node, pos, radius, keyLabel, alpha);
+          paintDisplayList(ctx, keyScene);
+          collectHitAreas(keyScene);
         } else if (is3DMode) {
           drawKeyBanner(pos, radius, keyLabel, alpha);
         } else {
@@ -17669,185 +17675,53 @@ function hitTestNoteLabel(screenPoint) {
   if (!layoutMode) {
     return null;
   }
-  let hit = null;
-  nodes.forEach((node) => {
-    if (!(node.isCenter || node.active || node.isCustom)) {
-      return;
-    }
-    const pos = worldToScreen(getNodeDisplayCoordinate(node));
-    const radius = getLayoutNodeRadius(pos);
-    const hitbox = getLayoutNoteLabelHitbox(node, pos, radius);
-    const left = hitbox.left;
-    const right = hitbox.left + hitbox.width;
-    const top = hitbox.top;
-    const bottom = hitbox.top + hitbox.height;
-    if (
-      screenPoint.x >= left &&
-      screenPoint.x <= right &&
-      screenPoint.y >= top &&
-      screenPoint.y <= bottom
-    ) {
-      hit = { node, labelPos: hitbox.labelPos };
-    }
-  });
-  return hit;
+  const hit = hitTestDisplayList(frameHitAreas, screenPoint, ["noteLabel"]);
+  const node = hit && nodeById.get(hit.ref.id);
+  return node ? { node, labelPos: hit.ref.labelPos } : null;
 }
 
 function hitTestLayoutKeyMappingLabel(screenPoint) {
-  if (!layoutMode || layoutKeyMappingMode === "hide") {
+  if (!layoutMode) {
     return null;
   }
-  const keyboardMode = getKeyboardMode();
-  if (keyboardMode !== "piano-custom") {
-    return null;
-  }
-  const customPianoLabels = getCustomPianoLabelMap();
-  let hit = null;
-  nodes.forEach((node) => {
-    if (!(node.isCenter || node.active || node.isCustom)) {
-      return;
-    }
-    const keyLabel = customPianoLabels.get(node.id);
-    if (!keyLabel) {
-      return;
-    }
-    const labelText = getLayoutKeyMappingLabelText(keyLabel);
-    const displayInfo = getCachedDisplayInfo(node);
-    const pitchClass = displayInfo.pitchClass || node.pitch_class;
-    if (!shouldShowLayoutKeyMappingLabel(keyLabel, pitchClass)) {
-      return;
-    }
-    const pos = worldToScreen(getNodeDisplayCoordinate(node));
-    const radius = getLayoutNodeRadius(pos);
-    const hitbox = getLayoutKeyMappingLabelHitbox(labelText, node, pos, radius);
-    const left = hitbox.left;
-    const right = hitbox.left + hitbox.width;
-    const top = hitbox.top;
-    const bottom = hitbox.top + hitbox.height;
-    if (
-      screenPoint.x >= left &&
-      screenPoint.x <= right &&
-      screenPoint.y >= top &&
-      screenPoint.y <= bottom
-    ) {
-      hit = { node, labelPos: hitbox.labelPos };
-    }
-  });
-  return hit;
+  const hit = hitTestDisplayList(frameHitAreas, screenPoint, ["keyMapping"]);
+  const node = hit && nodeById.get(hit.ref.id);
+  return node ? { node, labelPos: hit.ref.labelPos } : null;
 }
 
 function hitTestLayoutTitle(screenPoint) {
   if (!layoutMode || !layoutTitle) {
     return null;
   }
-  const titleSize = Math.max(12, Math.round(layoutTitleSize));
-  ctx.save();
-  ctx.font = `${layoutTitleFontWeight} ${titleSize}px ${layoutTitleFont}`;
-  const width = ctx.measureText(layoutTitle).width;
-  ctx.restore();
-  const pos = getLayoutTitlePosition();
-  const height = titleSize;
-  const left = pos.x - width / 2;
-  const right = pos.x + width / 2;
-  const top = pos.y;
-  const bottom = pos.y + height;
-  if (
-    screenPoint.x >= left &&
-    screenPoint.x <= right &&
-    screenPoint.y >= top &&
-    screenPoint.y <= bottom
-  ) {
-    return { pos };
-  }
-  return null;
+  return hitTestDisplayList(buildPageChromeScene(), screenPoint, ["title"])
+    ? { pos: getLayoutTitlePosition() }
+    : null;
 }
 
 function hitTestLayoutCreator(screenPoint) {
   if (!layoutMode || !layoutCreator) {
     return null;
   }
-  const creatorSize = getLayoutCreatorSize();
-  ctx.save();
-  ctx.font = `${layoutCreatorFontWeight} ${creatorSize}px ${layoutCreatorFont}`;
-  const width = ctx.measureText(layoutCreator).width;
-  ctx.restore();
-  const pos = getLayoutCreatorPosition();
-  const height = creatorSize;
-  const left = pos.x - width / 2;
-  const right = pos.x + width / 2;
-  const top = pos.y;
-  const bottom = pos.y + height;
-  if (
-    screenPoint.x >= left &&
-    screenPoint.x <= right &&
-    screenPoint.y >= top &&
-    screenPoint.y <= bottom
-  ) {
-    return { pos };
-  }
-  return null;
+  return hitTestDisplayList(buildPageChromeScene(), screenPoint, ["creator"])
+    ? { pos: getLayoutCreatorPosition() }
+    : null;
 }
 
 function hitTestLayoutCustomLabel(screenPoint) {
   if (!layoutMode || !layoutCustomLabels.length) {
     return null;
   }
-  ctx.save();
-  const size = Math.max(8, Math.round(layoutCustomLabelTextSize));
-  ctx.font = `${layoutCustomLabelFontWeight} ${size}px ${layoutCustomLabelFont}`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  for (let i = layoutCustomLabels.length - 1; i >= 0; i -= 1) {
-    const entry = layoutCustomLabels[i];
-    if (!entry.text || !entry.position) {
-      continue;
-    }
-    const { width, height } = getLayoutCustomLabelMetrics(entry);
-    const pos = getLayoutCustomLabelPosition(entry);
-    const align = getLayoutCustomLabelAlign(entry);
-    const left = getLayoutCustomLabelLeft(pos, width, align);
-    const right = left + width;
-    const top = pos.y;
-    const bottom = pos.y + height;
-    if (
-      screenPoint.x >= left &&
-      screenPoint.x <= right &&
-      screenPoint.y >= top &&
-      screenPoint.y <= bottom
-    ) {
-      ctx.restore();
-      return { entry, index: i, pos };
-    }
-  }
-  ctx.restore();
-  return null;
+  const hit = hitTestDisplayList(buildPageChromeScene(), screenPoint, ["customLabel"]);
+  const entry = hit && layoutCustomLabels[hit.ref.index];
+  return entry ? { entry, index: hit.ref.index, pos: getLayoutCustomLabelPosition(entry) } : null;
 }
 
 function hitTestDistanceLabel(screenPoint) {
   if (!distanceEdges.length) {
     return null;
   }
-  for (let i = distanceEdges.length - 1; i >= 0; i -= 1) {
-    const edge = distanceEdges[i];
-    const { label, labelFont, labelWeight, labelSize, labelPos } = edge;
-    const centerX = labelPos ? labelPos.x : 0;
-    const centerY = labelPos ? labelPos.y : 0;
-    ctx.save();
-    ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
-    const width = ctx.measureText(label).width;
-    ctx.restore();
-    const halfWidth = width / 2 + 6;
-    const halfHeight = labelSize / 2 + 4;
-    if (
-      screenPoint.x >= centerX - halfWidth &&
-      screenPoint.x <= centerX + halfWidth &&
-      screenPoint.y >= centerY - halfHeight &&
-      screenPoint.y <= centerY + halfHeight
-    ) {
-      return edge;
-    }
-  }
-  return null;
+  const hit = hitTestDisplayList(frameHitAreas, screenPoint, ["distanceLabel"]);
+  return (hit && distanceEdges.find((edge) => edge.key === hit.ref.key)) || null;
 }
 
 function hitTestDistanceLine(screenPoint) {
@@ -17938,35 +17812,8 @@ function hitTestAxisLegend(screenPoint) {
   if (!layoutMode) {
     return null;
   }
-  const settings = getAxisLegendSettings();
-  const axes = [
-    getAxisLegendInfo("x", settings),
-    getAxisLegendInfo("y", settings),
-    getAxisLegendInfo("z", settings),
-  ];
-  ctx.save();
-  ctx.font = `${layoutAxisLegendFontWeight} ${settings.fontSize}px ${layoutAxisLegendFont}`;
-  for (const axis of axes) {
-    if (!axis) {
-      continue;
-    }
-    const labelWidth = ctx.measureText(axis.label).width;
-    const halfW = labelWidth / 2 + 12;
-    const halfH = settings.fontSize / 2 + 8;
-    const angle = axis.textAngle;
-    const dx = screenPoint.x - axis.center.x;
-    const dy = screenPoint.y - axis.center.y;
-    const cos = Math.cos(-angle);
-    const sin = Math.sin(-angle);
-    const rx = dx * cos - dy * sin;
-    const ry = dx * sin + dy * cos;
-    if (Math.abs(rx) <= halfW && Math.abs(ry) <= halfH) {
-      ctx.restore();
-      return axis;
-    }
-  }
-  ctx.restore();
-  return null;
+  const hit = hitTestDisplayList(buildPageChromeScene(), screenPoint, ["axisLegend"]);
+  return hit ? getAxisLegendInfo(hit.ref.axis) : null;
 }
 
 function hitTestAxisLegendHandle(screenPoint) {

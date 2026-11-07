@@ -27,10 +27,15 @@
 //   { kind: "nodeShape", shape: "circle" | "square" | "triangle" | "diamond",
 //     x, y, radius, fill, fillAlpha?, stroke, width, dash?, alpha? }
 //     fill then stroke; fillAlpha multiplies alpha for the fill only
+//   { kind: "hitArea", left, top, width, height, rotation?, pivot?: { x, y } }
+//     invisible: painters and emitters skip it. The clickable region of the
+//     element named by its `ref`, when that isn't simply its ink (padded
+//     labels, a custom label's stored wrap width). With `rotation`, the box
+//     is in a frame rotated about `pivot`. Read by hit-test.js.
 //
 // Every primitive may carry `ref: { type, ... }` naming the scene element it
 // came from, so the interactive canvas pass can filter (e.g. hide a label
-// while its editor is open) and hit-testing can later read the scene.
+// while its editor is open) and hit-testing can find what was clicked.
 
 export function text(props) {
   return { kind: "text", ...props };
@@ -50,6 +55,10 @@ export function rect(props) {
 
 export function curve(props) {
   return { kind: "curve", ...props };
+}
+
+export function hitArea(props) {
+  return { kind: "hitArea", ...props };
 }
 
 export const DIAMOND_RADIUS_SCALE = 1.125;
@@ -135,6 +144,13 @@ export function offsetDisplayList(list, dx, dy) {
         const move = (point) => ({ x: point.x + dx, y: point.y + dy });
         return { ...item, p0: move(item.p0), p1: move(item.p1), p2: move(item.p2) };
       }
+      case "hitArea":
+        return {
+          ...item,
+          left: item.left + dx,
+          top: item.top + dy,
+          pivot: item.pivot ? { x: item.pivot.x + dx, y: item.pivot.y + dy } : item.pivot,
+        };
       case "stroke":
         return {
           ...item,

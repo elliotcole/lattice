@@ -38,6 +38,9 @@ import {
   axisMatches,
 } from "./lib/pitch.js";
 import opentype from "opentype.js";
+import { text as sceneText, arrow as sceneArrow } from "./scene/display-list.js";
+import { paintDisplayList } from "./scene/paint-canvas.js";
+import { emitDisplayListSvg, svgColorAttr } from "./scene/emit-svg.js";
 
 // Main editor spells ET fallbacks from its mixed default table (Eb/Bb flats).
 function getNearestEtInfo(freq, a4) {
@@ -10422,31 +10425,6 @@ function syncActiveLayoutCustomTextEntryFromEditor() {
   return entry;
 }
 
-function drawLayoutCustomLabels() {
-  if (!layoutCustomLabels.length) {
-    return;
-  }
-  const size = Math.max(8, Math.round(layoutCustomLabelTextSize));
-  ctx.save();
-  ctx.fillStyle = themeColors.textSecondary;
-  ctx.font = `${layoutCustomLabelFontWeight} ${size}px ${layoutCustomLabelFont}`;
-  ctx.textBaseline = "top";
-  layoutCustomLabels.forEach((entry) => {
-    if (!entry.text || !entry.position) {
-      return;
-    }
-    if (layoutCustomTextEditorState && layoutCustomTextEditorState.id === entry.id) {
-      return;
-    }
-    const pos = getLayoutCustomLabelPosition(entry);
-    const { lines, lineHeight } = getLayoutCustomLabelMetrics(entry);
-    ctx.textAlign = getLayoutCustomLabelAlign(entry);
-    lines.forEach((line, index) => {
-      ctx.fillText(line, pos.x, pos.y + index * lineHeight);
-    });
-  });
-  ctx.restore();
-}
 
 function setActiveLayoutCustomTextAlign(align) {
   if (!layoutCustomTextEditorState) {
@@ -12716,26 +12694,6 @@ function drawNodeShapePath(shape, x, y, radius) {
   ctx.arc(x, y, radius, 0, Math.PI * 2);
 }
 
-function drawAxisArrow(x1, y1, x2, y2) {
-  const headLength = 10;
-  const angle = Math.atan2(y2 - y1, x2 - x1);
-  ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(x2, y2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(x2, y2);
-  ctx.lineTo(
-    x2 - headLength * Math.cos(angle - Math.PI / 6),
-    y2 - headLength * Math.sin(angle - Math.PI / 6)
-  );
-  ctx.lineTo(
-    x2 - headLength * Math.cos(angle + Math.PI / 6),
-    y2 - headLength * Math.sin(angle + Math.PI / 6)
-  );
-  ctx.closePath();
-  ctx.fill();
-}
 
 function hasActiveAxis(axis) {
   const key =
@@ -12868,67 +12826,121 @@ function getAxisLegendInfo(axis, settings = getAxisLegendSettings()) {
   };
 }
 
-function drawLayoutAxisLegend(axis, { showHandles = false } = {}) {
-  const info = getAxisLegendInfo(axis);
-  if (!info) {
-    return;
+
+
+// Page chrome in page coordinates: title, creator, axis legends, custom text
+// labels. Shared by the canvas (drawLayoutPage) and SVG export. The page box,
+// its shadow, and the axis-edit handles are canvas-only.
+function buildPageChromeScene() {
+  const scene = [];
+  const { widthPx } = getLayoutPageDimensions();
+  const { left, top } = getLayoutPageRect();
+  if (layoutTitle) {
+    const titlePos = getLayoutTitlePosition();
+    scene.push(
+      sceneText({
+        text: layoutTitle,
+        x: layoutTitlePosition ? layoutTitlePosition.x : widthPx / 2,
+        y: layoutTitlePosition ? layoutTitlePosition.y : Math.max(12, titlePos.y - top),
+        font: layoutTitleFont,
+        size: Math.max(12, Math.round(layoutTitleSize)),
+        weight: layoutTitleFontWeight,
+        align: "center",
+        baseline: "top",
+        color: themeColors.textPrimary,
+        ref: { type: "title" },
+      })
+    );
   }
-  drawAxisArrow(
-    info.center.x - info.gapVec.x,
-    info.center.y - info.gapVec.y,
-    info.leftEnd.x,
-    info.leftEnd.y
-  );
-  drawAxisArrow(
-    info.center.x + info.gapVec.x,
-    info.center.y + info.gapVec.y,
-    info.rightEnd.x,
-    info.rightEnd.y
-  );
-  ctx.save();
-  ctx.translate(info.center.x, info.center.y);
-  ctx.rotate(info.textAngle);
-  ctx.fillText(info.label, 0, 0);
-  ctx.restore();
-  if (showHandles) {
-    const handleRadius = Math.max(8, Math.round(info.fontSize * 0.55));
-    ctx.save();
-    ctx.fillStyle = themeColors.textSecondary;
-    ctx.beginPath();
-    ctx.arc(info.leftEnd.x, info.leftEnd.y, handleRadius, 0, Math.PI * 2);
-    ctx.arc(info.rightEnd.x, info.rightEnd.y, handleRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+  if (layoutCreator) {
+    const creatorPos = getLayoutCreatorPosition();
+    scene.push(
+      sceneText({
+        text: layoutCreator,
+        x: creatorPos.x - left,
+        y: Math.max(12, creatorPos.y - top),
+        font: layoutCreatorFont,
+        size: getLayoutCreatorSize(),
+        weight: layoutCreatorFontWeight,
+        align: "center",
+        baseline: "top",
+        color: themeColors.textSecondary,
+        ref: { type: "creator" },
+      })
+    );
   }
+  const axisSettings = getAxisLegendSettings();
+  const axisColor = themeColors.textSecondary;
+  for (const axis of ["x", "y", "z"]) {
+    const info = getAxisLegendInfo(axis, axisSettings);
+    if (!info) {
+      continue;
+    }
+    const ref = { type: "axisLegend", axis };
+    const centerX = info.center.x - left;
+    const centerY = info.center.y - top;
+    scene.push(
+      ...sceneArrow({
+        x1: centerX - info.gapVec.x,
+        y1: centerY - info.gapVec.y,
+        x2: info.leftEnd.x - left,
+        y2: info.leftEnd.y - top,
+        color: axisColor,
+        width: 1.5,
+        ref,
+      }),
+      ...sceneArrow({
+        x1: centerX + info.gapVec.x,
+        y1: centerY + info.gapVec.y,
+        x2: info.rightEnd.x - left,
+        y2: info.rightEnd.y - top,
+        color: axisColor,
+        width: 1.5,
+        ref,
+      }),
+      sceneText({
+        text: info.label,
+        x: centerX,
+        y: centerY,
+        font: layoutAxisLegendFont,
+        size: axisSettings.fontSize,
+        weight: layoutAxisLegendFontWeight,
+        align: "center",
+        baseline: "middle",
+        color: axisColor,
+        rotation: info.textAngle,
+        ref,
+      })
+    );
+  }
+  if (layoutCustomLabels.length) {
+    const customSize = Math.max(8, Math.round(layoutCustomLabelTextSize));
+    for (const entry of layoutCustomLabels) {
+      if (!entry.text || !entry.position) {
+        continue;
+      }
+      const { lines, lineHeight } = getLayoutCustomLabelMetrics(entry);
+      scene.push(
+        sceneText({
+          lines,
+          lineHeight,
+          x: entry.position.x,
+          y: entry.position.y,
+          font: layoutCustomLabelFont,
+          size: customSize,
+          weight: layoutCustomLabelFontWeight,
+          align: getLayoutCustomLabelAlign(entry),
+          baseline: "top",
+          color: themeColors.textSecondary,
+          ref: { type: "customLabel", id: entry.id },
+        })
+      );
+    }
+  }
+  return scene;
 }
 
-function drawLayoutAxes() {
-  const { fontSize } = getAxisLegendSettings();
-
-  ctx.save();
-  ctx.strokeStyle = themeColors.textSecondary;
-  ctx.fillStyle = themeColors.textSecondary;
-  ctx.lineWidth = 1.5;
-  ctx.font = `${layoutAxisLegendFontWeight} ${fontSize}px ${layoutAxisLegendFont}`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-
-  if (hasActiveAxis("x")) {
-    drawLayoutAxisLegend("x", { showHandles: layoutAxisEdit === "x" });
-  }
-
-  if (hasActiveAxis("y")) {
-    drawLayoutAxisLegend("y", { showHandles: layoutAxisEdit === "y" });
-  }
-
-  if (hasActiveAxis("z")) {
-    drawLayoutAxisLegend("z", { showHandles: layoutAxisEdit === "z" });
-  }
-
-  ctx.restore();
-}
-
-function drawLayoutPage({ drawAxes = true } = {}) {
+function drawLayoutPage(pageScene) {
   const { left, top, width, height } = getLayoutPageRect();
   ctx.save();
   ctx.shadowColor = themeColors.pageShadow;
@@ -12942,32 +12954,41 @@ function drawLayoutPage({ drawAxes = true } = {}) {
   ctx.strokeStyle = themeColors.pageBorder;
   ctx.lineWidth = 1;
   ctx.strokeRect(left, top, width, height);
+  ctx.restore();
+  // While an axis is being edited, all legends move to the late overlay pass
+  // (drawLayoutAxisEditOverlay); the label under the text editor is hidden.
+  const editingLabelId = layoutCustomTextEditorState ? layoutCustomTextEditorState.id : null;
+  paintDisplayList(ctx, pageScene, {
+    originX: left,
+    originY: top,
+    filter: ({ ref }) =>
+      !(ref && ref.type === "axisLegend" && layoutAxisEdit) &&
+      !(ref && ref.type === "customLabel" && editingLabelId != null && ref.id === editingLabelId),
+  });
+}
 
-  if (layoutTitle) {
-    const titleSize = Math.max(12, Math.round(layoutTitleSize));
-    ctx.fillStyle = themeColors.textPrimary;
-    ctx.font = `${layoutTitleFontWeight} ${titleSize}px ${layoutTitleFont}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    const titlePos = getLayoutTitlePosition();
-    ctx.fillText(layoutTitle, titlePos.x, titlePos.y);
+function drawLayoutAxisEditOverlay(pageScene) {
+  const { left, top } = getLayoutPageRect();
+  ctx.save();
+  ctx.fillStyle = "rgba(128, 128, 128, 0.25)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+  paintDisplayList(ctx, pageScene, {
+    originX: left,
+    originY: top,
+    filter: ({ ref }) => Boolean(ref && ref.type === "axisLegend" && ref.axis === layoutAxisEdit),
+  });
+  const info = getAxisLegendInfo(layoutAxisEdit);
+  if (!info) {
+    return;
   }
-  if (layoutCreator) {
-    const creatorSize = getLayoutCreatorSize();
-    ctx.fillStyle = themeColors.textSecondary;
-    ctx.font = `${layoutCreatorFontWeight} ${creatorSize}px ${layoutCreatorFont}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    const creatorPos = getLayoutCreatorPosition();
-    ctx.fillText(layoutCreator, creatorPos.x, creatorPos.y);
-  }
-
-  if (drawAxes) {
-    drawLayoutAxes();
-  }
-
-  drawLayoutCustomLabels();
-
+  const handleRadius = Math.max(8, Math.round(info.fontSize * 0.55));
+  ctx.save();
+  ctx.fillStyle = themeColors.textSecondary;
+  ctx.beginPath();
+  ctx.arc(info.leftEnd.x, info.leftEnd.y, handleRadius, 0, Math.PI * 2);
+  ctx.arc(info.rightEnd.x, info.rightEnd.y, handleRadius, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
@@ -13726,8 +13747,9 @@ function draw() {
     refreshThemeColors();
   }
   const distanceFocusMode = distanceSelectMode && analysisLayers.distances;
-  if (layoutMode) {
-    drawLayoutPage({ drawAxes: !layoutAxisEdit });
+  const pageScene = layoutMode ? buildPageChromeScene() : null;
+  if (pageScene) {
+    drawLayoutPage(pageScene);
   }
 
   const nodeRenderList = nodes
@@ -14681,18 +14703,8 @@ function draw() {
     ctx.restore();
   });
 
-  if (layoutMode && layoutAxisEdit) {
-    ctx.save();
-    ctx.fillStyle = "rgba(128, 128, 128, 0.25)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = themeColors.textSecondary;
-    ctx.fillStyle = themeColors.textSecondary;
-    ctx.lineWidth = 1.5;
-  ctx.font = `${layoutAxisLegendFontWeight} ${getAxisLegendSettings().fontSize}px ${layoutAxisLegendFont}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    drawLayoutAxisLegend(layoutAxisEdit, { showHandles: true });
-    ctx.restore();
+  if (pageScene && layoutAxisEdit) {
+    drawLayoutAxisEditOverlay(pageScene);
   }
   drawAnalysisWatermark();
   syncNavViewSliders();
@@ -26288,59 +26300,7 @@ function getExportMetadataLabel() {
   return `${safeCreator} - ${safeTitle} [tuninglattice.com]`;
 }
 
-function normalizeSvgColor(color) {
-  if (!color) {
-    return { color: "none", opacity: null };
-  }
-  const trimmed = String(color).trim();
-  if (trimmed === "none" || trimmed === "transparent") {
-    return { color: trimmed, opacity: null };
-  }
-  const rgbaMatch = trimmed.match(/^rgba?\(([^)]+)\)$/i);
-  if (rgbaMatch) {
-    const parts = rgbaMatch[1]
-      .split(",")
-      .map((part) => part.trim())
-      .filter(Boolean);
-    const r = Number(parts[0]);
-    const g = Number(parts[1]);
-    const b = Number(parts[2]);
-    const a = parts.length > 3 ? Number(parts[3]) : 1;
-    if ([r, g, b].every((value) => Number.isFinite(value))) {
-      const rgb = `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
-      const opacity = Number.isFinite(a) ? Math.max(0, Math.min(1, a)) : 1;
-      return { color: rgb, opacity };
-    }
-  }
-  const hexMatch = trimmed.match(/^#([0-9a-f]{4}|[0-9a-f]{8})$/i);
-  if (hexMatch) {
-    const hex = hexMatch[1];
-    const values =
-      hex.length === 4
-        ? hex.split("").map((char) => parseInt(char + char, 16))
-        : [
-            parseInt(hex.slice(0, 2), 16),
-            parseInt(hex.slice(2, 4), 16),
-            parseInt(hex.slice(4, 6), 16),
-            parseInt(hex.slice(6, 8), 16),
-          ];
-    const [r, g, b, a = 255] = values;
-    const rgb = `rgb(${r}, ${g}, ${b})`;
-    const opacity = Math.max(0, Math.min(1, a / 255));
-    return { color: rgb, opacity };
-  }
-  return { color: trimmed, opacity: null };
-}
 
-function svgColorAttr(name, color) {
-  const normalized = normalizeSvgColor(color);
-  const base = `${name}="${normalized.color}"`;
-  if (normalized.opacity === null || normalized.color === "none") {
-    return base;
-  }
-  const opacity = Number(normalized.opacity.toFixed(3));
-  return `${base} ${name}-opacity="${opacity}"`;
-}
 
 const OUTLINE_SVG_TEXT = true;
 const OUTLINE_FONT_URLS = import.meta.glob(
@@ -26706,8 +26666,6 @@ async function buildLayoutSvgString(
   const { left, top } = getLayoutPageRect();
   const labelSize = layoutRatioTextSize;
   const detailSize = layoutNoteTextSize;
-  const titleSize = Math.max(12, Math.round(layoutTitleSize));
-  const creatorSize = getLayoutCreatorSize();
   const exportLabel = getExportMetadataLabel();
   const svgDetailHejiYOffset = Number.isFinite(detailHejiYOffset)
     ? detailHejiYOffset
@@ -26737,139 +26695,7 @@ async function buildLayoutSvgString(
   }
   parts.push(`<rect width="100%" height="100%" ${svgFill(themeColors.page)}/>`);
 
-  if (layoutTitle) {
-    const titlePos = getLayoutTitlePosition();
-    const titleX = layoutTitlePosition
-      ? layoutTitlePosition.x
-      : widthPx / 2;
-    const titleY = layoutTitlePosition
-      ? layoutTitlePosition.y
-      : Math.max(12, titlePos.y - top);
-    parts.push(
-      await buildSvgTextElement({
-        text: layoutTitle,
-        x: titleX,
-        y: titleY,
-        font: layoutTitleFont,
-        size: titleSize,
-        fontWeight: layoutTitleFontWeight,
-        anchor: "middle",
-        baseline: "text-before-edge",
-        color: themeColors.textPrimary,
-      })
-    );
-  }
-  if (layoutCreator) {
-    const creatorPos = getLayoutCreatorPosition();
-    const creatorX = creatorPos.x - left;
-    const creatorY = Math.max(12, creatorPos.y - top);
-    parts.push(
-      await buildSvgTextElement({
-        text: layoutCreator,
-        x: creatorX,
-        y: creatorY,
-        font: layoutCreatorFont,
-        size: creatorSize,
-        fontWeight: layoutCreatorFontWeight,
-        anchor: "middle",
-        baseline: "text-before-edge",
-        color: themeColors.textSecondary,
-      })
-    );
-  }
-
-  const axisSettings = getAxisLegendSettings();
-  const axisColor = themeColors.textSecondary;
-  const axisStroke = 1.5;
-  const axisDefs = [
-    getAxisLegendInfo("x", axisSettings),
-    getAxisLegendInfo("y", axisSettings),
-    getAxisLegendInfo("z", axisSettings),
-  ];
-  for (const info of axisDefs) {
-    if (!info) {
-      continue;
-    }
-    const centerX = info.center.x - left;
-    const centerY = info.center.y - top;
-    const leftStart = {
-      x: centerX - info.gapVec.x,
-      y: centerY - info.gapVec.y,
-    };
-    const leftEnd = {
-      x: info.leftEnd.x - left,
-      y: info.leftEnd.y - top,
-    };
-    const rightStart = {
-      x: centerX + info.gapVec.x,
-      y: centerY + info.gapVec.y,
-    };
-    const rightEnd = {
-      x: info.rightEnd.x - left,
-      y: info.rightEnd.y - top,
-    };
-    const buildArrow = (x1, y1, x2, y2) => {
-      const headLength = 10;
-      const angle = Math.atan2(y2 - y1, x2 - x1);
-      const p1 = `${x2},${y2}`;
-      const p2 = `${x2 - headLength * Math.cos(angle - Math.PI / 6)},${y2 -
-        headLength * Math.sin(angle - Math.PI / 6)}`;
-      const p3 = `${x2 - headLength * Math.cos(angle + Math.PI / 6)},${y2 -
-        headLength * Math.sin(angle + Math.PI / 6)}`;
-      parts.push(
-        `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${svgStroke(
-          axisColor
-        )} stroke-width="${axisStroke}" />`
-      );
-      parts.push(
-        `<polygon points="${p1} ${p2} ${p3}" ${svgFill(axisColor)} />`
-      );
-    };
-    buildArrow(leftStart.x, leftStart.y, leftEnd.x, leftEnd.y);
-    buildArrow(rightStart.x, rightStart.y, rightEnd.x, rightEnd.y);
-    const rotation = (info.textAngle * 180) / Math.PI;
-    parts.push(
-      await buildSvgTextElement({
-        text: info.label,
-        x: centerX,
-        y: centerY,
-        font: layoutAxisLegendFont,
-        size: axisSettings.fontSize,
-        fontWeight: layoutAxisLegendFontWeight,
-        anchor: "middle",
-        baseline: "middle",
-        color: axisColor,
-        transform: `rotate(${rotation} ${centerX} ${centerY})`,
-      })
-    );
-  }
-
-  if (layoutCustomLabels.length) {
-    const customSize = Math.max(8, Math.round(layoutCustomLabelTextSize));
-    for (const entry of layoutCustomLabels) {
-      if (!entry.text || !entry.position) {
-        continue;
-      }
-      const { lines } = getLayoutCustomLabelMetrics(entry);
-      const x = entry.position.x;
-      const y = entry.position.y;
-      const align = getLayoutCustomLabelAlign(entry);
-      const anchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
-      parts.push(
-        await buildSvgTextElement({
-          text: lines.join("\n"),
-          x,
-          y,
-          font: layoutCustomLabelFont,
-          size: customSize,
-          fontWeight: layoutCustomLabelFontWeight,
-          anchor,
-          baseline: "hanging",
-          color: themeColors.textSecondary,
-        })
-      );
-    }
-  }
+  parts.push(...(await emitDisplayListSvg(buildPageChromeScene(), { textElement: buildSvgTextElement })));
 
   const exportNodeRenderList = nodes
     .map((node) => ({

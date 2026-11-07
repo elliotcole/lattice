@@ -23201,11 +23201,29 @@ function renderIntervalChartTable() {
     });
     const display = getIntervalChartDisplayRatio(entry);
     const ratioCell = document.createElement("td");
-    ratioCell.textContent = `${display.numerator}:${display.denominator}`;
+    ratioCell.className = "interval-chart-ratio";
+    // <wbr> after the colon: long ratios wrap there before breaking a number.
+    ratioCell.append(
+      `${display.numerator}:`,
+      document.createElement("wbr"),
+      `${display.denominator}`
+    );
     const centsCell = document.createElement("td");
+    centsCell.className = "is-numeric";
     centsCell.textContent = formatIntervalChartDisplayCents(entry);
+    // Description and source ride under the name instead of taking their own
+    // (mostly empty / repetitive) columns; both stay searchable.
     const nameCell = document.createElement("td");
-    nameCell.textContent = entry.name;
+    const nameLine = document.createElement("div");
+    nameLine.textContent = entry.name;
+    nameCell.appendChild(nameLine);
+    const nameDetail = [entry.description, entry.source].filter(Boolean).join(" · ");
+    if (nameDetail) {
+      const detailLine = document.createElement("div");
+      detailLine.className = "interval-chart-name-detail";
+      detailLine.textContent = nameDetail;
+      nameCell.appendChild(detailLine);
+    }
     const typeCell = document.createElement("td");
     typeCell.textContent = entry.type;
     const factorCell = document.createElement("td");
@@ -23217,17 +23235,11 @@ function renderIntervalChartTable() {
       primeLine.title = factorInfo.factors;
     }
     factorCell.appendChild(primeLine);
-    const descCell = document.createElement("td");
-    descCell.textContent = entry.description;
-    const sourceCell = document.createElement("td");
-    sourceCell.textContent = entry.source;
     tr.appendChild(ratioCell);
     tr.appendChild(centsCell);
     tr.appendChild(nameCell);
     tr.appendChild(typeCell);
     tr.appendChild(factorCell);
-    tr.appendChild(descCell);
-    tr.appendChild(sourceCell);
     fragment.appendChild(tr);
     intervalChartRowMap.set(key, tr);
   });
@@ -29156,18 +29168,6 @@ if (requestedTour !== null) {
 if (isPresentationMode) {
   initPresentationMode();
 }
-
-bindOptionalClick(audioToggle, toggleAudio);
-bindOptionalClick(resetButton, resetLattice);
-bindOptionalClick(saveLatticeButton, downloadLatticeState);
-bindOptionalClick(loadLatticeButton, () => {
-  if (!loadLatticeInput) {
-    return;
-  }
-  loadLatticeInput.value = "";
-  loadLatticeInput.click();
-});
-bindOptionalChange(loadLatticeInput, async () => {
 if (isEmbedMode) {
   initEmbedMode();
 }
@@ -29266,6 +29266,18 @@ function fitEmbedView(maxZoom) {
   draw();
   markIsomorphicDirty();
 }
+
+bindOptionalClick(audioToggle, toggleAudio);
+bindOptionalClick(resetButton, resetLattice);
+bindOptionalClick(saveLatticeButton, downloadLatticeState);
+bindOptionalClick(loadLatticeButton, () => {
+  if (!loadLatticeInput) {
+    return;
+  }
+  loadLatticeInput.value = "";
+  loadLatticeInput.click();
+});
+bindOptionalChange(loadLatticeInput, async () => {
   if (!loadLatticeInput) {
     return;
   }

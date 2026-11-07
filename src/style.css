@@ -3017,48 +3017,23 @@ body.map-mode-active::before {
   color: var(--chrome-soft-muted);
 }
 
-.interval-chart-table-wrap {
-  overflow: auto;
-  border-radius: 12px;
-  border: 1px solid var(--chrome-section-border);
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
 .interval-chart-table-column {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
   min-height: 0;
 }
 
-.interval-chart-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--chrome-section-border);
-  background: var(--chrome-soft-surface);
+.interval-chart-search-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-wrap: wrap;
 }
 
-.interval-chart-toolbar:empty {
-  display: none;
-}
-
-.interval-chart-toolbar-search {
-  position: static;
-  border-bottom: 1px solid var(--chrome-section-border);
-  border-radius: 12px;
-  margin-bottom: 12px;
-}
-.interval-chart-toolbar input {
+.interval-chart-search-row input[type="search"] {
   flex: 1;
+  min-width: 0;
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid var(--chrome-soft-field-border);
@@ -3067,81 +3042,116 @@ body.map-mode-active::before {
   font-size: 13px;
 }
 
-.interval-chart-custom {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  flex: 1 1 320px;
-  padding: 12px 12px 14px;
-  border-top: 1px solid var(--chrome-section-border);
-  position: sticky;
-  bottom: 0;
-  background: var(--chrome-soft-surface);
-  z-index: 2;
-}
-
-.interval-chart-custom-label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--chrome-soft-muted);
-}
-
-.interval-chart-custom input {
-  flex: 1 1 auto;
-}
-
-
 .interval-chart-listen {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
 }
 
 .interval-chart-custom-active {
-  position: sticky;
-  top: 52px;
-  z-index: 1;
   padding: 8px 12px;
+  border-radius: 10px;
   font-size: 12px;
   color: var(--chrome-warning-ink);
   background: var(--chrome-warning-bg);
-  border-bottom: 1px solid var(--chrome-soft-field-border);
+  border: 1px solid var(--chrome-soft-field-border);
 }
 
-.interval-chart-table tbody tr {
-  transition: background-color 120ms ease;
+.interval-chart-custom-active[hidden] {
+  display: none;
 }
 
-.interval-chart-row-selected {
-  background: color-mix(in srgb, var(--chrome-warning-bg) 45%, transparent);
+/* Vertical scroll only: fixed table layout + wrapping cells keep every
+ * column inside the dialog, even for 18-digit ratios. */
+.interval-chart-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-radius: 12px;
+  border: 1px solid var(--chrome-section-border);
 }
 
 .interval-chart-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
-  min-width: 720px;
   font-size: 13px;
   color: var(--ink);
 }
 
+.interval-chart-col-ratio {
+  width: 24%;
+}
+
+.interval-chart-col-cents {
+  width: 10%;
+}
+
+.interval-chart-col-name {
+  width: 36%;
+}
+
+.interval-chart-col-type {
+  width: 12%;
+}
+
+.interval-chart-col-primes {
+  width: 18%;
+}
+
+.interval-chart-table tbody tr {
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.interval-chart-table tbody tr:hover {
+  background: color-mix(in srgb, var(--chrome-soft-field) 70%, transparent);
+}
+
+.interval-chart-table tbody tr.interval-chart-row-selected {
+  background: color-mix(in srgb, var(--chrome-warning-bg) 45%, transparent);
+}
+
+/* Both surface tokens are translucent in the light themes; stacking them
+ * keeps scrolled rows from ghosting through the sticky header. */
 .interval-chart-table thead th {
   position: sticky;
   top: 0;
-  background: var(--chrome-soft-surface);
+  z-index: 1;
+  background:
+    linear-gradient(var(--chrome-soft-surface), var(--chrome-soft-surface)),
+    var(--chrome-dialog-bg);
   text-align: left;
+  font-size: 12px;
   font-weight: 600;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--chrome-section-border);
 }
 
 .interval-chart-table tbody td {
-  padding: 8px 12px;
+  padding: 7px 10px;
   border-bottom: 1px solid var(--chrome-section-border);
   vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.interval-chart-table .is-numeric {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.interval-chart-ratio,
+.interval-chart-table td.is-numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.interval-chart-name-detail {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--chrome-soft-muted);
 }
 
 .interval-chart-factor-line {
@@ -3159,17 +3169,115 @@ body.map-mode-active::before {
 }
 
 .interval-chart-actions {
-  padding: 12px 24px 18px;
+  padding: 12px 24px 16px;
   border-top: 1px solid var(--chrome-section-border);
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+.interval-chart-custom {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.interval-chart-custom-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--chrome-soft-muted);
+  white-space: nowrap;
+}
+
+.interval-chart-custom-label input {
+  width: 150px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--chrome-soft-field-border);
+  background: var(--chrome-soft-field);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.interval-chart-action-buttons {
+  display: flex;
   gap: 12px;
+  margin-left: auto;
 }
 
 .interval-chart-actions #interval-chart-close {
   color: var(--ink);
   background: var(--chrome-input-bg);
   border: 1px solid var(--chrome-soft-field-border);
+}
+
+@media (max-width: 760px) {
+  .interval-chart-overlay {
+    padding: 8px;
+  }
+
+  .interval-chart-window {
+    width: 100%;
+    height: 100%;
+  }
+
+  .interval-chart-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    padding: 12px 16px;
+  }
+
+  .interval-chart-filters {
+    max-height: 140px;
+    border-right: 0;
+    border-bottom: 1px solid var(--chrome-section-border);
+    padding: 0 0 12px;
+  }
+
+  .interval-chart-table {
+    font-size: 11px;
+  }
+
+  .interval-chart-table thead th,
+  .interval-chart-table tbody td {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .interval-chart-col-ratio {
+    width: 25%;
+  }
+
+  .interval-chart-col-cents {
+    width: 17%;
+  }
+
+  .interval-chart-col-name {
+    width: 28%;
+  }
+
+  .interval-chart-col-type {
+    width: 13%;
+  }
+
+  .interval-chart-col-primes {
+    width: 17%;
+  }
+
+  .interval-chart-table td:nth-child(4) {
+    overflow-wrap: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .interval-chart-actions {
+    padding: 12px 16px;
+  }
 }
 
 body.interval-chart-open {
@@ -3648,8 +3756,19 @@ body.embed-mode #envelope-panel,
 body.embed-mode #animation-panel,
 body.embed-mode #ratio-wheel-panel,
 body.embed-mode #credits-dialog,
+body.embed-mode .nav-3d,
+body.embed-mode .synth-panel,
 body.embed-mode .tooltip {
   display: none !important;
+}
+
+/* The only control an embed keeps: plays the lattice's notes as the
+ * ascending pattern (same as Animation > Patterns > Play). */
+.embed-play-button {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
 }
 
 /* ---- Reader mode: /tuning-the-ear book companion ----
@@ -3756,21 +3875,10 @@ body.presentation-mode #lattice {
 }
 
 .presentation-help-button:hover,
-body.embed-mode .nav-3d,
-body.embed-mode .synth-panel,
 .presentation-help-button:focus-visible {
   color: var(--accent);
   border-color: var(--accent);
   outline: none;
-/* The only control an embed keeps: plays the lattice's notes as the
- * ascending pattern (same as Animation > Patterns > Play). */
-.embed-play-button {
-  position: fixed;
-  right: 12px;
-  bottom: 12px;
-  z-index: 5;
-}
-
 }
 
 .presentation-toc-eyebrow {

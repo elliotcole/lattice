@@ -1807,62 +1807,65 @@
             <div id="interval-chart-type-list" class="interval-chart-type-list"></div>
           </div>
           <div class="interval-chart-table-column">
-            <div class="interval-chart-toolbar interval-chart-toolbar-search">
+            <div class="interval-chart-search-row">
               <input
                 id="interval-chart-search"
                 type="search"
                 placeholder="Search ratios, names, types, sources..."
+                aria-label="Search intervals"
               />
               <label class="interval-chart-listen">
                 <input id="interval-chart-listen" type="checkbox" />
                 <span>Listen</span>
               </label>
             </div>
+            <div id="interval-chart-custom-active" class="interval-chart-custom-active" hidden>
+              Custom ratio entered — clear it to pick from the table
+            </div>
             <div class="interval-chart-table-wrap">
-              <div class="interval-chart-toolbar"></div>
-              <div id="interval-chart-custom-active" class="interval-chart-custom-active" hidden>
-                Custom ratio selected — table disabled
-              </div>
               <table class="interval-chart-table">
+                <colgroup>
+                  <col class="interval-chart-col-ratio" />
+                  <col class="interval-chart-col-cents" />
+                  <col class="interval-chart-col-name" />
+                  <col class="interval-chart-col-type" />
+                  <col class="interval-chart-col-primes" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Ratio</th>
-                    <th>Computed Cents</th>
+                    <th class="is-numeric">Cents</th>
                     <th>Name</th>
                     <th>Type</th>
-                    <th>Prime factors</th>
-                    <th>Description</th>
-                    <th>Source</th>
+                    <th>Primes</th>
                   </tr>
                 </thead>
                 <tbody id="interval-chart-table-body"></tbody>
               </table>
-            <div class="interval-chart-custom">
-              <label class="interval-chart-custom-label">
-                Custom Ratio
-                <input
-                  id="interval-chart-custom-ratio"
-                  type="text"
-                  placeholder="Or use a custom ratio (e.g. 81:80 or 128/75)"
-                />
-              </label>
-              <label class="interval-chart-custom-label">
-                Custom Text
-                <input
-                  id="interval-chart-custom-text"
-                  type="text"
-                  placeholder="Optional label suffix"
-                />
-              </label>
             </div>
-          </div>
           </div>
         </div>
         <div class="interval-chart-actions">
-          <button id="interval-chart-calc" type="button" class="button-full">
-            Calculate Interval
-          </button>
-          <button id="interval-chart-close" type="button" class="button-full">Cancel</button>
+          <div class="interval-chart-custom">
+            <label class="interval-chart-custom-label">
+              <span>Custom ratio</span>
+              <input
+                id="interval-chart-custom-ratio"
+                type="text"
+                placeholder="e.g. 81:80 or 128/75"
+              />
+            </label>
+            <label class="interval-chart-custom-label">
+              <span>Label suffix</span>
+              <input id="interval-chart-custom-text" type="text" placeholder="Optional" />
+            </label>
+          </div>
+          <div class="interval-chart-action-buttons">
+            <button id="interval-chart-calc" type="button" class="button-full">
+              Calculate Interval
+            </button>
+            <button id="interval-chart-close" type="button" class="button-full">Cancel</button>
+          </div>
         </div>
       </div>
     </div>

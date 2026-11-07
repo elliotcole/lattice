@@ -607,6 +607,9 @@ const store = createStore({
   fundamentalSpelling: "sharp",
   featureMode: "note",
   spellingMode: "true",
+  // Synth settings, filled from the controls once they exist (see
+  // readSynthControls); null until then.
+  synth: null,
   // Display layers and line styling.
   axes: true,
   grid: true,
@@ -23748,13 +23751,34 @@ function getPresetTriangleLabelsState() {
   }));
 }
 
-function getPresetSynthState() {
+// Synth settings in the document (`doc.synth`) are read back from the
+// controls after every change: range inputs clamp and step what they are
+// given and the envelope/LFO sliders map positions nonlinearly, and what a
+// file has always saved is the value after that normalisation. The custom
+// piano map is serialised from its own Map at save time.
+const SYNTH_DOC_CONTROLS = [
+  volumeSlider,
+  lfoDepthSlider,
+  lfoRateSlider,
+  keyboardModeSelect,
+  waveformSelect,
+  soundfontPresetSelect,
+  physicalModelSelect,
+  attackSlider,
+  decaySlider,
+  sustainSlider,
+  releaseSlider,
+  oneShotCheckbox,
+  ...synthModeInputs,
+  ...envelopeTimeModeInputs,
+].filter(Boolean);
+
+function readSynthControls() {
   return {
     volume: Number(volumeSlider.value),
     lfoDepth: Number(lfoDepthSlider.value),
     lfoRate,
     keyboardMode: keyboardModeSelect ? keyboardModeSelect.value : "off",
-    customPianoMap: serializeCustomPianoMap(),
     mode: synthMode,
     waveform: waveformSelect ? waveformSelect.value : "sine",
     soundfontPreset: soundfontPresetIndex,
@@ -23765,6 +23789,39 @@ function getPresetSynthState() {
     release: getEnvelopeSliderValue(releaseSlider),
     oneShot: Boolean(oneShotCheckbox && oneShotCheckbox.checked),
     envelopeTimeMode,
+  };
+}
+
+function sameSynthSettings(a, b) {
+  return Boolean(a && b) && Object.keys(a).every((key) => Object.is(a[key], b[key]));
+}
+
+function syncSynthDocFromControls() {
+  const next = readSynthControls();
+  if (!sameSynthSettings(next, doc.synth)) {
+    store.set({ synth: next });
+  }
+}
+
+function getPresetSynthState() {
+  syncSynthDocFromControls();
+  const synth = doc.synth;
+  return {
+    volume: synth.volume,
+    lfoDepth: synth.lfoDepth,
+    lfoRate: synth.lfoRate,
+    keyboardMode: synth.keyboardMode,
+    customPianoMap: serializeCustomPianoMap(),
+    mode: synth.mode,
+    waveform: synth.waveform,
+    soundfontPreset: synth.soundfontPreset,
+    physicalModel: synth.physicalModel,
+    attack: synth.attack,
+    decay: synth.decay,
+    sustain: synth.sustain,
+    release: synth.release,
+    oneShot: synth.oneShot,
+    envelopeTimeMode: synth.envelopeTimeMode,
   };
 }
 
@@ -25125,6 +25182,7 @@ function applyPresetSynthState(synthState, options = {}) {
   }
   updateEnvelopeReadouts();
   updatePatternLengthAvailability();
+  syncSynthDocFromControls();
 }
 
 function applyPresetViewState(viewState) {
@@ -27186,9 +27244,24 @@ function bindDocumentReactions() {
     if (labelsChanged) {
       invalidateLabelCache();
     }
+    // The synth document changed without its controls (undo, redo): push it
+    // back through the same path a loaded file takes.
+    if (changed.has("synth") && doc.synth && !sameSynthSettings(readSynthControls(), doc.synth)) {
+      applyPresetSynthState(doc.synth, { preserveActiveVoicesOnSynthChange: true });
+    }
     scheduleDraw();
     schedulePresetUrlUpdate();
   };
+  // Synth controls write the document after their own handlers have run
+  // (capture + microtask also catches change events dispatched in code).
+  const syncSynthAfterControlEvent = (event) => {
+    if (SYNTH_DOC_CONTROLS.includes(event.target)) {
+      queueMicrotask(syncSynthDocFromControls);
+    }
+  };
+  window.addEventListener("input", syncSynthAfterControlEvent, true);
+  window.addEventListener("change", syncSynthAfterControlEvent, true);
+  syncSynthDocFromControls();
   stopCollectingEarlyDocChanges();
   store.subscribe(react);
   if (docKeysChangedBeforeReactions.size) {

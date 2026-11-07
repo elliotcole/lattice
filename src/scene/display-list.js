@@ -20,6 +20,9 @@
 //     one stroked path of open polylines (a broken edge is one path with two
 //     subpaths, which antialiases differently from two separate lines)
 //   { kind: "polygon", points: [[x, y], ...], color, alpha? }  (filled)
+//   { kind: "nodeShape", shape: "circle" | "square" | "triangle" | "diamond",
+//     x, y, radius, fill, fillAlpha?, stroke, width, dash?, alpha? }
+//     fill then stroke; fillAlpha multiplies alpha for the fill only
 //
 // Every primitive may carry `ref: { type, ... }` naming the scene element it
 // came from, so the interactive canvas pass can filter (e.g. hide a label
@@ -35,6 +38,42 @@ export function line(props) {
 
 export function stroke(props) {
   return { kind: "stroke", ...props };
+}
+
+export const DIAMOND_RADIUS_SCALE = 1.125;
+
+export function nodeShape(props) {
+  return { kind: "nodeShape", ...props };
+}
+
+/** Outline vertices of a polygonal node shape, or null for a circle. */
+export function nodeShapePoints(shape, x, y, radius) {
+  if (shape === "square") {
+    return [
+      [x - radius, y - radius],
+      [x + radius, y - radius],
+      [x + radius, y + radius],
+      [x - radius, y + radius],
+    ];
+  }
+  if (shape === "triangle") {
+    const height = radius * 1.2;
+    return [
+      [x, y - height],
+      [x + radius, y + height * 0.6],
+      [x - radius, y + height * 0.6],
+    ];
+  }
+  if (shape === "diamond") {
+    const r = radius * DIAMOND_RADIUS_SCALE;
+    return [
+      [x, y - r],
+      [x + r, y],
+      [x, y + r],
+      [x - r, y],
+    ];
+  }
+  return null;
 }
 
 export function polygon(props) {
@@ -77,6 +116,8 @@ export function offsetDisplayList(list, dx, dy) {
         return { ...item, x1: item.x1 + dx, y1: item.y1 + dy, x2: item.x2 + dx, y2: item.y2 + dy };
       case "polygon":
         return { ...item, points: item.points.map(([x, y]) => [x + dx, y + dy]) };
+      case "nodeShape":
+        return { ...item, x: item.x + dx, y: item.y + dy };
       case "stroke":
         return {
           ...item,

@@ -40,11 +40,14 @@ import {
 import opentype from "opentype.js";
 import {
   text as sceneText,
+  line as sceneLine,
   stroke as sceneStroke,
   arrow as sceneArrow,
+  nodeShape as sceneNodeShape,
   offsetDisplayList,
+  DIAMOND_RADIUS_SCALE,
 } from "./scene/display-list.js";
-import { paintDisplayList } from "./scene/paint-canvas.js";
+import { paintDisplayList, traceNodeShape } from "./scene/paint-canvas.js";
 import { emitDisplayListSvg, svgColorAttr } from "./scene/emit-svg.js";
 
 // Main editor spells ET fallbacks from its mixed default table (Eb/Bb flats).
@@ -1530,7 +1533,6 @@ noteNamesFlat.forEach((name, index) => {
 });
 const KEYBOARD_BASE_MIDI = 60;
 const HEJI_SUFFIX_Y_OFFSET = -0.52;
-const HEJI_SVG_EXTRA_Y_OFFSET = 0.54;
 const HEJI_REST_GAP = 0.08;
 const HEJI_REST_GAP_PLAIN = -0.2;
 const CENTS_CHAR = "¢";
@@ -8556,7 +8558,13 @@ function measureCharWidth(char, size, font, fontWeight = 400, context = ctx) {
   return measureTextWidthWithWeight(char, size, font, fontWeight, context);
 }
 
-function drawTextWithSmallCent({
+function drawTextWithSmallCent(options) {
+  paintDisplayList(options.context || ctx, buildTextWithSmallCentScene(options));
+}
+
+// A cents readout drawn glyph by glyph: the ¢ sign smaller, and (optionally)
+// HEJI accidental letters v/e/V in the HEJI2Text font, raised by hejiYOffset.
+function buildTextWithSmallCentScene({
   text,
   x,
   y,
@@ -8572,100 +8580,47 @@ function drawTextWithSmallCent({
 }) {
   const chars = Array.from(text || "");
   if (!chars.length) {
-    return;
+    return [];
   }
-  const widths = chars.map((char) => {
+  const runs = chars.map((char) => {
     const isCent = char === CENTS_CHAR;
     const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
     const charSize = isCent ? getCentsCharSize(size) : size;
     const charFont = isHeji ? "HEJI2Text" : font;
     const charWeight = isHeji ? 400 : fontWeight;
-    return measureCharWidth(char, charSize, charFont, charWeight, context);
+    return {
+      char,
+      isHeji,
+      charSize,
+      charFont,
+      charWeight,
+      width: measureCharWidth(char, charSize, charFont, charWeight, context),
+    };
   });
-  const totalWidth = widths.reduce((sum, width) => sum + width, 0);
-  let startX = x;
+  const totalWidth = runs.reduce((sum, run) => sum + run.width, 0);
+  let cursorX = x;
   if (align === "center") {
-    startX = x - totalWidth / 2;
+    cursorX = x - totalWidth / 2;
   } else if (align === "right") {
-    startX = x - totalWidth;
+    cursorX = x - totalWidth;
   }
-  context.save();
-  context.fillStyle = color;
-  context.textAlign = "left";
-  context.textBaseline = baseline;
-  let cursorX = startX;
-  chars.forEach((char, index) => {
-    const isCent = char === CENTS_CHAR;
-    const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
-    const charSize = isCent ? getCentsCharSize(size) : size;
-    const charFont = isHeji ? "HEJI2Text" : font;
-    const charWeight = isHeji ? 400 : fontWeight;
-    context.font = `${charWeight} ${charSize}px ${charFont}`;
-    context.fillText(char, cursorX, y + (isHeji ? hejiYOffset : 0));
-    cursorX += widths[index];
+  return runs.map((run) => {
+    const item = sceneText({
+      text: run.char,
+      x: cursorX,
+      y: y + (run.isHeji ? hejiYOffset : 0),
+      font: run.charFont,
+      size: run.charSize,
+      weight: run.charWeight,
+      align: "left",
+      baseline,
+      color,
+    });
+    cursorX += run.width;
+    return item;
   });
-  context.restore();
 }
 
-async function buildSvgTextWithSmallCent({
-  text,
-  x,
-  y,
-  font,
-  size,
-  fontWeight = 400,
-  align = "left",
-  baseline = "text-before-edge",
-  hejiAccidentals = false,
-  hejiYOffset = 0,
-  color,
-}) {
-  const chars = Array.from(text || "");
-  if (!chars.length) {
-    return "";
-  }
-  const widths = await Promise.all(chars.map(async (char) => {
-    const isCent = char === CENTS_CHAR;
-    const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
-    const charSize = isCent ? getCentsCharSize(size) : size;
-    const charFont = isHeji ? "HEJI2Text" : font;
-    const charWeight = isHeji ? 400 : fontWeight;
-    return measureSvgCharWidth(char, charSize, charFont, charWeight);
-  }));
-  const totalWidth = widths.reduce((sum, width) => sum + width, 0);
-  let startX = x;
-  if (align === "center") {
-    startX = x - totalWidth / 2;
-  } else if (align === "right") {
-    startX = x - totalWidth;
-  }
-  let cursorX = startX;
-  const nodes = [];
-  for (let index = 0; index < chars.length; index += 1) {
-    const char = chars[index];
-    const isCent = char === CENTS_CHAR;
-    const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
-    const charSize = isCent ? getCentsCharSize(size) : size;
-    const charFont = isHeji ? "HEJI2Text" : font;
-    const charWeight = isHeji ? 400 : fontWeight;
-    const charY = y + (isHeji ? hejiYOffset : 0);
-    nodes.push(
-      await buildSvgTextElement({
-        text: char,
-        x: cursorX,
-        y: charY,
-        font: charFont,
-        size: charSize,
-        fontWeight: charWeight,
-        anchor: "start",
-        baseline,
-        color,
-      })
-    );
-    cursorX += widths[index];
-  }
-  return nodes.join("\n");
-}
 
 const STACKED_ASCENT_RATIO = 0.82;
 const STACKED_DESCENT_RATIO = 0.18;
@@ -9715,7 +9670,11 @@ function getExponentOffset(size, baseline) {
   return size + Math.round(size * 0.2);
 }
 
-function drawHejiInline({
+
+// A note name with HEJI accidentals: base text, then suffix parts (HEJI
+// glyphs, cents) glyph by glyph with their own fonts, sizes and raise, an
+// optional exponent label centred over a part, then optional rest text.
+function buildHejiInlineScene({
   x,
   y,
   baseText,
@@ -9731,12 +9690,9 @@ function drawHejiInline({
   fontWeight = 400,
   color = themeColors.textSecondary,
 }) {
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.textAlign = "left";
-  ctx.textBaseline = baseline;
-  ctx.font = `${fontWeight} ${size}px ${font}`;
-  const baseWidth = ctx.measureText(baseText).width;
+  const scene = [];
+  const run = (props) => scene.push(sceneText({ align: "left", baseline, color, ...props }));
+  const baseWidth = measureTextWidthWithWeight(baseText, size, font, fontWeight);
   const suffixSpacing = Math.round(size * 0.08);
   const partGap = Math.round(size * 0.1);
   const baseSuffixGap = Math.round(size * 0.1);
@@ -9746,7 +9702,7 @@ function drawHejiInline({
     const partWidth = measureSuffixPartWidth(part, size, suffixSpacing, fontWeight);
     return sum + partWidth + (index > 0 ? partGap : 0);
   }, 0);
-  const restWidth = restText ? ctx.measureText(restText).width : 0;
+  const restWidth = restText ? measureTextWidthWithWeight(restText, size, font, fontWeight) : 0;
   const totalWidth =
     baseWidth +
     (parts.length ? baseSuffixGap + suffixWidth : 0) +
@@ -9757,7 +9713,7 @@ function drawHejiInline({
   } else if (align === "right") {
     startX = x - totalWidth;
   }
-  ctx.fillText(baseText, startX, y);
+  run({ text: baseText, x: startX, y, font, size, weight: fontWeight });
   let cursorX = startX + baseWidth;
   if (parts.length) {
     cursorX += baseSuffixGap;
@@ -9768,15 +9724,13 @@ function drawHejiInline({
       const partCharGap = Number.isFinite(part.charGap) ? part.charGap : suffixSpacing;
       const partWidth = measureSuffixPartWidth(part, size, suffixSpacing, fontWeight);
       const partStartX = cursorX;
-      ctx.save();
       const partFont = part.font || "HEJI2Text";
       const partWeight = Number.isFinite(part.fontWeight)
         ? part.fontWeight
         : part.font
         ? fontWeight
         : 400;
-      const partYOffset =
-        typeof part.yOffset === "number" ? part.yOffset : hejiYOffset;
+      const partYOffset = typeof part.yOffset === "number" ? part.yOffset : hejiYOffset;
       const sizeScale = Number.isFinite(part.sizeScale) ? part.sizeScale : 1;
       Array.from(part.text).forEach((char, index) => {
         if (index > 0) {
@@ -9784,48 +9738,48 @@ function drawHejiInline({
         }
         const baseSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
         const charSize = Math.max(6, Math.round(baseSize * sizeScale));
-        ctx.font = `${partWeight} ${charSize}px ${partFont}`;
-        ctx.fillText(char, cursorX, y + partYOffset);
+        run({ text: char, x: cursorX, y: y + partYOffset, font: partFont, size: charSize, weight: partWeight });
         cursorX += measureCharWidth(char, charSize, partFont, partWeight);
       });
-      ctx.restore();
       if (part.expLabel) {
-        const expSize = Math.max(8, Math.round(size * 0.55));
-        const expY =
-          y +
-          (typeof part.yOffset === "number" ? part.yOffset : hejiYOffset) +
-          getExponentOffset(size, baseline);
-        ctx.save();
-        ctx.font = `${fontWeight} ${expSize}px ${font}`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.fillText(part.expLabel, partStartX + partWidth / 2, expY);
-        ctx.restore();
+        run({
+          text: part.expLabel,
+          x: partStartX + partWidth / 2,
+          y: y + partYOffset + getExponentOffset(size, baseline),
+          font,
+          size: Math.max(8, Math.round(size * 0.55)),
+          weight: fontWeight,
+          align: "center",
+          baseline: "top",
+        });
       }
     });
   }
   if (restText) {
     cursorX += restGap;
-    const chars = Array.from(restText);
     const needsInline =
       restHejiAccidentals || restText.includes(CENTS_CHAR) || /[veV]/.test(restText);
     if (!needsInline) {
-      ctx.font = `${fontWeight} ${size}px ${font}`;
-      ctx.fillText(restText, cursorX, y);
+      run({ text: restText, x: cursorX, y, font, size, weight: fontWeight });
     } else {
-      chars.forEach((char) => {
+      Array.from(restText).forEach((char) => {
         const useHeji = char === "v" || char === "e" || char === "V";
-        const isCent = char === CENTS_CHAR;
-        const charSize = isCent ? getCentsCharSize(size) : size;
+        const charSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
         const charFont = useHeji ? "HEJI2Text" : font;
         const charWeight = useHeji ? 400 : fontWeight;
-        ctx.font = `${charWeight} ${charSize}px ${charFont}`;
-        ctx.fillText(char, cursorX, y + (useHeji ? hejiYOffset : 0));
+        run({
+          text: char,
+          x: cursorX,
+          y: y + (useHeji ? hejiYOffset : 0),
+          font: charFont,
+          size: charSize,
+          weight: charWeight,
+        });
         cursorX += measureCharWidth(char, charSize, charFont, charWeight);
       });
     }
   }
-  ctx.restore();
+  return scene;
 }
 
 function getDefaultNoteDetailOffset(radius, scale = 1) {
@@ -12667,31 +12621,9 @@ function getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, light
   return gradient;
 }
 
-const DIAMOND_RADIUS_SCALE = 1.125;
 
 function drawNodeShapePath(shape, x, y, radius) {
-  if (shape === "square") {
-    ctx.rect(x - radius, y - radius, radius * 2, radius * 2);
-    return;
-  }
-  if (shape === "triangle") {
-    const height = radius * 1.2;
-    ctx.moveTo(x, y - height);
-    ctx.lineTo(x + radius, y + height * 0.6);
-    ctx.lineTo(x - radius, y + height * 0.6);
-    ctx.closePath();
-    return;
-  }
-  if (shape === "diamond") {
-    const r = radius * DIAMOND_RADIUS_SCALE;
-    ctx.moveTo(x, y - r);
-    ctx.lineTo(x + r, y);
-    ctx.lineTo(x, y + r);
-    ctx.lineTo(x - r, y);
-    ctx.closePath();
-    return;
-  }
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  traceNodeShape(ctx, shape, x, y, radius);
 }
 
 
@@ -13731,6 +13663,433 @@ function addDistanceLineSegments(nodePosMap, segments) {
   }
 }
 
+// How a node is drawn right now: visibility, opacity, colours. `env` carries
+// the interactive state (hover, guides, playing amplitudes, add-interval and
+// analysis modes); the SVG export passes a neutral env, so exports show the
+// diagram without hover, playback or selection effects.
+function getNodeRenderState(node, env) {
+  const isHovered = env.hoverNodeId != null && node.id === env.hoverNodeId;
+  const isGuide = env.guideNodes.has(node.id);
+  const isMuted = Boolean(node.muted);
+  const isOrphanGuide = Boolean(env.orphanGuideNodes && env.orphanGuideNodes.has(node.id));
+  const isIntervalDim = env.addIntervalMode && node.active && !isHovered;
+  const canShowInactive = !isOrphanGuide && isInactiveNodeAvailable(node);
+  const brightness = Math.min(1, env.nodeAmplitudes.get(node.id) || 0);
+  const isVisible =
+    node.isCenter ||
+    node.active ||
+    node.isCustom ||
+    brightness > 0.01 ||
+    isGuide ||
+    isOrphanGuide ||
+    (isHovered && canShowInactive && env.canInteractInactive);
+  let alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
+  if (node.isCenter && !node.active) {
+    alpha = isHovered ? 0.3 : 0.15;
+  }
+  if (isGuide) {
+    alpha = env.guideNodes.get(node.id);
+  }
+  if (isOrphanGuide && !isGuide) {
+    alpha = 0.08;
+  }
+  if (node.isCustom && !node.active) {
+    alpha = 0.25;
+  }
+  if (isMuted) {
+    alpha = isHovered ? 0.7 : 0.4;
+  }
+  if (env.axisEntry && !isNodeOnAxisEntry(node, env.axisEntry)) {
+    alpha *= AXIS_DIM_FACTOR;
+  }
+  if (env.showMicrotonal && !env.commaNodeRings.has(node.id)) {
+    alpha *= 0.18;
+  }
+  if (isIntervalDim) {
+    alpha *= 0.18;
+  }
+  if (env.distanceFocusMode) {
+    alpha *= AXIS_DIM_FACTOR;
+  }
+  const intervalTint = isIntervalDim ? "#9a9a9a" : null;
+  return {
+    isVisible,
+    isHovered,
+    isGuide,
+    isMuted,
+    isOrphanGuide,
+    brightness,
+    alpha,
+    intervalTint,
+    textColorPrimary: colorWithAlpha(intervalTint || themeColors.textPrimary, alpha),
+    textColorSecondary: colorWithAlpha(intervalTint || themeColors.textSecondary, alpha),
+  };
+}
+
+// Interactive state for nothing: what the SVG export renders with.
+function getStaticNodeEnv(orphanGuideNodes = null) {
+  return {
+    hoverNodeId: null,
+    guideNodes: new Map(),
+    orphanGuideNodes,
+    addIntervalMode: false,
+    nodeAmplitudes: new Map(),
+    axisEntry: null,
+    showMicrotonal: false,
+    commaNodeRings: new Set(),
+    distanceFocusMode: false,
+    canInteractInactive: false,
+  };
+}
+
+// Flat (2D / page layout) node outline. 3D shading stays in draw().
+function buildNodeShapeScene(node, pos, radius, shape, state) {
+  let fill;
+  if (layoutMode && !isInPresentationMode()) {
+    fill = "transparent";
+  } else if (node.isCustom && !node.active && state.brightness <= 0) {
+    fill = themeColors.nodeCustomInactive;
+  } else {
+    fill = state.brightness > 0 ? themeColors.playFill : "transparent";
+  }
+  return [
+    sceneNodeShape({
+      shape,
+      x: pos.x,
+      y: pos.y,
+      radius,
+      fill,
+      fillAlpha: state.brightness > 0 ? state.brightness : undefined,
+      stroke: state.intervalTint || getInkNodeStrokeColor(state.isMuted),
+      width: getInkNodeStrokeLineWidth(state.isMuted),
+      dash: state.isMuted || state.isOrphanGuide ? [6, 4] : null,
+      alpha: state.alpha,
+      ref: { type: "nodeShape", id: node.id },
+    }),
+  ];
+}
+
+// The label inside a node: note name (with HEJI) or the ratio, stacked when
+// it doesn't fit. `measureFont` is the font a ratio label leaves set; the
+// canvas measured the ratio-mode detail label in it (see detail label).
+function buildNodeInnerLabelScene(node, pos, radius, state) {
+  const innerTextScale = layoutMode ? getLayoutInnerTextScale(radius) : 1;
+  const baseLabelSize = layoutMode ? layoutRatioTextSize * innerTextScale : 21;
+  const labelSize = node.isCustom ? baseLabelSize * 0.85 : baseLabelSize;
+  const labelFont = layoutMode ? layoutRatioFont : "Noto Serif";
+  const labelWeight = layoutMode ? layoutRatioFontWeight : 400;
+  const color = state.textColorPrimary;
+  const ref = { type: "nodeLabel", id: node.id };
+  if (featureMode === "note") {
+    let baseText;
+    let suffixParts;
+    if (hejiEnabled && nodeHasHighPrime(node)) {
+      const displayInfo = getCachedDisplayInfo(node);
+      const base = getHejiBaseAndDefaults(displayInfo.pitchClass);
+      const centsText = showCentsDeviation ? formatCents(displayInfo.cents) : "";
+      baseText = base.baseText;
+      suffixParts = centsText
+        ? [
+            ...base.suffixParts,
+            {
+              text: centsText,
+              source: "cents",
+              font: labelFont,
+              charGap: 0,
+              sizeScale: 0.67,
+            },
+          ]
+        : base.suffixParts;
+    } else {
+      const annotation = getCachedHejiAnnotation(node, getNodePitchLabel(node));
+      baseText = annotation.baseText;
+      suffixParts = annotation.suffixParts;
+    }
+    const scene = buildHejiInlineScene({
+      x: pos.x,
+      y: pos.y,
+      baseText,
+      suffixParts,
+      restText: "",
+      size: labelSize,
+      font: labelFont,
+      fontWeight: labelWeight,
+      align: "center",
+      baseline: "middle",
+      color,
+    });
+    scene.forEach((item) => {
+      item.ref = ref;
+    });
+    return { scene, measureFont: null };
+  }
+  const layout = computeRatioLabelLayout(
+    node.numerator,
+    node.denominator,
+    labelFont,
+    labelSize,
+    radius * 1.6,
+    labelWeight,
+    radius * 1.6
+  );
+  const measureFont = { weight: labelWeight, size: layout.size, font: labelFont };
+  const run = (props) =>
+    sceneText({
+      font: labelFont,
+      size: layout.size,
+      weight: labelWeight,
+      align: "center",
+      color,
+      ref,
+      ...props,
+    });
+  if (layout.lines.length === 1) {
+    return {
+      scene: [run({ text: layout.lines[0], x: pos.x, y: pos.y, baseline: "middle" })],
+      measureFont,
+    };
+  }
+  const positions = computeStackedRatioPositionsFromLine(
+    layout.lines,
+    labelFont,
+    layout.size,
+    labelWeight,
+    pos.y,
+    layout.lineGap
+  );
+  return {
+    scene: [
+      run({ text: layout.lines[0], x: pos.x, y: positions.topBaseline, baseline: "alphabetic" }),
+      run({ text: layout.lines[1], x: pos.x, y: positions.bottomBaseline, baseline: "alphabetic" }),
+      sceneLine({
+        x1: pos.x - positions.lineWidth / 2,
+        y1: positions.lineY,
+        x2: pos.x + positions.lineWidth / 2,
+        y2: positions.lineY,
+        color,
+        width: Math.max(1, Math.round(layout.size * 0.06)),
+        ref,
+      }),
+    ],
+    measureFont,
+  };
+}
+
+// The detail block beside a node: ratio / note name, cents, octave shift,
+// ratio-cents and Hz lines, placed to avoid other nodes, edges and labels
+// (pushes onto `collision`). Returns the scene and the layout hitbox.
+function buildNodeDetailLabelScene(node, pos, radius, state, collision, innerMeasureFont) {
+  const scene = [];
+  const ref = { type: "nodeDetail", id: node.id };
+  const displayInfo = getCachedDisplayInfo(node);
+  const detailSize = layoutMode ? layoutNoteTextSize : 14;
+  const noteLabelFont = layoutMode ? layoutNoteFont : "Lexend, sans-serif";
+  const noteLabelWeight = layoutMode ? layoutNoteFontWeight : 200;
+  const color = state.textColorSecondary;
+  const lineStep = detailSize + 4;
+  const hejiYOffset = Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET);
+  const line = (text, x, y, font = noteLabelFont, weight = noteLabelWeight) =>
+    sceneText({ text, x, y, font, size: detailSize, weight, align: "left", baseline: "top", color, ref });
+  const tag = (items) => {
+    items.forEach((item) => {
+      item.ref = ref;
+    });
+    return items;
+  };
+  const place = (labelWidth, lineCount) => {
+    const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
+    const hasOffset = layoutMode && layoutLabelOffsets.has(node.id);
+    const labelPos = hasOffset
+      ? getLayoutNoteLabelPosition(node, pos, radius)
+      : getDetailLabelPosition({
+          center: pos,
+          baseOffset: getDefaultNoteDetailOffset(radius, 1),
+          width: labelWidth,
+          height: labelHeight,
+          circles: collision.circles,
+          placedRects: collision.rects,
+          segments: collision.segments,
+          ignoreId: node.id,
+        });
+    if (hasOffset) {
+      collision.rects.push({
+        left: labelPos.x,
+        top: labelPos.y,
+        right: labelPos.x + labelWidth,
+        bottom: labelPos.y + labelHeight,
+      });
+    }
+    let hitbox = null;
+    if (layoutMode) {
+      const padding = Math.max(4, Math.round(detailSize * 0.25));
+      hitbox = {
+        left: labelPos.x - padding,
+        top: labelPos.y - padding,
+        width: labelWidth + padding * 2,
+        height: labelHeight + padding * 2,
+        labelPos: { x: labelPos.x, y: labelPos.y },
+      };
+    }
+    return { labelPos, hitbox };
+  };
+  const result = (hitbox) => ({
+    scene,
+    hitbox,
+    font: noteLabelFont,
+    size: detailSize,
+    weight: noteLabelWeight,
+  });
+
+  if (featureMode === "note") {
+    const measure = (text) =>
+      measureTextWidthWithWeight(text, detailSize, noteLabelFont, noteLabelWeight);
+    const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
+    const ratioText = `${node.numerator}:${node.denominator}${octaveLabel}`;
+    const centsLabel = getCachedCentsReadout(node, { wrap: enharmonicsEnabled }, displayInfo);
+    const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
+    const hzText = showHz ? formatHzReadout(node.freq) : "";
+    const labelWidth = Math.max(
+      measure(ratioText),
+      centsLabel ? measure(centsLabel) : 0,
+      ratioCentsLabel ? measure(ratioCentsLabel) : 0,
+      hzText ? measure(hzText) : 0
+    );
+    const lineCount = 1 + (centsLabel ? 1 : 0) + (ratioCentsLabel ? 1 : 0) + (hzText ? 1 : 0);
+    const { labelPos, hitbox } = place(labelWidth, lineCount);
+    let y = labelPos.y;
+    scene.push(line(ratioText, labelPos.x, y));
+    y += lineStep;
+    if (centsLabel) {
+      scene.push(
+        ...tag(
+          buildTextWithSmallCentScene({
+            text: centsLabel,
+            x: labelPos.x,
+            y,
+            font: noteLabelFont,
+            size: detailSize,
+            fontWeight: noteLabelWeight,
+            align: "left",
+            baseline: "top",
+            hejiAccidentals: hejiEnabled,
+            hejiYOffset,
+            color,
+          })
+        )
+      );
+      y += lineStep;
+    }
+    if (ratioCentsLabel) {
+      scene.push(line(ratioCentsLabel, labelPos.x, y));
+      y += lineStep;
+    }
+    if (hzText) {
+      scene.push(line(hzText, labelPos.x, y));
+    }
+    return result(hitbox);
+  }
+
+  // Ratio mode. Widths are measured in the inner label's font, as the canvas
+  // always has (a known quirk; fixing it moves labels, so it's its own change).
+  const measure = (text) =>
+    innerMeasureFont
+      ? measureTextWidthWithWeight(
+          text,
+          innerMeasureFont.size,
+          innerMeasureFont.font,
+          innerMeasureFont.weight
+        )
+      : measureTextWidthWithWeight(text, detailSize, noteLabelFont, noteLabelWeight);
+  const centsLabel = getCachedCentsReadout(
+    node,
+    {
+      wrap: enharmonicsEnabled,
+      requireHejiDetail: true,
+      baseTextForHeji: displayInfo.pitchClass,
+    },
+    displayInfo
+  );
+  const hasParen = centsLabel && centsLabel.includes("(");
+  const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
+  const annotation = getCachedHejiAnnotation(node, baseLabel || node.note_name);
+  const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
+  const suffixText = annotation.suffixParts
+    .map((part) => (part && part.text ? part.text : ""))
+    .join("");
+  const restText = hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "";
+  const line1 = `${annotation.baseText || ""}${suffixText}${restText}`;
+  const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
+  const hzText = showHz ? formatHzReadout(node.freq) : "";
+  const labelWidth = Math.max(
+    line1 ? measure(line1) : 0,
+    hejiEnabled && centsLabel ? measure(centsLabel) : 0,
+    octaveLabel ? measure(octaveLabel) : 0,
+    ratioCentsLabel ? measure(ratioCentsLabel) : 0,
+    hzText ? measure(hzText) : 0
+  );
+  const lineCount =
+    1 +
+    (hejiEnabled && centsLabel ? 1 : 0) +
+    (octaveLabel ? 1 : 0) +
+    (ratioCentsLabel ? 1 : 0) +
+    (hzText ? 1 : 0);
+  const { labelPos, hitbox } = place(labelWidth, lineCount);
+  let y = labelPos.y;
+  scene.push(
+    ...tag(
+      buildHejiInlineScene({
+        x: labelPos.x,
+        y,
+        baseText: annotation.baseText,
+        suffixParts: annotation.suffixParts,
+        restText,
+        size: detailSize,
+        font: noteLabelFont,
+        align: "left",
+        baseline: "top",
+        hejiYOffset,
+        restGapScale: hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN,
+        restHejiAccidentals: hejiEnabled && hasParen,
+        fontWeight: noteLabelWeight,
+        color,
+      })
+    )
+  );
+  y += lineStep;
+  if (hejiEnabled && centsLabel) {
+    scene.push(
+      ...tag(
+        buildTextWithSmallCentScene({
+          text: centsLabel,
+          x: labelPos.x,
+          y,
+          font: noteLabelFont,
+          size: detailSize,
+          fontWeight: noteLabelWeight,
+          align: "left",
+          baseline: "top",
+          hejiAccidentals: hejiEnabled,
+          hejiYOffset,
+          color,
+        })
+      )
+    );
+    y += lineStep;
+  }
+  if (octaveLabel) {
+    scene.push(line(octaveLabel, labelPos.x, y));
+    y += lineStep;
+  }
+  if (ratioCentsLabel) {
+    scene.push(line(ratioCentsLabel, labelPos.x, y));
+    y += lineStep;
+  }
+  if (hzText) {
+    scene.push(line(hzText, labelPos.x, y, '"Lexend", sans-serif', 200));
+  }
+  return result(hitbox);
+}
+
 // The 2D lattice edges (page layout always uses this path): each active edge
 // trimmed to its node circles, with its interval label. Screen coordinates.
 function buildLatticeEdgesScene(nodePosMap) {
@@ -13975,67 +14334,25 @@ function draw() {
     ctx.restore();
   }
   nodeVolumeSliderHitboxes = [];
+  const nodeEnv = {
+    hoverNodeId,
+    guideNodes,
+    orphanGuideNodes: connectOrphansEnabled ? orphanGuideNodes : null,
+    addIntervalMode,
+    nodeAmplitudes,
+    axisEntry,
+    showMicrotonal,
+    commaNodeRings,
+    distanceFocusMode,
+    canInteractInactive: !is3DMode || isAddMode || distanceSelectMode,
+  };
   nodeRenderList.forEach(({ node, pos }) => {
-    const isHovered = node.id === hoverNodeId;
-    const isGuide = guideNodes.has(node.id);
-    const isMuted = Boolean(node.muted);
-    const isOrphanGuide = connectOrphansEnabled && orphanGuideNodes.has(node.id);
-    const isIntervalHover = addIntervalMode && node.active && isHovered;
-    const isIntervalDim = addIntervalMode && node.active && !isHovered;
-    const canShowInactive = !isOrphanGuide && isInactiveNodeAvailable(node);
-    const canInteractInactive = !is3DMode || isAddMode || distanceSelectMode;
-    const amplitude = nodeAmplitudes.get(node.id) || 0;
-    const brightness = Math.min(1, amplitude);
-    const isVisible =
-      node.isCenter ||
-      node.active ||
-      node.isCustom ||
-      brightness > 0.01 ||
-      isGuide ||
-      isOrphanGuide ||
-      (isHovered && canShowInactive && canInteractInactive);
-    let alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
-    if (node.isCenter && !node.active) {
-      alpha = isHovered ? 0.3 : 0.15;
-    }
-    if (isGuide) {
-      alpha = guideNodes.get(node.id);
-    }
-    if (isOrphanGuide && !isGuide) {
-      alpha = 0.08;
-    }
-    if (node.isCustom && !node.active) {
-      alpha = 0.25;
-    }
-    if (isMuted) {
-      alpha = isHovered ? 0.7 : 0.4;
-    }
-    if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
-      alpha *= AXIS_DIM_FACTOR;
-    }
-    if (showMicrotonal && !commaNodeRings.has(node.id)) {
-      alpha *= 0.18;
-    }
-    if (isIntervalDim) {
-      alpha *= 0.18;
-    }
-    if (distanceFocusMode) {
-      alpha *= AXIS_DIM_FACTOR;
-    }
-    const textAlpha = alpha;
-    const intervalTint = isIntervalDim ? "#9a9a9a" : null;
-    const textColorPrimary = colorWithAlpha(
-      intervalTint || themeColors.textPrimary,
-      textAlpha
-    );
-    const textColorSecondary = colorWithAlpha(
-      intervalTint || themeColors.textSecondary,
-      textAlpha
-    );
-
-    if (!isVisible) {
+    const state = getNodeRenderState(node, nodeEnv);
+    if (!state.isVisible) {
       return;
     }
+    const { isHovered, isGuide, isMuted, isOrphanGuide, brightness, alpha, intervalTint } = state;
+    const { textColorPrimary, textColorSecondary } = state;
 
     const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
     const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
@@ -14058,64 +14375,47 @@ function draw() {
       ctx.fill();
       ctx.stroke();
     }
-    if (showNodeShape && showCircles) {
+    if (showNodeShape && showCircles && !is3DMode) {
+      paintDisplayList(ctx, buildNodeShapeScene(node, pos, radius, layoutShape, state));
+    } else if (showNodeShape && showCircles) {
       ctx.beginPath();
       ctx.strokeStyle = intervalTint || getInkNodeStrokeColor(isMuted);
       ctx.lineWidth = getInkNodeStrokeLineWidth(isMuted);
       if (isMuted || isOrphanGuide) {
         ctx.setLineDash([6, 4]);
       }
-      if (is3DMode) {
-        const inactiveFill = node.isCustom
-          ? colorWithAlpha(themeColors.nodeCustomInactive, 0.6)
-          : themeColors.nodeInactive;
-        const shadowColor = themeColors.nodeShadow;
-        const fillAlpha = Math.min(1, brightness);
-        const baseFill =
-          fillAlpha > 0 ? colorWithAlpha(themeColors.playFill, fillAlpha) : inactiveFill;
-        const highlightColor =
-          fillAlpha > 0
-            ? colorWithAlpha(themeColors.playFill, 0.35 + 0.65 * fillAlpha)
-            : node.isCustom
-            ? colorWithAlpha(themeColors.nodeCustomInactive, 0.9)
-            : themeColors.nodeHighlight;
-        if (reducedEffects || !show3DShading) {
-          ctx.shadowColor = "transparent";
-          ctx.shadowBlur = 0;
-          ctx.shadowOffsetX = 0;
-          ctx.shadowOffsetY = 0;
-          ctx.fillStyle = baseFill;
-        } else {
-          ctx.shadowColor = shadowColor;
-          ctx.shadowBlur = Math.max(6, radius * 0.6);
-          ctx.shadowOffsetX = 0;
-          ctx.shadowOffsetY = 0;
-          ctx.fillStyle = isSquare
-            ? getCubeFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir)
-            : getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir);
-        }
-      } else if (layoutMode && !isInPresentationMode()) {
-        ctx.fillStyle = "transparent";
-      } else {
-        if (node.isCustom && !node.active && brightness <= 0) {
-          ctx.fillStyle = themeColors.nodeCustomInactive;
-        } else {
-          ctx.fillStyle = brightness > 0 ? themeColors.playFill : "transparent";
-        }
-      }
-      drawNodeShapePath(layoutShape, pos.x, pos.y, radius);
-      if (is3DMode) {
-        ctx.fill();
+      const inactiveFill = node.isCustom
+        ? colorWithAlpha(themeColors.nodeCustomInactive, 0.6)
+        : themeColors.nodeInactive;
+      const shadowColor = themeColors.nodeShadow;
+      const fillAlpha = Math.min(1, brightness);
+      const baseFill =
+        fillAlpha > 0 ? colorWithAlpha(themeColors.playFill, fillAlpha) : inactiveFill;
+      const highlightColor =
+        fillAlpha > 0
+          ? colorWithAlpha(themeColors.playFill, 0.35 + 0.65 * fillAlpha)
+          : node.isCustom
+          ? colorWithAlpha(themeColors.nodeCustomInactive, 0.9)
+          : themeColors.nodeHighlight;
+      if (reducedEffects || !show3DShading) {
         ctx.shadowColor = "transparent";
         ctx.shadowBlur = 0;
-      } else if (brightness > 0) {
-        ctx.save();
-        ctx.globalAlpha *= brightness;
-        ctx.fill();
-        ctx.restore();
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.fillStyle = baseFill;
       } else {
-        ctx.fill();
+        ctx.shadowColor = shadowColor;
+        ctx.shadowBlur = Math.max(6, radius * 0.6);
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.fillStyle = isSquare
+          ? getCubeFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir)
+          : getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir);
       }
+      drawNodeShapePath(layoutShape, pos.x, pos.y, radius);
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
       ctx.stroke();
       if (isMuted || isOrphanGuide) {
         ctx.setLineDash([]);
@@ -14179,98 +14479,15 @@ function draw() {
     }
 
     ctx.globalAlpha = 1;
+    const innerLabel = buildNodeInnerLabelScene(node, pos, radius, state);
+    paintDisplayList(ctx, innerLabel.scene);
+    // Canvas state the label code used to leave behind for later readers.
     ctx.fillStyle = textColorPrimary;
-    const innerTextScale = layoutMode ? getLayoutInnerTextScale(radius) : 1;
-    const baseLabelSize = layoutMode ? layoutRatioTextSize * innerTextScale : 21;
-    const labelSize = node.isCustom ? baseLabelSize * 0.85 : baseLabelSize;
-    const labelFont = layoutMode ? layoutRatioFont : "Noto Serif";
-    const labelWeight = layoutMode ? layoutRatioFontWeight : 400;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    if (featureMode === "note") {
-      if (hejiEnabled && nodeHasHighPrime(node)) {
-        const displayInfo = getCachedDisplayInfo(node);
-        const base = getHejiBaseAndDefaults(displayInfo.pitchClass);
-        const centsText = showCentsDeviation ? formatCents(displayInfo.cents) : "";
-        const suffixParts = centsText
-          ? [
-              ...base.suffixParts,
-              {
-                text: centsText,
-                source: "cents",
-                font: labelFont,
-                charGap: 0,
-                sizeScale: 0.67,
-              },
-            ]
-          : base.suffixParts;
-        drawHejiInline({
-          x: pos.x,
-          y: pos.y,
-          baseText: base.baseText,
-          suffixParts,
-          restText: "",
-          size: labelSize,
-          font: labelFont,
-          fontWeight: labelWeight,
-          align: "center",
-          baseline: "middle",
-          color: textColorPrimary,
-        });
-      } else {
-        const annotation = getCachedHejiAnnotation(node, getNodePitchLabel(node));
-        drawHejiInline({
-          x: pos.x,
-          y: pos.y,
-          baseText: annotation.baseText,
-          suffixParts: annotation.suffixParts,
-          restText: "",
-          size: labelSize,
-          font: labelFont,
-          fontWeight: labelWeight,
-          align: "center",
-          baseline: "middle",
-          color: textColorPrimary,
-        });
-      }
-    } else {
-      const maxWidth = radius * 1.6;
-      const maxHeight = radius * 1.6;
-      const layout = computeRatioLabelLayout(
-        node.numerator,
-        node.denominator,
-        labelFont,
-        labelSize,
-        maxWidth,
-        labelWeight,
-        maxHeight
-      );
-      ctx.font = `${labelWeight} ${layout.size}px ${labelFont}`;
-      if (layout.lines.length === 1) {
-        ctx.fillText(layout.lines[0], pos.x, pos.y);
-      } else {
-        const positions = computeStackedRatioPositionsFromLine(
-          layout.lines,
-          labelFont,
-          layout.size,
-          labelWeight,
-          pos.y,
-          layout.lineGap
-        );
-        ctx.save();
-        ctx.textBaseline = "alphabetic";
-        ctx.fillText(layout.lines[0], pos.x, positions.topBaseline);
-        ctx.fillText(layout.lines[1], pos.x, positions.bottomBaseline);
-        ctx.save();
-        ctx.strokeStyle = textColorPrimary;
-        ctx.lineWidth = Math.max(1, Math.round(layout.size * 0.06));
-        ctx.beginPath();
-        ctx.moveTo(pos.x - positions.lineWidth / 2, positions.lineY);
-        ctx.lineTo(pos.x + positions.lineWidth / 2, positions.lineY);
-        ctx.stroke();
-        ctx.restore();
-        ctx.restore();
-      }
+    if (innerLabel.measureFont) {
+      const { weight, size, font } = innerLabel.measureFont;
+      ctx.font = `${weight} ${size}px ${font}`;
     }
 
     if (nodeVolumeModeVisible && node.active) {
@@ -14365,229 +14582,23 @@ function draw() {
     }
     const displayInfo = getCachedDisplayInfo(node);
     if (!showMicrotonal) {
-      const detailSize = layoutMode ? layoutNoteTextSize : 14;
-      const noteLabelFont = layoutMode ? layoutNoteFont : "Lexend, sans-serif";
-      const noteLabelWeight = layoutMode ? layoutNoteFontWeight : 200;
+      const detail = buildNodeDetailLabelScene(
+        node,
+        pos,
+        radius,
+        state,
+        detailLabelCollision,
+        innerLabel.measureFont
+      );
+      paintDisplayList(ctx, detail.scene);
+      if (detail.hitbox) {
+        layoutRenderedNoteLabelHitboxes.set(node.id, detail.hitbox);
+      }
+      ctx.fillStyle = textColorSecondary;
       if (featureMode === "note") {
-      ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillStyle = textColorSecondary;
-      const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
-      const ratioText = `${node.numerator}:${node.denominator}${octaveLabel}`;
-      const centsLabel = getCachedCentsReadout(
-        node,
-        { wrap: enharmonicsEnabled },
-        displayInfo
-      );
-      const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
-      const defaultOffset = getDefaultNoteDetailOffset(radius, 1);
-      const lineWidth = ctx.measureText(ratioText).width;
-      const centsWidth = centsLabel ? ctx.measureText(centsLabel).width : 0;
-      const ratioCentsWidth = ratioCentsLabel ? ctx.measureText(ratioCentsLabel).width : 0;
-      const hzText = showHz ? formatHzReadout(node.freq) : "";
-      const hzWidth = hzText ? ctx.measureText(hzText).width : 0;
-      const labelWidth = Math.max(lineWidth, centsWidth, ratioCentsWidth, hzWidth);
-      const lineCount =
-        1 +
-        (centsLabel ? 1 : 0) +
-        (ratioCentsLabel ? 1 : 0) +
-        (hzText ? 1 : 0);
-      const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
-      const rawLabelPos =
-        layoutMode && layoutLabelOffsets.has(node.id)
-          ? getLayoutNoteLabelPosition(node, pos, radius)
-          : getDetailLabelPosition({
-              center: pos,
-              baseOffset: defaultOffset,
-              width: labelWidth,
-              height: labelHeight,
-              circles: detailLabelCollision.circles,
-              placedRects: detailLabelCollision.rects,
-              segments: detailLabelCollision.segments,
-              ignoreId: node.id,
-            });
-      if (layoutMode && layoutLabelOffsets.has(node.id)) {
-        detailLabelCollision.rects.push({
-          left: rawLabelPos.x,
-          top: rawLabelPos.y,
-          right: rawLabelPos.x + labelWidth,
-          bottom: rawLabelPos.y + labelHeight,
-        });
-      }
-      const ratioX = rawLabelPos.x;
-      const ratioY = rawLabelPos.y;
-      if (layoutMode) {
-        const padding = Math.max(4, Math.round(detailSize * 0.25));
-        layoutRenderedNoteLabelHitboxes.set(node.id, {
-          left: ratioX - padding,
-          top: ratioY - padding,
-          width: labelWidth + padding * 2,
-          height: labelHeight + padding * 2,
-          labelPos: { x: ratioX, y: ratioY },
-        });
-      }
-      let lineOffset = 0;
-      ctx.fillText(ratioText, ratioX, ratioY + lineOffset);
-      lineOffset += detailSize + 4;
-      if (centsLabel) {
-        drawTextWithSmallCent({
-          text: centsLabel,
-          x: ratioX,
-          y: ratioY + lineOffset,
-          font: noteLabelFont,
-          size: detailSize,
-          fontWeight: noteLabelWeight,
-          align: "left",
-          baseline: "top",
-          hejiAccidentals: hejiEnabled,
-          hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
-          context: ctx,
-          color: textColorSecondary,
-        });
-        lineOffset += detailSize + 4;
-      }
-      if (ratioCentsLabel) {
-        ctx.fillText(ratioCentsLabel, ratioX, ratioY + lineOffset);
-        lineOffset += detailSize + 4;
-      }
-      if (hzText) {
-        ctx.fillText(hzText, ratioX, ratioY + lineOffset);
-      }
-      } else {
-      ctx.fillStyle = textColorSecondary;
-      const centsLabel = getCachedCentsReadout(
-        node,
-        {
-          wrap: enharmonicsEnabled,
-          requireHejiDetail: true,
-          baseTextForHeji: displayInfo.pitchClass,
-        },
-        displayInfo
-      );
-      const hasParen = centsLabel && centsLabel.includes("(");
-      const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
-      const annotation = getCachedHejiAnnotation(node, baseLabel || node.note_name);
-      const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
-      const defaultOffset = getDefaultNoteDetailOffset(radius, 1);
-      const suffixText = annotation.suffixParts
-        .map((part) => (part && part.text ? part.text : ""))
-        .join("");
-      const restText = hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "";
-      const line1 = `${annotation.baseText || ""}${suffixText}${restText}`;
-      const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
-      const lineWidth = line1 ? ctx.measureText(line1).width : 0;
-      const centsWidth = hejiEnabled && centsLabel ? ctx.measureText(centsLabel).width : 0;
-      const octaveWidth = octaveLabel ? ctx.measureText(octaveLabel).width : 0;
-      const ratioCentsWidth = ratioCentsLabel ? ctx.measureText(ratioCentsLabel).width : 0;
-      const hzText = showHz ? formatHzReadout(node.freq) : "";
-      const hzWidth = hzText ? ctx.measureText(hzText).width : 0;
-      const labelWidth = Math.max(lineWidth, centsWidth, octaveWidth, ratioCentsWidth, hzWidth);
-      const lineCount =
-        1 +
-        (hejiEnabled && centsLabel ? 1 : 0) +
-        (octaveLabel ? 1 : 0) +
-        (ratioCentsLabel ? 1 : 0) +
-        (hzText ? 1 : 0);
-      const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
-      const rawLabelPos =
-        layoutMode && layoutLabelOffsets.has(node.id)
-          ? getLayoutNoteLabelPosition(node, pos, radius)
-          : getDetailLabelPosition({
-              center: pos,
-              baseOffset: defaultOffset,
-              width: labelWidth,
-              height: labelHeight,
-              circles: detailLabelCollision.circles,
-              placedRects: detailLabelCollision.rects,
-              segments: detailLabelCollision.segments,
-              ignoreId: node.id,
-            });
-      if (layoutMode && layoutLabelOffsets.has(node.id)) {
-        detailLabelCollision.rects.push({
-          left: rawLabelPos.x,
-          top: rawLabelPos.y,
-          right: rawLabelPos.x + labelWidth,
-          bottom: rawLabelPos.y + labelHeight,
-        });
-      }
-      const labelPos = { x: rawLabelPos.x, y: rawLabelPos.y };
-      if (layoutMode) {
-        const padding = Math.max(4, Math.round(detailSize * 0.25));
-        layoutRenderedNoteLabelHitboxes.set(node.id, {
-          left: labelPos.x - padding,
-          top: labelPos.y - padding,
-          width: labelWidth + padding * 2,
-          height: labelHeight + padding * 2,
-          labelPos: { x: labelPos.x, y: labelPos.y },
-        });
-      }
-      const restGapScale = hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
-      let lineOffset = 0;
-      drawHejiInline({
-        x: labelPos.x,
-        y: labelPos.y,
-        baseText: annotation.baseText,
-        suffixParts: annotation.suffixParts,
-        restText: hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "",
-        size: detailSize,
-        font: noteLabelFont,
-        align: "left",
-        baseline: "top",
-        hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
-        restGapScale,
-        restHejiAccidentals: hejiEnabled && hasParen,
-        fontWeight: noteLabelWeight,
-        color: textColorSecondary,
-      });
-      lineOffset += detailSize + 4;
-      if (hejiEnabled && centsLabel) {
-        drawTextWithSmallCent({
-          text: centsLabel,
-          x: labelPos.x,
-          y: labelPos.y + lineOffset,
-          font: noteLabelFont,
-          size: detailSize,
-          fontWeight: noteLabelWeight,
-          align: "left",
-          baseline: "top",
-          hejiAccidentals: hejiEnabled,
-          hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
-          context: ctx,
-          color: textColorSecondary,
-        });
-        lineOffset += detailSize + 4;
-      }
-      if (octaveLabel) {
-        ctx.save();
-        ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
+        ctx.font = `${detail.weight} ${detail.size}px ${detail.font}`;
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
-        ctx.fillStyle = textColorSecondary;
-        ctx.fillText(octaveLabel, labelPos.x, labelPos.y + lineOffset);
-        ctx.restore();
-        lineOffset += detailSize + 4;
-      }
-      if (ratioCentsLabel) {
-        ctx.save();
-        ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
-        ctx.fillStyle = textColorSecondary;
-        ctx.fillText(ratioCentsLabel, labelPos.x, labelPos.y + lineOffset);
-        ctx.restore();
-        lineOffset += detailSize + 4;
-      }
-      if (hzText) {
-        ctx.save();
-        ctx.font = `200 ${detailSize}px "Lexend", sans-serif`;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
-        ctx.fillStyle = textColorSecondary;
-        const hzY = labelPos.y + lineOffset;
-        ctx.fillText(hzText, labelPos.x, hzY);
-        ctx.restore();
-      }
       }
 
       if (layoutMode && layoutLabelHitboxVisible) {
@@ -25991,182 +26002,6 @@ function buildHejiSvgText({
   )}" font-size="${size}" ${svgColorAttr("fill", color)}>${baseSpan}${suffixSpan}${restSpan}</text>`;
 }
 
-async function buildHejiSvgInline({
-  x,
-  y,
-  baseText,
-  suffixParts,
-  restText,
-  font,
-  size,
-  align,
-  baseline,
-  hejiYOffset = 0.5,
-  restGapScale = HEJI_REST_GAP,
-  restHejiAccidentals = false,
-  fontWeight = 400,
-  color,
-}) {
-  const suffixSpacing = Math.round(size * 0.08);
-  const partGap = Math.round(size * 0.1);
-  const baseSuffixGap = Math.round(size * 0.1);
-  const restGap = Math.round(size * restGapScale);
-  const baseWidth = await measureSvgTextWidth(baseText, size, font, fontWeight);
-  const parts = Array.isArray(suffixParts) ? suffixParts : [];
-  const suffixWidths = await Promise.all(
-    parts.map((part) => measureSvgSuffixPartWidth(part, size, suffixSpacing, fontWeight))
-  );
-  const suffixWidth = suffixWidths.reduce(
-    (sum, partWidth, index) => sum + partWidth + (index > 0 ? partGap : 0),
-    0
-  );
-  const restWidth = restText
-    ? await measureSvgTextWidth(restText, size, font, fontWeight)
-    : 0;
-  const totalWidth =
-    baseWidth +
-    (parts.length ? baseSuffixGap + suffixWidth : 0) +
-    (restText ? restGap + restWidth : 0);
-  let startX = x;
-  if (align === "center") {
-    startX = x - totalWidth / 2;
-  } else if (align === "right") {
-    startX = x - totalWidth;
-  }
-
-  const nodes = [];
-  nodes.push(
-    await buildSvgTextElement({
-      text: baseText,
-      x: startX,
-      y,
-      font,
-      size,
-      fontWeight,
-      anchor: "start",
-      baseline,
-      color,
-    })
-  );
-
-  let cursorX = startX + baseWidth;
-  if (parts.length) {
-    cursorX += baseSuffixGap;
-    for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-      const part = parts[partIndex];
-      if (partIndex > 0) {
-        cursorX += partGap;
-      }
-      const partCharGap = Number.isFinite(part.charGap) ? part.charGap : suffixSpacing;
-      const partStartX = cursorX;
-      const partWidth = suffixWidths[partIndex] ?? 0;
-      const partFont = part.font || "HEJI2Text";
-      const partWeight = Number.isFinite(part.fontWeight)
-        ? part.fontWeight
-        : part.font
-        ? fontWeight
-        : 400;
-      const partYOffset =
-        typeof part.yOffset === "number" ? part.yOffset : hejiYOffset;
-      const sizeScale = Number.isFinite(part.sizeScale) ? part.sizeScale : 1;
-      const partChars = Array.from(part.text);
-      for (let index = 0; index < partChars.length; index += 1) {
-        const char = partChars[index];
-        if (index > 0) {
-          cursorX += partCharGap;
-        }
-        const baseSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
-        const charSize = Math.max(6, Math.round(baseSize * sizeScale));
-        nodes.push(
-          await buildSvgTextElement({
-            text: char,
-            x: cursorX,
-            y: y + partYOffset,
-            font: partFont,
-            size: charSize,
-            fontWeight: partWeight,
-            anchor: "start",
-            baseline,
-            color,
-          })
-        );
-        cursorX += await measureSvgCharWidth(char, charSize, partFont, partWeight);
-      }
-      if (part.expLabel) {
-        const expSize = Math.max(8, Math.round(size * 0.55));
-        const expY =
-          y +
-          (typeof part.yOffset === "number" ? part.yOffset : hejiYOffset) +
-          getExponentOffset(size, baseline);
-        nodes.push(
-          await buildSvgTextElement({
-            text: part.expLabel,
-            x: partStartX + partWidth / 2,
-            y: expY,
-            font,
-            size: expSize,
-            fontWeight,
-            anchor: "middle",
-            baseline: "hanging",
-            color,
-          })
-        );
-      }
-    }
-  }
-
-  if (restText) {
-    cursorX += restGap;
-    const chars = Array.from(restText);
-    const needsInline =
-      restHejiAccidentals || restText.includes(CENTS_CHAR) || /[veV]/.test(restText);
-    if (!needsInline) {
-      nodes.push(
-        await buildSvgTextElement({
-          text: restText,
-          x: cursorX,
-          y,
-          font,
-          size,
-          fontWeight,
-          anchor: "start",
-          baseline,
-          color,
-        })
-      );
-    } else {
-      for (let index = 0; index < chars.length; index += 1) {
-        const char = chars[index];
-        const useHeji = char === "v" || char === "e" || char === "V";
-        const isCent = char === CENTS_CHAR;
-        const charSize = isCent ? getCentsCharSize(size) : size;
-        const charFont = useHeji ? "HEJI2Text" : font;
-        const charWeight = useHeji ? "normal" : fontWeight;
-        nodes.push(
-          await buildSvgTextElement({
-            text: char,
-            x: cursorX,
-            y: y + (useHeji ? hejiYOffset : 0),
-            font: charFont,
-            size: charSize,
-            fontWeight: useHeji ? 400 : fontWeight,
-            anchor: "start",
-            baseline,
-            color,
-          })
-        );
-        cursorX += await measureSvgCharWidth(
-          char,
-          charSize,
-          charFont,
-          useHeji ? 400 : fontWeight
-        );
-      }
-    }
-  }
-
-  return nodes.join("\n");
-}
 
 const LEXEND_FONT_URL =
   "https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&family=Inter:wght@100..900&family=IBM+Plex+Sans:wght@200..700&family=Lato:wght@300..900&family=PT+Sans:wght@400..700&family=PT+Serif:wght@400..700&family=Radley:ital,wght@0,400;1,400&family=Alice&family=Noto+Serif:wght@400..700&display=swap";
@@ -26450,28 +26285,6 @@ async function measureSvgCharWidth(char, size, font, fontWeight = 400) {
   return fontObj.getAdvanceWidth(char, size);
 }
 
-async function measureSvgSuffixPartWidth(part, size, charGap, baseWeight) {
-  if (!part || !part.text) {
-    return 0;
-  }
-  const sizeScale = Number.isFinite(part.sizeScale) ? part.sizeScale : 1;
-  const font = part.font || "HEJI2Text";
-  const partCharGap = Number.isFinite(part.charGap) ? part.charGap : charGap;
-  const weight = Number.isFinite(part.fontWeight)
-    ? part.fontWeight
-    : part.font
-    ? baseWeight
-    : 400;
-  const chars = Array.from(part.text);
-  const widths = await Promise.all(
-    chars.map((char) => {
-      const baseSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
-      const charSize = Math.max(6, Math.round(baseSize * sizeScale));
-      return measureSvgCharWidth(char, charSize, font, weight);
-    })
-  );
-  return widths.reduce((sum, width, index) => sum + width + (index > 0 ? partCharGap : 0), 0);
-}
 
 // Scene text for SVG: measured on the canvas (the reference rendering) and
 // outlined from the bundled font files. See src/scene/emit-svg.js.
@@ -26581,32 +26394,8 @@ async function buildSvgTextElement({
   )} />`;
 }
 
-function measureFontMetrics(sample, size, font, fontWeight = 400) {
-  ctx.save();
-  ctx.font = `${fontWeight} ${size}px ${font}`;
-  const metrics = ctx.measureText(sample);
-  ctx.restore();
-  return {
-    ascent: Number(metrics.actualBoundingBoxAscent) || size * 0.8,
-    descent: Number(metrics.actualBoundingBoxDescent) || size * 0.2,
-  };
-}
 
-function getSvgTopBaselineOffset(size, font, fontWeight) {
-  const metrics = measureFontMetrics("H", size, font, fontWeight);
-  return Math.round(metrics.ascent);
-}
 
-async function ensureFontLoaded(font, size) {
-  if (!document.fonts || !document.fonts.load) {
-    return;
-  }
-  try {
-    await document.fonts.load(`${Math.max(6, Math.round(size))}px "${font}"`);
-  } catch (error) {
-    // Ignore font loading errors; we will fall back to default metrics.
-  }
-}
 
 function ensureUiFontReady(font, weight = 400, size = 16) {
   if (!document.fonts || !document.fonts.load) {
@@ -26649,24 +26438,8 @@ function queuePresetFontRecalc() {
   }, 0);
 }
 
-async function getSvgHejiYOffset(size, baseFont, baseWeight) {
-  await Promise.all([
-    ensureFontLoaded("HEJI2Text", size),
-    ensureFontLoaded(baseFont, size),
-  ]);
-  const baseMetrics = measureFontMetrics("H", size, baseFont, baseWeight);
-  const hejiMetrics = measureFontMetrics("v", size, "HEJI2Text", 400);
-  const ascentDelta = baseMetrics.ascent - hejiMetrics.ascent;
-  return Math.round(size * (HEJI_SUFFIX_Y_OFFSET + HEJI_SVG_EXTRA_Y_OFFSET) + ascentDelta);
-}
 
-async function buildLayoutSvgString(
-  hejiFontSrc = null,
-  detailHejiYOffset = null,
-  fontCss = null,
-  noteBaselineOffset = null,
-  labelHejiYOffset = null
-) {
+async function buildLayoutSvgString({ fontCss = null } = {}) {
   if (!layoutMode) {
     return null;
   }
@@ -26675,18 +26448,7 @@ async function buildLayoutSvgString(
   }
   const { widthIn, heightIn, widthPx, heightPx } = getLayoutPageDimensions();
   const { left, top } = getLayoutPageRect();
-  const labelSize = layoutRatioTextSize;
-  const detailSize = layoutNoteTextSize;
   const exportLabel = getExportMetadataLabel();
-  const svgDetailHejiYOffset = Number.isFinite(detailHejiYOffset)
-    ? detailHejiYOffset
-    : Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET);
-  const svgLabelHejiYOffset = Number.isFinite(labelHejiYOffset)
-    ? labelHejiYOffset
-    : Math.round(labelSize * HEJI_SUFFIX_Y_OFFSET);
-  const svgNoteBaselineOffset = Number.isFinite(noteBaselineOffset)
-    ? noteBaselineOffset
-    : 0;
   const svgFill = (color) => svgColorAttr("fill", color);
   const svgStroke = (color) => svgColorAttr("stroke", color);
 
@@ -26846,28 +26608,7 @@ async function buildLayoutSvgString(
     segments: exportDetailLabelSegments,
     rects: [],
   };
-  const getExportDetailLabelPosition = (node, pos, radius, width, height) => {
-    if (layoutLabelOffsets.has(node.id)) {
-      const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
-      exportDetailLabelCollision.rects.push({
-        left: rawLabelPos.x,
-        top: rawLabelPos.y,
-        right: rawLabelPos.x + width,
-        bottom: rawLabelPos.y + height,
-      });
-      return rawLabelPos;
-    }
-    return getDetailLabelPosition({
-      center: pos,
-      baseOffset: getDefaultNoteDetailOffset(radius, 1),
-      width,
-      height,
-      circles: exportDetailLabelCollision.circles,
-      placedRects: exportDetailLabelCollision.rects,
-      segments: exportDetailLabelCollision.segments,
-      ignoreId: node.id,
-    });
-  };
+
 
   const edgeLabelSize = getLayoutLineLabelSize();
   const lineLabelFont = layoutLineLabelFont;
@@ -27338,440 +27079,39 @@ async function buildLayoutSvgString(
     }
   }
 
+  const exportNodeEnv = getStaticNodeEnv(exportOrphanGuides);
   for (const { node, pos } of exportNodeRenderList) {
-    const isMuted = Boolean(node.muted);
-    const isOrphanGuide = exportOrphanGuides && exportOrphanGuides.has(node.id);
-    const isVisible = node.isCenter || node.active || node.isCustom || isOrphanGuide;
-    if (!isVisible) {
-      continue;
-    }
+    const state = getNodeRenderState(node, exportNodeEnv);
     const entry = exportNodePosMap.get(node.id);
-    if (!entry) {
+    if (!state.isVisible || !entry) {
       continue;
     }
-    const x = pos.x - left;
-    const y = pos.y - top;
     const radius = entry.radius;
-    const innerTextScale =
-      layoutPerspectiveTextSize && layoutMode
-        ? Math.min(1.8, Math.max(0.65, radius / Math.max(1, Number(layoutNodeSize) || 1)))
-        : 1;
-    const nodeLabelSize = labelSize * innerTextScale;
     const shape = getLayoutNodeShape(node);
-    const fill = "none";
-    const stroke = isMuted
-      ? blendOverPage(themeColors.nodeStroke, 0.4)
-      : isOrphanGuide && !node.active && !node.isCenter && !node.isCustom
-      ? blendOverPage(themeColors.nodeStroke, 0.08)
-      : getInkNodeStrokeColor(false);
-    const strokeWidth = getInkNodeStrokeLineWidth(isMuted);
-    if (showCircles) {
-      if (shape === "circle") {
-        parts.push(
-          `<circle cx="${x}" cy="${y}" r="${radius}" ${svgFill(
-            fill
-          )} ${svgStroke(stroke)} stroke-width="${strokeWidth}" />`
-        );
-      } else if (shape === "square") {
-        parts.push(
-          `<rect x="${x - radius}" y="${y - radius}" width="${radius * 2}" height="${
-            radius * 2
-          }" ${svgFill(fill)} ${svgStroke(stroke)} stroke-width="${strokeWidth}" />`
-        );
-      } else if (shape === "triangle") {
-        const height = radius * 1.2;
-        const points = [
-          `${x},${y - height}`,
-          `${x + radius},${y + height * 0.6}`,
-          `${x - radius},${y + height * 0.6}`,
-        ].join(" ");
-        parts.push(
-          `<polygon points="${points}" ${svgFill(fill)} ${svgStroke(
-            stroke
-          )} stroke-width="${strokeWidth}" />`
-        );
-      } else if (shape === "diamond") {
-        const dr = radius * DIAMOND_RADIUS_SCALE;
-        const points = [
-          `${x},${y - dr}`,
-          `${x + dr},${y}`,
-          `${x},${y + dr}`,
-          `${x - dr},${y}`,
-        ].join(" ");
-        parts.push(
-          `<polygon points="${points}" ${svgFill(fill)} ${svgStroke(
-            stroke
-          )} stroke-width="${strokeWidth}" />`
-        );
-      }
+    const scene = [];
+    if (showCircles && shape !== "none") {
+      scene.push(...buildNodeShapeScene(node, pos, radius, shape, state));
     }
-    const isOrphanText = isOrphanGuide && !node.active && !node.isCenter && !node.isCustom;
-    const textColorPrimary = isMuted
-      ? blendOverPage(themeColors.textPrimary, 0.7)
-      : isOrphanText
-      ? blendOverPage(themeColors.textPrimary, 0.08)
-      : themeColors.textPrimary;
-    const textColorSecondary = isMuted
-      ? blendOverPage(themeColors.textSecondary, 0.7)
-      : isOrphanText
-      ? blendOverPage(themeColors.textSecondary, 0.08)
-      : themeColors.textSecondary;
-
-    if (featureMode === "note") {
-      if (hejiEnabled && nodeHasHighPrime(node)) {
-        const displayInfo = getDisplayNoteInfo(node);
-        const base = getHejiBaseAndDefaults(displayInfo.pitchClass);
-        const centsText = showCentsDeviation ? formatCents(displayInfo.cents) : "";
-        const suffixParts = centsText
-          ? [
-              ...base.suffixParts,
-              {
-                text: centsText,
-                source: "cents",
-                font: layoutRatioFont,
-                charGap: 0,
-                sizeScale: 0.67,
-              },
-            ]
-          : base.suffixParts;
-        parts.push(
-          await buildHejiSvgInline({
-            x,
-            y,
-            baseText: base.baseText,
-            suffixParts,
-            restText: "",
-            font: layoutRatioFont,
-            fontWeight: layoutRatioFontWeight,
-            size: nodeLabelSize,
-            align: "center",
-            baseline: "middle",
-            hejiYOffset: svgLabelHejiYOffset,
-            color: textColorPrimary,
-          })
-        );
-      } else {
-        const annotation = getHejiAnnotation(node, getNodePitchLabel(node));
-        parts.push(
-          await buildHejiSvgInline({
-            x,
-            y,
-            baseText: annotation.baseText,
-            suffixParts: annotation.suffixParts,
-            restText: "",
-            font: layoutRatioFont,
-            fontWeight: layoutRatioFontWeight,
-            size: nodeLabelSize,
-            align: "center",
-            baseline: "middle",
-            hejiYOffset: svgLabelHejiYOffset,
-            color: textColorPrimary,
-          })
-        );
-      }
-      const centsLabel = buildCentsReadout(node, { wrap: enharmonicsEnabled });
-      const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
-      const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
-      const ratioText = `${node.numerator}:${node.denominator}${octaveLabel}`;
-      const hzText = showHz ? formatHzReadout(node.freq) : "";
-      const ratioWidth = await measureSvgTextWidth(
-        ratioText,
-        detailSize,
-        layoutNoteFont,
-        layoutNoteFontWeight
+    const innerLabel = buildNodeInnerLabelScene(node, pos, radius, state);
+    scene.push(...innerLabel.scene);
+    const hasDetail = !(
+      state.isOrphanGuide ||
+      state.isGuide ||
+      (!node.active && !node.isCustom && !node.isCenter)
+    );
+    if (hasDetail) {
+      scene.push(
+        ...buildNodeDetailLabelScene(
+          node,
+          pos,
+          radius,
+          state,
+          exportDetailLabelCollision,
+          innerLabel.measureFont
+        ).scene
       );
-      const centsWidth = centsLabel
-        ? await measureSvgTextWidth(centsLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const ratioCentsWidth = ratioCentsLabel
-        ? await measureSvgTextWidth(ratioCentsLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const hzWidth = hzText
-        ? await measureSvgTextWidth(hzText, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const labelWidth = Math.max(ratioWidth, centsWidth, ratioCentsWidth, hzWidth);
-      const lineCount = 1 + (centsLabel ? 1 : 0) + (ratioCentsLabel ? 1 : 0) + (hzText ? 1 : 0);
-      const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
-      const rawLabelPos = getExportDetailLabelPosition(node, pos, radius, labelWidth, labelHeight);
-      const ratioX = rawLabelPos.x - left;
-      const ratioY = rawLabelPos.y - top;
-      parts.push(
-        await buildSvgTextElement({
-          text: ratioText,
-          x: ratioX,
-          y: ratioY + svgNoteBaselineOffset,
-          font: layoutNoteFont,
-          size: detailSize,
-          fontWeight: layoutNoteFontWeight,
-          anchor: "start",
-          baseline: "alphabetic",
-          color: textColorSecondary,
-        })
-      );
-      let detailLine = 1;
-      if (centsLabel) {
-        parts.push(
-          await buildSvgTextWithSmallCent({
-            text: centsLabel,
-            x: ratioX,
-            y: ratioY + detailSize + 4 + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            align: "left",
-            baseline: "alphabetic",
-            hejiAccidentals: hejiEnabled,
-            hejiYOffset: svgDetailHejiYOffset,
-            color: textColorSecondary,
-          })
-        );
-        detailLine += 1;
-      }
-      if (ratioCentsLabel) {
-        parts.push(
-          await buildSvgTextElement({
-            text: ratioCentsLabel,
-            x: ratioX,
-            y: ratioY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            anchor: "start",
-            baseline: "alphabetic",
-            color: textColorSecondary,
-          })
-        );
-        detailLine += 1;
-      }
-      if (hzText) {
-        parts.push(
-          await buildSvgTextElement({
-            text: hzText,
-            x: ratioX,
-            y: ratioY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            anchor: "start",
-            baseline: "alphabetic",
-            color: textColorSecondary,
-          })
-        );
-      }
-    } else {
-      const maxWidth = radius * 1.6;
-      const maxHeight = radius * 1.6;
-      const layout = computeRatioLabelLayout(
-        node.numerator,
-        node.denominator,
-        layoutRatioFont,
-        nodeLabelSize,
-        maxWidth,
-        layoutRatioFontWeight,
-        maxHeight
-      );
-      const ratioTextColor = textColorPrimary;
-      if (layout.lines.length === 1) {
-        const ratioFontObj = await getOutlineFontOrFallback(
-          layoutRatioFont,
-          layoutRatioFontWeight
-        );
-        let ratioY = y;
-        let ratioBaseline = "middle";
-        if (ratioFontObj) {
-          const bbox = ratioFontObj
-            .getPath(layout.lines[0], 0, 0, layout.size)
-            .getBoundingBox();
-          ratioY = y - (bbox.y1 + bbox.y2) / 2;
-          ratioBaseline = "alphabetic";
-        }
-        parts.push(
-          await buildSvgTextElement({
-            text: layout.lines[0],
-            x,
-            y: ratioY,
-            font: layoutRatioFont,
-            size: layout.size,
-            fontWeight: layoutRatioFontWeight,
-            anchor: "middle",
-            baseline: ratioBaseline,
-            color: ratioTextColor,
-          })
-        );
-      } else {
-        const positions = computeStackedRatioPositionsFromLine(
-          layout.lines,
-          layoutRatioFont,
-          layout.size,
-          layoutRatioFontWeight,
-          y,
-          layout.lineGap
-        );
-        parts.push(
-          await buildSvgTextElement({
-            text: layout.lines[0],
-            x,
-            y: positions.topBaseline,
-            font: layoutRatioFont,
-            size: layout.size,
-            fontWeight: layoutRatioFontWeight,
-            anchor: "middle",
-            baseline: "alphabetic",
-            color: ratioTextColor,
-          })
-        );
-        parts.push(
-          await buildSvgTextElement({
-            text: layout.lines[1],
-            x,
-            y: positions.bottomBaseline,
-            font: layoutRatioFont,
-            size: layout.size,
-            fontWeight: layoutRatioFontWeight,
-            anchor: "middle",
-            baseline: "alphabetic",
-            color: ratioTextColor,
-          })
-        );
-        parts.push(
-          `<line x1="${x - positions.lineWidth / 2}" y1="${positions.lineY}" x2="${x + positions.lineWidth / 2}" y2="${positions.lineY}" ${svgStroke(
-            ratioTextColor
-          )} stroke-width="${Math.max(1, Math.round(layout.size * 0.06))}" />`
-        );
-      }
-
-      const displayInfo = getDisplayNoteInfo(node);
-      const centsLabel = buildCentsReadout(node, {
-        wrap: enharmonicsEnabled,
-        requireHejiDetail: true,
-        baseTextForHeji: displayInfo.pitchClass,
-      });
-      const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
-      const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
-      const hzText = showHz ? formatHzReadout(node.freq) : "";
-      const hasParen = centsLabel && centsLabel.includes("(");
-      const restGapScale =
-        hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
-      const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
-      const annotation = getHejiAnnotation(node, baseLabel || node.note_name);
-      const suffixText = annotation.suffixParts
-        .map((part) => (part && part.text ? part.text : ""))
-        .join("");
-      const line1 = `${annotation.baseText || ""}${suffixText}${
-        hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : ""
-      }`;
-      const lineWidth = line1
-        ? await measureSvgTextWidth(line1, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const centsWidth =
-        hejiEnabled && centsLabel
-          ? await measureSvgTextWidth(centsLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
-          : 0;
-      const octaveWidth = octaveLabel
-        ? await measureSvgTextWidth(octaveLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const ratioCentsWidth = ratioCentsLabel
-        ? await measureSvgTextWidth(ratioCentsLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const hzWidth = hzText
-        ? await measureSvgTextWidth(hzText, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const labelWidth = Math.max(lineWidth, centsWidth, octaveWidth, ratioCentsWidth, hzWidth);
-      const lineCount =
-        1 +
-        (hejiEnabled && centsLabel ? 1 : 0) +
-        (octaveLabel ? 1 : 0) +
-        (ratioCentsLabel ? 1 : 0) +
-        (hzText ? 1 : 0);
-      const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
-      const rawLabelPos = getExportDetailLabelPosition(node, pos, radius, labelWidth, labelHeight);
-      const labelX = rawLabelPos.x - left;
-      const labelY = rawLabelPos.y - top;
-      parts.push(
-        await buildHejiSvgInline({
-          x: labelX,
-          y: labelY + svgNoteBaselineOffset,
-          baseText: annotation.baseText,
-          suffixParts: annotation.suffixParts,
-          restText: hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "",
-          font: layoutNoteFont,
-          size: detailSize,
-          align: "left",
-          baseline: "alphabetic",
-          hejiYOffset: svgDetailHejiYOffset,
-          restGapScale,
-          restHejiAccidentals: hejiEnabled && hasParen,
-          fontWeight: layoutNoteFontWeight,
-          color: textColorSecondary,
-        })
-      );
-      let detailLine = 1;
-      if (hejiEnabled && centsLabel) {
-        parts.push(
-          await buildSvgTextWithSmallCent({
-            text: centsLabel,
-            x: labelX,
-            y: labelY + detailSize + 4 + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            align: "left",
-            baseline: "alphabetic",
-            hejiAccidentals: hejiEnabled,
-            hejiYOffset: svgDetailHejiYOffset,
-            color: textColorSecondary,
-          })
-        );
-        detailLine += 1;
-      }
-      if (octaveLabel) {
-        parts.push(
-          await buildSvgTextElement({
-            text: octaveLabel,
-            x: labelX,
-            y: labelY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            anchor: "start",
-            baseline: "alphabetic",
-            color: textColorSecondary,
-          })
-        );
-        detailLine += 1;
-      }
-      if (ratioCentsLabel) {
-        parts.push(
-          await buildSvgTextElement({
-            text: ratioCentsLabel,
-            x: labelX,
-            y: labelY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            anchor: "start",
-            baseline: "alphabetic",
-            color: textColorSecondary,
-          })
-        );
-        detailLine += 1;
-      }
-      if (hzText) {
-        parts.push(
-          await buildSvgTextElement({
-            text: hzText,
-            x: labelX,
-            y: labelY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            anchor: "start",
-            baseline: "alphabetic",
-            color: textColorSecondary,
-          })
-        );
-      }
     }
+    await emitScene(scene);
   }
 
   parts.push("</svg>");
@@ -27792,28 +27132,7 @@ async function exportLayoutSvg() {
   const exportFontCss = OUTLINE_SVG_TEXT
     ? null
     : await getExportFontCss(hejiFontDataUrl || hejiFontUrl);
-  const svgDetailHejiYOffset = await getSvgHejiYOffset(
-    layoutNoteTextSize,
-    layoutNoteFont,
-    layoutNoteFontWeight
-  );
-  const svgLabelHejiYOffset = await getSvgHejiYOffset(
-    layoutRatioTextSize,
-    layoutRatioFont,
-    layoutRatioFontWeight
-  );
-  const svgNoteBaselineOffset = getSvgTopBaselineOffset(
-    layoutNoteTextSize,
-    layoutNoteFont,
-    layoutNoteFontWeight
-  );
-  const svg = await buildLayoutSvgString(
-    hejiFontDataUrl || hejiFontUrl,
-    svgDetailHejiYOffset,
-    exportFontCss,
-    svgNoteBaselineOffset,
-    svgLabelHejiYOffset
-  );
+  const svg = await buildLayoutSvgString({ fontCss: exportFontCss });
   if (!svg) {
     alert("Enable Page Layout mode to export SVG.");
     return;
@@ -27853,28 +27172,7 @@ async function exportLayoutPdf() {
   const exportFontCss = OUTLINE_SVG_TEXT
     ? null
     : await getExportFontCss(hejiFontSrc);
-  const svgDetailHejiYOffset = await getSvgHejiYOffset(
-    layoutNoteTextSize,
-    layoutNoteFont,
-    layoutNoteFontWeight
-  );
-  const svgLabelHejiYOffset = await getSvgHejiYOffset(
-    layoutRatioTextSize,
-    layoutRatioFont,
-    layoutRatioFontWeight
-  );
-  const svgNoteBaselineOffset = getSvgTopBaselineOffset(
-    layoutNoteTextSize,
-    layoutNoteFont,
-    layoutNoteFontWeight
-  );
-  const svg = await buildLayoutSvgString(
-    hejiFontSrc,
-    svgDetailHejiYOffset,
-    exportFontCss,
-    svgNoteBaselineOffset,
-    svgLabelHejiYOffset
-  );
+  const svg = await buildLayoutSvgString({ fontCss: exportFontCss });
   if (!svg) {
     alert("Enable Page Layout mode to export PDF.");
     win.close();

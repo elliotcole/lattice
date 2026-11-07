@@ -1,4 +1,6 @@
 // SVG emitter for the display list (see display-list.js).
+
+import { nodeShapePoints } from "./display-list.js";
 //
 // The canvas is the reference rendering: SVG text is outlined glyphs placed
 // with the canvas's own metrics, so an export matches what's on screen.
@@ -43,6 +45,9 @@ export async function emitDisplayListSvg(list, { measure, outline }) {
             item.dash && item.dash.length ? ` stroke-dasharray="${item.dash.join(" ")}"` : ""
           }${opacityAttr(item)} />`,
         );
+        break;
+      case "nodeShape":
+        parts.push(emitNodeShape(item));
         break;
       case "polygon":
         parts.push(
@@ -110,6 +115,26 @@ export async function emitText(item, { measure, outline }) {
     }
   }
   return out;
+}
+
+function emitNodeShape(item) {
+  const isTransparent = !item.fill || item.fill === "transparent" || item.fill === "none";
+  let fill = 'fill="none"';
+  if (!isTransparent) {
+    const normalized = normalizeSvgColor(item.fill);
+    const opacity = (normalized.opacity ?? 1) * (item.fillAlpha ?? 1);
+    fill = `fill="${normalized.color}"${
+      opacity !== 1 ? ` fill-opacity="${Number(opacity.toFixed(3))}"` : ""
+    }`;
+  }
+  const paint = `${fill} ${svgColorAttr("stroke", item.stroke)} stroke-width="${item.width}"${
+    item.dash && item.dash.length ? ` stroke-dasharray="${item.dash.join(" ")}"` : ""
+  }${opacityAttr(item)}`;
+  const points = nodeShapePoints(item.shape, item.x, item.y, item.radius);
+  if (!points) {
+    return `<circle cx="${item.x}" cy="${item.y}" r="${item.radius}" ${paint} />`;
+  }
+  return `<polygon points="${points.map(([x, y]) => `${x},${y}`).join(" ")}" ${paint} />`;
 }
 
 function opacityAttr(item) {

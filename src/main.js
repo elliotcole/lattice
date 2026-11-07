@@ -599,8 +599,23 @@ const store = createStore({
   enharmonicsEnabled: true,
   centsPrecision: 0,
   hzPrecision: 2,
+  // Tuning: the fundamental and A4 (Hz) used to live only in their inputs.
+  // They hold Number(input text), so `doc.fundamental || 220` matches the old
+  // `Number(fundamentalInput.value) || 220` exactly.
+  fundamental: Number(fundamentalInput && fundamentalInput.value),
+  a4: Number(a4Input && a4Input.value),
+  fundamentalSpelling: "sharp",
+  featureMode: "note",
+  spellingMode: "true",
 });
 const doc = store.doc;
+// Changes made while main.js is still starting up, before the reactions can
+// run (they touch controls and state declared further down); replayed once
+// bindDocumentReactions() is called.
+const docKeysChangedBeforeReactions = new Set();
+const stopCollectingEarlyDocChanges = store.subscribe((changed) => {
+  changed.forEach((key) => docKeysChangedBeforeReactions.add(key));
+});
 // Quasimode letters currently held (see HELD_KEYS in src/input/keyboard.js).
 const heldKeys = createHeldKeys();
 // The editor's single keyboard pipeline: bindings are added in precedence
@@ -1412,7 +1427,7 @@ const voiceBackends = createVoiceBackends({
   soundfontWaveform: SOUNDFONT_WAVEFORM,
   soundfont: () => ({ data: soundfontData, preset: soundfontPreset }),
   startPresetNote,
-  referenceA4: () => Number(a4Input.value) || 440,
+  referenceA4: () => doc.a4 || 440,
   isWavetable: (type) => CUSTOM_WAVEFORMS.has(type),
   wavetables: () => customOscillators,
   ensureWavetables: () => ensureCustomOscillators(),
@@ -1891,10 +1906,7 @@ const LAYOUT_UNDO_LIMIT = 50;
 let layoutWheelUndoTimer = null;
 const LAYOUT_CUSTOM_TEXT_DEFAULT_WIDTH = 260;
 const LAYOUT_CUSTOM_TEXT_MIN_WIDTH = 120;
-let spellingMode = "true";
 let spellingHintActive = false;
-let fundamentalSpelling = "sharp";
-let featureMode = "note";
 let enharmonicsEnabledPreference = true;
 let showCircles = true;
 let show3DShading = true;
@@ -2056,7 +2068,7 @@ function syncSpellingModeControls() {
     return;
   }
   spellingModeButtons.forEach((button) => {
-    const isActive = button.dataset.spellingMode === spellingMode;
+    const isActive = button.dataset.spellingMode === doc.spellingMode;
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
@@ -2067,7 +2079,7 @@ function syncFeatureModeControls() {
     return;
   }
   featureModeButtons.forEach((button) => {
-    const isActive = button.dataset.featureMode === featureMode;
+    const isActive = button.dataset.featureMode === doc.featureMode;
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
@@ -4161,11 +4173,8 @@ function startTour(stepsSource, label) {
   // Reset the lattice and set beginner-friendly defaults so the tour starts
   // from a clean, familiar state.
   resetLattice();
-  featureMode = "note";
-  syncFeatureModeControls();
-  spellingMode = "true";
-  syncSpellingModeControls();
-  syncHejiButtons();
+  store.set({ featureMode: "note" });
+  store.set({ spellingMode: "true" });
   applyLabelDisplayToggleChange({ refreshCustom: true });
 
   tourLabel = label || (source === deepTourSteps ? "Deep tour" : "Quick tour");
@@ -5801,13 +5810,13 @@ function getCustomNodeDisplayInfo(node) {
   if (!Number.isFinite(freq)) {
     return null;
   }
-  const a4 = Number(a4Input.value) || 440;
+  const a4 = doc.a4 || 440;
   const nearest = getNearestEtInfo(freq, a4);
   const preferredNames = getNoteNamesForNode(node);
   const nearestPitchClass = preferredNames[nearest.midi % 12];
   const nearestName = `${nearestPitchClass}${Math.floor(nearest.midi / 12) - 1}`;
   const nearestCents = Number.isFinite(node.cents_from_et) ? node.cents_from_et : nearest.cents;
-  if (spellingMode === "true" || doc.hejiEnabled) {
+  if (doc.spellingMode === "true" || doc.hejiEnabled) {
     const analysis = analyzeRatioForTrueSpelling(node.derivedNumerator || node.numerator, node.derivedDenominator || node.denominator);
     if (analysis) {
       const info = buildTrueSpellingFromAxisRatios({
@@ -5830,7 +5839,7 @@ function getCustomNodeDisplayInfo(node) {
   }
   const targetPc = nearest.midi % 12;
   const pitchClass =
-    spellingMode === "simple"
+    doc.spellingMode === "simple"
       ? getManualSpellingForNode(node, targetPc)
       : nearestPitchClass;
   return {
@@ -5841,8 +5850,8 @@ function getCustomNodeDisplayInfo(node) {
 }
 
 function refreshCustomNodes() {
-  const fundamental = Number(fundamentalInput.value) || 220;
-  const a4 = Number(a4Input.value) || 440;
+  const fundamental = doc.fundamental || 220;
+  const a4 = doc.a4 || 440;
   customNodes.forEach((customNode) => {
     const source = nodeById.get(customNode.sourceNodeId);
     if (!source) {
@@ -6424,8 +6433,8 @@ function buildLattice() {
   const rows = GRID_ROWS;
   const spacing = GRID_SPACING;
   let id = 0;
-  const fundamental = Number(fundamentalInput.value) || 220;
-  const a4 = Number(a4Input.value) || 440;
+  const fundamental = doc.fundamental || 220;
+  const a4 = doc.a4 || 440;
   const ratioX = Number(ratioXSelect.value) || 3;
   const ratioY = Number(ratioYSelect.value) || 5;
   const ratioZ = Number(ratioZSelect.value) || 7;
@@ -6488,8 +6497,8 @@ function buildLattice() {
 }
 
 function updateNodeFrequencies() {
-  const fundamental = Number(fundamentalInput.value) || 220;
-  const a4 = Number(a4Input.value) || 440;
+  const fundamental = doc.fundamental || 220;
+  const a4 = doc.a4 || 440;
   nodes.forEach((node) => {
     const ratio = node.numerator / node.denominator;
     node.freq = fundamental * ratio;
@@ -6507,13 +6516,13 @@ function updateNodeFrequencies() {
 }
 
 function updateNodeRatios() {
-  if (spellingMode === "true") {
+  if (doc.spellingMode === "true") {
     const activeKeys = captureActiveNodeKeys();
     rebuildLattice(activeKeys);
     return;
   }
-  const fundamental = Number(fundamentalInput.value) || 220;
-  const a4 = Number(a4Input.value) || 440;
+  const fundamental = doc.fundamental || 220;
+  const a4 = doc.a4 || 440;
   const ratioX = Number(ratioXSelect.value) || 3;
   const ratioY = Number(ratioYSelect.value) || 5;
   const ratioZ = Number(ratioZSelect.value) || 7;
@@ -6549,8 +6558,8 @@ function updateNodeRatios() {
 }
 
 function recomputeNodeRatiosFromExponents() {
-  const fundamental = Number(fundamentalInput.value) || 220;
-  const a4 = Number(a4Input.value) || 440;
+  const fundamental = doc.fundamental || 220;
+  const a4 = doc.a4 || 440;
   const ratioX = Number(ratioXSelect.value) || 3;
   const ratioY = Number(ratioYSelect.value) || 5;
   const ratioZ = Number(ratioZSelect.value) || 7;
@@ -6637,7 +6646,7 @@ function rebaseLatticeFromNode(node) {
 }
 
 function updateVoiceFrequencies() {
-  const fundamental = Number(fundamentalInput.value) || 220;
+  const fundamental = doc.fundamental || 220;
   voices.forEach((voice) => {
     const node = nodes.find((item) => item.id === voice.nodeId);
     if (!node || !voice.oscillator) {
@@ -6734,7 +6743,7 @@ function findNodeByGrid(gridX, gridY) {
 }
 
 function updatePitchInstances() {
-  const fundamental = Number(fundamentalInput.value) || 220;
+  const fundamental = doc.fundamental || 220;
   pitchInstances = [];
 
   nodes.forEach((node) => {
@@ -7613,7 +7622,7 @@ function handleKeyDown(event) {
     return;
   }
 
-  const a4 = Number(a4Input.value) || 440;
+  const a4 = doc.a4 || 440;
   let voice = null;
 
   if (mode === "piano") {
@@ -7843,7 +7852,7 @@ function midiToNoteName(midi) {
 }
 
 function getFundamentalNoteNames() {
-  return fundamentalSpelling === "flat" ? noteNamesFlat : noteNamesSharp;
+  return doc.fundamentalSpelling === "flat" ? noteNamesFlat : noteNamesSharp;
 }
 
 function midiToFundamentalNoteName(midi) {
@@ -7853,7 +7862,7 @@ function midiToFundamentalNoteName(midi) {
 
 function getFundamentalSpellingFromPitchClass(pitchClass) {
   if (typeof pitchClass !== "string") {
-    return fundamentalSpelling;
+    return doc.fundamentalSpelling;
   }
   if (pitchClass.includes("b")) {
     return "flat";
@@ -7861,7 +7870,7 @@ function getFundamentalSpellingFromPitchClass(pitchClass) {
   if (pitchClass.includes("#") || pitchClass.includes("x")) {
     return "sharp";
   }
-  return fundamentalSpelling;
+  return doc.fundamentalSpelling;
 }
 
 function getEnharmonicOptions(midi) {
@@ -7920,7 +7929,7 @@ function populateFundamentalNotes() {
 }
 
 function updateFundamentalNotes() {
-  const a4 = Number(a4Input.value) || 440;
+  const a4 = doc.a4 || 440;
   const selectedValue = fundamentalNoteSelect.value || "";
   Array.from(fundamentalNoteSelect.options).forEach((option) => {
     const midi = Number(option.value);
@@ -7936,11 +7945,11 @@ function updateFundamentalNotes() {
 }
 
 function syncFundamentalNoteSelect() {
-  const freq = Number(fundamentalInput.value);
+  const freq = doc.fundamental;
   if (!Number.isFinite(freq) || freq <= 0) {
     return;
   }
-  const a4 = Number(a4Input.value) || 440;
+  const a4 = doc.a4 || 440;
   const { midi } = getNearestEtInfo(freq, a4);
   const target = midiToFrequency(midi, a4);
   if (Math.abs(target - freq) <= 0.01) {
@@ -7954,14 +7963,14 @@ function adjustFundamentalByFactor(factor) {
   if (!fundamentalInput) {
     return;
   }
-  const current = Number(fundamentalInput.value);
+  const current = doc.fundamental;
   if (!Number.isFinite(current) || current <= 0) {
     return;
   }
   const min = Number(fundamentalInput.min) || 0;
   const max = Number(fundamentalInput.max) || Infinity;
   const next = Math.min(max, Math.max(min, current * factor));
-  fundamentalInput.value = String(next);
+  store.set({ fundamental: next });
   syncFundamentalNoteSelect();
   updateNodeFrequencies();
 }
@@ -8122,11 +8131,11 @@ function onFundamentalNoteChange() {
     return;
   }
   const midi = Number(fundamentalNoteSelect.value);
-  const a4 = Number(a4Input.value) || 440;
+  const a4 = doc.a4 || 440;
   const freq = midiToFrequency(midi, a4);
-  fundamentalInput.value = String(freq);
+  store.set({ fundamental: freq });
   updateNodeFrequencies();
-  if (spellingMode === "true") {
+  if (doc.spellingMode === "true") {
     showFundamentalSpellingDialog(midi);
   } else {
     hideFundamentalSpellingDialog();
@@ -8354,9 +8363,9 @@ function getLayoutNodeShape(node) {
 
 function getNodeNoteLabel(node) {
   const info = getCachedDisplayInfo(node);
-  const noteText = featureMode === "ratio" ? info.pitchClass : info.name;
+  const noteText = doc.featureMode === "ratio" ? info.pitchClass : info.name;
   const wrap = doc.enharmonicsEnabled;
-  const requireHejiDetail = featureMode === "ratio";
+  const requireHejiDetail = doc.featureMode === "ratio";
   const centsText = getCachedCentsReadout(
     node,
     {
@@ -8636,16 +8645,16 @@ function computeStackedRatioPositionsFromLine(
 
 function getLabelCacheKey() {
   return [
-    featureMode,
+    doc.featureMode,
     doc.hejiEnabled ? "heji" : "no-heji",
     doc.enharmonicsEnabled ? "enharmonics" : "no-enharmonics",
-    spellingMode,
+    doc.spellingMode,
     doc.centsPrecision,
     doc.hzPrecision,
     doc.showCentsSign ? "cents" : "no-cents",
     doc.showHz ? "hz" : "no-hz",
     doc.showRatioCents ? "ratio-cents" : "no-ratio-cents",
-    fundamentalSpelling,
+    doc.fundamentalSpelling,
   ].join("|");
 }
 
@@ -9097,7 +9106,7 @@ function getNearestNoteInfo(node) {
   if (!node) {
     return { name: "", pitchClass: "", cents: 0 };
   }
-  const a4 = Number(a4Input.value) || 440;
+  const a4 = doc.a4 || 440;
   const freq = Number(node.freq);
   const nearest = getNearestEtInfo(freq, a4);
   const preferredNames = getNoteNamesForNode(node);
@@ -9150,7 +9159,7 @@ function buildCentsReadout(
       nearest.pitchClass
     );
     const freq = Number(node && node.freq);
-    const a4 = Number(a4Input.value) || 440;
+    const a4 = doc.a4 || 440;
     const fallbackCents = preferredFallback
       ? getCentsForPitchClass(freq, a4, preferredFallback)
       : nearest.cents;
@@ -9198,16 +9207,16 @@ function getDisplayNoteInfo(node) {
     }
   }
   if (
-    spellingMode === "true" &&
+    doc.spellingMode === "true" &&
     !node.isCustom &&
     Number.isFinite(node.numerator) &&
     Number.isFinite(node.denominator) &&
     node.numerator === node.denominator
   ) {
-    const a4 = Number(a4Input.value) || 440;
+    const a4 = doc.a4 || 440;
     let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
     if (!Number.isFinite(fundamentalMidi)) {
-      const fallback = getNearestEtInfo(Number(fundamentalInput.value) || 220, a4);
+      const fallback = getNearestEtInfo(doc.fundamental || 220, a4);
       fundamentalMidi = fallback.midi;
     }
     const targetPc = mod(fundamentalMidi, 12);
@@ -9216,20 +9225,20 @@ function getDisplayNoteInfo(node) {
     const cents = getCentsForPitchClass(Number(node.freq), a4, pitchClass);
     return { name, pitchClass, cents };
   }
-  const a4 = Number(a4Input.value) || 440;
+  const a4 = doc.a4 || 440;
   const freq = Number(node.freq);
   const nearest = getNearestEtInfo(freq, a4);
   const preferredNames = getNoteNamesForNode(node);
   const nearestPitchClass = preferredNames[nearest.midi % 12];
   const nearestName = `${nearestPitchClass}${Math.floor(nearest.midi / 12) - 1}`;
   const nearestCents = Number.isFinite(node.cents_from_et) ? node.cents_from_et : nearest.cents;
-  if (spellingMode === "true") {
+  if (doc.spellingMode === "true") {
     return getTrueSpellingPitchClass(node);
   }
   if (!doc.hejiEnabled) {
     const targetPc = nearest.midi % 12;
     const pitchClass =
-      spellingMode === "simple"
+      doc.spellingMode === "simple"
         ? getManualSpellingForNode(node, targetPc)
         : nearestPitchClass;
     return {
@@ -9240,7 +9249,7 @@ function getDisplayNoteInfo(node) {
   }
   let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
   if (!Number.isFinite(fundamentalMidi)) {
-    const fallback = getNearestEtInfo(Number(fundamentalInput.value) || 220, a4);
+    const fallback = getNearestEtInfo(doc.fundamental || 220, a4);
     fundamentalMidi = fallback.midi;
   }
   const basePc = ((fundamentalMidi % 12) + 12) % 12;
@@ -9305,7 +9314,7 @@ function getDisplayNoteInfo(node) {
   if (!hasOffsetAxis) {
     const targetPc = nearest.midi % 12;
     const pitchClass =
-      spellingMode === "simple"
+      doc.spellingMode === "simple"
         ? getManualSpellingForNode(node, targetPc)
         : getFundamentalNoteNames()[mod(targetPc, 12)];
     const name = `${pitchClass}${Math.floor(nearest.midi / 12) - 1}`;
@@ -9320,7 +9329,7 @@ function getDisplayNoteInfo(node) {
   const cents = 1200 * Math.log2(freq / etFreq);
   const basePitchClass = preferredNames[targetPc];
   const pitchClass =
-    spellingMode === "simple"
+    doc.spellingMode === "simple"
       ? getManualSpellingForNode(node, targetPc)
       : basePitchClass;
   const name = `${pitchClass}${Math.floor(midi / 12) - 1}`;
@@ -10485,8 +10494,8 @@ function buildTrueSpellingFromAxisRatios({
   let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
   if (!Number.isFinite(fundamentalMidi)) {
     const fallback = getNearestEtInfo(
-      Number(fundamentalInput.value) || 220,
-      Number(a4Input.value) || 440
+      doc.fundamental || 220,
+      doc.a4 || 440
     );
     fundamentalMidi = fallback.midi;
   }
@@ -10504,13 +10513,13 @@ function buildTrueSpellingFromAxisRatios({
     LETTER_TO_SEMITONE[LETTERS[targetLetterIndex]] + accidental,
     12
   );
-  const midiFloat = 69 + 12 * Math.log2(freq / (Number(a4Input.value) || 440));
+  const midiFloat = 69 + 12 * Math.log2(freq / (doc.a4 || 440));
   const midiBase = Math.round((midiFloat - targetPc) / 12);
   const midi = targetPc + 12 * midiBase;
   const etFreq =
-    (Number(a4Input.value) || 440) * Math.pow(2, (midi - 69) / 12);
+    (doc.a4 || 440) * Math.pow(2, (midi - 69) / 12);
   const cents = 1200 * Math.log2(freq / etFreq);
-  if (spellingMode === "simple") {
+  if (doc.spellingMode === "simple") {
     return {
       name: `${getManualSpellingForNode(node, targetPc)}${Math.floor(midi / 12) - 1}`,
       pitchClass: getManualSpellingForNode(node, targetPc),
@@ -10523,7 +10532,7 @@ function buildTrueSpellingFromAxisRatios({
 
 
 function getTrueSpellingPitchClass(node) {
-  const a4 = Number(a4Input.value) || 440;
+  const a4 = doc.a4 || 440;
   const freq = Number(node.freq);
   const nearest = getNearestEtInfo(freq, a4);
   const nearestPitchClass = noteNames[nearest.midi % 12];
@@ -13821,7 +13830,7 @@ function buildNodeInnerLabelScene(node, pos, radius, state) {
   const labelWeight = layoutMode ? layoutRatioFontWeight : 400;
   const color = state.textColorPrimary;
   const ref = { type: "nodeLabel", id: node.id };
-  if (featureMode === "note") {
+  if (doc.featureMode === "note") {
     let baseText;
     let suffixParts;
     if (doc.hejiEnabled && nodeHasHighPrime(node)) {
@@ -13970,7 +13979,7 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
   };
   const result = () => ({ scene });
 
-  if (featureMode === "note") {
+  if (doc.featureMode === "note") {
     const measure = (text) =>
       measureTextWidthWithWeight(text, detailSize, noteLabelFont, noteLabelWeight);
     const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
@@ -14032,7 +14041,7 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
     displayInfo
   );
   const hasParen = centsLabel && centsLabel.includes("(");
-  const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
+  const baseLabel = doc.featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
   const annotation = getCachedHejiAnnotation(node, baseLabel || node.note_name);
   const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
   const suffixText = annotation.suffixParts
@@ -15165,7 +15174,7 @@ function handleMidiMessage(event) {
   if (command === 0x90 && data2 > 0) {
     if (useCustomMap) {
       const pc = ((data1 % 12) + 12) % 12;
-      const targetFreq = midiToFrequency(data1, Number(a4Input.value) || 440);
+      const targetFreq = midiToFrequency(data1, doc.a4 || 440);
       const nearest = findNearestPitchInstance(targetFreq);
       const octaveOffset = nearest
         ? nearest.octave
@@ -15176,7 +15185,7 @@ function handleMidiMessage(event) {
         draw();
       }
     } else {
-      const targetFreq = midiToFrequency(data1, Number(a4Input.value) || 440);
+      const targetFreq = midiToFrequency(data1, doc.a4 || 440);
       const instance = findNearestPitchInstance(targetFreq);
       if (!instance) {
         return;
@@ -15290,7 +15299,7 @@ function updateMidiOutVoicePitch(voice) {
   if (!Number.isFinite(freq) || freq <= 0) {
     return;
   }
-  const a4 = Number(a4Input.value) || 440;
+  const a4 = doc.a4 || 440;
   const midiFloat = 69 + 12 * Math.log2(freq / a4);
   const delta = midiFloat - entry.note;
   const bend = 8192 + (delta / midiOutBendRange) * 8192;
@@ -15327,7 +15336,7 @@ function sendMidiOutNoteOn(voice) {
     releaseMidiOutChannel(channel);
     return;
   }
-  const a4 = Number(a4Input.value) || 440;
+  const a4 = doc.a4 || 440;
   const midiFloat = 69 + 12 * Math.log2(freq / a4);
   const baseMidi = Math.min(127, Math.max(0, Math.round(midiFloat)));
   const delta = midiFloat - baseMidi;
@@ -15582,8 +15591,8 @@ function onPointerDown(event) {
 
   if (heldKeys.has("r") && hit) {
     const isOneToOne = hit.isCenter || (!hit.isCustom && hit.numerator === hit.denominator);
-    if (isOneToOne && spellingMode !== "simple") {
-      const a4 = Number(a4Input.value) || 440;
+    if (isOneToOne && doc.spellingMode !== "simple") {
+      const a4 = doc.a4 || 440;
       const nearest = getNearestEtInfo(Number(hit.freq), a4);
       const targetPc = nearest.midi % 12;
       const options = getManualSpellingOptions(targetPc);
@@ -15599,9 +15608,9 @@ function onPointerDown(event) {
           currentIndex = 0;
         }
         const nextOption = allowed[(currentIndex + 1) % allowed.length];
-        fundamentalSpelling = nextOption.pitchClass.includes("b") ? "flat" : "sharp";
+        store.set({ fundamentalSpelling: nextOption.pitchClass.includes("b") ? "flat" : "sharp" });
         updateFundamentalNotes();
-        if (spellingMode === "simple") {
+        if (doc.spellingMode === "simple") {
           nodeSpellingOverrides.clear();
         }
         invalidateLabelCache();
@@ -15611,8 +15620,8 @@ function onPointerDown(event) {
       suppressClickAfterRespell = true;
       return;
     }
-    if (spellingMode === "simple") {
-      const a4 = Number(a4Input.value) || 440;
+    if (doc.spellingMode === "simple") {
+      const a4 = doc.a4 || 440;
       const nearest = getNearestEtInfo(Number(hit.freq), a4);
       let targetPc = nearest.midi % 12;
       if (doc.hejiEnabled) {
@@ -15640,7 +15649,7 @@ function onPointerDown(event) {
         if (hasOffsetAxis) {
           let fundamentalMidi = Number(fundamentalNoteSelect && fundamentalNoteSelect.value);
           if (!Number.isFinite(fundamentalMidi)) {
-            const fallback = getNearestEtInfo(Number(fundamentalInput.value) || 220, a4);
+            const fallback = getNearestEtInfo(doc.fundamental || 220, a4);
             fundamentalMidi = fallback.midi;
           }
           const basePc = ((fundamentalMidi % 12) + 12) % 12;
@@ -16749,12 +16758,12 @@ function onPointerUp(event) {
       if (Number.isFinite(freq)) {
         const displayInfo = getDisplayNoteInfo(hit);
         if (displayInfo && displayInfo.pitchClass) {
-          fundamentalSpelling = getFundamentalSpellingFromPitchClass(displayInfo.pitchClass);
+          store.set({ fundamentalSpelling: getFundamentalSpellingFromPitchClass(displayInfo.pitchClass) });
         }
-        fundamentalInput.value = String(freq);
+        store.set({ fundamental: freq });
         fundamentalNoteSelect.value = FUNDAMENTAL_CUSTOM_VALUE;
         updateFundamentalNotes();
-        if (spellingMode === "simple") {
+        if (doc.spellingMode === "simple") {
           nodeSpellingOverrides.clear();
           invalidateLabelCache();
         }
@@ -19379,8 +19388,8 @@ function drawRatioWheel(canvasEl, options = {}) {
     ctx2d.textAlign = "center";
     ctx2d.textBaseline = "middle";
 
-    const fundamental = Number(fundamentalInput.value) || 220;
-    const a4 = Number(a4Input.value) || 440;
+    const fundamental = doc.fundamental || 220;
+    const a4 = doc.a4 || 440;
 
     angles.forEach((item) => {
       const noteInfo = getNearestEtInfo(fundamental * item.ratio, a4);
@@ -19568,7 +19577,7 @@ function getUiHintKey() {
     return "layout";
   }
   if (spellingHintActive) {
-    return spellingMode === "true" ? "spelling-true" : "spelling-simple";
+    return doc.spellingMode === "true" ? "spelling-true" : "spelling-simple";
   }
   if (!is3DMode) {
     return "mode-2d";
@@ -19729,7 +19738,7 @@ function updateUiHint() {
   }
   if (spellingHintActive) {
     setUiHintContent(
-      spellingMode === "true"
+      doc.spellingMode === "true"
         ? "Diatonic spellings up to 3 sharps / flats, after which nearest enharmonic equivalents are used. \nHold R and click 1:1 to re-spell the fundamental."
         : "Manual spelling: hold R and click on a node to cycle."
     );
@@ -23004,7 +23013,7 @@ function getIntervalChartBaseFrequency() {
       return freq;
     }
   }
-  return Number(fundamentalInput.value) || 220;
+  return doc.fundamental || 220;
 }
 
 function syncIntervalChartCustomState() {
@@ -23792,11 +23801,11 @@ function buildPresetStateSkeleton(active, customState, lineLabelState, distanceS
     nodeVolumes: serializePresetNodeVolumes(),
     triangles: getPresetTrianglesState(),
     triangleLabels: getPresetTriangleLabelsState(),
-    fundamental: Number(fundamentalInput.value) || 220,
-    a4: Number(a4Input.value) || 440,
-    fundamentalSpelling,
-    featureMode,
-    spellingMode,
+    fundamental: doc.fundamental || 220,
+    a4: doc.a4 || 440,
+    fundamentalSpelling: doc.fundamentalSpelling,
+    featureMode: doc.featureMode,
+    spellingMode: doc.spellingMode,
     showHz: doc.showHz,
     showRatioCents: doc.showRatioCents,
     showCentsDeviation: doc.showCentsDeviation,
@@ -24272,13 +24281,10 @@ function applyPresetSpellingAndOctaveState(state) {
 
 function applyPresetReadoutAndTuningSettings(state) {
   if (typeof state.featureMode === "string") {
-    featureMode = state.featureMode === "note" ? "note" : "ratio";
-    syncFeatureModeControls();
+    store.set({ featureMode: state.featureMode === "note" ? "note" : "ratio" });
   }
   if (typeof state.spellingMode === "string") {
-    spellingMode = state.spellingMode === "true" ? "true" : "simple";
-    syncSpellingModeControls();
-    syncHejiButtons();
+    store.set({ spellingMode: state.spellingMode === "true" ? "true" : "simple" });
   }
   applyPresetBooleanField(
     state,
@@ -25225,13 +25231,13 @@ function initializePresetApplyContext(state, options = {}) {
 
 function applyPresetCoreTuningState(state) {
   if (Number.isFinite(state.fundamental)) {
-    fundamentalInput.value = String(state.fundamental);
+    store.set({ fundamental: state.fundamental });
   }
   if (Number.isFinite(state.a4)) {
-    a4Input.value = String(state.a4);
+    store.set({ a4: state.a4 });
   }
   if (typeof state.fundamentalSpelling === "string") {
-    fundamentalSpelling = state.fundamentalSpelling === "flat" ? "flat" : "sharp";
+    store.set({ fundamentalSpelling: state.fundamentalSpelling === "flat" ? "flat" : "sharp" });
   }
   if (Array.isArray(state.ratios)) {
     const [x, y, z] = state.ratios;
@@ -25558,8 +25564,8 @@ function openOvertonesFromMenu() {
 
 function openTunerFromFileMenu() {
   const params = new URLSearchParams();
-  const fundamental = Number(fundamentalInput && fundamentalInput.value);
-  const a4 = Number(a4Input && a4Input.value);
+  const fundamental = doc.fundamental;
+  const a4 = doc.a4;
   if (Number.isFinite(fundamental) && fundamental > 0) {
     params.set("fundamental", String(fundamental));
   }
@@ -27112,6 +27118,9 @@ const LABEL_DOC_KEYS = new Set([
   "enharmonicsEnabled",
   "centsPrecision",
   "hzPrecision",
+  "fundamentalSpelling",
+  "featureMode",
+  "spellingMode",
 ]);
 
 function bindDocumentReactions() {
@@ -27124,7 +27133,7 @@ function bindDocumentReactions() {
     directionalRatioLabels: [directionalRatioLabelsToggle],
     enharmonicsEnabled: [enharmonicsEnabledToggle, layoutEnharmonicsEnabledToggle],
   };
-  store.subscribe((changed) => {
+  const react = (changed) => {
     let labelsChanged = false;
     for (const key of changed) {
       if (LABEL_DOC_KEYS.has(key)) {
@@ -27132,8 +27141,22 @@ function bindDocumentReactions() {
       }
       (mirroredToggles[key] || []).forEach((toggle) => setControlChecked(toggle, doc[key]));
     }
-    if (changed.has("hejiEnabled")) {
+    if (changed.has("hejiEnabled") || changed.has("spellingMode")) {
       syncHejiButtons();
+    }
+    if (changed.has("spellingMode")) {
+      syncSpellingModeControls();
+    }
+    if (changed.has("featureMode")) {
+      syncFeatureModeControls();
+    }
+    // A number input shows the document value unless its text already parses
+    // to it (so "220." being typed isn't rewritten as "220").
+    if (changed.has("fundamental") && !Object.is(Number(fundamentalInput.value), doc.fundamental)) {
+      fundamentalInput.value = String(doc.fundamental);
+    }
+    if (changed.has("a4") && !Object.is(Number(a4Input.value), doc.a4)) {
+      a4Input.value = String(doc.a4);
     }
     if (changed.has("centsPrecision")) {
       syncCentsPrecisionControls();
@@ -27146,7 +27169,12 @@ function bindDocumentReactions() {
     }
     scheduleDraw();
     schedulePresetUrlUpdate();
-  });
+  };
+  stopCollectingEarlyDocChanges();
+  store.subscribe(react);
+  if (docKeysChangedBeforeReactions.size) {
+    react(docKeysChangedBeforeReactions);
+  }
 }
 
 function applyPresetStateSafely(state, sourceLabel) {
@@ -27922,9 +27950,7 @@ if (featureModeButtons.length) {
       if (!nextMode) {
         return;
       }
-      featureMode = nextMode === "note" ? "note" : "ratio";
-      syncFeatureModeControls();
-      applyLabelDisplayToggleChange();
+      store.set({ featureMode: nextMode === "note" ? "note" : "ratio" });
     });
   });
 }
@@ -27935,10 +27961,8 @@ if (spellingModeButtons.length) {
       if (!nextMode) {
         return;
       }
-      spellingMode = nextMode === "true" ? "true" : "simple";
+      store.set({ spellingMode: nextMode === "true" ? "true" : "simple" });
       spellingHintActive = true;
-      syncSpellingModeControls();
-      syncHejiButtons();
       updateUiHint();
       hideFundamentalSpellingDialog();
       applyLabelDisplayToggleChange({ refreshCustom: true });
@@ -27946,14 +27970,11 @@ if (spellingModeButtons.length) {
   });
 }
 function applyFundamentalSpelling(nextSpelling) {
-  if (spellingMode !== "true") {
+  if (doc.spellingMode !== "true") {
     return;
   }
-  fundamentalSpelling = nextSpelling === "flat" ? "flat" : "sharp";
-  invalidateLabelCache();
+  store.set({ fundamentalSpelling: nextSpelling === "flat" ? "flat" : "sharp" });
   updateFundamentalNotes();
-  draw();
-  schedulePresetUrlUpdate();
   hideFundamentalSpellingDialog();
 }
 
@@ -28138,7 +28159,7 @@ function syncHejiButtons() {
   if (hejiDisabledButton) hejiDisabledButton.classList.toggle("is-active", !doc.hejiEnabled);
   if (layoutHejiEnabledButton) layoutHejiEnabledButton.classList.toggle("is-active", doc.hejiEnabled);
   if (layoutHejiDisabledButton) layoutHejiDisabledButton.classList.toggle("is-active", !doc.hejiEnabled);
-  const isDiatonic = spellingMode === "true";
+  const isDiatonic = doc.spellingMode === "true";
   if (hejiToggleGroup) hejiToggleGroup.style.display = isDiatonic ? "" : "none";
   if (layoutHejiToggleGroup) layoutHejiToggleGroup.style.display = isDiatonic ? "" : "none";
 }
@@ -29392,6 +29413,7 @@ bindOptionalClick(bannerMessage, (event) => {
   updateBannerMessage();
 });
 bindOptionalInput(fundamentalInput, () => {
+  store.set({ fundamental: Number(fundamentalInput.value) });
   syncFundamentalNoteSelect();
   updateNodeFrequencies();
 });
@@ -29405,11 +29427,12 @@ bindOptionalChange(ratioXSelect, updateNodeRatios);
 bindOptionalChange(ratioYSelect, updateNodeRatios);
 bindOptionalChange(ratioZSelect, updateNodeRatios);
 bindOptionalInput(a4Input, () => {
-  const a4 = Number(a4Input.value) || 440;
+  store.set({ a4: Number(a4Input.value) });
+  const a4 = doc.a4 || 440;
   if (fundamentalNoteSelect.value !== FUNDAMENTAL_CUSTOM_VALUE) {
     const selectedMidi = Number(fundamentalNoteSelect.value);
     if (Number.isFinite(selectedMidi)) {
-      fundamentalInput.value = String(midiToFrequency(selectedMidi, a4));
+      store.set({ fundamental: midiToFrequency(selectedMidi, a4) });
     }
   }
   updateFundamentalNotes();

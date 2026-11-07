@@ -13770,8 +13770,7 @@ function buildNodeShapeScene(node, pos, radius, shape, state) {
 }
 
 // The label inside a node: note name (with HEJI) or the ratio, stacked when
-// it doesn't fit. `measureFont` is the font a ratio label leaves set; the
-// canvas measured the ratio-mode detail label in it (see detail label).
+// it doesn't fit.
 function buildNodeInnerLabelScene(node, pos, radius, state) {
   const innerTextScale = layoutMode ? getLayoutInnerTextScale(radius) : 1;
   const baseLabelSize = layoutMode ? layoutRatioTextSize * innerTextScale : 21;
@@ -13821,7 +13820,7 @@ function buildNodeInnerLabelScene(node, pos, radius, state) {
     scene.forEach((item) => {
       item.ref = ref;
     });
-    return { scene, measureFont: null };
+    return scene;
   }
   const layout = computeRatioLabelLayout(
     node.numerator,
@@ -13832,7 +13831,6 @@ function buildNodeInnerLabelScene(node, pos, radius, state) {
     labelWeight,
     radius * 1.6
   );
-  const measureFont = { weight: labelWeight, size: layout.size, font: labelFont };
   const run = (props) =>
     sceneText({
       font: labelFont,
@@ -13844,10 +13842,7 @@ function buildNodeInnerLabelScene(node, pos, radius, state) {
       ...props,
     });
   if (layout.lines.length === 1) {
-    return {
-      scene: [run({ text: layout.lines[0], x: pos.x, y: pos.y, baseline: "middle" })],
-      measureFont,
-    };
+    return [run({ text: layout.lines[0], x: pos.x, y: pos.y, baseline: "middle" })];
   }
   const positions = computeStackedRatioPositionsFromLine(
     layout.lines,
@@ -13857,28 +13852,25 @@ function buildNodeInnerLabelScene(node, pos, radius, state) {
     pos.y,
     layout.lineGap
   );
-  return {
-    scene: [
-      run({ text: layout.lines[0], x: pos.x, y: positions.topBaseline, baseline: "alphabetic" }),
-      run({ text: layout.lines[1], x: pos.x, y: positions.bottomBaseline, baseline: "alphabetic" }),
-      sceneLine({
-        x1: pos.x - positions.lineWidth / 2,
-        y1: positions.lineY,
-        x2: pos.x + positions.lineWidth / 2,
-        y2: positions.lineY,
-        color,
-        width: Math.max(1, Math.round(layout.size * 0.06)),
-        ref,
-      }),
-    ],
-    measureFont,
-  };
+  return [
+    run({ text: layout.lines[0], x: pos.x, y: positions.topBaseline, baseline: "alphabetic" }),
+    run({ text: layout.lines[1], x: pos.x, y: positions.bottomBaseline, baseline: "alphabetic" }),
+    sceneLine({
+      x1: pos.x - positions.lineWidth / 2,
+      y1: positions.lineY,
+      x2: pos.x + positions.lineWidth / 2,
+      y2: positions.lineY,
+      color,
+      width: Math.max(1, Math.round(layout.size * 0.06)),
+      ref,
+    }),
+  ];
 }
 
 // The detail block beside a node: ratio / note name, cents, octave shift,
 // ratio-cents and Hz lines, placed to avoid other nodes, edges and labels
 // (pushes onto `collision`). Returns the scene and the layout hitbox.
-function buildNodeDetailLabelScene(node, pos, radius, state, collision, innerMeasureFont) {
+function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
   const scene = [];
   const ref = { type: "nodeDetail", id: node.id };
   const displayInfo = getCachedDisplayInfo(node);
@@ -13932,13 +13924,7 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision, innerMea
     }
     return { labelPos, hitbox };
   };
-  const result = (hitbox) => ({
-    scene,
-    hitbox,
-    font: noteLabelFont,
-    size: detailSize,
-    weight: noteLabelWeight,
-  });
+  const result = (hitbox) => ({ scene, hitbox });
 
   if (featureMode === "note") {
     const measure = (text) =>
@@ -13989,17 +13975,9 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision, innerMea
     return result(hitbox);
   }
 
-  // Ratio mode. Widths are measured in the inner label's font, as the canvas
-  // always has (a known quirk; fixing it moves labels, so it's its own change).
+  // Ratio mode.
   const measure = (text) =>
-    innerMeasureFont
-      ? measureTextWidthWithWeight(
-          text,
-          innerMeasureFont.size,
-          innerMeasureFont.font,
-          innerMeasureFont.weight
-        )
-      : measureTextWidthWithWeight(text, detailSize, noteLabelFont, noteLabelWeight);
+    measureTextWidthWithWeight(text, detailSize, noteLabelFont, noteLabelWeight);
   const centsLabel = getCachedCentsReadout(
     node,
     {
@@ -14352,7 +14330,6 @@ function draw() {
       return;
     }
     const { isHovered, isGuide, isMuted, isOrphanGuide, brightness, alpha, intervalTint } = state;
-    const { textColorPrimary, textColorSecondary } = state;
 
     const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
     const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
@@ -14479,16 +14456,7 @@ function draw() {
     }
 
     ctx.globalAlpha = 1;
-    const innerLabel = buildNodeInnerLabelScene(node, pos, radius, state);
-    paintDisplayList(ctx, innerLabel.scene);
-    // Canvas state the label code used to leave behind for later readers.
-    ctx.fillStyle = textColorPrimary;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    if (innerLabel.measureFont) {
-      const { weight, size, font } = innerLabel.measureFont;
-      ctx.font = `${weight} ${size}px ${font}`;
-    }
+    paintDisplayList(ctx, buildNodeInnerLabelScene(node, pos, radius, state));
 
     if (nodeVolumeModeVisible && node.active) {
       const sliderHeight = Math.max(56, radius * 2.5);
@@ -14582,23 +14550,10 @@ function draw() {
     }
     const displayInfo = getCachedDisplayInfo(node);
     if (!showMicrotonal) {
-      const detail = buildNodeDetailLabelScene(
-        node,
-        pos,
-        radius,
-        state,
-        detailLabelCollision,
-        innerLabel.measureFont
-      );
+      const detail = buildNodeDetailLabelScene(node, pos, radius, state, detailLabelCollision);
       paintDisplayList(ctx, detail.scene);
       if (detail.hitbox) {
         layoutRenderedNoteLabelHitboxes.set(node.id, detail.hitbox);
-      }
-      ctx.fillStyle = textColorSecondary;
-      if (featureMode === "note") {
-        ctx.font = `${detail.weight} ${detail.size}px ${detail.font}`;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
       }
 
       if (layoutMode && layoutLabelHitboxVisible) {
@@ -27092,8 +27047,7 @@ async function buildLayoutSvgString({ fontCss = null } = {}) {
     if (showCircles && shape !== "none") {
       scene.push(...buildNodeShapeScene(node, pos, radius, shape, state));
     }
-    const innerLabel = buildNodeInnerLabelScene(node, pos, radius, state);
-    scene.push(...innerLabel.scene);
+    scene.push(...buildNodeInnerLabelScene(node, pos, radius, state));
     const hasDetail = !(
       state.isOrphanGuide ||
       state.isGuide ||
@@ -27101,14 +27055,7 @@ async function buildLayoutSvgString({ fontCss = null } = {}) {
     );
     if (hasDetail) {
       scene.push(
-        ...buildNodeDetailLabelScene(
-          node,
-          pos,
-          radius,
-          state,
-          exportDetailLabelCollision,
-          innerLabel.measureFont
-        ).scene
+        ...buildNodeDetailLabelScene(node, pos, radius, state, exportDetailLabelCollision).scene
       );
     }
     await emitScene(scene);

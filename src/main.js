@@ -607,6 +607,18 @@ const store = createStore({
   fundamentalSpelling: "sharp",
   featureMode: "note",
   spellingMode: "true",
+  // Display layers and line styling.
+  axes: true,
+  grid: true,
+  lineLabels: true,
+  circles: true,
+  shading3d: true,
+  keyMappings: true,
+  connectOrphans: false,
+  showOperatorLineLabels: false,
+  edgesBlack: false,
+  connectionsBlack: false,
+  lineThickness: 1,
 });
 const doc = store.doc;
 // Changes made while main.js is still starting up, before the reactions can
@@ -1565,8 +1577,6 @@ const MAX_FREQ = 19000;
 const SNAPSHOT_MORPH_MAX_CENTS = 500;
 let is3DMode = false;
 let isFlattened2D = false;
-let showAxes = true;
-let showGrid = true;
 let gridDepth = 1;
 let gridCenterZ = 0;
 let latticeExponentOffset = { x: 0, y: 0, z: 0 };
@@ -1908,20 +1918,11 @@ const LAYOUT_CUSTOM_TEXT_DEFAULT_WIDTH = 260;
 const LAYOUT_CUSTOM_TEXT_MIN_WIDTH = 120;
 let spellingHintActive = false;
 let enharmonicsEnabledPreference = true;
-let showCircles = true;
-let show3DShading = true;
-let showLineLabels = true;
-let showKeyMappings = true;
 let layoutKeyMappingMode = "hide";
 let showHelpEnabled = true;
 let latticeTiltDeg = 0;
-let connectOrphansEnabled = false;
-let showOperatorLineLabels = false;
 let orphanGuideNodes = new Set();
 let orphanGuideEdges = new Set();
-let edgesBlack = false;
-let connectionsBlack = false;
-let lineThickness = 1;
 const LINE_THICKNESS_MIN = 0.5;
 const LINE_THICKNESS_MAX = 3;
 let uiHintDismissed = false;
@@ -5771,7 +5772,7 @@ function insertCustomNode(node) {
 
 function addCustomNodeToScene(node) {
   insertCustomNode(node);
-  if (node && node.isCustom && !showLineLabels) {
+  if (node && node.isCustom && !doc.lineLabels) {
     const sourceNode = nodeById.get(node.sourceNodeId);
     const edgeKey = getEdgeKey(sourceNode, node);
     if (edgeKey) {
@@ -11278,7 +11279,7 @@ function getNodeGuideAlpha(node, guideNodes, axisEntry) {
   if (guideNodes && guideNodes.has(node.id)) {
     alpha = guideNodes.get(node.id);
   }
-  const isOrphanGuide = connectOrphansEnabled && orphanGuideNodes.has(node.id);
+  const isOrphanGuide = doc.connectOrphans && orphanGuideNodes.has(node.id);
   if (isOrphanGuide && !(guideNodes && guideNodes.has(node.id))) {
     alpha = 0.08;
   }
@@ -11292,7 +11293,7 @@ function getNodeGuideAlpha(node, guideNodes, axisEntry) {
 }
 
 function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
-  if (!connectOrphansEnabled) {
+  if (!doc.connectOrphans) {
     return;
   }
   paintDisplayList(
@@ -11807,7 +11808,7 @@ function getEdgeLabelText(a, b) {
   if (!ratio) {
     return null;
   }
-  if (!showOperatorLineLabels) {
+  if (!doc.showOperatorLineLabels) {
     return ratio;
   }
   return `${axisMaxExp > 0 ? "×" : "÷"}${ratio}`;
@@ -11822,7 +11823,7 @@ function getCustomConnectionLabelText(customNode) {
   if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
     return null;
   }
-  if (showOperatorLineLabels) {
+  if (doc.showOperatorLineLabels) {
     const divisor = gcd(numerator, denominator);
     const n = numerator / divisor;
     const d = denominator / divisor;
@@ -11868,7 +11869,7 @@ function setLineLabelPositionOverride(a, b, t) {
 
 function shouldShowEdgeLabel(a, b) {
   const override = getLineLabelOverride(a, b);
-  return override == null ? showLineLabels : override;
+  return override == null ? doc.lineLabels : override;
 }
 
 function toggleEdgeLabelOverride(a, b) {
@@ -11877,9 +11878,9 @@ function toggleEdgeLabelOverride(a, b) {
     return;
   }
   const override = getLineLabelOverride(a, b);
-  const currentVisible = override == null ? showLineLabels : override;
+  const currentVisible = override == null ? doc.lineLabels : override;
   const nextVisible = !currentVisible;
-  if (nextVisible === showLineLabels) {
+  if (nextVisible === doc.lineLabels) {
     lineLabelOverrides.delete(key);
   } else {
     lineLabelOverrides.set(key, nextVisible);
@@ -12428,14 +12429,14 @@ function getInkEdgeColor(eitherMuted) {
   if (eitherMuted) {
     return themeColors.edge;
   }
-  return connectionsBlack ? "#000000" : themeColors.edge;
+  return doc.connectionsBlack ? "#000000" : themeColors.edge;
 }
 
 function getInkNodeStrokeColor(isMuted) {
   if (isMuted) {
     return themeColors.nodeStroke;
   }
-  return edgesBlack ? "#000000" : themeColors.nodeStroke;
+  return doc.edgesBlack ? "#000000" : themeColors.nodeStroke;
 }
 
 function clampLineThickness(value) {
@@ -12447,11 +12448,11 @@ function clampLineThickness(value) {
 }
 
 function getInkEdgeLineWidth(_eitherMuted) {
-  return lineThickness;
+  return doc.lineThickness;
 }
 
 function getInkNodeStrokeLineWidth(_isMuted) {
-  return lineThickness;
+  return doc.lineThickness;
 }
 
 function parseColorToRgb(color) {
@@ -14260,9 +14261,9 @@ function draw() {
   const axisEntry = getActiveAxisEntry();
   const axisModeActive = Boolean(axisEntry);
   const shouldDrawAxisLine =
-    (is3DMode && (showAxes || (axisModeActive && isAddMode))) || (!is3DMode && axisModeActive);
+    (is3DMode && (doc.axes || (axisModeActive && isAddMode))) || (!is3DMode && axisModeActive);
 
-  if (is3DMode && showGrid) {
+  if (is3DMode && doc.grid) {
     drawGrid();
   }
 
@@ -14316,8 +14317,8 @@ function draw() {
   const isIsomorphicTriangleMode = keyboardMode === "iso-tri";
   const isCustomMapMode = keyboardMode === "piano-custom";
   const customPianoLabels =
-    isCustomMapMode && (layoutMode || showKeyMappings) ? getCustomPianoLabelMap() : null;
-  const showPianoKeyMappings = isPianoMode && showKeyMappings;
+    isCustomMapMode && (layoutMode || doc.keyMappings) ? getCustomPianoLabelMap() : null;
+  const showPianoKeyMappings = isPianoMode && doc.keyMappings;
   const selectedCustomNodes =
     isCustomMapMode && isCustomPianoMapModeActive() && customPianoSelectedKey != null
       ? customPianoMap.get(customPianoSelectedKey)
@@ -14330,7 +14331,7 @@ function draw() {
   }
   const keyMap = isIsomorphicMode ? isomorphicKeyMap : null;
   const triangleKeyMap =
-    isIsomorphicTriangleMode && showKeyMappings && !layoutMode ? isomorphicTriangleKeyMap : null;
+    isIsomorphicTriangleMode && doc.keyMappings && !layoutMode ? isomorphicTriangleKeyMap : null;
   const triangleTargetById = new Map();
   if (triangleKeyMap && isomorphicTriangleLayout) {
     isomorphicTriangleLayout.forEach((target) => {
@@ -14361,7 +14362,7 @@ function draw() {
   const nodeEnv = {
     hoverNodeId,
     guideNodes,
-    orphanGuideNodes: connectOrphansEnabled ? orphanGuideNodes : null,
+    orphanGuideNodes: doc.connectOrphans ? orphanGuideNodes : null,
     addIntervalMode,
     nodeAmplitudes,
     axisEntry,
@@ -14398,9 +14399,9 @@ function draw() {
       ctx.fill();
       ctx.stroke();
     }
-    if (showNodeShape && showCircles && !is3DMode) {
+    if (showNodeShape && doc.circles && !is3DMode) {
       paintDisplayList(ctx, buildNodeShapeScene(node, pos, radius, layoutShape, state));
-    } else if (showNodeShape && showCircles) {
+    } else if (showNodeShape && doc.circles) {
       ctx.beginPath();
       ctx.strokeStyle = intervalTint || getInkNodeStrokeColor(isMuted);
       ctx.lineWidth = getInkNodeStrokeLineWidth(isMuted);
@@ -14420,7 +14421,7 @@ function draw() {
           : node.isCustom
           ? colorWithAlpha(themeColors.nodeCustomInactive, 0.9)
           : themeColors.nodeHighlight;
-      if (reducedEffects || !show3DShading) {
+      if (reducedEffects || !doc.shading3d) {
         ctx.shadowColor = "transparent";
         ctx.shadowBlur = 0;
         ctx.shadowOffsetX = 0;
@@ -14612,7 +14613,7 @@ function draw() {
       }
     }
 
-    if (keyMap && node.active && !layoutMode && showKeyMappings) {
+    if (keyMap && node.active && !layoutMode && doc.keyMappings) {
       const keyLabel = keyMap.get(node.id);
       if (keyLabel) {
         if (is3DMode) {
@@ -17324,7 +17325,7 @@ function hitTestScreen(screenPoint, options) {
   const axisEntry = getActiveAxisEntry();
 
   nodes.forEach((node) => {
-    if (connectOrphansEnabled && orphanGuideNodes.has(node.id)) {
+    if (doc.connectOrphans && orphanGuideNodes.has(node.id)) {
       if (!shiftHeld && !capsLockOn && !addIntervalMode) {
         return;
       }
@@ -17435,7 +17436,7 @@ function hitTestEdgeLabel(screenPoint) {
       bestDistance = distance;
     }
   });
-  if (connectOrphansEnabled && orphanGuideEdges.size) {
+  if (doc.connectOrphans && orphanGuideEdges.size) {
     orphanGuideEdges.forEach((edgeKey) => {
       const partsKey = edgeKey.split("|");
       if (partsKey.length !== 2) {
@@ -18303,7 +18304,7 @@ function factorizeRatio(numerator, denominator) {
 function buildOrphanGuideSet() {
   const guides = new Set();
   const edgesSet = new Set();
-  if (!connectOrphansEnabled) {
+  if (!doc.connectOrphans) {
     return { guides, edges: edgesSet };
   }
   const expMap = new Map();
@@ -21109,8 +21110,8 @@ function setLayoutMode(enabled, { force = false } = {}) {
   if (enabled && !wasLayoutMode) {
     layoutPrevState = {
       is3DMode,
-      showAxes,
-      showGrid,
+      showAxes: doc.axes,
+      showGrid: doc.grid,
       zoom: view.zoom,
       offsetX: view.offsetX,
       offsetY: view.offsetY,
@@ -21135,8 +21136,8 @@ function setLayoutMode(enabled, { force = false } = {}) {
   if (enabled) {
     setCustomPianoMapMode(false);
     closeKeyboardMapPopover();
-    showAxes = false;
-    showGrid = false;
+    store.set({ axes: false });
+    store.set({ grid: false });
     setControlChecked(navAxesToggle, false);
     setControlChecked(navGridToggle, false);
     setControlChecked(mode3dCheckbox, false);
@@ -21173,10 +21174,10 @@ function setLayoutMode(enabled, { force = false } = {}) {
     closeLayoutFontPopover();
     layoutAxisEdit = null;
     layoutAxisEditDrag = null;
-    showAxes = layoutPrevState.showAxes;
-    showGrid = layoutPrevState.showGrid;
-    setControlChecked(navAxesToggle, showAxes);
-    setControlChecked(navGridToggle, showGrid);
+    store.set({ axes: layoutPrevState.showAxes });
+    store.set({ grid: layoutPrevState.showGrid });
+    setControlChecked(navAxesToggle, doc.axes);
+    setControlChecked(navGridToggle, doc.grid);
     if (layoutLockPosition) {
       syncLayoutViewFromCurrent();
       view.zoom = layoutPrevState.zoom;
@@ -23774,25 +23775,25 @@ function buildPresetStateSkeleton(active, customState, lineLabelState, distanceS
     muted,
     customNodes: customState,
     mode3d: is3DMode,
-    connectOrphans: connectOrphansEnabled,
-    showOperatorLineLabels,
+    connectOrphans: doc.connectOrphans,
+    showOperatorLineLabels: doc.showOperatorLineLabels,
     tiltDeg: latticeTiltDeg,
-    edgesBlack,
-    connectionsBlack,
-    lineThickness,
+    edgesBlack: doc.edgesBlack,
+    connectionsBlack: doc.connectionsBlack,
+    lineThickness: doc.lineThickness,
     distances: analysisLayers.distances,
     microtonal: analysisLayers.microtonal,
     view: getPresetViewState(),
-    axes: showAxes,
-    grid: showGrid,
-    lineLabels: showLineLabels,
+    axes: doc.axes,
+    grid: doc.grid,
+    lineLabels: doc.lineLabels,
     lineLabelOverrides: lineLabelState.lineLabelOverridesState,
     lineLabelPositions: lineLabelState.lineLabelPositionsState,
     distanceEdges: distanceState.distanceEdgesState,
     distanceEdgeOverrides: distanceState.distanceOverridesState,
-    circles: showCircles,
-    shading3d: show3DShading,
-    keyMappings: showKeyMappings,
+    circles: doc.circles,
+    shading3d: doc.shading3d,
+    keyMappings: doc.keyMappings,
     ratios: getPresetRatiosState(),
     axisRanges: getPresetAxisRangesState(),
     exponentOffset: getPresetExponentOffsetState(),
@@ -24168,29 +24169,29 @@ function applyPresetBooleanField(state, key, checkboxes, applyValue, fallbackVal
 
 function applyPresetDisplayToggleState(state) {
   applyPresetBooleanField(state, "axes", [navAxesToggle], (value) => {
-    showAxes = value;
+    store.set({ axes: value });
   });
   applyPresetBooleanField(state, "grid", [navGridToggle], (value) => {
-    showGrid = value;
+    store.set({ grid: value });
   });
   applyPresetBooleanField(
     state,
     "lineLabels",
     [lineLabelsToggle, layoutLineLabelsToggle],
     (value) => {
-      showLineLabels = value;
+      store.set({ lineLabels: value });
     },
     false
   );
   applyPresetBooleanField(state, "circles", [navCirclesToggle, layoutCirclesToggle], (value) => {
-    showCircles = value;
+    store.set({ circles: value });
   });
   applyPresetBooleanField(
     state,
     "shading3d",
     [show3DShadingToggle],
     (value) => {
-      show3DShading = value;
+      store.set({ shading3d: value });
     },
     true
   );
@@ -24199,7 +24200,7 @@ function applyPresetDisplayToggleState(state) {
     "keyMappings",
     [navKeyMappingsToggle, layoutKeyMappingsToggle],
     (value) => {
-      showKeyMappings = value;
+      store.set({ keyMappings: value });
     }
   );
   if (typeof state.distances === "boolean") {
@@ -24311,21 +24312,21 @@ function applyPresetReadoutAndTuningSettings(state) {
     store.set({ showCentsSign: value });
   });
   applyPresetBooleanField(state, "connectOrphans", [connectOrphansToggle], (value) => {
-    connectOrphansEnabled = value;
+    store.set({ connectOrphans: value });
   });
   applyPresetBooleanField(
     state,
     "showOperatorLineLabels",
     [showOperatorLineLabelsToggle],
     (value) => {
-      showOperatorLineLabels = value;
+      store.set({ showOperatorLineLabels: value });
     }
   );
-  edgesBlack = state.edgesBlack === true;
-  connectionsBlack = state.connectionsBlack === true;
-  lineThickness = Number.isFinite(state.lineThickness)
-    ? clampLineThickness(state.lineThickness)
-    : 1;
+  store.set({ edgesBlack: state.edgesBlack === true });
+  store.set({ connectionsBlack: state.connectionsBlack === true });
+  store.set({
+    lineThickness: Number.isFinite(state.lineThickness) ? clampLineThickness(state.lineThickness) : 1,
+  });
   syncEdgesBlackToggle();
   syncConnectionsBlackToggle();
   syncLineThicknessSlider();
@@ -24888,8 +24889,8 @@ function applyPresetLayoutViewAndModeState(layoutState) {
     if (layoutMode) {
       layoutPrevState = {
         is3DMode,
-        showAxes,
-        showGrid,
+        showAxes: doc.axes,
+        showGrid: doc.grid,
         zoom: view.zoom,
         offsetX: view.offsetX,
         offsetY: view.offsetY,
@@ -26015,7 +26016,7 @@ async function buildLayoutSvgString({ fontCss = null } = {}) {
 
   await emitScene(buildCustomConnectionsScene(exportNodePosMap, null));
 
-  const exportOrphanResult = connectOrphansEnabled ? buildOrphanGuideSet() : null;
+  const exportOrphanResult = doc.connectOrphans ? buildOrphanGuideSet() : null;
   const exportOrphanGuides = exportOrphanResult ? exportOrphanResult.guides : null;
   if (exportOrphanResult) {
     await emitScene(
@@ -26043,7 +26044,7 @@ async function buildLayoutSvgString({ fontCss = null } = {}) {
     const radius = entry.radius;
     const shape = getLayoutNodeShape(node);
     const scene = [];
-    if (showCircles && shape !== "none") {
+    if (doc.circles && shape !== "none") {
       scene.push(...buildNodeShapeScene(node, pos, radius, shape, state));
     }
     scene.push(...buildNodeInnerLabelScene(node, pos, radius, state));
@@ -26489,18 +26490,18 @@ if (waveformSelect) {
 populateFundamentalNotes();
 updateFundamentalNotes();
 if (navAxesToggle) {
-  showAxes = navAxesToggle.checked;
+  store.set({ axes: navAxesToggle.checked });
 }
 if (navGridToggle) {
-  showGrid = navGridToggle.checked;
+  store.set({ grid: navGridToggle.checked });
 }
 if (navCirclesToggle) {
-  showCircles = navCirclesToggle.checked;
+  store.set({ circles: navCirclesToggle.checked });
 }
 if (lineLabelsToggle) {
-  showLineLabels = lineLabelsToggle.checked;
+  store.set({ lineLabels: lineLabelsToggle.checked });
 }
-setControlChecked(layoutLineLabelsToggle, showLineLabels);
+setControlChecked(layoutLineLabelsToggle, doc.lineLabels);
 if (mode3dCheckbox) {
   is3DMode = mode3dCheckbox.checked;
   updateNavPanelVisibility();
@@ -26536,16 +26537,16 @@ enharmonicsEnabledPreference = Boolean(doc.enharmonicsEnabled);
 enforceCentsDisplayMode();
 setControlChecked(showCentsSignToggle, doc.showCentsSign);
 setControlChecked(directionalRatioLabelsToggle, doc.directionalRatioLabels);
-setControlChecked(connectOrphansToggle, connectOrphansEnabled);
-setControlChecked(showOperatorLineLabelsToggle, showOperatorLineLabels);
-setControlChecked(show3DShadingToggle, show3DShading);
+setControlChecked(connectOrphansToggle, doc.connectOrphans);
+setControlChecked(showOperatorLineLabelsToggle, doc.showOperatorLineLabels);
+setControlChecked(show3DShadingToggle, doc.shading3d);
 setLatticeTilt(latticeTiltDeg);
 syncHejiButtons();
 
 setControlChecked(enharmonicsEnabledToggle, doc.enharmonicsEnabled);
 setControlChecked(layoutEnharmonicsEnabledToggle, doc.enharmonicsEnabled);
-setControlChecked(navCirclesToggle, showCircles);
-setControlChecked(layoutCirclesToggle, showCircles);
+setControlChecked(navCirclesToggle, doc.circles);
+setControlChecked(layoutCirclesToggle, doc.circles);
 syncAnalysisLayerToggles();
 syncCentsPrecisionControls();
 syncHzPrecisionControls();
@@ -27121,6 +27122,7 @@ const LABEL_DOC_KEYS = new Set([
   "fundamentalSpelling",
   "featureMode",
   "spellingMode",
+  "showOperatorLineLabels",
 ]);
 
 function bindDocumentReactions() {
@@ -27132,6 +27134,16 @@ function bindDocumentReactions() {
     showCentsSign: [showCentsSignToggle],
     directionalRatioLabels: [directionalRatioLabelsToggle],
     enharmonicsEnabled: [enharmonicsEnabledToggle, layoutEnharmonicsEnabledToggle],
+    axes: [navAxesToggle],
+    grid: [navGridToggle],
+    lineLabels: [lineLabelsToggle, layoutLineLabelsToggle],
+    circles: [navCirclesToggle, layoutCirclesToggle],
+    shading3d: [show3DShadingToggle],
+    keyMappings: [navKeyMappingsToggle, layoutKeyMappingsToggle],
+    connectOrphans: [connectOrphansToggle],
+    showOperatorLineLabels: [showOperatorLineLabelsToggle],
+    edgesBlack: [layoutEdgesBlackToggle],
+    connectionsBlack: [layoutConnectionsBlackToggle],
   };
   const react = (changed) => {
     let labelsChanged = false;
@@ -27157,6 +27169,13 @@ function bindDocumentReactions() {
     }
     if (changed.has("a4") && !Object.is(Number(a4Input.value), doc.a4)) {
       a4Input.value = String(doc.a4);
+    }
+    if (
+      changed.has("lineThickness") &&
+      layoutLineThicknessSlider &&
+      !Object.is(Number(layoutLineThicknessSlider.value), doc.lineThickness)
+    ) {
+      layoutLineThicknessSlider.value = String(doc.lineThickness);
     }
     if (changed.has("centsPrecision")) {
       syncCentsPrecisionControls();
@@ -27407,32 +27426,32 @@ if (!viewModeInputs.length && !viewModeButtons.length) {
   });
 }
 bindSingleBooleanDrawToggle(navAxesToggle, (checked) => {
-  showAxes = checked;
+  store.set({ axes: checked });
 });
 bindSingleBooleanDrawToggle(navGridToggle, (checked) => {
-  showGrid = checked;
+  store.set({ grid: checked });
 });
 bindMirroredDrawToggles(
   navCirclesToggle,
   layoutCirclesToggle,
   (checked) => {
-    showCircles = checked;
+    store.set({ circles: checked });
   }
 );
 bindMirroredDrawToggles(
   lineLabelsToggle,
   layoutLineLabelsToggle,
   (checked) => {
-    showLineLabels = checked;
+    store.set({ lineLabels: checked });
   }
 );
-setControlChecked(navKeyMappingsToggle, showKeyMappings);
-setControlChecked(layoutKeyMappingsToggle, showKeyMappings);
+setControlChecked(navKeyMappingsToggle, doc.keyMappings);
+setControlChecked(layoutKeyMappingsToggle, doc.keyMappings);
 bindMirroredDrawToggles(
   navKeyMappingsToggle,
   layoutKeyMappingsToggle,
   (checked) => {
-    showKeyMappings = checked;
+    store.set({ keyMappings: checked });
   }
 );
 bindOptionalClick(viewPanelToggle, () => {
@@ -27853,14 +27872,13 @@ bindSingleBooleanToggle(directionalRatioLabelsToggle, (checked) => {
   store.set({ directionalRatioLabels: checked });
 });
 bindSingleBooleanDrawToggle(connectOrphansToggle, (checked) => {
-  connectOrphansEnabled = checked;
+  store.set({ connectOrphans: checked });
 });
 bindSingleBooleanDrawToggle(showOperatorLineLabelsToggle, (checked) => {
-  showOperatorLineLabels = checked;
-  invalidateLabelCache();
+  store.set({ showOperatorLineLabels: checked });
 });
 bindSingleBooleanDrawToggle(show3DShadingToggle, (checked) => {
-  show3DShading = checked;
+  store.set({ shading3d: checked });
 });
 bindOptionalClick(layoutFreezeButton, () => {
     if (!layoutLockPosition) {
@@ -28173,30 +28191,24 @@ if (layoutHejiEnabledButton) layoutHejiEnabledButton.addEventListener("click", (
 if (layoutHejiDisabledButton) layoutHejiDisabledButton.addEventListener("click", () => setHeji(false));
 
 function syncEdgesBlackToggle() {
-  setControlChecked(layoutEdgesBlackToggle, edgesBlack);
+  setControlChecked(layoutEdgesBlackToggle, doc.edgesBlack);
 }
 function syncConnectionsBlackToggle() {
-  setControlChecked(layoutConnectionsBlackToggle, connectionsBlack);
+  setControlChecked(layoutConnectionsBlackToggle, doc.connectionsBlack);
 }
 function syncLineThicknessSlider() {
   if (layoutLineThicknessSlider) {
-    layoutLineThicknessSlider.value = String(lineThickness);
+    layoutLineThicknessSlider.value = String(doc.lineThickness);
   }
 }
 bindOptionalChange(layoutEdgesBlackToggle, () => {
-  edgesBlack = Boolean(layoutEdgesBlackToggle.checked);
-  schedulePresetUrlUpdate();
-  draw();
+  store.set({ edgesBlack: Boolean(layoutEdgesBlackToggle.checked) });
 });
 bindOptionalChange(layoutConnectionsBlackToggle, () => {
-  connectionsBlack = Boolean(layoutConnectionsBlackToggle.checked);
-  schedulePresetUrlUpdate();
-  draw();
+  store.set({ connectionsBlack: Boolean(layoutConnectionsBlackToggle.checked) });
 });
 bindOptionalInput(layoutLineThicknessSlider, () => {
-  lineThickness = clampLineThickness(layoutLineThicknessSlider.value);
-  schedulePresetUrlUpdate();
-  draw();
+  store.set({ lineThickness: clampLineThickness(layoutLineThicknessSlider.value) });
 });
 syncEdgesBlackToggle();
 syncConnectionsBlackToggle();

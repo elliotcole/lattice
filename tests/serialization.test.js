@@ -47,20 +47,20 @@ describe("Snapshot-set fixtures round-trip", () => {
   }
 });
 
-describe("Preset library URIs decode and round-trip", () => {
+describe("Preset library state documents", () => {
   const presets = JSON.parse(readFileSync(join(ROOT, "src/presets.json"), "utf8"));
   it("library is non-empty", () => {
     expect(presets.length).toBeGreaterThan(0);
   });
   for (const preset of presets) {
     it(preset.title, () => {
-      expect(preset.uri.startsWith("#s=")).toBe(true);
-      const encoded = preset.uri.slice("#s=".length);
-      const state = decodePresetState(encoded);
-      expect(state).toBeTruthy();
-      expect(typeof state).toBe("object");
-      // the canonical URIs must keep decoding to the same state after re-encode
-      expect(decodePresetState(encodePresetState(state))).toEqual(state);
+      expect(typeof preset.title).toBe("string");
+      expect(Array.isArray(preset.tags)).toBe(true);
+      // Entries are readable states, not encoded links (npm run presets:normalize).
+      expect(preset.uri).toBeUndefined();
+      expect(preset.state && typeof preset.state).toBe("object");
+      expect(Array.isArray(preset.state.active)).toBe(true);
+      expect(decodePresetState(encodePresetState(preset.state))).toEqual(preset.state);
     });
   }
 });

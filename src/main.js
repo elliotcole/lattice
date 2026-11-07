@@ -22455,7 +22455,12 @@ function normalizePresetEntry(entry) {
   if (entry && typeof entry === "object") {
     const title = String(entry.title || "").trim();
     const creator = String(entry.creator || "").trim();
-    const uri = String(entry.uri || "").trim();
+    // Library entries are plain state documents (scripts/normalize-presets.mjs);
+    // a pasted lattice link (`uri`) still works.
+    const uri =
+      entry.state && typeof entry.state === "object"
+        ? `#s=${encodePresetState(entry.state)}`
+        : String(entry.uri || "").trim();
     const tags = Array.isArray(entry.tags)
       ? entry.tags.map((tag) => String(tag || "").trim()).filter(Boolean)
       : [];

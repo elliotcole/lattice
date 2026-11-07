@@ -31,6 +31,7 @@ Decisions already made (don't re-ask):
 | `tuning-the-ear/` + `src/tuning-the-ear/` | Book-companion diagram deck; imported via `scripts/import-tuning-the-ear.mjs [sourceDir]` (defaults to the Dropbox "Diagrams v2" folder; refuses to write on bad JSON or slug collisions) |
 | `src/tour-steps.js` | Declarative tour content — the pattern to emulate |
 | `src/serialization.js` | Preset codec (encode/decode + LZ-string), pure, extracted Phase 1 |
+| `src/presets.json` | Preset library as readable state docs `{title, creator, tags, state}`; paste an entry with a `uri` lattice link instead and run `npm run presets:normalize` |
 | `src/state-migrations.js` + `src/node-keys.js` | Preset-state version chain (`STATE_VERSION`, `migrateState`) and the stable node/edge key helpers (Phase 4.2) |
 | `src/scene/` | Display list primitives, canvas painter, SVG emitter, hit-testing (Phase 3); builders still live in main.js |
 | `src/lib/pitch.js` | Shared pitch core: note tables, ratio math, ET/spelling, HEJI — imported by main, tuner, overtones. Drift decisions documented in its header |

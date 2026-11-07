@@ -12,7 +12,8 @@
     "lint:warn": "eslint .",
     "format": "prettier --write src/serialization.js src/state-merge.js src/custom-oscillator-types.js src/custom-oscillators.js src/state-migrations.js src/node-keys.js src/scene src/lib tests scripts eslint.config.js",
     "format:check": "prettier --check src/serialization.js src/state-merge.js src/custom-oscillator-types.js src/custom-oscillators.js src/state-migrations.js src/node-keys.js src/scene src/lib tests scripts eslint.config.js",
-    "check:regression": "node scripts/regression-smoke.mjs"
+    "check:regression": "node scripts/regression-smoke.mjs",
+    "presets:normalize": "node scripts/normalize-presets.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

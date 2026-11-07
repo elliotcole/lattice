@@ -10,9 +10,10 @@
     "test": "vitest run",
     "lint": "eslint . --quiet",
     "lint:warn": "eslint .",
-    "format": "prettier --write src/serialization.js src/state-merge.js src/custom-oscillator-types.js src/custom-oscillators.js src/lib tests scripts eslint.config.js",
-    "format:check": "prettier --check src/serialization.js src/state-merge.js src/custom-oscillator-types.js src/custom-oscillators.js src/lib tests scripts eslint.config.js",
-    "check:regression": "node scripts/regression-smoke.mjs"
+    "format": "prettier --write src/serialization.js src/state-merge.js src/custom-oscillator-types.js src/custom-oscillators.js src/state-migrations.js src/node-keys.js src/scene src/input src/audio src/lib tests scripts eslint.config.js",
+    "format:check": "prettier --check src/serialization.js src/state-merge.js src/custom-oscillator-types.js src/custom-oscillators.js src/state-migrations.js src/node-keys.js src/scene src/input src/audio src/lib tests scripts eslint.config.js",
+    "check:regression": "node scripts/regression-smoke.mjs",
+    "presets:normalize": "node scripts/normalize-presets.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -23,6 +24,7 @@
     "vitest": "^4.1.8"
   },
   "dependencies": {
+    "lz-string": "1.5.0",
     "opentype.js": "^1.3.4",
     "sfumato": "^0.1.2",
     "web-audio-oscillators": "^2.0.0"

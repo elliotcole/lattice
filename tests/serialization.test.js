@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { encodePresetState, decodePresetState } from "../src/serialization.js";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -47,20 +48,20 @@ describe("Snapshot-set fixtures round-trip", () => {
   }
 });
 
-describe("Preset library URIs decode and round-trip", () => {
+describe("Preset library state documents", () => {
   const presets = JSON.parse(readFileSync(join(ROOT, "src/presets.json"), "utf8"));
   it("library is non-empty", () => {
     expect(presets.length).toBeGreaterThan(0);
   });
   for (const preset of presets) {
     it(preset.title, () => {
-      expect(preset.uri.startsWith("#s=")).toBe(true);
-      const encoded = preset.uri.slice("#s=".length);
-      const state = decodePresetState(encoded);
-      expect(state).toBeTruthy();
-      expect(typeof state).toBe("object");
-      // the canonical URIs must keep decoding to the same state after re-encode
-      expect(decodePresetState(encodePresetState(state))).toEqual(state);
+      expect(typeof preset.title).toBe("string");
+      expect(Array.isArray(preset.tags)).toBe(true);
+      // Entries are readable states, not encoded links (npm run presets:normalize).
+      expect(preset.uri).toBeUndefined();
+      expect(preset.state && typeof preset.state).toBe("object");
+      expect(Array.isArray(preset.state.active)).toBe(true);
+      expect(decodePresetState(encodePresetState(preset.state))).toEqual(preset.state);
     });
   }
 });
@@ -93,3 +94,24 @@ describe("codec edge cases", () => {
     expect(decodePresetState(b64)).toEqual(state);
   });
 });
+
+// Links already shared in the wild must keep their exact bytes: pin the
+// encoder's output (as a SHA-256) for every preset and Creator export.
+describe("encoded links are stable", () => {
+  const presets = JSON.parse(readFileSync(join(ROOT, "src/presets.json"), "utf8"));
+  it("preset and fixture encodings match the pinned snapshot", () => {
+    const encoded = {};
+    for (const preset of presets) {
+      encoded[`preset: ${preset.title}`] = sha256(encodePresetState(preset.state));
+    }
+    for (const name of readdirSync(join(ROOT, "fixtures/creator-exports")).sort()) {
+      const state = JSON.parse(readFileSync(join(ROOT, "fixtures/creator-exports", name), "utf8"));
+      encoded[`fixture: ${name}`] = sha256(encodePresetState(state));
+    }
+    expect(encoded).toMatchSnapshot();
+  });
+});
+
+function sha256(text) {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}

@@ -1,0 +1,163 @@
+// Display list: the shared scene both renderers consume (Phase 3).
+//
+// A scene is a flat array of primitives in SCREEN coordinates (CSS px on the
+// lattice canvas), painted in order. The canvas painter draws them as-is; the
+// SVG export shifts them by the page's on-screen origin (offsetDisplayList).
+// The canvas is the reference rendering: SVG output is made to match it.
+// Builders live in main.js for now (they read its globals, strangler-style);
+// painters and emitters here are pure.
+//
+// Primitive shapes (colours are CSS colour strings; `alpha` defaults to 1):
+//   { kind: "text", text, x, y, font, size, weight, color, alpha?,
+//     align: "left" | "center" | "right", baseline: "top" | "middle",
+//     lines?: string[], lineHeight?: number,
+//     rotation?: radians, offsetY?: number }
+//     `lines` (with `lineHeight`) replaces `text` for multi-line blocks.
+//     With `rotation`, the frame is rotated about (x, y) and lines start at
+//     local y = offsetY.
+//   { kind: "line", x1, y1, x2, y2, color, width, alpha?, dash?: number[] }
+//   { kind: "stroke", subpaths: [[[x, y], ...], ...], color, width, alpha?, dash? }
+//     one stroked path of open polylines (a broken edge is one path with two
+//     subpaths, which antialiases differently from two separate lines)
+//   { kind: "rect", x, y, width, height, radius?, fill, stroke?, strokeWidth?, alpha? }
+//     filled (then stroked) rectangle, corners rounded by `radius`
+//   { kind: "curve", p0, p1, p2, color, width, alpha?, dash? }
+//     stroked quadratic Bézier; points are { x, y }
+//   { kind: "polygon", points: [[x, y], ...], color, alpha? }  (filled)
+//   { kind: "nodeShape", shape: "circle" | "square" | "triangle" | "diamond",
+//     x, y, radius, fill, fillAlpha?, stroke, width, dash?, alpha? }
+//     fill then stroke; fillAlpha multiplies alpha for the fill only
+//   { kind: "hitArea", left, top, width, height, rotation?, pivot?: { x, y } }
+//     invisible: painters and emitters skip it. The clickable region of the
+//     element named by its `ref`, when that isn't simply its ink (padded
+//     labels, a custom label's stored wrap width). With `rotation`, the box
+//     is in a frame rotated about `pivot`. Read by hit-test.js.
+//
+// Every primitive may carry `ref: { type, ... }` naming the scene element it
+// came from, so the interactive canvas pass can filter (e.g. hide a label
+// while its editor is open) and hit-testing can find what was clicked.
+
+export function text(props) {
+  return { kind: "text", ...props };
+}
+
+export function line(props) {
+  return { kind: "line", ...props };
+}
+
+export function stroke(props) {
+  return { kind: "stroke", ...props };
+}
+
+export function rect(props) {
+  return { kind: "rect", ...props };
+}
+
+export function curve(props) {
+  return { kind: "curve", ...props };
+}
+
+export function hitArea(props) {
+  return { kind: "hitArea", ...props };
+}
+
+export const DIAMOND_RADIUS_SCALE = 1.125;
+
+export function nodeShape(props) {
+  return { kind: "nodeShape", ...props };
+}
+
+/** Outline vertices of a polygonal node shape, or null for a circle. */
+export function nodeShapePoints(shape, x, y, radius) {
+  if (shape === "square") {
+    return [
+      [x - radius, y - radius],
+      [x + radius, y - radius],
+      [x + radius, y + radius],
+      [x - radius, y + radius],
+    ];
+  }
+  if (shape === "triangle") {
+    const height = radius * 1.2;
+    return [
+      [x, y - height],
+      [x + radius, y + height * 0.6],
+      [x - radius, y + height * 0.6],
+    ];
+  }
+  if (shape === "diamond") {
+    const r = radius * DIAMOND_RADIUS_SCALE;
+    return [
+      [x, y - r],
+      [x + r, y],
+      [x, y + r],
+      [x - r, y],
+    ];
+  }
+  return null;
+}
+
+export function polygon(props) {
+  return { kind: "polygon", ...props };
+}
+
+/**
+ * Line from (x1, y1) to (x2, y2) with a filled arrowhead at (x2, y2): the
+ * axis-legend arrow. Head geometry matches the pre-Phase-3 renderers.
+ */
+export function arrow({ x1, y1, x2, y2, color, width, headLength = 10, ref }) {
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  return [
+    line({ x1, y1, x2, y2, color, width, ref }),
+    polygon({
+      points: [
+        [x2, y2],
+        [
+          x2 - headLength * Math.cos(angle - Math.PI / 6),
+          y2 - headLength * Math.sin(angle - Math.PI / 6),
+        ],
+        [
+          x2 - headLength * Math.cos(angle + Math.PI / 6),
+          y2 - headLength * Math.sin(angle + Math.PI / 6),
+        ],
+      ],
+      color,
+      ref,
+    }),
+  ];
+}
+
+/** Copy of `list` translated by (dx, dy). Rotations pivot on (x, y), so they follow. */
+export function offsetDisplayList(list, dx, dy) {
+  return list.map((item) => {
+    switch (item.kind) {
+      case "text":
+        return { ...item, x: item.x + dx, y: item.y + dy };
+      case "line":
+        return { ...item, x1: item.x1 + dx, y1: item.y1 + dy, x2: item.x2 + dx, y2: item.y2 + dy };
+      case "polygon":
+        return { ...item, points: item.points.map(([x, y]) => [x + dx, y + dy]) };
+      case "nodeShape":
+      case "rect":
+        return { ...item, x: item.x + dx, y: item.y + dy };
+      case "curve": {
+        const move = (point) => ({ x: point.x + dx, y: point.y + dy });
+        return { ...item, p0: move(item.p0), p1: move(item.p1), p2: move(item.p2) };
+      }
+      case "hitArea":
+        return {
+          ...item,
+          left: item.left + dx,
+          top: item.top + dy,
+          pivot: item.pivot ? { x: item.pivot.x + dx, y: item.pivot.y + dy } : item.pivot,
+        };
+      case "stroke":
+        return {
+          ...item,
+          subpaths: item.subpaths.map((points) => points.map(([x, y]) => [x + dx, y + dy])),
+        };
+      default:
+        return item;
+    }
+  });
+}

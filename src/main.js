@@ -5,6 +5,8 @@ const karplusWorkletUrl = new URL("./karplus-worklet.js", import.meta.url);
 const resonatorWorkletUrl = new URL("./modal-resonator-worklet.js", import.meta.url);
 import { quickTourSteps, deepTourSteps } from "./tour-steps.js";
 import { encodePresetState, decodePresetState } from "./serialization.js";
+import { STATE_VERSION, migrateState } from "./state-migrations.js";
+import { getDistanceEdgeKey, parseDistanceEdgeKey } from "./node-keys.js";
 import {
   isPlainObject,
   deepClonePresetValue,
@@ -38,6 +40,23 @@ import {
   axisMatches,
 } from "./lib/pitch.js";
 import opentype from "opentype.js";
+import {
+  text as sceneText,
+  line as sceneLine,
+  stroke as sceneStroke,
+  arrow as sceneArrow,
+  nodeShape as sceneNodeShape,
+  curve as sceneCurve,
+  rect as sceneRect,
+  hitArea as sceneHitArea,
+  offsetDisplayList,
+  DIAMOND_RADIUS_SCALE,
+} from "./scene/display-list.js";
+import { paintDisplayList, traceNodeShape } from "./scene/paint-canvas.js";
+import { emitDisplayListSvg, svgColorAttr } from "./scene/emit-svg.js";
+import { hitTestDisplayList } from "./scene/hit-test.js";
+import { createKeyDispatcher, createHeldKeys } from "./input/keyboard.js";
+import { createVoiceBackends } from "./audio/voice-backends.js";
 
 // Main editor spells ET fallbacks from its mixed default table (Eb/Bb flats).
 function getNearestEtInfo(freq, a4) {
@@ -384,7 +403,6 @@ let distanceSelectMode = false;
 let addIntervalMode = false;
 let addIntervalSourceNodeId = null;
 let addIntervalSelectedRing = null;
-let iHeld = false;
 const distanceSelectedNodeKeys = new Set();
 const distanceSelectedEdges = new Set();
 const commaEdges = [];
@@ -566,14 +584,12 @@ let synthMode = "waveform";
 let soundfontPresetIndex = 0;
 let currentSynthWaveform = "";
 let lastCustomOctaveReduce = true;
-let rHeld = false;
-let tHeld = false;
-let lHeld = false;
-let vHeld = false;
-let fHeld = false;
-let oHeld = false;
-let mHeld = false;
-let nHeld = false;
+// Quasimode letters currently held (see HELD_KEYS in src/input/keyboard.js).
+const heldKeys = createHeldKeys();
+// The editor's single keyboard pipeline: bindings are added in precedence
+// order (the deck's in initPresentationMode, the rest at the bottom of this
+// file) and attached once.
+const keyBindings = createKeyDispatcher();
 let suppressClickAfterRespell = false;
 let nodeVolumeAdjustMode = false;
 let nodeVolumeSliderDrag = null;
@@ -581,19 +597,7 @@ let nodeVolumeSliderHitboxes = [];
 const nodeVolumeLimits = new Map();
 
 function resetHeldModifiers() {
-  rHeld = false;
-  tHeld = false;
-  lHeld = false;
-  vHeld = false;
-  fHeld = false;
-  oHeld = false;
-  iHeld = false;
-  cHeld = false;
-  zKeyHeld = false;
-  xKeyHeld = false;
-  yKeyHeld = false;
-  mHeld = false;
-  nHeld = false;
+  heldKeys.clear();
 }
 const midiActiveNotes = new Map();
 const activeKeys = new Map();
@@ -613,7 +617,9 @@ const TRIANGLE_TRI_TO_DIAG = {
   bcd: "slash",
 };
 let layoutLabelHitboxVisible = false;
-const layoutRenderedNoteLabelHitboxes = new Map();
+// Hit areas from the last painted frame (node detail labels, key-mapping
+// labels, distance labels): hit-tests read these, so only drawn labels click.
+const frameHitAreas = [];
 
 function clearTriangleLabelsForCell(entry) {
   TRIANGLE_TRI_IDS.forEach((tri) => {
@@ -654,72 +660,6 @@ function computeTriangleLabelLayout(text, font, baseSize, points, fontWeight = 4
     size = baseSize * scale;
   }
   return { size };
-}
-
-function getLayoutNoteLabelHitbox(node, pos, radius) {
-  const rendered = layoutRenderedNoteLabelHitboxes.get(node.id);
-  if (rendered) {
-    return rendered;
-  }
-  const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
-  const labelPos = { x: rawLabelPos.x, y: rawLabelPos.y };
-  let width = 0;
-  let height = layoutNoteTextSize;
-  if (featureMode === "ratio") {
-    if (!node.active && !node.isCustom && !node.isCenter) {
-      return;
-    }
-    const displayInfo = getCachedDisplayInfo(node);
-    const centsLabel = getCachedCentsReadout(
-      node,
-      {
-        wrap: enharmonicsEnabled,
-        requireHejiDetail: true,
-        baseTextForHeji: displayInfo.pitchClass,
-      },
-      displayInfo
-    );
-    ctx.save();
-    ctx.font = `${layoutNoteFontWeight} ${layoutNoteTextSize}px ${layoutNoteFont}`;
-    const noteWidth = ctx.measureText(displayInfo.pitchClass || "").width;
-    const centsWidth = centsLabel ? ctx.measureText(centsLabel).width : 0;
-    ctx.restore();
-    width = Math.max(noteWidth, centsWidth);
-    if (hejiEnabled && centsLabel) {
-      height += layoutNoteTextSize + 4;
-    }
-  } else {
-    const ratioText = `${node.numerator}:${node.denominator}`;
-    const displayInfo = getCachedDisplayInfo(node);
-    const centsLabel = getCachedCentsReadout(
-      node,
-      { wrap: enharmonicsEnabled },
-      displayInfo
-    );
-    width = Math.max(
-      measureTextWidthWithWeight(
-        ratioText,
-        layoutNoteTextSize,
-        layoutNoteFont,
-        layoutNoteFontWeight
-      ),
-      measureTextWidthWithWeight(
-        centsLabel,
-        layoutNoteTextSize,
-        layoutNoteFont,
-        layoutNoteFontWeight
-      )
-    );
-    height = centsLabel ? layoutNoteTextSize * 2 + 4 : layoutNoteTextSize;
-  }
-  const padding = Math.max(4, Math.round(layoutNoteTextSize * 0.25));
-  return {
-    left: labelPos.x - padding,
-    top: labelPos.y - padding,
-    width: width + padding * 2,
-    height: height + padding * 2,
-    labelPos,
-  };
 }
 
 function serializeLayoutLabelOffsets() {
@@ -1435,6 +1375,42 @@ let customOscillators = null;
 let customOscillatorsLoading = null;
 let customOscillatorFallbackWarned = false;
 
+// How each note's sound source is made (src/audio/voice-backends.js).
+const voiceBackends = createVoiceBackends({
+  audioContext: () => audioCtx,
+  worklets: {
+    [KARPLUS_WAVEFORM]: {
+      processor: "karplus-strong",
+      ensure: () => ensureKarplusWorklet(),
+      ready: () => karplusWorkletReady,
+      parameters: { damping: 0.985 },
+    },
+    [RESONANT_WAVEFORM]: {
+      processor: "modal-resonator",
+      ensure: () => ensureResonatorWorklet(),
+      ready: () => resonatorWorkletReady,
+      parameters: { brightness: 0.45 },
+    },
+  },
+  soundfontWaveform: SOUNDFONT_WAVEFORM,
+  soundfont: () => ({ data: soundfontData, preset: soundfontPreset }),
+  startPresetNote,
+  referenceA4: () => Number(a4Input.value) || 440,
+  isWavetable: (type) => CUSTOM_WAVEFORMS.has(type),
+  wavetables: () => customOscillators,
+  ensureWavetables: () => ensureCustomOscillators(),
+  warnFallback: (type) => {
+    if (!CUSTOM_WAVEFORMS.has(type)) {
+      warnWorkletFallback(type);
+      return;
+    }
+    if (!customOscillatorFallbackWarned) {
+      customOscillatorFallbackWarned = true;
+      console.warn(`"${type}" wavetable not loaded yet; this note uses a sine oscillator.`);
+    }
+  },
+});
+
 function ensureCustomOscillators() {
   if (customOscillators || customOscillatorsLoading) {
     return customOscillatorsLoading || Promise.resolve(customOscillators);
@@ -1522,7 +1498,6 @@ noteNamesFlat.forEach((name, index) => {
 });
 const KEYBOARD_BASE_MIDI = 60;
 const HEJI_SUFFIX_Y_OFFSET = -0.52;
-const HEJI_SVG_EXTRA_Y_OFFSET = 0.54;
 const HEJI_REST_GAP = 0.08;
 const HEJI_REST_GAP_PLAIN = -0.2;
 const CENTS_CHAR = "¢";
@@ -1564,9 +1539,6 @@ let gridDepth = 1;
 let gridCenterZ = 0;
 let latticeExponentOffset = { x: 0, y: 0, z: 0 };
 const axisStack = [];
-let zKeyHeld = false;
-let xKeyHeld = false;
-let yKeyHeld = false;
 let isAddMode = false;
 let shiftHeld = false;
 let capsLockOn = false;
@@ -1677,13 +1649,13 @@ function isEdgeOnAxisEntry(a, b, entry) {
 }
 
 function getRequestedAxisKey() {
-  if (zKeyHeld) {
+  if (heldKeys.has("z")) {
     return "z";
   }
-  if (xKeyHeld) {
+  if (heldKeys.has("x")) {
     return "x";
   }
-  if (yKeyHeld) {
+  if (heldKeys.has("y")) {
     return "y";
   }
   return null;
@@ -1798,7 +1770,6 @@ let customNodes = [];
 let nextCustomNodeId = 200000;
 let pendingCustomAction = null;
 let lastCustomFactor = { numerator: 5, denominator: 4 };
-let cHeld = false;
 let layoutMode = false;
 let layoutAlignMode = "";
 let layoutAlignAnchorId = null;
@@ -3561,40 +3532,42 @@ function getPlayingSnapshotKeys({ excludePattern = false } = {}) {
   return Array.from(keys);
 }
 
-function serializeSnapshotsForPreset() {
+// Snapshots live in two banks of the same slot type: numeric slots 1–0
+// (`snapshotSlots`) and letter slots on the snapshot keyboard
+// (`snapshotLetterSlots`). A slot is { state, playKeys, pattern, looper, lfos,
+// caption } — a preset state doc plus the performance overlay around it.
+// Both banks share every function below; only the active-slot marker
+// (snapshotActiveIndex vs snapshotActiveLetterKey) and banner text differ.
+
+function serializeSnapshotSlots(slots) {
   const entries = [];
-  snapshotSlots.forEach((snapshot, index) => {
+  slots.forEach((snapshot, index) => {
     if (!snapshot) {
       return;
     }
     entries.push([index, snapshot]);
   });
   return entries;
+}
+
+function serializeSnapshotsForPreset() {
+  return serializeSnapshotSlots(snapshotSlots);
 }
 
 function serializeLetterSnapshotsForPreset() {
-  const entries = [];
-  snapshotLetterSlots.forEach((snapshot, index) => {
-    if (!snapshot) {
-      return;
-    }
-    entries.push([index, snapshot]);
-  });
-  return entries;
+  return serializeSnapshotSlots(snapshotLetterSlots);
 }
 
-function applySnapshotsFromPreset(value) {
-  if (!Array.isArray(value)) {
-    return;
-  }
-  snapshotSlots.fill(null);
+/** Fill `slots` from persisted [index, entry] pairs (diff entries expand over the base). */
+function loadSnapshotSlots(slots, value) {
+  slots.fill(null);
   value.forEach((entry) => {
     if (!Array.isArray(entry) || entry.length < 2) {
       return;
     }
     const index = Number(entry[0]);
     const snapshot = entry[1];
-    if (!Number.isFinite(index) || index < 0 || index >= snapshotSlots.length) {
+    if (!Number.isFinite(index) || index < 0 || index >= slots.length) {
       return;
     }
     if (!snapshot || typeof snapshot !== "object") {
@@ -3606,8 +3579,16 @@ function applySnapshotsFromPreset(value) {
     if (!snapshot.state) {
       return;
     }
-    snapshotSlots[index] = snapshot;
+    snapshot.state = migrateState(snapshot.state).state;
+    slots[index] = snapshot;
   });
+}
+
+function applySnapshotsFromPreset(value) {
+  if (!Array.isArray(value)) {
+    return;
+  }
+  loadSnapshotSlots(snapshotSlots, value);
   updateSnapshotUi();
 }
 
@@ -3615,28 +3596,27 @@ function applyLetterSnapshotsFromPreset(value) {
   if (!Array.isArray(value)) {
     return;
   }
-  snapshotLetterSlots.fill(null);
-  value.forEach((entry) => {
-    if (!Array.isArray(entry) || entry.length < 2) {
-      return;
-    }
-    const index = Number(entry[0]);
-    const snapshot = entry[1];
-    if (!Number.isFinite(index) || index < 0 || index >= snapshotLetterSlots.length) {
-      return;
-    }
-    if (!snapshot || typeof snapshot !== "object") {
-      return;
-    }
-    if (!snapshot.state && snapshot.diff && snapshotBaseState) {
-      snapshot.state = mergeSnapshotState(snapshotBaseState, snapshot.diff);
-    }
-    if (!snapshot.state) {
-      return;
-    }
-    snapshotLetterSlots[index] = snapshot;
-  });
+  loadSnapshotSlots(snapshotLetterSlots, value);
   updateSnapshotUi();
+}
+
+/** A slot as written to a snapshot-set file: its state as a diff against `base`. */
+function compactSnapshotEntry(base, snapshot) {
+  const diff = base && snapshot.state ? diffSnapshotState(base, snapshot.state) : null;
+  const entry = {
+    diff: diff && Object.keys(diff).length ? diff : null,
+    playKeys: snapshot.playKeys,
+    pattern: snapshot.pattern,
+    looper: snapshot.looper,
+    lfos: snapshot.lfos,
+  };
+  if (!entry.diff) {
+    entry.state = snapshot.state;
+  }
+  if (snapshot.caption) {
+    entry.caption = snapshot.caption;
+  }
+  return entry;
 }
 
 function buildSnapshotSetPayload({ compact = true } = {}) {
@@ -3648,42 +3628,10 @@ function buildSnapshotSetPayload({ compact = true } = {}) {
     buildSnapshotState();
   const base = baseCandidate ? JSON.parse(JSON.stringify(baseCandidate)) : null;
   const compactSnapshots = compact
-    ? snapshots.map(([index, snapshot]) => {
-        const diff = base && snapshot.state ? diffSnapshotState(base, snapshot.state) : null;
-        const entry = {
-          diff: diff && Object.keys(diff).length ? diff : null,
-          playKeys: snapshot.playKeys,
-          pattern: snapshot.pattern,
-          looper: snapshot.looper,
-          lfos: snapshot.lfos,
-        };
-        if (!entry.diff) {
-          entry.state = snapshot.state;
-        }
-        if (snapshot.caption) {
-          entry.caption = snapshot.caption;
-        }
-        return [index, entry];
-      })
+    ? snapshots.map(([index, snapshot]) => [index, compactSnapshotEntry(base, snapshot)])
     : snapshots;
   const compactLetters = compact
-    ? letterSnapshots.map(([index, snapshot]) => {
-        const diff = base && snapshot.state ? diffSnapshotState(base, snapshot.state) : null;
-        const entry = {
-          diff: diff && Object.keys(diff).length ? diff : null,
-          playKeys: snapshot.playKeys,
-          pattern: snapshot.pattern,
-          looper: snapshot.looper,
-          lfos: snapshot.lfos,
-        };
-        if (!entry.diff) {
-          entry.state = snapshot.state;
-        }
-        if (snapshot.caption) {
-          entry.caption = snapshot.caption;
-        }
-        return [index, entry];
-      })
+    ? letterSnapshots.map(([index, snapshot]) => [index, compactSnapshotEntry(base, snapshot)])
     : letterSnapshots;
   return {
     v: 1,
@@ -4828,15 +4776,13 @@ if (typeof window !== "undefined") {
   };
 }
 
-function saveSnapshot(index) {
-  if (index < 0 || index >= snapshotSlots.length) {
-    return;
-  }
+/** The current editor + performance state as a snapshot slot, or null. */
+function captureSnapshotSlot() {
   const state = buildSnapshotState();
   if (!state) {
-    return;
+    return null;
   }
-  snapshotSlots[index] = {
+  return {
     state,
     playKeys: getPlayingSnapshotKeys({ excludePattern: patternPlayerState === "playing" }),
     pattern: getSnapshotPatternState(),
@@ -4844,6 +4790,17 @@ function saveSnapshot(index) {
     lfos: getSnapshotLfoState(),
     caption: cloneCaption(activeCaption),
   };
+}
+
+function saveSnapshot(index) {
+  if (index < 0 || index >= snapshotSlots.length) {
+    return;
+  }
+  const slot = captureSnapshotSlot();
+  if (!slot) {
+    return;
+  }
+  snapshotSlots[index] = slot;
   updateSnapshotUi();
   const displayIndex = index === 9 ? 0 : index + 1;
   showTemporaryBanner(`Snapshot ${displayIndex} saved`);
@@ -4853,18 +4810,11 @@ function saveSnapshotLetter(letter, index) {
   if (index < 0 || index >= snapshotLetterSlots.length) {
     return;
   }
-  const state = buildSnapshotState();
-  if (!state) {
+  const slot = captureSnapshotSlot();
+  if (!slot) {
     return;
   }
-  snapshotLetterSlots[index] = {
-    state,
-    playKeys: getPlayingSnapshotKeys({ excludePattern: patternPlayerState === "playing" }),
-    pattern: getSnapshotPatternState(),
-    looper: getSnapshotLooperState(),
-    lfos: getSnapshotLfoState(),
-    caption: cloneCaption(activeCaption),
-  };
+  snapshotLetterSlots[index] = slot;
   snapshotActiveLetterKey = letter;
   updateSnapshotUi();
   showTemporaryBanner(`Snapshot ${letter.toUpperCase()} saved`);
@@ -4874,82 +4824,44 @@ function recallSnapshotLetter(letter, index) {
   if (index < 0 || index >= snapshotLetterSlots.length) {
     return;
   }
-  const snapshot = snapshotLetterSlots[index];
-  if (!snapshot || !snapshot.state) {
-    return;
-  }
-  const snapshotState = prepareSnapshotStateForRecall(snapshot.state);
-  if (snapshotDeferToCycleEnd && patternPlayerState === "playing") {
-    pendingSnapshotIndex = -1;
-    pendingSnapshotState = { ...snapshot, state: snapshotState };
-    pendingSnapshotLetterKey = letter;
-    snapshotActiveLetterKey = letter;
-    updateSnapshotUi();
-    pendingSnapshotAtNextEvent = false;
-    return;
-  }
-  if (patternPlayerState === "playing") {
-    pendingSnapshotIndex = -1;
-    pendingSnapshotState = { ...snapshot, state: snapshotState };
-    pendingSnapshotLetterKey = letter;
-    snapshotActiveLetterKey = letter;
-    updateSnapshotUi();
-    pendingSnapshotAtNextEvent = true;
-    return;
-  }
-  snapshotActiveLetterKey = letter;
-  applyPresetState(snapshotState, {
-    skipLayoutModeSwitch: true,
-    skipStopVoices: true,
-    preserveViewMode: true,
-    preserveActiveVoicesOnSynthChange: true,
-  });
-  if (snapshotRestoreSequence) {
-    if (snapshot.pattern) {
-      stopPatternPlayback();
-      applySnapshotPatternState(snapshot.pattern);
-      startPatternPlaybackFromSnapshot();
-    } else {
-      stopPatternPlayback();
-      buildPatternStates(true);
-    }
-    restoreSnapshotLooper(snapshot);
-  } else {
-    buildPatternStates(true);
-  }
-  const playSnapshot = excludeLooperNodesFromPlayKeys(snapshot);
-  const morphHandled = restoreSnapshotPlayState(playSnapshot);
-  if (!morphHandled) {
-    restoreSnapshotLfos(playSnapshot);
-  }
-  setActiveCaption(snapshot.caption || null, { updateUrl: false });
-  updateSnapshotUi();
+  recallSnapshotSlot(snapshotLetterSlots[index], { letter });
 }
 
 function recallSnapshot(index) {
   if (index < 0 || index >= snapshotSlots.length) {
     return;
   }
-  const snapshot = snapshotSlots[index];
+  recallSnapshotSlot(snapshotSlots[index], { index });
+}
+
+/**
+ * Recall a slot from either bank: `{ index }` for a numeric slot, `{ letter }`
+ * for a letter slot. While a pattern plays, the recall is queued for the next
+ * event (or the cycle end) and applied by applyPendingSnapshotForPattern.
+ * A letter recall marks its key active immediately; a numeric one only when
+ * applied.
+ */
+function recallSnapshotSlot(snapshot, { index = -1, letter = "" }) {
   if (!snapshot || !snapshot.state) {
     return;
   }
   const snapshotState = prepareSnapshotStateForRecall(snapshot.state);
-  if (snapshotDeferToCycleEnd && patternPlayerState === "playing") {
-    pendingSnapshotIndex = index;
-    pendingSnapshotState = { ...snapshot, state: snapshotState };
-    pendingSnapshotLetterKey = "";
-    pendingSnapshotAtNextEvent = false;
-    return;
-  }
   if (patternPlayerState === "playing") {
-    pendingSnapshotIndex = index;
+    pendingSnapshotIndex = letter ? -1 : index;
     pendingSnapshotState = { ...snapshot, state: snapshotState };
-    pendingSnapshotLetterKey = "";
-    pendingSnapshotAtNextEvent = true;
+    pendingSnapshotLetterKey = letter;
+    pendingSnapshotAtNextEvent = !snapshotDeferToCycleEnd;
+    if (letter) {
+      snapshotActiveLetterKey = letter;
+      updateSnapshotUi();
+    }
     return;
   }
-  snapshotActiveIndex = index;
+  if (letter) {
+    snapshotActiveLetterKey = letter;
+  } else {
+    snapshotActiveIndex = index;
+  }
   applyPresetState(snapshotState, {
     skipLayoutModeSwitch: true,
     skipStopVoices: true,
@@ -8548,7 +8460,13 @@ function measureCharWidth(char, size, font, fontWeight = 400, context = ctx) {
   return measureTextWidthWithWeight(char, size, font, fontWeight, context);
 }
 
-function drawTextWithSmallCent({
+function drawTextWithSmallCent(options) {
+  paintDisplayList(options.context || ctx, buildTextWithSmallCentScene(options));
+}
+
+// A cents readout drawn glyph by glyph: the ¢ sign smaller, and (optionally)
+// HEJI accidental letters v/e/V in the HEJI2Text font, raised by hejiYOffset.
+function buildTextWithSmallCentScene({
   text,
   x,
   y,
@@ -8564,100 +8482,47 @@ function drawTextWithSmallCent({
 }) {
   const chars = Array.from(text || "");
   if (!chars.length) {
-    return;
+    return [];
   }
-  const widths = chars.map((char) => {
+  const runs = chars.map((char) => {
     const isCent = char === CENTS_CHAR;
     const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
     const charSize = isCent ? getCentsCharSize(size) : size;
     const charFont = isHeji ? "HEJI2Text" : font;
     const charWeight = isHeji ? 400 : fontWeight;
-    return measureCharWidth(char, charSize, charFont, charWeight, context);
+    return {
+      char,
+      isHeji,
+      charSize,
+      charFont,
+      charWeight,
+      width: measureCharWidth(char, charSize, charFont, charWeight, context),
+    };
   });
-  const totalWidth = widths.reduce((sum, width) => sum + width, 0);
-  let startX = x;
+  const totalWidth = runs.reduce((sum, run) => sum + run.width, 0);
+  let cursorX = x;
   if (align === "center") {
-    startX = x - totalWidth / 2;
+    cursorX = x - totalWidth / 2;
   } else if (align === "right") {
-    startX = x - totalWidth;
+    cursorX = x - totalWidth;
   }
-  context.save();
-  context.fillStyle = color;
-  context.textAlign = "left";
-  context.textBaseline = baseline;
-  let cursorX = startX;
-  chars.forEach((char, index) => {
-    const isCent = char === CENTS_CHAR;
-    const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
-    const charSize = isCent ? getCentsCharSize(size) : size;
-    const charFont = isHeji ? "HEJI2Text" : font;
-    const charWeight = isHeji ? 400 : fontWeight;
-    context.font = `${charWeight} ${charSize}px ${charFont}`;
-    context.fillText(char, cursorX, y + (isHeji ? hejiYOffset : 0));
-    cursorX += widths[index];
+  return runs.map((run) => {
+    const item = sceneText({
+      text: run.char,
+      x: cursorX,
+      y: y + (run.isHeji ? hejiYOffset : 0),
+      font: run.charFont,
+      size: run.charSize,
+      weight: run.charWeight,
+      align: "left",
+      baseline,
+      color,
+    });
+    cursorX += run.width;
+    return item;
   });
-  context.restore();
 }
 
-async function buildSvgTextWithSmallCent({
-  text,
-  x,
-  y,
-  font,
-  size,
-  fontWeight = 400,
-  align = "left",
-  baseline = "text-before-edge",
-  hejiAccidentals = false,
-  hejiYOffset = 0,
-  color,
-}) {
-  const chars = Array.from(text || "");
-  if (!chars.length) {
-    return "";
-  }
-  const widths = await Promise.all(chars.map(async (char) => {
-    const isCent = char === CENTS_CHAR;
-    const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
-    const charSize = isCent ? getCentsCharSize(size) : size;
-    const charFont = isHeji ? "HEJI2Text" : font;
-    const charWeight = isHeji ? 400 : fontWeight;
-    return measureSvgCharWidth(char, charSize, charFont, charWeight);
-  }));
-  const totalWidth = widths.reduce((sum, width) => sum + width, 0);
-  let startX = x;
-  if (align === "center") {
-    startX = x - totalWidth / 2;
-  } else if (align === "right") {
-    startX = x - totalWidth;
-  }
-  let cursorX = startX;
-  const nodes = [];
-  for (let index = 0; index < chars.length; index += 1) {
-    const char = chars[index];
-    const isCent = char === CENTS_CHAR;
-    const isHeji = hejiAccidentals && (char === "v" || char === "e" || char === "V");
-    const charSize = isCent ? getCentsCharSize(size) : size;
-    const charFont = isHeji ? "HEJI2Text" : font;
-    const charWeight = isHeji ? 400 : fontWeight;
-    const charY = y + (isHeji ? hejiYOffset : 0);
-    nodes.push(
-      await buildSvgTextElement({
-        text: char,
-        x: cursorX,
-        y: charY,
-        font: charFont,
-        size: charSize,
-        fontWeight: charWeight,
-        anchor: "start",
-        baseline,
-        color,
-      })
-    );
-    cursorX += widths[index];
-  }
-  return nodes.join("\n");
-}
 
 const STACKED_ASCENT_RATIO = 0.82;
 const STACKED_DESCENT_RATIO = 0.18;
@@ -9707,7 +9572,11 @@ function getExponentOffset(size, baseline) {
   return size + Math.round(size * 0.2);
 }
 
-function drawHejiInline({
+
+// A note name with HEJI accidentals: base text, then suffix parts (HEJI
+// glyphs, cents) glyph by glyph with their own fonts, sizes and raise, an
+// optional exponent label centred over a part, then optional rest text.
+function buildHejiInlineScene({
   x,
   y,
   baseText,
@@ -9723,12 +9592,9 @@ function drawHejiInline({
   fontWeight = 400,
   color = themeColors.textSecondary,
 }) {
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.textAlign = "left";
-  ctx.textBaseline = baseline;
-  ctx.font = `${fontWeight} ${size}px ${font}`;
-  const baseWidth = ctx.measureText(baseText).width;
+  const scene = [];
+  const run = (props) => scene.push(sceneText({ align: "left", baseline, color, ...props }));
+  const baseWidth = measureTextWidthWithWeight(baseText, size, font, fontWeight);
   const suffixSpacing = Math.round(size * 0.08);
   const partGap = Math.round(size * 0.1);
   const baseSuffixGap = Math.round(size * 0.1);
@@ -9738,7 +9604,7 @@ function drawHejiInline({
     const partWidth = measureSuffixPartWidth(part, size, suffixSpacing, fontWeight);
     return sum + partWidth + (index > 0 ? partGap : 0);
   }, 0);
-  const restWidth = restText ? ctx.measureText(restText).width : 0;
+  const restWidth = restText ? measureTextWidthWithWeight(restText, size, font, fontWeight) : 0;
   const totalWidth =
     baseWidth +
     (parts.length ? baseSuffixGap + suffixWidth : 0) +
@@ -9749,7 +9615,7 @@ function drawHejiInline({
   } else if (align === "right") {
     startX = x - totalWidth;
   }
-  ctx.fillText(baseText, startX, y);
+  run({ text: baseText, x: startX, y, font, size, weight: fontWeight });
   let cursorX = startX + baseWidth;
   if (parts.length) {
     cursorX += baseSuffixGap;
@@ -9760,15 +9626,13 @@ function drawHejiInline({
       const partCharGap = Number.isFinite(part.charGap) ? part.charGap : suffixSpacing;
       const partWidth = measureSuffixPartWidth(part, size, suffixSpacing, fontWeight);
       const partStartX = cursorX;
-      ctx.save();
       const partFont = part.font || "HEJI2Text";
       const partWeight = Number.isFinite(part.fontWeight)
         ? part.fontWeight
         : part.font
         ? fontWeight
         : 400;
-      const partYOffset =
-        typeof part.yOffset === "number" ? part.yOffset : hejiYOffset;
+      const partYOffset = typeof part.yOffset === "number" ? part.yOffset : hejiYOffset;
       const sizeScale = Number.isFinite(part.sizeScale) ? part.sizeScale : 1;
       Array.from(part.text).forEach((char, index) => {
         if (index > 0) {
@@ -9776,48 +9640,48 @@ function drawHejiInline({
         }
         const baseSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
         const charSize = Math.max(6, Math.round(baseSize * sizeScale));
-        ctx.font = `${partWeight} ${charSize}px ${partFont}`;
-        ctx.fillText(char, cursorX, y + partYOffset);
+        run({ text: char, x: cursorX, y: y + partYOffset, font: partFont, size: charSize, weight: partWeight });
         cursorX += measureCharWidth(char, charSize, partFont, partWeight);
       });
-      ctx.restore();
       if (part.expLabel) {
-        const expSize = Math.max(8, Math.round(size * 0.55));
-        const expY =
-          y +
-          (typeof part.yOffset === "number" ? part.yOffset : hejiYOffset) +
-          getExponentOffset(size, baseline);
-        ctx.save();
-        ctx.font = `${fontWeight} ${expSize}px ${font}`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.fillText(part.expLabel, partStartX + partWidth / 2, expY);
-        ctx.restore();
+        run({
+          text: part.expLabel,
+          x: partStartX + partWidth / 2,
+          y: y + partYOffset + getExponentOffset(size, baseline),
+          font,
+          size: Math.max(8, Math.round(size * 0.55)),
+          weight: fontWeight,
+          align: "center",
+          baseline: "top",
+        });
       }
     });
   }
   if (restText) {
     cursorX += restGap;
-    const chars = Array.from(restText);
     const needsInline =
       restHejiAccidentals || restText.includes(CENTS_CHAR) || /[veV]/.test(restText);
     if (!needsInline) {
-      ctx.font = `${fontWeight} ${size}px ${font}`;
-      ctx.fillText(restText, cursorX, y);
+      run({ text: restText, x: cursorX, y, font, size, weight: fontWeight });
     } else {
-      chars.forEach((char) => {
+      Array.from(restText).forEach((char) => {
         const useHeji = char === "v" || char === "e" || char === "V";
-        const isCent = char === CENTS_CHAR;
-        const charSize = isCent ? getCentsCharSize(size) : size;
+        const charSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
         const charFont = useHeji ? "HEJI2Text" : font;
         const charWeight = useHeji ? 400 : fontWeight;
-        ctx.font = `${charWeight} ${charSize}px ${charFont}`;
-        ctx.fillText(char, cursorX, y + (useHeji ? hejiYOffset : 0));
+        run({
+          text: char,
+          x: cursorX,
+          y: y + (useHeji ? hejiYOffset : 0),
+          font: charFont,
+          size: charSize,
+          weight: charWeight,
+        });
         cursorX += measureCharWidth(char, charSize, charFont, charWeight);
       });
     }
   }
-  ctx.restore();
+  return scene;
 }
 
 function getDefaultNoteDetailOffset(radius, scale = 1) {
@@ -10422,31 +10286,6 @@ function syncActiveLayoutCustomTextEntryFromEditor() {
   return entry;
 }
 
-function drawLayoutCustomLabels() {
-  if (!layoutCustomLabels.length) {
-    return;
-  }
-  const size = Math.max(8, Math.round(layoutCustomLabelTextSize));
-  ctx.save();
-  ctx.fillStyle = themeColors.textSecondary;
-  ctx.font = `${layoutCustomLabelFontWeight} ${size}px ${layoutCustomLabelFont}`;
-  ctx.textBaseline = "top";
-  layoutCustomLabels.forEach((entry) => {
-    if (!entry.text || !entry.position) {
-      return;
-    }
-    if (layoutCustomTextEditorState && layoutCustomTextEditorState.id === entry.id) {
-      return;
-    }
-    const pos = getLayoutCustomLabelPosition(entry);
-    const { lines, lineHeight } = getLayoutCustomLabelMetrics(entry);
-    ctx.textAlign = getLayoutCustomLabelAlign(entry);
-    lines.forEach((line, index) => {
-      ctx.fillText(line, pos.x, pos.y + index * lineHeight);
-    });
-  });
-  ctx.restore();
-}
 
 function setActiveLayoutCustomTextAlign(align) {
   if (!layoutCustomTextEditorState) {
@@ -10842,7 +10681,7 @@ function openTriangleLabelDialog(value) {
 }
 
 function openLayoutCustomLabelDialog(value = "") {
-  xKeyHeld = false;
+  heldKeys.delete("x");
   if (layoutCustomLabelEditId != null) {
     openLayoutCustomTextEditor(layoutCustomLabelEditId, { selectAll: !value });
     return;
@@ -11240,15 +11079,18 @@ function getTriangleLabelPoints(tri, nodes) {
 }
 
 function drawTriangleDiagonals(nodePosMap) {
+  paintDisplayList(ctx, buildTriangleDiagonalsScene(nodePosMap));
+}
+
+// Dashed diagonals that split lattice squares into triangles (drawn and
+// automatic), trimmed to the node circles.
+function buildTriangleDiagonalsScene(nodePosMap) {
+  const scene = [];
   ensureAutoTriangleDiagonals();
   if (!triangleDiagonals.size && !autoTriangleDiagonals.size) {
-    return;
+    return scene;
   }
   const gridMap = getActiveGridNodeMap();
-  ctx.save();
-  ctx.strokeStyle = getInkEdgeColor(false);
-  ctx.lineWidth = getInkEdgeLineWidth(false);
-  ctx.setLineDash([6, 4]);
   forEachEffectiveTriangleDiagonal((entry) => {
     const { a, b } = getTriangleDiagonalNodes(entry, gridMap);
     if (!a || !b) {
@@ -11256,12 +11098,8 @@ function drawTriangleDiagonals(nodePosMap) {
     }
     const startEntry = nodePosMap && nodePosMap.get(a.id);
     const endEntry = nodePosMap && nodePosMap.get(b.id);
-    const start = startEntry
-      ? startEntry.pos
-      : worldToScreen(getNodeDisplayCoordinate(a));
-    const end = endEntry
-      ? endEntry.pos
-      : worldToScreen(getNodeDisplayCoordinate(b));
+    const start = startEntry ? startEntry.pos : worldToScreen(getNodeDisplayCoordinate(a));
+    const end = endEntry ? endEntry.pos : worldToScreen(getNodeDisplayCoordinate(b));
     const radiusA = startEntry
       ? startEntry.radius
       : layoutMode
@@ -11280,26 +11118,31 @@ function drawTriangleDiagonals(nodePosMap) {
     }
     const ux = dx / dist;
     const uy = dy / dist;
-    const edgeStart = {
-      x: start.x + ux * radiusA,
-      y: start.y + uy * radiusA,
-    };
-    const edgeEnd = {
-      x: end.x - ux * radiusB,
-      y: end.y - uy * radiusB,
-    };
-    ctx.beginPath();
-    ctx.moveTo(edgeStart.x, edgeStart.y);
-    ctx.lineTo(edgeEnd.x, edgeEnd.y);
-    ctx.stroke();
-
+    scene.push(
+      sceneLine({
+        x1: start.x + ux * radiusA,
+        y1: start.y + uy * radiusA,
+        x2: end.x - ux * radiusB,
+        y2: end.y - uy * radiusB,
+        color: getInkEdgeColor(false),
+        width: getInkEdgeLineWidth(false),
+        dash: [6, 4],
+        ref: { type: "triangleDiagonal" },
+      })
+    );
   });
-  ctx.restore();
+  return scene;
 }
 
 function drawTriangleLabels(nodePosMap) {
+  paintDisplayList(ctx, buildTriangleLabelsScene(nodePosMap));
+}
+
+// Text labels centred in labelled triangles, shrunk to fit the triangle.
+function buildTriangleLabelsScene(nodePosMap) {
+  const scene = [];
   if (!triangleLabels.size) {
-    return;
+    return scene;
   }
   ensureAutoTriangleDiagonals();
   const gridMap = getActiveGridNodeMap();
@@ -11316,17 +11159,12 @@ function drawTriangleLabels(nodePosMap) {
     if (!labelNodes) {
       return;
     }
-    const points = labelNodes.map((node) => {
-      const projected = nodePosMap && nodePosMap.get(node.id)
+    const points = labelNodes.map((node) =>
+      nodePosMap && nodePosMap.get(node.id)
         ? nodePosMap.get(node.id).pos
-        : worldToScreen(getNodeDisplayCoordinate(node));
-      return projected;
-    });
-    const cx = (points[0].x + points[1].x + points[2].x) / 3;
-    const cy = (points[0].y + points[1].y + points[2].y) / 3;
-    const baseSize = layoutMode
-      ? Math.max(12, Math.round(layoutTriangleLabelTextSize))
-      : 18;
+        : worldToScreen(getNodeDisplayCoordinate(node))
+    );
+    const baseSize = layoutMode ? Math.max(12, Math.round(layoutTriangleLabelTextSize)) : 18;
     const fontWeight = layoutMode ? layoutTriangleLabelFontWeight : 400;
     const layout = computeTriangleLabelLayout(
       entry.label,
@@ -11335,19 +11173,26 @@ function drawTriangleLabels(nodePosMap) {
       points,
       fontWeight
     );
-    ctx.save();
-    ctx.setLineDash([]);
-    ctx.fillStyle = themeColors.textSecondary;
-    ctx.font = `${fontWeight} ${layout.size}px ${layoutTriangleLabelFont}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(entry.label, cx, cy);
-    ctx.restore();
+    scene.push(
+      sceneText({
+        text: entry.label,
+        x: (points[0].x + points[1].x + points[2].x) / 3,
+        y: (points[0].y + points[1].y + points[2].y) / 3,
+        font: layoutTriangleLabelFont,
+        size: layout.size,
+        weight: fontWeight,
+        align: "center",
+        baseline: "middle",
+        color: themeColors.textSecondary,
+        ref: { type: "triangleLabel" },
+      })
+    );
   });
+  return scene;
 }
 
 function drawTriangleHover(nodePosMap) {
-  if (!triangleHover || !tHeld) {
+  if (!triangleHover || !heldKeys.has("t")) {
     return;
   }
   const gridMap = new Map();
@@ -11436,15 +11281,31 @@ function getNodeGuideAlpha(node, guideNodes, axisEntry) {
 }
 
 function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
-  if (!connectOrphansEnabled || !orphanGuideEdges.size) {
+  if (!connectOrphansEnabled) {
     return;
+  }
+  paintDisplayList(
+    ctx,
+    buildOrphanGuideEdgesScene(nodePosMap, {
+      edges: orphanGuideEdges,
+      orphans: orphanGuideNodes,
+      guideNodes,
+      axisEntry,
+    })
+  );
+}
+
+// Faint guide edges that connect orphaned active nodes back to the lattice
+// ("connect orphans"). `edges` holds "idA|idB" keys; `orphans` the guide ids.
+function buildOrphanGuideEdgesScene(nodePosMap, { edges: edgeKeys, orphans, guideNodes, axisEntry }) {
+  const scene = [];
+  if (!edgeKeys || !edgeKeys.size) {
+    return scene;
   }
   const labelFont = layoutMode ? layoutLineLabelFont : "Noto Serif";
   const labelWeight = layoutMode ? layoutLineLabelFontWeight : 400;
   const labelSize = layoutMode ? getLayoutLineLabelSize() : EDGE_LABEL_SIZE_DEFAULT;
-  ctx.save();
-  ctx.lineWidth = getInkEdgeLineWidth(false);
-  orphanGuideEdges.forEach((edgeKey) => {
+  edgeKeys.forEach((edgeKey) => {
     const partsKey = edgeKey.split("|");
     if (partsKey.length !== 2) {
       return;
@@ -11459,8 +11320,8 @@ function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
     if (!startEntry || !endEntry) {
       return;
     }
-    const isOrphanA = orphanGuideNodes.has(a.id);
-    const isOrphanB = orphanGuideNodes.has(b.id);
+    const isOrphanA = orphans.has(a.id);
+    const isOrphanB = orphans.has(b.id);
     if (!isOrphanA && !isOrphanB) {
       return;
     }
@@ -11480,26 +11341,25 @@ function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
     }
     const ux = dx / dist;
     const uy = dy / dist;
-    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-    const labelText = getEdgeLabelText(a, b);
-    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
-    drawCanvasEdgeSegment({
-      start,
-      end,
-      startRadius,
-      endRadius,
-      color: themeColors.nodeStroke,
-      label,
-      labelFont,
-      labelWeight,
-      labelSize,
-      alpha: edgeAlpha,
-      labelAlpha: Math.min(1, (edgeAlpha + 1) * 0.3),
-      lineWidth: getInkEdgeLineWidth(false),
-    });
+    scene.push(
+      ...buildEdgeSegmentScene({
+        start,
+        end,
+        startRadius: getNodeEdgeRadius(a, ux, uy, startEntry.radius),
+        endRadius: getNodeEdgeRadius(b, ux, uy, endEntry.radius),
+        color: themeColors.nodeStroke,
+        label: shouldShowEdgeLabel(a, b) ? getEdgeLabelText(a, b) : null,
+        labelFont,
+        labelWeight,
+        labelSize,
+        alpha: edgeAlpha,
+        labelAlpha: Math.min(1, (edgeAlpha + 1) * 0.3),
+        lineWidth: getInkEdgeLineWidth(false),
+        ref: { type: "orphanGuideEdge", a: a.id, b: b.id },
+      })
+    );
   });
-  ctx.restore();
+  return scene;
 }
 
 function getGuideRevealInfo(nodePosMap, axisEntry = null) {
@@ -12015,7 +11875,14 @@ function toggleEdgeLabelOverride(a, b) {
   }
 }
 
-function drawCanvasEdgeSegment({
+function drawCanvasEdgeSegment(options) {
+  paintDisplayList(ctx, buildEdgeSegmentScene(options));
+}
+
+// One lattice-style connection between two node circles: trimmed to the
+// circles, broken around an optional label (which shrinks to fit short
+// segments and can slide along to avoid nodes). Screen coordinates.
+function buildEdgeSegmentScene({
   start,
   end,
   startRadius,
@@ -12025,22 +11892,20 @@ function drawCanvasEdgeSegment({
   labelFont,
   labelWeight,
   labelSize,
-  forceLabel = false,
   alpha = 1,
   dash = null,
   lineWidth = 1.5,
   labelT = 0.5,
   labelAvoidNodes = null,
   labelAlpha = null,
+  ref = null,
 }) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
   const dist = Math.hypot(dx, dy);
   if (dist === 0) {
-    return;
+    return [];
   }
-  ctx.save();
-  ctx.globalAlpha = alpha;
   const ux = dx / dist;
   const uy = dy / dist;
   const lineStart = {
@@ -12052,127 +11917,117 @@ function drawCanvasEdgeSegment({
     y: end.y - uy * endRadius,
   };
   const lineLen = Math.max(0, dist - startRadius - endRadius);
-  const shouldLabel = Boolean(label);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth;
-  if (dash && dash.length) {
-    ctx.setLineDash(dash);
-  } else {
-    ctx.setLineDash([]);
-  }
-  if (shouldLabel && lineLen > 0) {
-    const labelLines = String(label).split("\n");
-    ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
-    const baseWidth = labelLines.reduce(
-      (maxWidth, line) => Math.max(maxWidth, ctx.measureText(line).width),
-      0
-    );
-    const layout = computeEdgeLabelLayoutFromWidth({
-      baseSize: labelSize,
-      baseWidth,
-      lineLen,
-      minSize: 4,
+  const stroke = (...runs) =>
+    sceneStroke({
+      subpaths: runs.map(([from, to]) => [
+        [from.x, from.y],
+        [to.x, to.y],
+      ]),
+      color,
+      width: lineWidth,
+      alpha,
+      dash,
+      ref,
     });
-    const size = layout.size;
-    const gap = layout.gap;
-    if (size !== labelSize) {
-      ctx.font = `${labelWeight} ${size}px ${labelFont}`;
-    }
-    const textWidth = labelLines.reduce(
-      (maxWidth, line) => Math.max(maxWidth, ctx.measureText(line).width),
-      0
-    );
-    const lineGap = Math.max(2, Math.round(size * 0.25));
-    const textHeight = labelLines.length * size + (labelLines.length - 1) * lineGap;
-    let clampedT = Math.min(1, Math.max(0, labelT));
-    if (Array.isArray(labelAvoidNodes) && labelAvoidNodes.length) {
-      const labelRadius = Math.hypot(textWidth / 2 + 6, textHeight / 2 + 4);
-      const intersectsNodeAt = (t) => {
-        const x = lineStart.x + (lineEnd.x - lineStart.x) * t;
-        const y = lineStart.y + (lineEnd.y - lineStart.y) * t;
-        for (let i = 0; i < labelAvoidNodes.length; i += 1) {
-          const circle = labelAvoidNodes[i];
-          const clearance = (Number(circle.r) || 0) + labelRadius;
-          if (clearance <= 0) {
-            continue;
-          }
-          if (Math.hypot(x - circle.x, y - circle.y) < clearance) {
-            return true;
-          }
-        }
-        return false;
-      };
-      if (intersectsNodeAt(clampedT)) {
-        const step = 0.04;
-        const maxSteps = 24;
-        let bestT = clampedT;
-        for (let i = 1; i <= maxSteps; i += 1) {
-          const delta = i * step;
-          const left = Math.max(0, clampedT - delta);
-          const right = Math.min(1, clampedT + delta);
-          if (!intersectsNodeAt(left)) {
-            bestT = left;
-            break;
-          }
-          if (!intersectsNodeAt(right)) {
-            bestT = right;
-            break;
-          }
-        }
-        clampedT = bestT;
-      }
-    }
-    const gapHalf = gap / 2;
-    const midX = lineStart.x + (lineEnd.x - lineStart.x) * clampedT;
-    const midY = lineStart.y + (lineEnd.y - lineStart.y) * clampedT;
-    const gapStart = {
-      x: midX - ux * gapHalf,
-      y: midY - uy * gapHalf,
-    };
-    const gapEnd = {
-      x: midX + ux * gapHalf,
-      y: midY + uy * gapHalf,
-    };
-    ctx.beginPath();
-    ctx.moveTo(lineStart.x, lineStart.y);
-    ctx.lineTo(gapStart.x, gapStart.y);
-    ctx.moveTo(gapEnd.x, gapEnd.y);
-    ctx.lineTo(lineEnd.x, lineEnd.y);
-    ctx.stroke();
-    let angle = 0;
-    if (Math.abs(dx) > 1e-6 || Math.abs(dy) > 1e-6) {
-      angle = Math.atan2(dy, dx);
-      if (!shouldUseHorizontalText(angle)) {
-        if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
-          angle += Math.PI;
-        }
-      } else {
-        angle = 0;
-      }
-    }
+  if (!label || lineLen <= 0) {
+    return [stroke([lineStart, lineEnd])];
+  }
+  const labelLines = String(label).split("\n");
+  const measureLines = (size) => {
     ctx.save();
-    const effectiveLabelAlpha = Number.isFinite(labelAlpha) ? labelAlpha : alpha;
-    ctx.globalAlpha = effectiveLabelAlpha;
-    const labelNudgeX = Math.max(0.5, size * 0.04);
-    const labelNudgeY = Math.max(1, size * 0.14);
-    ctx.translate(midX - labelNudgeX, midY - labelNudgeY);
-    ctx.rotate(angle);
-    ctx.fillStyle = themeColors.textSecondary;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    const textStartY = -textHeight / 2;
-    labelLines.forEach((line, index) => {
-      const y = textStartY + index * (size + lineGap);
-      ctx.fillText(line, 0, y);
-    });
+    ctx.font = `${labelWeight} ${size}px ${labelFont}`;
+    const width = labelLines.reduce(
+      (maxWidth, line) => Math.max(maxWidth, ctx.measureText(line).width),
+      0
+    );
     ctx.restore();
-  } else {
-    ctx.beginPath();
-    ctx.moveTo(lineStart.x, lineStart.y);
-    ctx.lineTo(lineEnd.x, lineEnd.y);
-    ctx.stroke();
+    return width;
+  };
+  const layout = computeEdgeLabelLayoutFromWidth({
+    baseSize: labelSize,
+    baseWidth: measureLines(labelSize),
+    lineLen,
+    minSize: 4,
+  });
+  const size = layout.size;
+  const gap = layout.gap;
+  const textWidth = measureLines(size);
+  const lineGap = Math.max(2, Math.round(size * 0.25));
+  const textHeight = labelLines.length * size + (labelLines.length - 1) * lineGap;
+  let clampedT = Math.min(1, Math.max(0, labelT));
+  if (Array.isArray(labelAvoidNodes) && labelAvoidNodes.length) {
+    const labelRadius = Math.hypot(textWidth / 2 + 6, textHeight / 2 + 4);
+    const intersectsNodeAt = (t) => {
+      const x = lineStart.x + (lineEnd.x - lineStart.x) * t;
+      const y = lineStart.y + (lineEnd.y - lineStart.y) * t;
+      for (let i = 0; i < labelAvoidNodes.length; i += 1) {
+        const circle = labelAvoidNodes[i];
+        const clearance = (Number(circle.r) || 0) + labelRadius;
+        if (clearance <= 0) {
+          continue;
+        }
+        if (Math.hypot(x - circle.x, y - circle.y) < clearance) {
+          return true;
+        }
+      }
+      return false;
+    };
+    if (intersectsNodeAt(clampedT)) {
+      const step = 0.04;
+      const maxSteps = 24;
+      let bestT = clampedT;
+      for (let i = 1; i <= maxSteps; i += 1) {
+        const delta = i * step;
+        const left = Math.max(0, clampedT - delta);
+        const right = Math.min(1, clampedT + delta);
+        if (!intersectsNodeAt(left)) {
+          bestT = left;
+          break;
+        }
+        if (!intersectsNodeAt(right)) {
+          bestT = right;
+          break;
+        }
+      }
+      clampedT = bestT;
+    }
   }
-  ctx.restore();
+  const gapHalf = gap / 2;
+  const midX = lineStart.x + (lineEnd.x - lineStart.x) * clampedT;
+  const midY = lineStart.y + (lineEnd.y - lineStart.y) * clampedT;
+  let angle = 0;
+  if (Math.abs(dx) > 1e-6 || Math.abs(dy) > 1e-6) {
+    angle = Math.atan2(dy, dx);
+    if (!shouldUseHorizontalText(angle)) {
+      if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+        angle += Math.PI;
+      }
+    } else {
+      angle = 0;
+    }
+  }
+  return [
+    stroke(
+      [lineStart, { x: midX - ux * gapHalf, y: midY - uy * gapHalf }],
+      [{ x: midX + ux * gapHalf, y: midY + uy * gapHalf }, lineEnd]
+    ),
+    sceneText({
+      lines: labelLines,
+      lineHeight: size + lineGap,
+      x: midX - Math.max(0.5, size * 0.04),
+      y: midY - Math.max(1, size * 0.14),
+      rotation: angle,
+      offsetY: -textHeight / 2,
+      font: labelFont,
+      size,
+      weight: labelWeight,
+      align: "center",
+      baseline: "top",
+      color: themeColors.textSecondary,
+      alpha: Number.isFinite(labelAlpha) ? labelAlpha : alpha,
+      ref,
+    }),
+  ];
 }
 
 function computeEdgeLabelLayoutFromWidth({ baseSize, baseWidth, lineLen, minSize = 4 }) {
@@ -12619,16 +12474,6 @@ function parseColorToRgb(color) {
   return null;
 }
 
-function blendOverPage(color, alpha) {
-  const fg = parseColorToRgb(color) || { r: 0, g: 0, b: 0 };
-  const pageColor = themeColors && themeColors.page ? themeColors.page : "#ffffff";
-  const bg = parseColorToRgb(pageColor) || { r: 255, g: 255, b: 255 };
-  const a = Math.max(0, Math.min(1, alpha));
-  const r = Math.round(fg.r * a + bg.r * (1 - a));
-  const g = Math.round(fg.g * a + bg.g * (1 - a));
-  const b = Math.round(fg.b * a + bg.b * (1 - a));
-  return `rgb(${r}, ${g}, ${b})`;
-}
 
 function colorWithAlpha(color, alpha) {
   const clamped = Math.max(0, Math.min(1, alpha));
@@ -12689,53 +12534,11 @@ function getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, light
   return gradient;
 }
 
-const DIAMOND_RADIUS_SCALE = 1.125;
 
 function drawNodeShapePath(shape, x, y, radius) {
-  if (shape === "square") {
-    ctx.rect(x - radius, y - radius, radius * 2, radius * 2);
-    return;
-  }
-  if (shape === "triangle") {
-    const height = radius * 1.2;
-    ctx.moveTo(x, y - height);
-    ctx.lineTo(x + radius, y + height * 0.6);
-    ctx.lineTo(x - radius, y + height * 0.6);
-    ctx.closePath();
-    return;
-  }
-  if (shape === "diamond") {
-    const r = radius * DIAMOND_RADIUS_SCALE;
-    ctx.moveTo(x, y - r);
-    ctx.lineTo(x + r, y);
-    ctx.lineTo(x, y + r);
-    ctx.lineTo(x - r, y);
-    ctx.closePath();
-    return;
-  }
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  traceNodeShape(ctx, shape, x, y, radius);
 }
 
-function drawAxisArrow(x1, y1, x2, y2) {
-  const headLength = 10;
-  const angle = Math.atan2(y2 - y1, x2 - x1);
-  ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(x2, y2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(x2, y2);
-  ctx.lineTo(
-    x2 - headLength * Math.cos(angle - Math.PI / 6),
-    y2 - headLength * Math.sin(angle - Math.PI / 6)
-  );
-  ctx.lineTo(
-    x2 - headLength * Math.cos(angle + Math.PI / 6),
-    y2 - headLength * Math.sin(angle + Math.PI / 6)
-  );
-  ctx.closePath();
-  ctx.fill();
-}
 
 function hasActiveAxis(axis) {
   const key =
@@ -12868,67 +12671,154 @@ function getAxisLegendInfo(axis, settings = getAxisLegendSettings()) {
   };
 }
 
-function drawLayoutAxisLegend(axis, { showHandles = false } = {}) {
-  const info = getAxisLegendInfo(axis);
-  if (!info) {
-    return;
+
+
+// Page chrome in page coordinates: title, creator, axis legends, custom text
+// labels. Shared by the canvas (drawLayoutPage) and SVG export. The page box,
+// its shadow, and the axis-edit handles are canvas-only.
+function buildPageChromeScene() {
+  const scene = [];
+  if (layoutTitle) {
+    const titlePos = getLayoutTitlePosition();
+    scene.push(
+      sceneText({
+        text: layoutTitle,
+        x: titlePos.x,
+        y: titlePos.y,
+        font: layoutTitleFont,
+        size: Math.max(12, Math.round(layoutTitleSize)),
+        weight: layoutTitleFontWeight,
+        align: "center",
+        baseline: "top",
+        color: themeColors.textPrimary,
+        ref: { type: "title" },
+      }),
+      textHitArea(layoutTitle, titlePos, layoutTitleFont, Math.max(12, Math.round(layoutTitleSize)), layoutTitleFontWeight, { type: "title" })
+    );
   }
-  drawAxisArrow(
-    info.center.x - info.gapVec.x,
-    info.center.y - info.gapVec.y,
-    info.leftEnd.x,
-    info.leftEnd.y
-  );
-  drawAxisArrow(
-    info.center.x + info.gapVec.x,
-    info.center.y + info.gapVec.y,
-    info.rightEnd.x,
-    info.rightEnd.y
-  );
-  ctx.save();
-  ctx.translate(info.center.x, info.center.y);
-  ctx.rotate(info.textAngle);
-  ctx.fillText(info.label, 0, 0);
-  ctx.restore();
-  if (showHandles) {
-    const handleRadius = Math.max(8, Math.round(info.fontSize * 0.55));
-    ctx.save();
-    ctx.fillStyle = themeColors.textSecondary;
-    ctx.beginPath();
-    ctx.arc(info.leftEnd.x, info.leftEnd.y, handleRadius, 0, Math.PI * 2);
-    ctx.arc(info.rightEnd.x, info.rightEnd.y, handleRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+  if (layoutCreator) {
+    const creatorPos = getLayoutCreatorPosition();
+    scene.push(
+      sceneText({
+        text: layoutCreator,
+        x: creatorPos.x,
+        y: creatorPos.y,
+        font: layoutCreatorFont,
+        size: getLayoutCreatorSize(),
+        weight: layoutCreatorFontWeight,
+        align: "center",
+        baseline: "top",
+        color: themeColors.textSecondary,
+        ref: { type: "creator" },
+      }),
+      textHitArea(layoutCreator, creatorPos, layoutCreatorFont, getLayoutCreatorSize(), layoutCreatorFontWeight, { type: "creator" })
+    );
   }
+  const axisSettings = getAxisLegendSettings();
+  const axisColor = themeColors.textSecondary;
+  for (const axis of ["x", "y", "z"]) {
+    const info = getAxisLegendInfo(axis, axisSettings);
+    if (!info) {
+      continue;
+    }
+    const ref = { type: "axisLegend", axis };
+    scene.push(
+      ...sceneArrow({
+        x1: info.center.x - info.gapVec.x,
+        y1: info.center.y - info.gapVec.y,
+        x2: info.leftEnd.x,
+        y2: info.leftEnd.y,
+        color: axisColor,
+        width: 1.5,
+        ref,
+      }),
+      ...sceneArrow({
+        x1: info.center.x + info.gapVec.x,
+        y1: info.center.y + info.gapVec.y,
+        x2: info.rightEnd.x,
+        y2: info.rightEnd.y,
+        color: axisColor,
+        width: 1.5,
+        ref,
+      }),
+      sceneText({
+        text: info.label,
+        x: info.center.x,
+        y: info.center.y,
+        font: layoutAxisLegendFont,
+        size: axisSettings.fontSize,
+        weight: layoutAxisLegendFontWeight,
+        align: "center",
+        baseline: "middle",
+        color: axisColor,
+        rotation: info.textAngle,
+        ref,
+      })
+    );
+    const labelWidth = measureTextWidthWithWeight(
+      info.label,
+      axisSettings.fontSize,
+      layoutAxisLegendFont,
+      layoutAxisLegendFontWeight
+    );
+    const halfW = labelWidth / 2 + 12;
+    const halfH = axisSettings.fontSize / 2 + 8;
+    scene.push(
+      sceneHitArea({
+        left: info.center.x - halfW,
+        top: info.center.y - halfH,
+        width: halfW * 2,
+        height: halfH * 2,
+        rotation: info.textAngle,
+        pivot: info.center,
+        ref,
+      })
+    );
+  }
+  if (layoutCustomLabels.length) {
+    const customSize = Math.max(8, Math.round(layoutCustomLabelTextSize));
+    layoutCustomLabels.forEach((entry, index) => {
+      if (!entry.text || !entry.position) {
+        return;
+      }
+      const pos = getLayoutCustomLabelPosition(entry);
+      const { lines, lineHeight, width, height } = getLayoutCustomLabelMetrics(entry);
+      const align = getLayoutCustomLabelAlign(entry);
+      scene.push(
+        sceneText({
+          lines,
+          lineHeight,
+          x: pos.x,
+          y: pos.y,
+          font: layoutCustomLabelFont,
+          size: customSize,
+          weight: layoutCustomLabelFontWeight,
+          align,
+          baseline: "top",
+          color: themeColors.textSecondary,
+          ref: { type: "customLabel", id: entry.id },
+        }),
+        // The stored wrap width, not the ink, is the clickable box.
+        sceneHitArea({
+          left: getLayoutCustomLabelLeft(pos, width, align),
+          top: pos.y,
+          width,
+          height,
+          ref: { type: "customLabel", id: entry.id, index },
+        })
+      );
+    });
+  }
+  return scene;
 }
 
-function drawLayoutAxes() {
-  const { fontSize } = getAxisLegendSettings();
-
-  ctx.save();
-  ctx.strokeStyle = themeColors.textSecondary;
-  ctx.fillStyle = themeColors.textSecondary;
-  ctx.lineWidth = 1.5;
-  ctx.font = `${layoutAxisLegendFontWeight} ${fontSize}px ${layoutAxisLegendFont}`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-
-  if (hasActiveAxis("x")) {
-    drawLayoutAxisLegend("x", { showHandles: layoutAxisEdit === "x" });
-  }
-
-  if (hasActiveAxis("y")) {
-    drawLayoutAxisLegend("y", { showHandles: layoutAxisEdit === "y" });
-  }
-
-  if (hasActiveAxis("z")) {
-    drawLayoutAxisLegend("z", { showHandles: layoutAxisEdit === "z" });
-  }
-
-  ctx.restore();
+// Clickable box of a centred, top-baseline text run (title, creator).
+function textHitArea(text, pos, font, size, weight, ref) {
+  const width = measureTextWidthWithWeight(text, size, font, weight);
+  return sceneHitArea({ left: pos.x - width / 2, top: pos.y, width, height: size, ref });
 }
 
-function drawLayoutPage({ drawAxes = true } = {}) {
+function drawLayoutPage(pageScene) {
   const { left, top, width, height } = getLayoutPageRect();
   ctx.save();
   ctx.shadowColor = themeColors.pageShadow;
@@ -12942,32 +12832,36 @@ function drawLayoutPage({ drawAxes = true } = {}) {
   ctx.strokeStyle = themeColors.pageBorder;
   ctx.lineWidth = 1;
   ctx.strokeRect(left, top, width, height);
+  ctx.restore();
+  // While an axis is being edited, all legends move to the late overlay pass
+  // (drawLayoutAxisEditOverlay); the label under the text editor is hidden.
+  const editingLabelId = layoutCustomTextEditorState ? layoutCustomTextEditorState.id : null;
+  paintDisplayList(ctx, pageScene, {
+    filter: ({ ref }) =>
+      !(ref && ref.type === "axisLegend" && layoutAxisEdit) &&
+      !(ref && ref.type === "customLabel" && editingLabelId != null && ref.id === editingLabelId),
+  });
+}
 
-  if (layoutTitle) {
-    const titleSize = Math.max(12, Math.round(layoutTitleSize));
-    ctx.fillStyle = themeColors.textPrimary;
-    ctx.font = `${layoutTitleFontWeight} ${titleSize}px ${layoutTitleFont}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    const titlePos = getLayoutTitlePosition();
-    ctx.fillText(layoutTitle, titlePos.x, titlePos.y);
+function drawLayoutAxisEditOverlay(pageScene) {
+  ctx.save();
+  ctx.fillStyle = "rgba(128, 128, 128, 0.25)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+  paintDisplayList(ctx, pageScene, {
+    filter: ({ ref }) => Boolean(ref && ref.type === "axisLegend" && ref.axis === layoutAxisEdit),
+  });
+  const info = getAxisLegendInfo(layoutAxisEdit);
+  if (!info) {
+    return;
   }
-  if (layoutCreator) {
-    const creatorSize = getLayoutCreatorSize();
-    ctx.fillStyle = themeColors.textSecondary;
-    ctx.font = `${layoutCreatorFontWeight} ${creatorSize}px ${layoutCreatorFont}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    const creatorPos = getLayoutCreatorPosition();
-    ctx.fillText(layoutCreator, creatorPos.x, creatorPos.y);
-  }
-
-  if (drawAxes) {
-    drawLayoutAxes();
-  }
-
-  drawLayoutCustomLabels();
-
+  const handleRadius = Math.max(8, Math.round(info.fontSize * 0.55));
+  ctx.save();
+  ctx.fillStyle = themeColors.textSecondary;
+  ctx.beginPath();
+  ctx.arc(info.leftEnd.x, info.leftEnd.y, handleRadius, 0, Math.PI * 2);
+  ctx.arc(info.rightEnd.x, info.rightEnd.y, handleRadius, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
@@ -12982,13 +12876,34 @@ function scheduleDraw() {
   });
 }
 
-function drawDistanceConnections(nodePosMap) {
-  if (!distanceSelectedEdges.size) {
-    distanceEdges.length = 0;
-    distanceSelectedNodeKeys.clear();
-    return;
+function collectHitAreas(scene) {
+  for (const item of scene) {
+    if (item.kind === "hitArea") {
+      frameHitAreas.push(item);
+    }
   }
+}
+
+function drawDistanceConnections(nodePosMap) {
+  const { scene, hits, nodeKeys } = buildDistanceConnectionsScene(nodePosMap);
   distanceEdges.length = 0;
+  distanceEdges.push(...hits);
+  distanceSelectedNodeKeys.clear();
+  nodeKeys.forEach((key) => distanceSelectedNodeKeys.add(key));
+  collectHitAreas(scene);
+  paintDisplayList(ctx, scene);
+}
+
+// Distance curves between selected node pairs: a quadratic arc (auto or
+// user-bent control point) broken around its interval label, which runs
+// along the curve glyph by glyph unless the curve is near horizontal.
+// Also returns the per-curve hit data and the node keys involved.
+function buildDistanceConnectionsScene(nodePosMap) {
+  const scene = [];
+  const hits = [];
+  if (!distanceSelectedEdges.size) {
+    return { scene, hits, nodeKeys: new Set() };
+  }
   const selectedEdges = [];
   const resolvedEdges = new Set();
   const resolvedNodeKeys = new Set();
@@ -13011,10 +12926,8 @@ function drawDistanceConnections(nodePosMap) {
     resolvedNodeKeys.add(bKey);
     selectedEdges.push({ a, b, aKey, bKey, edgeKey });
   });
-  distanceSelectedNodeKeys.clear();
-  resolvedNodeKeys.forEach((key) => distanceSelectedNodeKeys.add(key));
   if (!selectedEdges.length) {
-    return;
+    return { scene, hits, nodeKeys: resolvedNodeKeys };
   }
   const labelFont = layoutMode
     ? layoutLineLabelFont
@@ -13045,7 +12958,6 @@ function drawDistanceConnections(nodePosMap) {
     if (override && override.hidden) {
       continue;
     }
-    const dimOthers = false;
     const ratioInfo = getDistanceRatioLabel(a, b);
     if (!ratioInfo) {
       continue;
@@ -13121,7 +13033,7 @@ function drawDistanceConnections(nodePosMap) {
     const t = curveInfo.tAtRatio(labelT);
     const labelPos = getQuadraticPoint(lineStart, control, lineEnd, t);
     const tangent = getQuadraticTangent(lineStart, control, lineEnd, t);
-    distanceEdges.push({
+    hits.push({
       a,
       b,
       key: edgeKey,
@@ -13138,9 +13050,16 @@ function drawDistanceConnections(nodePosMap) {
       labelPos,
       tangent,
     });
-    ctx.save();
-    ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
-    const baseWidth = ctx.measureText(label).width;
+    const baseWidth = measureTextWidthWithWeight(label, labelSize, labelFont, labelWeight);
+    scene.push(
+      sceneHitArea({
+        left: labelPos.x - baseWidth / 2 - 6,
+        top: labelPos.y - labelSize / 2 - 4,
+        width: baseWidth + 12,
+        height: labelSize + 8,
+        ref: { type: "distanceLabel", key: edgeKey },
+      })
+    );
     let angle = 0;
     let useHorizontal = false;
     if (Math.abs(tangent.x) > 1e-6 || Math.abs(tangent.y) > 1e-6) {
@@ -13162,76 +13081,58 @@ function drawDistanceConnections(nodePosMap) {
       minSize: 4,
     });
     const size = layout.size;
-    const gap = layout.gap;
-    ctx.restore();
-
-    const gapHalf = gap / 2;
+    const gapHalf = layout.gap / 2;
     const labelArcLen = curveInfo.total * Math.min(1, Math.max(0, labelT));
     const tLeft = curveInfo.tAtLength(labelArcLen - gapHalf);
     const tRight = curveInfo.tAtLength(labelArcLen + gapHalf);
-
-    const leftSegment = getQuadraticSubcurve(lineStart, control, lineEnd, 0, tLeft);
-    const rightSegment = getQuadraticSubcurve(lineStart, control, lineEnd, tRight, 1);
-    ctx.save();
-    ctx.strokeStyle = getInkEdgeColor(false);
-    ctx.lineWidth = getInkEdgeLineWidth(false);
-    ctx.globalAlpha = 1;
-    if (!isAdjacentLatticeEdge(a, b)) {
-      ctx.setLineDash([6, 6]);
-    } else {
-      ctx.setLineDash([]);
-    }
-    if (leftSegment) {
-      ctx.beginPath();
-      ctx.moveTo(leftSegment.p0.x, leftSegment.p0.y);
-      ctx.quadraticCurveTo(leftSegment.p1.x, leftSegment.p1.y, leftSegment.p2.x, leftSegment.p2.y);
-      ctx.stroke();
-    }
-    if (rightSegment) {
-      ctx.beginPath();
-      ctx.moveTo(rightSegment.p0.x, rightSegment.p0.y);
-      ctx.quadraticCurveTo(
-        rightSegment.p1.x,
-        rightSegment.p1.y,
-        rightSegment.p2.x,
-        rightSegment.p2.y
-      );
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    ctx.save();
-    ctx.font = `${labelWeight} ${size}px ${labelFont}`;
-    ctx.fillStyle = themeColors.textSecondary;
-    ctx.globalAlpha = 1;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
+    const ref = { type: "distance", key: edgeKey };
+    const curveStyle = {
+      color: getInkEdgeColor(false),
+      width: getInkEdgeLineWidth(false),
+      alpha: 1,
+      dash: isAdjacentLatticeEdge(a, b) ? null : [6, 6],
+      ref,
+    };
+    [
+      getQuadraticSubcurve(lineStart, control, lineEnd, 0, tLeft),
+      getQuadraticSubcurve(lineStart, control, lineEnd, tRight, 1),
+    ].forEach((segment) => {
+      if (segment) {
+        scene.push(sceneCurve({ p0: segment.p0, p1: segment.p1, p2: segment.p2, ...curveStyle }));
+      }
+    });
+    const glyph = (text, pos, rotation) =>
+      sceneText({
+        text,
+        x: pos.x,
+        y: pos.y,
+        rotation,
+        font: labelFont,
+        size,
+        weight: labelWeight,
+        align: "center",
+        baseline: "middle",
+        color: themeColors.textSecondary,
+        alpha: 1,
+        ref,
+      });
     if (useHorizontal) {
-      ctx.translate(labelPos.x, labelPos.y);
-      ctx.rotate(0);
-      ctx.fillText(label, 0, 0);
+      scene.push(glyph(label, labelPos, 0));
     } else {
       const chars = Array.from(label);
-      const charWidths = chars.map((char) => ctx.measureText(char).width);
       const { placements } = placeGlyphsAlongQuadratic({
         p0: lineStart,
         p1: control,
         p2: lineEnd,
         curveInfo,
         chars,
-        charWidths,
+        charWidths: chars.map((char) => measureTextWidthWithWeight(char, size, labelFont, labelWeight)),
         centerArcLen: labelArcLen,
       });
-      for (const placement of placements) {
-        ctx.save();
-        ctx.translate(placement.pos.x, placement.pos.y);
-        ctx.rotate(placement.angle);
-        ctx.fillText(placement.char, 0, 0);
-        ctx.restore();
-      }
+      placements.forEach((placement) => scene.push(glyph(placement.char, placement.pos, placement.angle)));
     }
-    ctx.restore();
   }
+  return { scene, hits, nodeKeys: resolvedNodeKeys };
 }
 
 function drawDistanceDragPreview(nodePosMap) {
@@ -13465,8 +13366,15 @@ function drawCommaConnections(nodePosMap) {
 }
 
 function drawCustomConnections(nodePosMap) {
+  paintDisplayList(ctx, buildCustomConnectionsScene(nodePosMap, getActiveAxisEntry()));
+}
+
+// Connections from each active custom node to its source node, labelled
+// with the custom interval. `axisEntry` dims connections off the active axis.
+function buildCustomConnectionsScene(nodePosMap, axisEntry) {
+  const scene = [];
   if (!customNodes.length) {
-    return;
+    return scene;
   }
   const edgeOutset = 1;
   const labelFont = layoutMode
@@ -13484,7 +13392,6 @@ function drawCustomConnections(nodePosMap) {
     : is3DMode
     ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
     : 14;
-  const axisEntry = getActiveAxisEntry();
   const axisActive = Boolean(axisEntry);
   customNodes.forEach((node) => {
     if (!node.active) {
@@ -13531,7 +13438,8 @@ function drawCustomConnections(nodePosMap) {
     const labelText = getCustomConnectionLabelText(node);
     const label = shouldShowEdgeLabel(source, node) ? labelText : null;
     const labelT = getLineLabelPositionOverride(source, node) ?? 0.5;
-    drawCanvasEdgeSegment({
+    scene.push(
+      ...buildEdgeSegmentScene({
       start,
       end,
       startRadius,
@@ -13546,8 +13454,11 @@ function drawCustomConnections(nodePosMap) {
       dash: eitherMuted ? [6, 4] : null,
       lineWidth: getInkEdgeLineWidth(eitherMuted),
       labelAlpha: eitherMuted ? 1 : null,
-    });
+      ref: { type: "customConnection", id: node.id },
+    })
+    );
   });
+  return scene;
 }
 
 function addCustomConnectionSegments(nodePosMap, segments) {
@@ -13718,18 +13629,11 @@ function addDistanceLineSegments(nodePosMap, segments) {
   }
 }
 
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  layoutRenderedNoteLabelHitboxes.clear();
-
-  if (!themeColors) {
-    refreshThemeColors();
-  }
-  const distanceFocusMode = distanceSelectMode && analysisLayers.distances;
-  if (layoutMode) {
-    drawLayoutPage({ drawAxes: !layoutAxisEdit });
-  }
-
+// Where every node is on screen and how big, in paint order (lattice nodes
+// back to front, custom nodes on top), plus the obstacles detail labels
+// avoid: node circles, edge/connection/diagonal/distance segments, and
+// (filled in while labels are placed) the label rects themselves.
+function buildNodeLayout() {
   const nodeRenderList = nodes
     .map((node) => ({
       node,
@@ -13746,11 +13650,10 @@ function draw() {
     });
   const nodePosMap = new Map();
   nodeRenderList.forEach(({ node, pos }) => {
-    const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
-    const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
+    const radius = layoutMode ? getLayoutNodeRadius(pos) : getNodeRadius(node) * (pos.scale || 1);
     nodePosMap.set(node.id, { pos, radius });
   });
-  const detailLabelSegments = [];
+  const segments = [];
   edges.forEach(([a, b]) => {
     if (!a.active || !b.active) {
       return;
@@ -13775,19 +13678,16 @@ function draw() {
     const uy = dy / dist;
     const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
     const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-    detailLabelSegments.push({
+    segments.push({
       x1: start.x + ux * startRadius,
       y1: start.y + uy * startRadius,
       x2: end.x - ux * endRadius,
       y2: end.y - uy * endRadius,
     });
   });
-  addCustomConnectionSegments(nodePosMap, detailLabelSegments);
-  addTriangleDiagonalSegments(nodePosMap, detailLabelSegments);
-  addDistanceLineSegments(nodePosMap, detailLabelSegments);
-  const orphanResult = buildOrphanGuideSet();
-  orphanGuideNodes = orphanResult.guides;
-  orphanGuideEdges = orphanResult.edges;
+  addCustomConnectionSegments(nodePosMap, segments);
+  addTriangleDiagonalSegments(nodePosMap, segments);
+  addDistanceLineSegments(nodePosMap, segments);
   const detailLabelCollision = {
     circles: nodeRenderList
       .filter(({ node }) => node.isCenter || node.active || node.isCustom)
@@ -13795,11 +13695,557 @@ function draw() {
         id: node.id,
         x: pos.x,
         y: pos.y,
-        r: layoutMode ? getLayoutNodeRadius(pos) : getNodeRadius(node) * (pos.scale || 1),
+        r: nodePosMap.get(node.id).radius,
       })),
-    segments: detailLabelSegments,
+    segments,
     rects: [],
   };
+  return { nodeRenderList, nodePosMap, detailLabelCollision };
+}
+
+// How a node is drawn right now: visibility, opacity, colours. `env` carries
+// the interactive state (hover, guides, playing amplitudes, add-interval and
+// analysis modes); the SVG export passes a neutral env, so exports show the
+// diagram without hover, playback or selection effects.
+function getNodeRenderState(node, env) {
+  const isHovered = env.hoverNodeId != null && node.id === env.hoverNodeId;
+  const isGuide = env.guideNodes.has(node.id);
+  const isMuted = Boolean(node.muted);
+  const isOrphanGuide = Boolean(env.orphanGuideNodes && env.orphanGuideNodes.has(node.id));
+  const isIntervalDim = env.addIntervalMode && node.active && !isHovered;
+  const canShowInactive = !isOrphanGuide && isInactiveNodeAvailable(node);
+  const brightness = Math.min(1, env.nodeAmplitudes.get(node.id) || 0);
+  const isVisible =
+    node.isCenter ||
+    node.active ||
+    node.isCustom ||
+    brightness > 0.01 ||
+    isGuide ||
+    isOrphanGuide ||
+    (isHovered && canShowInactive && env.canInteractInactive);
+  let alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
+  if (node.isCenter && !node.active) {
+    alpha = isHovered ? 0.3 : 0.15;
+  }
+  if (isGuide) {
+    alpha = env.guideNodes.get(node.id);
+  }
+  if (isOrphanGuide && !isGuide) {
+    alpha = 0.08;
+  }
+  if (node.isCustom && !node.active) {
+    alpha = 0.25;
+  }
+  if (isMuted) {
+    alpha = isHovered ? 0.7 : 0.4;
+  }
+  if (env.axisEntry && !isNodeOnAxisEntry(node, env.axisEntry)) {
+    alpha *= AXIS_DIM_FACTOR;
+  }
+  if (env.showMicrotonal && !env.commaNodeRings.has(node.id)) {
+    alpha *= 0.18;
+  }
+  if (isIntervalDim) {
+    alpha *= 0.18;
+  }
+  if (env.distanceFocusMode) {
+    alpha *= AXIS_DIM_FACTOR;
+  }
+  const intervalTint = isIntervalDim ? "#9a9a9a" : null;
+  return {
+    isVisible,
+    isHovered,
+    isGuide,
+    isMuted,
+    isOrphanGuide,
+    brightness,
+    alpha,
+    intervalTint,
+    textColorPrimary: colorWithAlpha(intervalTint || themeColors.textPrimary, alpha),
+    textColorSecondary: colorWithAlpha(intervalTint || themeColors.textSecondary, alpha),
+  };
+}
+
+// Interactive state for nothing: what the SVG export renders with.
+function getStaticNodeEnv(orphanGuideNodes = null) {
+  return {
+    hoverNodeId: null,
+    guideNodes: new Map(),
+    orphanGuideNodes,
+    addIntervalMode: false,
+    nodeAmplitudes: new Map(),
+    axisEntry: null,
+    showMicrotonal: false,
+    commaNodeRings: new Set(),
+    distanceFocusMode: false,
+    canInteractInactive: false,
+  };
+}
+
+// Flat (2D / page layout) node outline. 3D shading stays in draw().
+function buildNodeShapeScene(node, pos, radius, shape, state) {
+  let fill;
+  if (layoutMode && !isInPresentationMode()) {
+    fill = "transparent";
+  } else if (node.isCustom && !node.active && state.brightness <= 0) {
+    fill = themeColors.nodeCustomInactive;
+  } else {
+    fill = state.brightness > 0 ? themeColors.playFill : "transparent";
+  }
+  return [
+    sceneNodeShape({
+      shape,
+      x: pos.x,
+      y: pos.y,
+      radius,
+      fill,
+      fillAlpha: state.brightness > 0 ? state.brightness : undefined,
+      stroke: state.intervalTint || getInkNodeStrokeColor(state.isMuted),
+      width: getInkNodeStrokeLineWidth(state.isMuted),
+      dash: state.isMuted || state.isOrphanGuide ? [6, 4] : null,
+      alpha: state.alpha,
+      ref: { type: "nodeShape", id: node.id },
+    }),
+  ];
+}
+
+// The label inside a node: note name (with HEJI) or the ratio, stacked when
+// it doesn't fit.
+function buildNodeInnerLabelScene(node, pos, radius, state) {
+  const innerTextScale = layoutMode ? getLayoutInnerTextScale(radius) : 1;
+  const baseLabelSize = layoutMode ? layoutRatioTextSize * innerTextScale : 21;
+  const labelSize = node.isCustom ? baseLabelSize * 0.85 : baseLabelSize;
+  const labelFont = layoutMode ? layoutRatioFont : "Noto Serif";
+  const labelWeight = layoutMode ? layoutRatioFontWeight : 400;
+  const color = state.textColorPrimary;
+  const ref = { type: "nodeLabel", id: node.id };
+  if (featureMode === "note") {
+    let baseText;
+    let suffixParts;
+    if (hejiEnabled && nodeHasHighPrime(node)) {
+      const displayInfo = getCachedDisplayInfo(node);
+      const base = getHejiBaseAndDefaults(displayInfo.pitchClass);
+      const centsText = showCentsDeviation ? formatCents(displayInfo.cents) : "";
+      baseText = base.baseText;
+      suffixParts = centsText
+        ? [
+            ...base.suffixParts,
+            {
+              text: centsText,
+              source: "cents",
+              font: labelFont,
+              charGap: 0,
+              sizeScale: 0.67,
+            },
+          ]
+        : base.suffixParts;
+    } else {
+      const annotation = getCachedHejiAnnotation(node, getNodePitchLabel(node));
+      baseText = annotation.baseText;
+      suffixParts = annotation.suffixParts;
+    }
+    const scene = buildHejiInlineScene({
+      x: pos.x,
+      y: pos.y,
+      baseText,
+      suffixParts,
+      restText: "",
+      size: labelSize,
+      font: labelFont,
+      fontWeight: labelWeight,
+      align: "center",
+      baseline: "middle",
+      color,
+    });
+    scene.forEach((item) => {
+      item.ref = ref;
+    });
+    return scene;
+  }
+  const layout = computeRatioLabelLayout(
+    node.numerator,
+    node.denominator,
+    labelFont,
+    labelSize,
+    radius * 1.6,
+    labelWeight,
+    radius * 1.6
+  );
+  const run = (props) =>
+    sceneText({
+      font: labelFont,
+      size: layout.size,
+      weight: labelWeight,
+      align: "center",
+      color,
+      ref,
+      ...props,
+    });
+  if (layout.lines.length === 1) {
+    return [run({ text: layout.lines[0], x: pos.x, y: pos.y, baseline: "middle" })];
+  }
+  const positions = computeStackedRatioPositionsFromLine(
+    layout.lines,
+    labelFont,
+    layout.size,
+    labelWeight,
+    pos.y,
+    layout.lineGap
+  );
+  return [
+    run({ text: layout.lines[0], x: pos.x, y: positions.topBaseline, baseline: "alphabetic" }),
+    run({ text: layout.lines[1], x: pos.x, y: positions.bottomBaseline, baseline: "alphabetic" }),
+    sceneLine({
+      x1: pos.x - positions.lineWidth / 2,
+      y1: positions.lineY,
+      x2: pos.x + positions.lineWidth / 2,
+      y2: positions.lineY,
+      color,
+      width: Math.max(1, Math.round(layout.size * 0.06)),
+      ref,
+    }),
+  ];
+}
+
+// The detail block beside a node: ratio / note name, cents, octave shift,
+// ratio-cents and Hz lines, placed to avoid other nodes, edges and labels
+// (pushes onto `collision`). In page layout the scene includes the label's
+// padded hit area. Returns { scene }.
+function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
+  const scene = [];
+  const ref = { type: "nodeDetail", id: node.id };
+  const displayInfo = getCachedDisplayInfo(node);
+  const detailSize = layoutMode ? layoutNoteTextSize : 14;
+  const noteLabelFont = layoutMode ? layoutNoteFont : "Lexend, sans-serif";
+  const noteLabelWeight = layoutMode ? layoutNoteFontWeight : 200;
+  const color = state.textColorSecondary;
+  const lineStep = detailSize + 4;
+  const hejiYOffset = Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET);
+  const line = (text, x, y, font = noteLabelFont, weight = noteLabelWeight) =>
+    sceneText({ text, x, y, font, size: detailSize, weight, align: "left", baseline: "top", color, ref });
+  const tag = (items) => {
+    items.forEach((item) => {
+      item.ref = ref;
+    });
+    return items;
+  };
+  const place = (labelWidth, lineCount) => {
+    const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
+    const hasOffset = layoutMode && layoutLabelOffsets.has(node.id);
+    const labelPos = hasOffset
+      ? getLayoutNoteLabelPosition(node, pos, radius)
+      : getDetailLabelPosition({
+          center: pos,
+          baseOffset: getDefaultNoteDetailOffset(radius, 1),
+          width: labelWidth,
+          height: labelHeight,
+          circles: collision.circles,
+          placedRects: collision.rects,
+          segments: collision.segments,
+          ignoreId: node.id,
+        });
+    if (hasOffset) {
+      collision.rects.push({
+        left: labelPos.x,
+        top: labelPos.y,
+        right: labelPos.x + labelWidth,
+        bottom: labelPos.y + labelHeight,
+      });
+    }
+    if (layoutMode) {
+      const padding = Math.max(4, Math.round(detailSize * 0.25));
+      scene.push(
+        sceneHitArea({
+          left: labelPos.x - padding,
+          top: labelPos.y - padding,
+          width: labelWidth + padding * 2,
+          height: labelHeight + padding * 2,
+          ref: { type: "noteLabel", id: node.id, labelPos: { x: labelPos.x, y: labelPos.y } },
+        })
+      );
+    }
+    return { labelPos };
+  };
+  const result = () => ({ scene });
+
+  if (featureMode === "note") {
+    const measure = (text) =>
+      measureTextWidthWithWeight(text, detailSize, noteLabelFont, noteLabelWeight);
+    const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
+    const ratioText = `${node.numerator}:${node.denominator}${octaveLabel}`;
+    const centsLabel = getCachedCentsReadout(node, { wrap: enharmonicsEnabled }, displayInfo);
+    const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
+    const hzText = showHz ? formatHzReadout(node.freq) : "";
+    const labelWidth = Math.max(
+      measure(ratioText),
+      centsLabel ? measure(centsLabel) : 0,
+      ratioCentsLabel ? measure(ratioCentsLabel) : 0,
+      hzText ? measure(hzText) : 0
+    );
+    const lineCount = 1 + (centsLabel ? 1 : 0) + (ratioCentsLabel ? 1 : 0) + (hzText ? 1 : 0);
+    const { labelPos } = place(labelWidth, lineCount);
+    let y = labelPos.y;
+    scene.push(line(ratioText, labelPos.x, y));
+    y += lineStep;
+    if (centsLabel) {
+      scene.push(
+        ...tag(
+          buildTextWithSmallCentScene({
+            text: centsLabel,
+            x: labelPos.x,
+            y,
+            font: noteLabelFont,
+            size: detailSize,
+            fontWeight: noteLabelWeight,
+            align: "left",
+            baseline: "top",
+            hejiAccidentals: hejiEnabled,
+            hejiYOffset,
+            color,
+          })
+        )
+      );
+      y += lineStep;
+    }
+    if (ratioCentsLabel) {
+      scene.push(line(ratioCentsLabel, labelPos.x, y));
+      y += lineStep;
+    }
+    if (hzText) {
+      scene.push(line(hzText, labelPos.x, y));
+    }
+    return result();
+  }
+
+  // Ratio mode.
+  const measure = (text) =>
+    measureTextWidthWithWeight(text, detailSize, noteLabelFont, noteLabelWeight);
+  const centsLabel = getCachedCentsReadout(
+    node,
+    {
+      wrap: enharmonicsEnabled,
+      requireHejiDetail: true,
+      baseTextForHeji: displayInfo.pitchClass,
+    },
+    displayInfo
+  );
+  const hasParen = centsLabel && centsLabel.includes("(");
+  const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
+  const annotation = getCachedHejiAnnotation(node, baseLabel || node.note_name);
+  const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
+  const suffixText = annotation.suffixParts
+    .map((part) => (part && part.text ? part.text : ""))
+    .join("");
+  const restText = hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "";
+  const line1 = `${annotation.baseText || ""}${suffixText}${restText}`;
+  const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
+  const hzText = showHz ? formatHzReadout(node.freq) : "";
+  const labelWidth = Math.max(
+    line1 ? measure(line1) : 0,
+    hejiEnabled && centsLabel ? measure(centsLabel) : 0,
+    octaveLabel ? measure(octaveLabel) : 0,
+    ratioCentsLabel ? measure(ratioCentsLabel) : 0,
+    hzText ? measure(hzText) : 0
+  );
+  const lineCount =
+    1 +
+    (hejiEnabled && centsLabel ? 1 : 0) +
+    (octaveLabel ? 1 : 0) +
+    (ratioCentsLabel ? 1 : 0) +
+    (hzText ? 1 : 0);
+  const { labelPos } = place(labelWidth, lineCount);
+  let y = labelPos.y;
+  scene.push(
+    ...tag(
+      buildHejiInlineScene({
+        x: labelPos.x,
+        y,
+        baseText: annotation.baseText,
+        suffixParts: annotation.suffixParts,
+        restText,
+        size: detailSize,
+        font: noteLabelFont,
+        align: "left",
+        baseline: "top",
+        hejiYOffset,
+        restGapScale: hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN,
+        restHejiAccidentals: hejiEnabled && hasParen,
+        fontWeight: noteLabelWeight,
+        color,
+      })
+    )
+  );
+  y += lineStep;
+  if (hejiEnabled && centsLabel) {
+    scene.push(
+      ...tag(
+        buildTextWithSmallCentScene({
+          text: centsLabel,
+          x: labelPos.x,
+          y,
+          font: noteLabelFont,
+          size: detailSize,
+          fontWeight: noteLabelWeight,
+          align: "left",
+          baseline: "top",
+          hejiAccidentals: hejiEnabled,
+          hejiYOffset,
+          color,
+        })
+      )
+    );
+    y += lineStep;
+  }
+  if (octaveLabel) {
+    scene.push(line(octaveLabel, labelPos.x, y));
+    y += lineStep;
+  }
+  if (ratioCentsLabel) {
+    scene.push(line(ratioCentsLabel, labelPos.x, y));
+    y += lineStep;
+  }
+  if (hzText) {
+    scene.push(line(hzText, labelPos.x, y, '"Lexend", sans-serif', 200));
+  }
+  return result();
+}
+
+// A node's custom piano-key label on the page (bottom-right anchored, plain
+// or in a dark box).
+function buildLayoutKeyMappingScene(node, pos, radius, keyLabel, alpha) {
+  const labelText = getLayoutKeyMappingLabelText(keyLabel);
+  const labelPos = getLayoutKeyMappingLabelPosition(node, pos, radius);
+  const fontSize = Math.max(8, Math.round(layoutKeyMappingTextSize));
+  const ref = { type: "keyMapping", id: node.id };
+  const hitbox = getLayoutKeyMappingLabelHitbox(labelText, node, pos, radius);
+  const hit = sceneHitArea({
+    left: hitbox.left,
+    top: hitbox.top,
+    width: hitbox.width,
+    height: hitbox.height,
+    ref: { ...ref, labelPos: hitbox.labelPos },
+  });
+  const textProps = {
+    text: labelText,
+    font: layoutKeyMappingFont,
+    size: fontSize,
+    weight: layoutKeyMappingFontWeight,
+    align: "right",
+    baseline: "bottom",
+    alpha,
+    ref,
+  };
+  if (!layoutKeyMappingDark) {
+    return [
+      sceneText({ ...textProps, x: labelPos.x, y: labelPos.y, color: themeColors.textSecondary }),
+      hit,
+    ];
+  }
+  const paddingX = 6;
+  const paddingY = 3;
+  const textWidth = measureTextWidthWithWeight(
+    labelText,
+    fontSize,
+    layoutKeyMappingFont,
+    layoutKeyMappingFontWeight
+  );
+  const boxWidth = textWidth + paddingX * 2;
+  const boxHeight = fontSize + paddingY * 2;
+  return [
+    sceneRect({
+      x: labelPos.x - boxWidth,
+      y: labelPos.y - boxHeight,
+      width: boxWidth,
+      height: boxHeight,
+      radius: 6,
+      fill: "rgba(10, 15, 20, 0.7)",
+      stroke: "rgba(255, 255, 255, 0.4)",
+      strokeWidth: 1,
+      alpha,
+      ref,
+    }),
+    sceneText({ ...textProps, x: labelPos.x - paddingX, y: labelPos.y - paddingY, color: "#ffffff" }),
+    hit,
+  ];
+}
+
+// The 2D lattice edges (page layout always uses this path): each active edge
+// trimmed to its node circles, with its interval label. Screen coordinates.
+function buildLatticeEdgesScene(nodePosMap) {
+  const scene = [];
+  const labelFont = layoutMode ? layoutLineLabelFont : "Noto Serif";
+  const labelWeight = layoutMode ? layoutLineLabelFontWeight : 400;
+  const labelSize = layoutMode ? getLayoutLineLabelSize() : EDGE_LABEL_SIZE_DEFAULT;
+  edges.forEach(([a, b]) => {
+    if (!a.active || !b.active) {
+      return;
+    }
+    if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
+      return;
+    }
+    const startEntry = nodePosMap.get(a.id);
+    const endEntry = nodePosMap.get(b.id);
+    const start = startEntry ? startEntry.pos : worldToScreen(getNodeDisplayCoordinate(a));
+    const end = endEntry ? endEntry.pos : worldToScreen(getNodeDisplayCoordinate(b));
+    const radiusA = startEntry
+      ? startEntry.radius
+      : layoutMode
+        ? getLayoutNodeRadius(start)
+        : getNodeRadius(a) * (start.scale || 1);
+    const radiusB = endEntry
+      ? endEntry.radius
+      : layoutMode
+        ? getLayoutNodeRadius(end)
+        : getNodeRadius(b) * (end.scale || 1);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist === 0) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const eitherMuted = Boolean(a.muted) || Boolean(b.muted);
+    scene.push(
+      ...buildEdgeSegmentScene({
+        start,
+        end,
+        startRadius: getNodeEdgeRadius(a, ux, uy, radiusA),
+        endRadius: getNodeEdgeRadius(b, ux, uy, radiusB),
+        color: getInkEdgeColor(eitherMuted),
+        label: shouldShowEdgeLabel(a, b) ? getEdgeLabelText(a, b) : null,
+        labelFont,
+        labelWeight,
+        labelSize,
+        labelT: getLineLabelPositionOverride(a, b) ?? 0.5,
+        alpha: eitherMuted ? 0.4 : 1,
+        dash: eitherMuted ? [6, 4] : null,
+        lineWidth: getInkEdgeLineWidth(eitherMuted),
+        labelAlpha: eitherMuted ? 1 : null,
+        ref: { type: "edge", a: a.id, b: b.id },
+      })
+    );
+  });
+  return scene;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  frameHitAreas.length = 0;
+
+  if (!themeColors) {
+    refreshThemeColors();
+  }
+  const distanceFocusMode = distanceSelectMode && analysisLayers.distances;
+  const pageScene = layoutMode ? buildPageChromeScene() : null;
+  if (pageScene) {
+    drawLayoutPage(pageScene);
+  }
+
+  const { nodeRenderList, nodePosMap, detailLabelCollision } = buildNodeLayout();
+  const orphanResult = buildOrphanGuideSet();
+  orphanGuideNodes = orphanResult.guides;
+  orphanGuideEdges = orphanResult.edges;
   const axisEntry = getActiveAxisEntry();
   const axisModeActive = Boolean(axisEntry);
   const shouldDrawAxisLine =
@@ -13822,65 +14268,7 @@ function draw() {
   if (is3DMode && !showMicrotonal) {
     draw3DEdges(nodePosMap, axisEntry);
   } else if (!showMicrotonal) {
-    const labelFont = layoutMode ? layoutLineLabelFont : "Noto Serif";
-    const labelWeight = layoutMode ? layoutLineLabelFontWeight : 400;
-    const labelSize = layoutMode ? getLayoutLineLabelSize() : EDGE_LABEL_SIZE_DEFAULT;
-    edges.forEach(([a, b]) => {
-      if (!a.active || !b.active) {
-        return;
-      }
-      if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
-        return;
-      }
-      const startEntry = nodePosMap.get(a.id);
-      const endEntry = nodePosMap.get(b.id);
-      const start = startEntry
-        ? startEntry.pos
-        : worldToScreen(getNodeDisplayCoordinate(a));
-      const end = endEntry
-        ? endEntry.pos
-        : worldToScreen(getNodeDisplayCoordinate(b));
-      const radiusA = startEntry
-        ? startEntry.radius
-        : layoutMode
-          ? getLayoutNodeRadius(start)
-          : getNodeRadius(a) * (start.scale || 1);
-      const radiusB = endEntry
-        ? endEntry.radius
-        : layoutMode
-          ? getLayoutNodeRadius(end)
-          : getNodeRadius(b) * (end.scale || 1);
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist === 0) {
-        return;
-      }
-      const ux = dx / dist;
-      const uy = dy / dist;
-      const startRadius = getNodeEdgeRadius(a, ux, uy, radiusA);
-      const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
-      const labelText = getEdgeLabelText(a, b);
-      const eitherMuted = Boolean(a.muted) || Boolean(b.muted);
-      const label = shouldShowEdgeLabel(a, b) ? labelText : null;
-      const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
-      drawCanvasEdgeSegment({
-        start,
-        end,
-        startRadius,
-        endRadius,
-        color: getInkEdgeColor(eitherMuted),
-        label,
-        labelFont,
-        labelWeight,
-        labelSize,
-        labelT,
-        alpha: eitherMuted ? 0.4 : 1,
-        dash: eitherMuted ? [6, 4] : null,
-        lineWidth: getInkEdgeLineWidth(eitherMuted),
-        labelAlpha: eitherMuted ? 1 : null,
-      });
-    });
+    paintDisplayList(ctx, buildLatticeEdgesScene(nodePosMap));
   }
 
   if (showDistances) {
@@ -13959,67 +14347,24 @@ function draw() {
     ctx.restore();
   }
   nodeVolumeSliderHitboxes = [];
+  const nodeEnv = {
+    hoverNodeId,
+    guideNodes,
+    orphanGuideNodes: connectOrphansEnabled ? orphanGuideNodes : null,
+    addIntervalMode,
+    nodeAmplitudes,
+    axisEntry,
+    showMicrotonal,
+    commaNodeRings,
+    distanceFocusMode,
+    canInteractInactive: !is3DMode || isAddMode || distanceSelectMode,
+  };
   nodeRenderList.forEach(({ node, pos }) => {
-    const isHovered = node.id === hoverNodeId;
-    const isGuide = guideNodes.has(node.id);
-    const isMuted = Boolean(node.muted);
-    const isOrphanGuide = connectOrphansEnabled && orphanGuideNodes.has(node.id);
-    const isIntervalHover = addIntervalMode && node.active && isHovered;
-    const isIntervalDim = addIntervalMode && node.active && !isHovered;
-    const canShowInactive = !isOrphanGuide && isInactiveNodeAvailable(node);
-    const canInteractInactive = !is3DMode || isAddMode || distanceSelectMode;
-    const amplitude = nodeAmplitudes.get(node.id) || 0;
-    const brightness = Math.min(1, amplitude);
-    const isVisible =
-      node.isCenter ||
-      node.active ||
-      node.isCustom ||
-      brightness > 0.01 ||
-      isGuide ||
-      isOrphanGuide ||
-      (isHovered && canShowInactive && canInteractInactive);
-    let alpha = node.active || node.isCenter ? 1 : isHovered ? 0.3 : 0;
-    if (node.isCenter && !node.active) {
-      alpha = isHovered ? 0.3 : 0.15;
-    }
-    if (isGuide) {
-      alpha = guideNodes.get(node.id);
-    }
-    if (isOrphanGuide && !isGuide) {
-      alpha = 0.08;
-    }
-    if (node.isCustom && !node.active) {
-      alpha = 0.25;
-    }
-    if (isMuted) {
-      alpha = isHovered ? 0.7 : 0.4;
-    }
-    if (axisEntry && !isNodeOnAxisEntry(node, axisEntry)) {
-      alpha *= AXIS_DIM_FACTOR;
-    }
-    if (showMicrotonal && !commaNodeRings.has(node.id)) {
-      alpha *= 0.18;
-    }
-    if (isIntervalDim) {
-      alpha *= 0.18;
-    }
-    if (distanceFocusMode) {
-      alpha *= AXIS_DIM_FACTOR;
-    }
-    const textAlpha = alpha;
-    const intervalTint = isIntervalDim ? "#9a9a9a" : null;
-    const textColorPrimary = colorWithAlpha(
-      intervalTint || themeColors.textPrimary,
-      textAlpha
-    );
-    const textColorSecondary = colorWithAlpha(
-      intervalTint || themeColors.textSecondary,
-      textAlpha
-    );
-
-    if (!isVisible) {
+    const state = getNodeRenderState(node, nodeEnv);
+    if (!state.isVisible) {
       return;
     }
+    const { isHovered, isGuide, isMuted, isOrphanGuide, brightness, alpha, intervalTint } = state;
 
     const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
     const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
@@ -14042,64 +14387,47 @@ function draw() {
       ctx.fill();
       ctx.stroke();
     }
-    if (showNodeShape && showCircles) {
+    if (showNodeShape && showCircles && !is3DMode) {
+      paintDisplayList(ctx, buildNodeShapeScene(node, pos, radius, layoutShape, state));
+    } else if (showNodeShape && showCircles) {
       ctx.beginPath();
       ctx.strokeStyle = intervalTint || getInkNodeStrokeColor(isMuted);
       ctx.lineWidth = getInkNodeStrokeLineWidth(isMuted);
       if (isMuted || isOrphanGuide) {
         ctx.setLineDash([6, 4]);
       }
-      if (is3DMode) {
-        const inactiveFill = node.isCustom
-          ? colorWithAlpha(themeColors.nodeCustomInactive, 0.6)
-          : themeColors.nodeInactive;
-        const shadowColor = themeColors.nodeShadow;
-        const fillAlpha = Math.min(1, brightness);
-        const baseFill =
-          fillAlpha > 0 ? colorWithAlpha(themeColors.playFill, fillAlpha) : inactiveFill;
-        const highlightColor =
-          fillAlpha > 0
-            ? colorWithAlpha(themeColors.playFill, 0.35 + 0.65 * fillAlpha)
-            : node.isCustom
-            ? colorWithAlpha(themeColors.nodeCustomInactive, 0.9)
-            : themeColors.nodeHighlight;
-        if (reducedEffects || !show3DShading) {
-          ctx.shadowColor = "transparent";
-          ctx.shadowBlur = 0;
-          ctx.shadowOffsetX = 0;
-          ctx.shadowOffsetY = 0;
-          ctx.fillStyle = baseFill;
-        } else {
-          ctx.shadowColor = shadowColor;
-          ctx.shadowBlur = Math.max(6, radius * 0.6);
-          ctx.shadowOffsetX = 0;
-          ctx.shadowOffsetY = 0;
-          ctx.fillStyle = isSquare
-            ? getCubeFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir)
-            : getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir);
-        }
-      } else if (layoutMode && !isInPresentationMode()) {
-        ctx.fillStyle = "transparent";
-      } else {
-        if (node.isCustom && !node.active && brightness <= 0) {
-          ctx.fillStyle = themeColors.nodeCustomInactive;
-        } else {
-          ctx.fillStyle = brightness > 0 ? themeColors.playFill : "transparent";
-        }
-      }
-      drawNodeShapePath(layoutShape, pos.x, pos.y, radius);
-      if (is3DMode) {
-        ctx.fill();
+      const inactiveFill = node.isCustom
+        ? colorWithAlpha(themeColors.nodeCustomInactive, 0.6)
+        : themeColors.nodeInactive;
+      const shadowColor = themeColors.nodeShadow;
+      const fillAlpha = Math.min(1, brightness);
+      const baseFill =
+        fillAlpha > 0 ? colorWithAlpha(themeColors.playFill, fillAlpha) : inactiveFill;
+      const highlightColor =
+        fillAlpha > 0
+          ? colorWithAlpha(themeColors.playFill, 0.35 + 0.65 * fillAlpha)
+          : node.isCustom
+          ? colorWithAlpha(themeColors.nodeCustomInactive, 0.9)
+          : themeColors.nodeHighlight;
+      if (reducedEffects || !show3DShading) {
         ctx.shadowColor = "transparent";
         ctx.shadowBlur = 0;
-      } else if (brightness > 0) {
-        ctx.save();
-        ctx.globalAlpha *= brightness;
-        ctx.fill();
-        ctx.restore();
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.fillStyle = baseFill;
       } else {
-        ctx.fill();
+        ctx.shadowColor = shadowColor;
+        ctx.shadowBlur = Math.max(6, radius * 0.6);
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.fillStyle = isSquare
+          ? getCubeFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir)
+          : getSphereFill(pos, radius, baseFill, shadowColor, highlightColor, lightDir);
       }
+      drawNodeShapePath(layoutShape, pos.x, pos.y, radius);
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
       ctx.stroke();
       if (isMuted || isOrphanGuide) {
         ctx.setLineDash([]);
@@ -14163,99 +14491,7 @@ function draw() {
     }
 
     ctx.globalAlpha = 1;
-    ctx.fillStyle = textColorPrimary;
-    const innerTextScale = layoutMode ? getLayoutInnerTextScale(radius) : 1;
-    const baseLabelSize = layoutMode ? layoutRatioTextSize * innerTextScale : 21;
-    const labelSize = node.isCustom ? baseLabelSize * 0.85 : baseLabelSize;
-    const labelFont = layoutMode ? layoutRatioFont : "Noto Serif";
-    const labelWeight = layoutMode ? layoutRatioFontWeight : 400;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    if (featureMode === "note") {
-      if (hejiEnabled && nodeHasHighPrime(node)) {
-        const displayInfo = getCachedDisplayInfo(node);
-        const base = getHejiBaseAndDefaults(displayInfo.pitchClass);
-        const centsText = showCentsDeviation ? formatCents(displayInfo.cents) : "";
-        const suffixParts = centsText
-          ? [
-              ...base.suffixParts,
-              {
-                text: centsText,
-                source: "cents",
-                font: labelFont,
-                charGap: 0,
-                sizeScale: 0.67,
-              },
-            ]
-          : base.suffixParts;
-        drawHejiInline({
-          x: pos.x,
-          y: pos.y,
-          baseText: base.baseText,
-          suffixParts,
-          restText: "",
-          size: labelSize,
-          font: labelFont,
-          fontWeight: labelWeight,
-          align: "center",
-          baseline: "middle",
-          color: textColorPrimary,
-        });
-      } else {
-        const annotation = getCachedHejiAnnotation(node, getNodePitchLabel(node));
-        drawHejiInline({
-          x: pos.x,
-          y: pos.y,
-          baseText: annotation.baseText,
-          suffixParts: annotation.suffixParts,
-          restText: "",
-          size: labelSize,
-          font: labelFont,
-          fontWeight: labelWeight,
-          align: "center",
-          baseline: "middle",
-          color: textColorPrimary,
-        });
-      }
-    } else {
-      const maxWidth = radius * 1.6;
-      const maxHeight = radius * 1.6;
-      const layout = computeRatioLabelLayout(
-        node.numerator,
-        node.denominator,
-        labelFont,
-        labelSize,
-        maxWidth,
-        labelWeight,
-        maxHeight
-      );
-      ctx.font = `${labelWeight} ${layout.size}px ${labelFont}`;
-      if (layout.lines.length === 1) {
-        ctx.fillText(layout.lines[0], pos.x, pos.y);
-      } else {
-        const positions = computeStackedRatioPositionsFromLine(
-          layout.lines,
-          labelFont,
-          layout.size,
-          labelWeight,
-          pos.y,
-          layout.lineGap
-        );
-        ctx.save();
-        ctx.textBaseline = "alphabetic";
-        ctx.fillText(layout.lines[0], pos.x, positions.topBaseline);
-        ctx.fillText(layout.lines[1], pos.x, positions.bottomBaseline);
-        ctx.save();
-        ctx.strokeStyle = textColorPrimary;
-        ctx.lineWidth = Math.max(1, Math.round(layout.size * 0.06));
-        ctx.beginPath();
-        ctx.moveTo(pos.x - positions.lineWidth / 2, positions.lineY);
-        ctx.lineTo(pos.x + positions.lineWidth / 2, positions.lineY);
-        ctx.stroke();
-        ctx.restore();
-        ctx.restore();
-      }
-    }
+    paintDisplayList(ctx, buildNodeInnerLabelScene(node, pos, radius, state));
 
     if (nodeVolumeModeVisible && node.active) {
       const sliderHeight = Math.max(56, radius * 2.5);
@@ -14349,233 +14585,12 @@ function draw() {
     }
     const displayInfo = getCachedDisplayInfo(node);
     if (!showMicrotonal) {
-      const detailSize = layoutMode ? layoutNoteTextSize : 14;
-      const noteLabelFont = layoutMode ? layoutNoteFont : "Lexend, sans-serif";
-      const noteLabelWeight = layoutMode ? layoutNoteFontWeight : 200;
-      if (featureMode === "note") {
-      ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillStyle = textColorSecondary;
-      const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
-      const ratioText = `${node.numerator}:${node.denominator}${octaveLabel}`;
-      const centsLabel = getCachedCentsReadout(
-        node,
-        { wrap: enharmonicsEnabled },
-        displayInfo
-      );
-      const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
-      const defaultOffset = getDefaultNoteDetailOffset(radius, 1);
-      const lineWidth = ctx.measureText(ratioText).width;
-      const centsWidth = centsLabel ? ctx.measureText(centsLabel).width : 0;
-      const ratioCentsWidth = ratioCentsLabel ? ctx.measureText(ratioCentsLabel).width : 0;
-      const hzText = showHz ? formatHzReadout(node.freq) : "";
-      const hzWidth = hzText ? ctx.measureText(hzText).width : 0;
-      const labelWidth = Math.max(lineWidth, centsWidth, ratioCentsWidth, hzWidth);
-      const lineCount =
-        1 +
-        (centsLabel ? 1 : 0) +
-        (ratioCentsLabel ? 1 : 0) +
-        (hzText ? 1 : 0);
-      const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
-      const rawLabelPos =
-        layoutMode && layoutLabelOffsets.has(node.id)
-          ? getLayoutNoteLabelPosition(node, pos, radius)
-          : getDetailLabelPosition({
-              center: pos,
-              baseOffset: defaultOffset,
-              width: labelWidth,
-              height: labelHeight,
-              circles: detailLabelCollision.circles,
-              placedRects: detailLabelCollision.rects,
-              segments: detailLabelCollision.segments,
-              ignoreId: node.id,
-            });
-      if (layoutMode && layoutLabelOffsets.has(node.id)) {
-        detailLabelCollision.rects.push({
-          left: rawLabelPos.x,
-          top: rawLabelPos.y,
-          right: rawLabelPos.x + labelWidth,
-          bottom: rawLabelPos.y + labelHeight,
-        });
-      }
-      const ratioX = rawLabelPos.x;
-      const ratioY = rawLabelPos.y;
-      if (layoutMode) {
-        const padding = Math.max(4, Math.round(detailSize * 0.25));
-        layoutRenderedNoteLabelHitboxes.set(node.id, {
-          left: ratioX - padding,
-          top: ratioY - padding,
-          width: labelWidth + padding * 2,
-          height: labelHeight + padding * 2,
-          labelPos: { x: ratioX, y: ratioY },
-        });
-      }
-      let lineOffset = 0;
-      ctx.fillText(ratioText, ratioX, ratioY + lineOffset);
-      lineOffset += detailSize + 4;
-      if (centsLabel) {
-        drawTextWithSmallCent({
-          text: centsLabel,
-          x: ratioX,
-          y: ratioY + lineOffset,
-          font: noteLabelFont,
-          size: detailSize,
-          fontWeight: noteLabelWeight,
-          align: "left",
-          baseline: "top",
-          hejiAccidentals: hejiEnabled,
-          hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
-          context: ctx,
-          color: textColorSecondary,
-        });
-        lineOffset += detailSize + 4;
-      }
-      if (ratioCentsLabel) {
-        ctx.fillText(ratioCentsLabel, ratioX, ratioY + lineOffset);
-        lineOffset += detailSize + 4;
-      }
-      if (hzText) {
-        ctx.fillText(hzText, ratioX, ratioY + lineOffset);
-      }
-      } else {
-      ctx.fillStyle = textColorSecondary;
-      const centsLabel = getCachedCentsReadout(
-        node,
-        {
-          wrap: enharmonicsEnabled,
-          requireHejiDetail: true,
-          baseTextForHeji: displayInfo.pitchClass,
-        },
-        displayInfo
-      );
-      const hasParen = centsLabel && centsLabel.includes("(");
-      const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
-      const annotation = getCachedHejiAnnotation(node, baseLabel || node.note_name);
-      const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
-      const defaultOffset = getDefaultNoteDetailOffset(radius, 1);
-      const suffixText = annotation.suffixParts
-        .map((part) => (part && part.text ? part.text : ""))
-        .join("");
-      const restText = hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "";
-      const line1 = `${annotation.baseText || ""}${suffixText}${restText}`;
-      const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
-      const lineWidth = line1 ? ctx.measureText(line1).width : 0;
-      const centsWidth = hejiEnabled && centsLabel ? ctx.measureText(centsLabel).width : 0;
-      const octaveWidth = octaveLabel ? ctx.measureText(octaveLabel).width : 0;
-      const ratioCentsWidth = ratioCentsLabel ? ctx.measureText(ratioCentsLabel).width : 0;
-      const hzText = showHz ? formatHzReadout(node.freq) : "";
-      const hzWidth = hzText ? ctx.measureText(hzText).width : 0;
-      const labelWidth = Math.max(lineWidth, centsWidth, octaveWidth, ratioCentsWidth, hzWidth);
-      const lineCount =
-        1 +
-        (hejiEnabled && centsLabel ? 1 : 0) +
-        (octaveLabel ? 1 : 0) +
-        (ratioCentsLabel ? 1 : 0) +
-        (hzText ? 1 : 0);
-      const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
-      const rawLabelPos =
-        layoutMode && layoutLabelOffsets.has(node.id)
-          ? getLayoutNoteLabelPosition(node, pos, radius)
-          : getDetailLabelPosition({
-              center: pos,
-              baseOffset: defaultOffset,
-              width: labelWidth,
-              height: labelHeight,
-              circles: detailLabelCollision.circles,
-              placedRects: detailLabelCollision.rects,
-              segments: detailLabelCollision.segments,
-              ignoreId: node.id,
-            });
-      if (layoutMode && layoutLabelOffsets.has(node.id)) {
-        detailLabelCollision.rects.push({
-          left: rawLabelPos.x,
-          top: rawLabelPos.y,
-          right: rawLabelPos.x + labelWidth,
-          bottom: rawLabelPos.y + labelHeight,
-        });
-      }
-      const labelPos = { x: rawLabelPos.x, y: rawLabelPos.y };
-      if (layoutMode) {
-        const padding = Math.max(4, Math.round(detailSize * 0.25));
-        layoutRenderedNoteLabelHitboxes.set(node.id, {
-          left: labelPos.x - padding,
-          top: labelPos.y - padding,
-          width: labelWidth + padding * 2,
-          height: labelHeight + padding * 2,
-          labelPos: { x: labelPos.x, y: labelPos.y },
-        });
-      }
-      const restGapScale = hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
-      let lineOffset = 0;
-      drawHejiInline({
-        x: labelPos.x,
-        y: labelPos.y,
-        baseText: annotation.baseText,
-        suffixParts: annotation.suffixParts,
-        restText: hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "",
-        size: detailSize,
-        font: noteLabelFont,
-        align: "left",
-        baseline: "top",
-        hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
-        restGapScale,
-        restHejiAccidentals: hejiEnabled && hasParen,
-        fontWeight: noteLabelWeight,
-        color: textColorSecondary,
-      });
-      lineOffset += detailSize + 4;
-      if (hejiEnabled && centsLabel) {
-        drawTextWithSmallCent({
-          text: centsLabel,
-          x: labelPos.x,
-          y: labelPos.y + lineOffset,
-          font: noteLabelFont,
-          size: detailSize,
-          fontWeight: noteLabelWeight,
-          align: "left",
-          baseline: "top",
-          hejiAccidentals: hejiEnabled,
-          hejiYOffset: Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET),
-          context: ctx,
-          color: textColorSecondary,
-        });
-        lineOffset += detailSize + 4;
-      }
-      if (octaveLabel) {
-        ctx.save();
-        ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
-        ctx.fillStyle = textColorSecondary;
-        ctx.fillText(octaveLabel, labelPos.x, labelPos.y + lineOffset);
-        ctx.restore();
-        lineOffset += detailSize + 4;
-      }
-      if (ratioCentsLabel) {
-        ctx.save();
-        ctx.font = `${noteLabelWeight} ${detailSize}px ${noteLabelFont}`;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
-        ctx.fillStyle = textColorSecondary;
-        ctx.fillText(ratioCentsLabel, labelPos.x, labelPos.y + lineOffset);
-        ctx.restore();
-        lineOffset += detailSize + 4;
-      }
-      if (hzText) {
-        ctx.save();
-        ctx.font = `200 ${detailSize}px "Lexend", sans-serif`;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
-        ctx.fillStyle = textColorSecondary;
-        const hzY = labelPos.y + lineOffset;
-        ctx.fillText(hzText, labelPos.x, hzY);
-        ctx.restore();
-      }
-      }
+      const detail = buildNodeDetailLabelScene(node, pos, radius, state, detailLabelCollision);
+      paintDisplayList(ctx, detail.scene);
+      collectHitAreas(detail.scene);
+      const hitbox = detail.scene.find((item) => item.kind === "hitArea");
 
-      if (layoutMode && layoutLabelHitboxVisible) {
-        const hitbox = getLayoutNoteLabelHitbox(node, pos, radius);
+      if (layoutMode && layoutLabelHitboxVisible && hitbox) {
         ctx.save();
         ctx.strokeStyle = "rgba(255, 80, 80, 0.8)";
         ctx.fillStyle = "rgba(255, 80, 80, 0.12)";
@@ -14632,36 +14647,9 @@ function draw() {
         : true;
       if (keyLabel && showLabel) {
         if (layoutMode) {
-          const labelText = getLayoutKeyMappingLabelText(keyLabel);
-          const labelPos = getLayoutKeyMappingLabelPosition(node, pos, radius);
-          const fontSize = Math.max(8, Math.round(layoutKeyMappingTextSize));
-          ctx.save();
-          ctx.globalAlpha = alpha;
-          ctx.font = `${layoutKeyMappingFontWeight} ${fontSize}px ${layoutKeyMappingFont}`;
-          ctx.textAlign = "right";
-          ctx.textBaseline = "bottom";
-          if (layoutKeyMappingDark) {
-            const paddingX = 6;
-            const paddingY = 3;
-            const textWidth = ctx.measureText(labelText).width;
-            const boxWidth = textWidth + paddingX * 2;
-            const boxHeight = fontSize + paddingY * 2;
-            const boxX = labelPos.x - boxWidth;
-            const boxY = labelPos.y - boxHeight;
-            ctx.fillStyle = "rgba(10, 15, 20, 0.7)";
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 6);
-            ctx.fill();
-            ctx.stroke();
-            ctx.fillStyle = "#ffffff";
-            ctx.fillText(labelText, labelPos.x - paddingX, labelPos.y - paddingY);
-          } else {
-            ctx.fillStyle = themeColors.textSecondary;
-            ctx.fillText(labelText, labelPos.x, labelPos.y);
-          }
-          ctx.restore();
+          const keyScene = buildLayoutKeyMappingScene(node, pos, radius, keyLabel, alpha);
+          paintDisplayList(ctx, keyScene);
+          collectHitAreas(keyScene);
         } else if (is3DMode) {
           drawKeyBanner(pos, radius, keyLabel, alpha);
         } else {
@@ -14681,18 +14669,8 @@ function draw() {
     ctx.restore();
   });
 
-  if (layoutMode && layoutAxisEdit) {
-    ctx.save();
-    ctx.fillStyle = "rgba(128, 128, 128, 0.25)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = themeColors.textSecondary;
-    ctx.fillStyle = themeColors.textSecondary;
-    ctx.lineWidth = 1.5;
-  ctx.font = `${layoutAxisLegendFontWeight} ${getAxisLegendSettings().fontSize}px ${layoutAxisLegendFont}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    drawLayoutAxisLegend(layoutAxisEdit, { showHandles: true });
-    ctx.restore();
+  if (pageScene && layoutAxisEdit) {
+    drawLayoutAxisEditOverlay(pageScene);
   }
   drawAnalysisWatermark();
   syncNavViewSliders();
@@ -14736,105 +14714,14 @@ function startVoice(options) {
   const velocity = Math.max(0, Math.min(1, Number(options.velocity ?? 1)));
   const nodeVolumeMax = options.source === "midi" ? 1 : getNodeVolumeLimit(node);
   const waveformType = getCurrentWaveformType();
-  let oscillator = null;
-  if (waveformType === KARPLUS_WAVEFORM) {
-    ensureKarplusWorklet();
-    if (karplusWorkletReady) {
-      try {
-        oscillator = new AudioWorkletNode(audioCtx, "karplus-strong", {
-          numberOfOutputs: 1,
-          outputChannelCount: [1],
-          parameterData: {
-            frequency: Number.isFinite(effectiveFreq) ? effectiveFreq : 220,
-            damping: 0.985,
-          },
-        });
-        if (oscillator.port) {
-          oscillator.port.postMessage({ type: "trigger" });
-        }
-      } catch (error) {
-        oscillator = audioCtx.createOscillator();
-      }
-    } else {
-      warnWorkletFallback(waveformType);
-      oscillator = audioCtx.createOscillator();
-    }
-  } else if (waveformType === RESONANT_WAVEFORM) {
-    ensureResonatorWorklet();
-    if (resonatorWorkletReady) {
-      try {
-        oscillator = new AudioWorkletNode(audioCtx, "modal-resonator", {
-          numberOfOutputs: 1,
-          outputChannelCount: [1],
-          parameterData: {
-            frequency: Number.isFinite(effectiveFreq) ? effectiveFreq : 220,
-          brightness: 0.45,
-          },
-        });
-        if (oscillator.port) {
-          oscillator.port.postMessage({ type: "trigger" });
-        }
-      } catch (error) {
-        oscillator = audioCtx.createOscillator();
-      }
-    } else {
-      warnWorkletFallback(waveformType);
-      oscillator = audioCtx.createOscillator();
-    }
-  } else if (waveformType === SOUNDFONT_WAVEFORM) {
-  if (soundfontData && soundfontPreset) {
-    const sfCtx = {
-      currentTime: audioCtx.currentTime,
-        destination: null,
-        createGain: audioCtx.createGain.bind(audioCtx),
-        createBuffer: audioCtx.createBuffer.bind(audioCtx),
-        createBufferSource: audioCtx.createBufferSource.bind(audioCtx),
-        createStereoPanner: audioCtx.createStereoPanner.bind(audioCtx),
-      };
-      oscillator = {
-        type: "soundfont",
-        start: () => {},
-        stop: () => {},
-        disconnect: () => {},
-        port: null,
-      };
-      // Use envGain as the destination so ADSR/LFO apply downstream.
-      sfCtx.destination = audioCtx.createGain();
-      const sfDestination = sfCtx.destination;
-      const midi = 69 + 12 * Math.log2((Number.isFinite(effectiveFreq) ? effectiveFreq : 220) / (Number(a4Input.value) || 440));
-      const stopFn = startPresetNote(sfCtx, soundfontPreset, midi, audioCtx.currentTime);
-      oscillator.sfStop = stopFn;
-      oscillator.sfOutput = sfDestination;
-    } else {
-      oscillator = audioCtx.createOscillator();
-    }
-  } else if (CUSTOM_WAVEFORMS.has(waveformType)) {
-    if (customOscillators && typeof customOscillators[waveformType] === "function") {
-      oscillator = customOscillators[waveformType](audioCtx);
-    } else {
-      ensureCustomOscillators();
-      if (!customOscillatorFallbackWarned) {
-        customOscillatorFallbackWarned = true;
-        console.warn(`"${waveformType}" wavetable not loaded yet; this note uses a sine oscillator.`);
-      }
-      oscillator = audioCtx.createOscillator();
-    }
-  } else {
-    oscillator = audioCtx.createOscillator();
-  }
+  const { source: oscillator, kind: voiceKind } = voiceBackends.createSource(
+    waveformType,
+    effectiveFreq
+  );
   const envGain = audioCtx.createGain();
   const lfoGain = audioCtx.createGain();
   const morphGain = audioCtx.createGain();
 
-  if (
-    waveformType !== KARPLUS_WAVEFORM &&
-    waveformType !== RESONANT_WAVEFORM &&
-    !CUSTOM_WAVEFORMS.has(waveformType) &&
-    oscillator &&
-    "type" in oscillator
-  ) {
-    oscillator.type = waveformType;
-  }
   if (oscillator && "frequency" in oscillator && Number.isFinite(effectiveFreq)) {
     oscillator.frequency.value = effectiveFreq;
   }
@@ -14883,8 +14770,9 @@ function startVoice(options) {
     source: options.source || "keyboard",
     loopOffRecorded: false,
     oneShot: isOneShot,
-    usesWorklet: waveformType === KARPLUS_WAVEFORM || waveformType === RESONANT_WAVEFORM,
-    usesSoundfont: waveformType === SOUNDFONT_WAVEFORM,
+    kind: voiceKind,
+    usesWorklet: voiceKind === "worklet",
+    usesSoundfont: voiceKind === "soundfont",
     sfStop: oscillator && oscillator.sfStop ? oscillator.sfStop : null,
     sfOutput: oscillator && oscillator.sfOutput ? oscillator.sfOutput : null,
   };
@@ -15193,13 +15081,17 @@ function toggleAudio() {
   }
 }
 
+let audioGestureUnlockDone = false;
 function enableAudioFromGesture() {
+  if (audioGestureUnlockDone) {
+    return;
+  }
   if (audioCtx && audioCtx.state === "running") {
     return;
   }
   enableAudio();
+  audioGestureUnlockDone = true;
   window.removeEventListener("pointerdown", enableAudioFromGesture);
-  window.removeEventListener("keydown", enableAudioFromGesture);
 }
 
 
@@ -15667,7 +15559,7 @@ function onPointerDown(event) {
       toggleCustomPianoPreviewVoice(hit);
       return;
     }
-    if (tHeld || rHeld) {
+    if (heldKeys.has("t") || heldKeys.has("r")) {
       return;
     }
     if (layoutMode) {
@@ -15681,12 +15573,12 @@ function onPointerDown(event) {
     }
   }
 
-  if (oHeld && hit) {
+  if (heldKeys.has("o") && hit) {
     openOctaveShiftDialog(hit);
     return;
   }
 
-  if (rHeld && hit) {
+  if (heldKeys.has("r") && hit) {
     const isOneToOne = hit.isCenter || (!hit.isCustom && hit.numerator === hit.denominator);
     if (isOneToOne && spellingMode !== "simple") {
       const a4 = Number(a4Input.value) || 440;
@@ -15774,7 +15666,7 @@ function onPointerDown(event) {
       return;
     }
   }
-  if (tHeld) {
+  if (heldKeys.has("t")) {
     const triangle = findTriangleHit(screenPoint);
     if (triangle) {
       const keys = triangleCellKeys(triangle);
@@ -16075,7 +15967,7 @@ function onPointerDown(event) {
     return;
   }
 
-  if (!layoutMode && lHeld && hit) {
+  if (!layoutMode && heldKeys.has("l") && hit) {
     lfoArmingId = hit.id;
     lfoArmingStart = now;
     ensureLfoLoop();
@@ -16086,7 +15978,7 @@ function onPointerDown(event) {
 
   if (
     !layoutMode &&
-    !cHeld &&
+    !heldKeys.has("c") &&
     hit &&
     hit.isCustom &&
     !event.altKey &&
@@ -16582,7 +16474,7 @@ function onPointerMove(event) {
     schedulePresetUrlUpdate();
     return;
   }
-  if (tHeld && !isCustomPianoMapModeActive() && !view.dragging && !view.rotating) {
+  if (heldKeys.has("t") && !isCustomPianoMapModeActive() && !view.dragging && !view.rotating) {
     const screen = { x: event.offsetX, y: event.offsetY };
     const nextTriangle = findTriangleHit(screen);
     const nextKey = nextTriangle
@@ -16815,14 +16707,14 @@ function onPointerUp(event) {
       setNodeVolumeAdjustMode(false);
       return;
     }
-    if (nHeld && hit) {
+    if (heldKeys.has("n") && hit) {
       const projected = projectPoint(hit.coordinate || { x: 0, y: 0, z: 0 });
       view.offsetX = -projected.x;
       view.offsetY = -projected.y;
       draw();
       return;
     }
-    if (mHeld && hit) {
+    if (heldKeys.has("m") && hit) {
       toggleNodeMuted(hit);
       return;
     }
@@ -16850,7 +16742,7 @@ function onPointerUp(event) {
         }
       }
     }
-    if (!layoutMode && fHeld && hit) {
+    if (!layoutMode && heldKeys.has("f") && hit) {
       const freq = Number(hit.freq);
       if (Number.isFinite(freq)) {
         const displayInfo = getDisplayNoteInfo(hit);
@@ -16872,19 +16764,19 @@ function onPointerUp(event) {
       }
       return;
     }
-    if (!layoutMode && iHeld && hit && hit.active) {
+    if (!layoutMode && heldKeys.has("i") && hit && hit.active) {
       startAddIntervalFromNode(hit);
       return;
     }
     if (
       !layoutMode &&
-      !tHeld &&
+      !heldKeys.has("t") &&
       !hit &&
       !event.altKey &&
       !event.shiftKey &&
-      !cHeld &&
-      !oHeld &&
-      !lHeld
+      !heldKeys.has("c") &&
+      !heldKeys.has("o") &&
+      !heldKeys.has("l")
     ) {
       const triangle = findTriangleHit(screenPoint);
       if (triangle && triangle.tri) {
@@ -17034,12 +16926,12 @@ function onPointerUp(event) {
         }
       }
     }
-    if (cHeld && hit && hit.active) {
+    if (heldKeys.has("c") && hit && hit.active) {
       openCustomRatioDialog({ type: "create", sourceId: hit.id });
       return;
     }
     if (hit) {
-      if (vHeld) {
+      if (heldKeys.has("v")) {
         setNodeVolumeAdjustMode(true);
         return;
       }
@@ -17659,185 +17551,53 @@ function hitTestNoteLabel(screenPoint) {
   if (!layoutMode) {
     return null;
   }
-  let hit = null;
-  nodes.forEach((node) => {
-    if (!(node.isCenter || node.active || node.isCustom)) {
-      return;
-    }
-    const pos = worldToScreen(getNodeDisplayCoordinate(node));
-    const radius = getLayoutNodeRadius(pos);
-    const hitbox = getLayoutNoteLabelHitbox(node, pos, radius);
-    const left = hitbox.left;
-    const right = hitbox.left + hitbox.width;
-    const top = hitbox.top;
-    const bottom = hitbox.top + hitbox.height;
-    if (
-      screenPoint.x >= left &&
-      screenPoint.x <= right &&
-      screenPoint.y >= top &&
-      screenPoint.y <= bottom
-    ) {
-      hit = { node, labelPos: hitbox.labelPos };
-    }
-  });
-  return hit;
+  const hit = hitTestDisplayList(frameHitAreas, screenPoint, ["noteLabel"]);
+  const node = hit && nodeById.get(hit.ref.id);
+  return node ? { node, labelPos: hit.ref.labelPos } : null;
 }
 
 function hitTestLayoutKeyMappingLabel(screenPoint) {
-  if (!layoutMode || layoutKeyMappingMode === "hide") {
+  if (!layoutMode) {
     return null;
   }
-  const keyboardMode = getKeyboardMode();
-  if (keyboardMode !== "piano-custom") {
-    return null;
-  }
-  const customPianoLabels = getCustomPianoLabelMap();
-  let hit = null;
-  nodes.forEach((node) => {
-    if (!(node.isCenter || node.active || node.isCustom)) {
-      return;
-    }
-    const keyLabel = customPianoLabels.get(node.id);
-    if (!keyLabel) {
-      return;
-    }
-    const labelText = getLayoutKeyMappingLabelText(keyLabel);
-    const displayInfo = getCachedDisplayInfo(node);
-    const pitchClass = displayInfo.pitchClass || node.pitch_class;
-    if (!shouldShowLayoutKeyMappingLabel(keyLabel, pitchClass)) {
-      return;
-    }
-    const pos = worldToScreen(getNodeDisplayCoordinate(node));
-    const radius = getLayoutNodeRadius(pos);
-    const hitbox = getLayoutKeyMappingLabelHitbox(labelText, node, pos, radius);
-    const left = hitbox.left;
-    const right = hitbox.left + hitbox.width;
-    const top = hitbox.top;
-    const bottom = hitbox.top + hitbox.height;
-    if (
-      screenPoint.x >= left &&
-      screenPoint.x <= right &&
-      screenPoint.y >= top &&
-      screenPoint.y <= bottom
-    ) {
-      hit = { node, labelPos: hitbox.labelPos };
-    }
-  });
-  return hit;
+  const hit = hitTestDisplayList(frameHitAreas, screenPoint, ["keyMapping"]);
+  const node = hit && nodeById.get(hit.ref.id);
+  return node ? { node, labelPos: hit.ref.labelPos } : null;
 }
 
 function hitTestLayoutTitle(screenPoint) {
   if (!layoutMode || !layoutTitle) {
     return null;
   }
-  const titleSize = Math.max(12, Math.round(layoutTitleSize));
-  ctx.save();
-  ctx.font = `${layoutTitleFontWeight} ${titleSize}px ${layoutTitleFont}`;
-  const width = ctx.measureText(layoutTitle).width;
-  ctx.restore();
-  const pos = getLayoutTitlePosition();
-  const height = titleSize;
-  const left = pos.x - width / 2;
-  const right = pos.x + width / 2;
-  const top = pos.y;
-  const bottom = pos.y + height;
-  if (
-    screenPoint.x >= left &&
-    screenPoint.x <= right &&
-    screenPoint.y >= top &&
-    screenPoint.y <= bottom
-  ) {
-    return { pos };
-  }
-  return null;
+  return hitTestDisplayList(buildPageChromeScene(), screenPoint, ["title"])
+    ? { pos: getLayoutTitlePosition() }
+    : null;
 }
 
 function hitTestLayoutCreator(screenPoint) {
   if (!layoutMode || !layoutCreator) {
     return null;
   }
-  const creatorSize = getLayoutCreatorSize();
-  ctx.save();
-  ctx.font = `${layoutCreatorFontWeight} ${creatorSize}px ${layoutCreatorFont}`;
-  const width = ctx.measureText(layoutCreator).width;
-  ctx.restore();
-  const pos = getLayoutCreatorPosition();
-  const height = creatorSize;
-  const left = pos.x - width / 2;
-  const right = pos.x + width / 2;
-  const top = pos.y;
-  const bottom = pos.y + height;
-  if (
-    screenPoint.x >= left &&
-    screenPoint.x <= right &&
-    screenPoint.y >= top &&
-    screenPoint.y <= bottom
-  ) {
-    return { pos };
-  }
-  return null;
+  return hitTestDisplayList(buildPageChromeScene(), screenPoint, ["creator"])
+    ? { pos: getLayoutCreatorPosition() }
+    : null;
 }
 
 function hitTestLayoutCustomLabel(screenPoint) {
   if (!layoutMode || !layoutCustomLabels.length) {
     return null;
   }
-  ctx.save();
-  const size = Math.max(8, Math.round(layoutCustomLabelTextSize));
-  ctx.font = `${layoutCustomLabelFontWeight} ${size}px ${layoutCustomLabelFont}`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  for (let i = layoutCustomLabels.length - 1; i >= 0; i -= 1) {
-    const entry = layoutCustomLabels[i];
-    if (!entry.text || !entry.position) {
-      continue;
-    }
-    const { width, height } = getLayoutCustomLabelMetrics(entry);
-    const pos = getLayoutCustomLabelPosition(entry);
-    const align = getLayoutCustomLabelAlign(entry);
-    const left = getLayoutCustomLabelLeft(pos, width, align);
-    const right = left + width;
-    const top = pos.y;
-    const bottom = pos.y + height;
-    if (
-      screenPoint.x >= left &&
-      screenPoint.x <= right &&
-      screenPoint.y >= top &&
-      screenPoint.y <= bottom
-    ) {
-      ctx.restore();
-      return { entry, index: i, pos };
-    }
-  }
-  ctx.restore();
-  return null;
+  const hit = hitTestDisplayList(buildPageChromeScene(), screenPoint, ["customLabel"]);
+  const entry = hit && layoutCustomLabels[hit.ref.index];
+  return entry ? { entry, index: hit.ref.index, pos: getLayoutCustomLabelPosition(entry) } : null;
 }
 
 function hitTestDistanceLabel(screenPoint) {
   if (!distanceEdges.length) {
     return null;
   }
-  for (let i = distanceEdges.length - 1; i >= 0; i -= 1) {
-    const edge = distanceEdges[i];
-    const { label, labelFont, labelWeight, labelSize, labelPos } = edge;
-    const centerX = labelPos ? labelPos.x : 0;
-    const centerY = labelPos ? labelPos.y : 0;
-    ctx.save();
-    ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
-    const width = ctx.measureText(label).width;
-    ctx.restore();
-    const halfWidth = width / 2 + 6;
-    const halfHeight = labelSize / 2 + 4;
-    if (
-      screenPoint.x >= centerX - halfWidth &&
-      screenPoint.x <= centerX + halfWidth &&
-      screenPoint.y >= centerY - halfHeight &&
-      screenPoint.y <= centerY + halfHeight
-    ) {
-      return edge;
-    }
-  }
-  return null;
+  const hit = hitTestDisplayList(frameHitAreas, screenPoint, ["distanceLabel"]);
+  return (hit && distanceEdges.find((edge) => edge.key === hit.ref.key)) || null;
 }
 
 function hitTestDistanceLine(screenPoint) {
@@ -17928,35 +17688,8 @@ function hitTestAxisLegend(screenPoint) {
   if (!layoutMode) {
     return null;
   }
-  const settings = getAxisLegendSettings();
-  const axes = [
-    getAxisLegendInfo("x", settings),
-    getAxisLegendInfo("y", settings),
-    getAxisLegendInfo("z", settings),
-  ];
-  ctx.save();
-  ctx.font = `${layoutAxisLegendFontWeight} ${settings.fontSize}px ${layoutAxisLegendFont}`;
-  for (const axis of axes) {
-    if (!axis) {
-      continue;
-    }
-    const labelWidth = ctx.measureText(axis.label).width;
-    const halfW = labelWidth / 2 + 12;
-    const halfH = settings.fontSize / 2 + 8;
-    const angle = axis.textAngle;
-    const dx = screenPoint.x - axis.center.x;
-    const dy = screenPoint.y - axis.center.y;
-    const cos = Math.cos(-angle);
-    const sin = Math.sin(-angle);
-    const rx = dx * cos - dy * sin;
-    const ry = dx * sin + dy * cos;
-    if (Math.abs(rx) <= halfW && Math.abs(ry) <= halfH) {
-      ctx.restore();
-      return axis;
-    }
-  }
-  ctx.restore();
-  return null;
+  const hit = hitTestDisplayList(buildPageChromeScene(), screenPoint, ["axisLegend"]);
+  return hit ? getAxisLegendInfo(hit.ref.axis) : null;
 }
 
 function hitTestAxisLegendHandle(screenPoint) {
@@ -18499,81 +18232,6 @@ function openDistanceLabelDialog(edgeKey) {
     distanceLabelInput.focus();
     distanceLabelInput.select();
   });
-}
-
-function getDistanceEdgeKey(aKey, bKey) {
-  if (!aKey || !bKey) {
-    return "";
-  }
-  return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
-}
-
-// Edge keys join two node keys with "|". A custom node key itself contains a
-// "|" (custom:x,y,z|slot), so split only at a "|" that starts the next node
-// key. Legacy keys made of two bare numeric ids ("123|456") still split.
-function parseDistanceEdgeKey(edgeKey) {
-  if (!edgeKey || typeof edgeKey !== "string") {
-    return null;
-  }
-  let parts = edgeKey.split(/\|(?=grid:|custom:)/);
-  if (parts.length !== 2) {
-    parts = edgeKey.split("|");
-    if (parts.length !== 2 || parts.some((part) => /^(grid|custom):/.test(part))) {
-      return null;
-    }
-  }
-  return parts[0] && parts[1] ? parts : null;
-}
-
-// Pre-September-2026 files keyed custom nodes in distance edges by runtime
-// id, handed out as 200000 + index into the file's own customNodes array.
-// Rewrite such keys to the stable address using that same array.
-function migrateLegacyDistanceNodeKey(nodeKey, customEntries) {
-  if (!nodeKey.startsWith("custom:") || nodeKey.includes("|")) {
-    return nodeKey;
-  }
-  const index = Number(nodeKey.slice(7)) - 200000;
-  const entries = Array.isArray(customEntries) ? customEntries : [];
-  const entry = Number.isInteger(index) && index >= 0 ? entries[index] : null;
-  if (!entry || typeof entry !== "object") {
-    return null;
-  }
-  const source = Array.isArray(entry.sourceExponents)
-    ? entry.sourceExponents
-    : Array.isArray(entry.exponents)
-    ? entry.exponents
-    : null;
-  if (!source || source.length < 2) {
-    return null;
-  }
-  const [x, y, z = 0] = source.map(Number);
-  if (![x, y, z].every(Number.isFinite)) {
-    return null;
-  }
-  let slot = Number.isFinite(Number(entry.customSlot)) ? Math.trunc(Number(entry.customSlot)) : null;
-  if (slot == null) {
-    // Slots were assigned in file order per source node.
-    slot = entries.slice(0, index).filter((other) => {
-      const otherSource = other && (other.sourceExponents || other.exponents);
-      return (
-        Array.isArray(otherSource) &&
-        Number(otherSource[0]) === x &&
-        Number(otherSource[1]) === y &&
-        Number(otherSource[2] || 0) === z
-      );
-    }).length;
-  }
-  return `custom:${x},${y},${z}|${slot}`;
-}
-
-function migrateLegacyDistanceEdgeKey(edgeKey, customEntries) {
-  const parts = parseDistanceEdgeKey(edgeKey);
-  if (!parts) {
-    return null;
-  }
-  const a = migrateLegacyDistanceNodeKey(parts[0], customEntries);
-  const b = migrateLegacyDistanceNodeKey(parts[1], customEntries);
-  return a && b ? getDistanceEdgeKey(a, b) : null;
 }
 
 function getDistanceEdgeOverride(key) {
@@ -19902,7 +19560,7 @@ function getUiHintKey() {
     if (layoutAxisEdit) {
       return "layout-axis-edit";
     }
-    if (tHeld) {
+    if (heldKeys.has("t")) {
       return "layout-triangle";
     }
     return "layout";
@@ -20060,7 +19718,7 @@ function updateUiHint() {
       setUiHintContent("Editing axis legend.\nPress Delete to remove. Reset Layout restores.");
       return;
     }
-    if (tHeld) {
+    if (heldKeys.has("t")) {
       setUiHintContent(
         "Creating triangles (T)\nClick to add a diagonal, click again to label.\nClick line to rotate or remove."
       );
@@ -20233,6 +19891,7 @@ function handlePerformanceModeHotkey(event) {
   event.preventDefault();
   event.stopImmediatePropagation();
   togglePerformanceMode();
+  return true;
 }
 
 function isTextEntryTargetForHotkeys(target) {
@@ -20297,13 +19956,14 @@ function handleModeSwitchHotkey(event) {
   event.stopImmediatePropagation();
   if (targetMode === "layout") {
     setLayoutMode(true);
-    return;
+    return true;
   }
   if (layoutMode) {
     setLayoutMode(false);
   }
   set3DMode(targetMode === "3d", { preserveDepth: true });
   schedulePresetUrlUpdate();
+  return true;
 }
 
 function isKeyboardModeToggleHotkey(event) {
@@ -20339,17 +19999,18 @@ function handleKeyboardModeToggleHotkey(event) {
   event.preventDefault();
   event.stopImmediatePropagation();
   if (!keyboardModeSelect || keyboardModeSelect.disabled) {
-    return;
+    return true;
   }
   const currentMode = keyboardModeSelect.value || "off";
   if (currentMode !== "off") {
     keyboardModeToggleMemory = currentMode;
     applyKeyboardModeValue("off");
-    return;
+    return true;
   }
   if (keyboardModeToggleMemory && keyboardModeToggleMemory !== "off") {
     applyKeyboardModeValue(keyboardModeToggleMemory);
   }
+  return true;
 }
 
 function isCustomPianoMode() {
@@ -20863,7 +20524,7 @@ function updateAddModeFromShift() {
   if (navAddModeToggle) {
     setControlChecked(navAddModeToggle, isAddMode);
   }
-  if (tHeld) {
+  if (heldKeys.has("t")) {
     updateUiHint();
   }
 }
@@ -22669,7 +22330,12 @@ function normalizePresetEntry(entry) {
   if (entry && typeof entry === "object") {
     const title = String(entry.title || "").trim();
     const creator = String(entry.creator || "").trim();
-    const uri = String(entry.uri || "").trim();
+    // Library entries are plain state documents (scripts/normalize-presets.mjs);
+    // a pasted lattice link (`uri`) still works.
+    const uri =
+      entry.state && typeof entry.state === "object"
+        ? `#s=${encodePresetState(entry.state)}`
+        : String(entry.uri || "").trim();
     const tags = Array.isArray(entry.tags)
       ? entry.tags.map((tag) => String(tag || "").trim()).filter(Boolean)
       : [];
@@ -24092,7 +23758,7 @@ function getPresetSynthState() {
 
 function buildPresetStateSkeleton(active, customState, lineLabelState, distanceState, muted) {
   return {
-    v: 1,
+    v: STATE_VERSION,
     active,
     muted,
     customNodes: customState,
@@ -24537,13 +24203,11 @@ function applyPresetDisplayToggleState(state) {
 }
 
 function applyPresetDistanceState(state) {
-  const customEntries = state.customNodes;
   if (Array.isArray(state.distanceEdges)) {
     state.distanceEdges.forEach((edgeKey) => {
       if (typeof edgeKey === "string" && edgeKey) {
-        const migrated = migrateLegacyDistanceEdgeKey(edgeKey, customEntries);
-        if (migrated) {
-          distanceSelectedEdges.add(migrated);
+        if (parseDistanceEdgeKey(edgeKey)) {
+          distanceSelectedEdges.add(edgeKey);
         }
       }
     });
@@ -24552,9 +24216,8 @@ function applyPresetDistanceState(state) {
     state.distanceEdgeOverrides,
     normalizeDistanceEdgeOverrideEntry,
     (normalized) => {
-      const migrated = migrateLegacyDistanceEdgeKey(normalized.key, customEntries);
-      if (migrated) {
-        distanceEdgeOverrides.set(migrated, normalized.value);
+      if (parseDistanceEdgeKey(normalized.key)) {
+        distanceEdgeOverrides.set(normalized.key, normalized.value);
       }
     }
   );
@@ -25732,10 +25395,13 @@ function runPresetApplyPipeline(state, options, presetContext) {
   applyPresetPostRebuildPipeline(state, presetContext);
 }
 
-function applyPresetState(state, options = {}) {
-  if (!state || typeof state !== "object") {
+function applyPresetState(rawState, options = {}) {
+  if (!rawState || typeof rawState !== "object") {
     return;
   }
+  // Every load path funnels through here: bring the state to the current
+  // format first (src/state-migrations.js).
+  const state = migrateState(rawState).state;
   const isSnapshotRecall = Boolean(
     options && (options.skipStopVoices || options.preserveViewMode)
   );
@@ -25955,212 +25621,8 @@ function escapeSvgText(text) {
     .replace(/'/g, "&apos;");
 }
 
-function escapeSvgTextPreservingWhitespace(text) {
-  const value = String(text ?? "");
-  if (!value) {
-    return "&#160;";
-  }
-  return escapeSvgText(value);
-}
 
-function buildHejiSvgText({
-  x,
-  y,
-  baseText,
-  suffix,
-  restText,
-  font,
-  size,
-  anchor,
-  baseline,
-  color,
-}) {
-  const baseSpan = `<tspan>${escapeSvgText(baseText)}</tspan>`;
-  const suffixSpan = suffix
-    ? `<tspan font-family="HEJI2Text">${escapeSvgText(suffix)}</tspan>`
-    : "";
-  const restSpan = restText ? `<tspan>${escapeSvgText(restText)}</tspan>` : "";
-  return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-    font
-  )}" font-size="${size}" ${svgColorAttr("fill", color)}>${baseSpan}${suffixSpan}${restSpan}</text>`;
-}
 
-async function buildHejiSvgInline({
-  x,
-  y,
-  baseText,
-  suffixParts,
-  restText,
-  font,
-  size,
-  align,
-  baseline,
-  hejiYOffset = 0.5,
-  restGapScale = HEJI_REST_GAP,
-  restHejiAccidentals = false,
-  fontWeight = 400,
-  color,
-}) {
-  const suffixSpacing = Math.round(size * 0.08);
-  const partGap = Math.round(size * 0.1);
-  const baseSuffixGap = Math.round(size * 0.1);
-  const restGap = Math.round(size * restGapScale);
-  const baseWidth = await measureSvgTextWidth(baseText, size, font, fontWeight);
-  const parts = Array.isArray(suffixParts) ? suffixParts : [];
-  const suffixWidths = await Promise.all(
-    parts.map((part) => measureSvgSuffixPartWidth(part, size, suffixSpacing, fontWeight))
-  );
-  const suffixWidth = suffixWidths.reduce(
-    (sum, partWidth, index) => sum + partWidth + (index > 0 ? partGap : 0),
-    0
-  );
-  const restWidth = restText
-    ? await measureSvgTextWidth(restText, size, font, fontWeight)
-    : 0;
-  const totalWidth =
-    baseWidth +
-    (parts.length ? baseSuffixGap + suffixWidth : 0) +
-    (restText ? restGap + restWidth : 0);
-  let startX = x;
-  if (align === "center") {
-    startX = x - totalWidth / 2;
-  } else if (align === "right") {
-    startX = x - totalWidth;
-  }
-
-  const nodes = [];
-  nodes.push(
-    await buildSvgTextElement({
-      text: baseText,
-      x: startX,
-      y,
-      font,
-      size,
-      fontWeight,
-      anchor: "start",
-      baseline,
-      color,
-    })
-  );
-
-  let cursorX = startX + baseWidth;
-  if (parts.length) {
-    cursorX += baseSuffixGap;
-    for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-      const part = parts[partIndex];
-      if (partIndex > 0) {
-        cursorX += partGap;
-      }
-      const partCharGap = Number.isFinite(part.charGap) ? part.charGap : suffixSpacing;
-      const partStartX = cursorX;
-      const partWidth = suffixWidths[partIndex] ?? 0;
-      const partFont = part.font || "HEJI2Text";
-      const partWeight = Number.isFinite(part.fontWeight)
-        ? part.fontWeight
-        : part.font
-        ? fontWeight
-        : 400;
-      const partYOffset =
-        typeof part.yOffset === "number" ? part.yOffset : hejiYOffset;
-      const sizeScale = Number.isFinite(part.sizeScale) ? part.sizeScale : 1;
-      const partChars = Array.from(part.text);
-      for (let index = 0; index < partChars.length; index += 1) {
-        const char = partChars[index];
-        if (index > 0) {
-          cursorX += partCharGap;
-        }
-        const baseSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
-        const charSize = Math.max(6, Math.round(baseSize * sizeScale));
-        nodes.push(
-          await buildSvgTextElement({
-            text: char,
-            x: cursorX,
-            y: y + partYOffset,
-            font: partFont,
-            size: charSize,
-            fontWeight: partWeight,
-            anchor: "start",
-            baseline,
-            color,
-          })
-        );
-        cursorX += await measureSvgCharWidth(char, charSize, partFont, partWeight);
-      }
-      if (part.expLabel) {
-        const expSize = Math.max(8, Math.round(size * 0.55));
-        const expY =
-          y +
-          (typeof part.yOffset === "number" ? part.yOffset : hejiYOffset) +
-          getExponentOffset(size, baseline);
-        nodes.push(
-          await buildSvgTextElement({
-            text: part.expLabel,
-            x: partStartX + partWidth / 2,
-            y: expY,
-            font,
-            size: expSize,
-            fontWeight,
-            anchor: "middle",
-            baseline: "hanging",
-            color,
-          })
-        );
-      }
-    }
-  }
-
-  if (restText) {
-    cursorX += restGap;
-    const chars = Array.from(restText);
-    const needsInline =
-      restHejiAccidentals || restText.includes(CENTS_CHAR) || /[veV]/.test(restText);
-    if (!needsInline) {
-      nodes.push(
-        await buildSvgTextElement({
-          text: restText,
-          x: cursorX,
-          y,
-          font,
-          size,
-          fontWeight,
-          anchor: "start",
-          baseline,
-          color,
-        })
-      );
-    } else {
-      for (let index = 0; index < chars.length; index += 1) {
-        const char = chars[index];
-        const useHeji = char === "v" || char === "e" || char === "V";
-        const isCent = char === CENTS_CHAR;
-        const charSize = isCent ? getCentsCharSize(size) : size;
-        const charFont = useHeji ? "HEJI2Text" : font;
-        const charWeight = useHeji ? "normal" : fontWeight;
-        nodes.push(
-          await buildSvgTextElement({
-            text: char,
-            x: cursorX,
-            y: y + (useHeji ? hejiYOffset : 0),
-            font: charFont,
-            size: charSize,
-            fontWeight: useHeji ? 400 : fontWeight,
-            anchor: "start",
-            baseline,
-            color,
-          })
-        );
-        cursorX += await measureSvgCharWidth(
-          char,
-          charSize,
-          charFont,
-          useHeji ? 400 : fontWeight
-        );
-      }
-    }
-  }
-
-  return nodes.join("\n");
-}
 
 const LEXEND_FONT_URL =
   "https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&family=Inter:wght@100..900&family=IBM+Plex+Sans:wght@200..700&family=Lato:wght@300..900&family=PT+Sans:wght@400..700&family=PT+Serif:wght@400..700&family=Radley:ital,wght@0,400;1,400&family=Alice&family=Noto+Serif:wght@400..700&display=swap";
@@ -26258,13 +25720,6 @@ async function getExportFontCss(hejiFontSrc = null) {
 @font-face { font-family: "HEJI2Text"; src: url("${hejiFontUrl}") format("opentype"); font-display: swap; }`;
 }
 
-function analyzeExportFontCss(css) {
-  const content = String(css || "");
-  const hasImport = content.includes("@import");
-  const embeddedFonts = (content.match(/data:font\//g) || []).length;
-  const hasHejiData = content.includes("HEJI2Text") && content.includes("data:font/");
-  return { hasImport, embeddedFonts, hasHejiData };
-}
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) {
@@ -26288,59 +25743,7 @@ function getExportMetadataLabel() {
   return `${safeCreator} - ${safeTitle} [tuninglattice.com]`;
 }
 
-function normalizeSvgColor(color) {
-  if (!color) {
-    return { color: "none", opacity: null };
-  }
-  const trimmed = String(color).trim();
-  if (trimmed === "none" || trimmed === "transparent") {
-    return { color: trimmed, opacity: null };
-  }
-  const rgbaMatch = trimmed.match(/^rgba?\(([^)]+)\)$/i);
-  if (rgbaMatch) {
-    const parts = rgbaMatch[1]
-      .split(",")
-      .map((part) => part.trim())
-      .filter(Boolean);
-    const r = Number(parts[0]);
-    const g = Number(parts[1]);
-    const b = Number(parts[2]);
-    const a = parts.length > 3 ? Number(parts[3]) : 1;
-    if ([r, g, b].every((value) => Number.isFinite(value))) {
-      const rgb = `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
-      const opacity = Number.isFinite(a) ? Math.max(0, Math.min(1, a)) : 1;
-      return { color: rgb, opacity };
-    }
-  }
-  const hexMatch = trimmed.match(/^#([0-9a-f]{4}|[0-9a-f]{8})$/i);
-  if (hexMatch) {
-    const hex = hexMatch[1];
-    const values =
-      hex.length === 4
-        ? hex.split("").map((char) => parseInt(char + char, 16))
-        : [
-            parseInt(hex.slice(0, 2), 16),
-            parseInt(hex.slice(2, 4), 16),
-            parseInt(hex.slice(4, 6), 16),
-            parseInt(hex.slice(6, 8), 16),
-          ];
-    const [r, g, b, a = 255] = values;
-    const rgb = `rgb(${r}, ${g}, ${b})`;
-    const opacity = Math.max(0, Math.min(1, a / 255));
-    return { color: rgb, opacity };
-  }
-  return { color: trimmed, opacity: null };
-}
 
-function svgColorAttr(name, color) {
-  const normalized = normalizeSvgColor(color);
-  const base = `${name}="${normalized.color}"`;
-  if (normalized.opacity === null || normalized.color === "none") {
-    return base;
-  }
-  const opacity = Number(normalized.opacity.toFixed(3));
-  return `${base} ${name}-opacity="${opacity}"`;
-}
 
 const OUTLINE_SVG_TEXT = true;
 const OUTLINE_FONT_URLS = import.meta.glob(
@@ -26474,168 +25877,46 @@ async function getOutlineFontOrFallback(fontFamily, fontWeight) {
   return loadOutlineFont("Noto Serif", fontWeight);
 }
 
-async function measureSvgTextWidth(text, size, font, fontWeight = 400) {
-  if (!OUTLINE_SVG_TEXT) {
-    return measureTextWidthWithWeight(text, size, font, fontWeight);
-  }
-  const fontObj = await getOutlineFontOrFallback(font, fontWeight);
-  if (!fontObj) {
-    return measureTextWidthWithWeight(text, size, font, fontWeight);
-  }
-  return fontObj.getAdvanceWidth(text, size);
-}
 
-async function measureSvgCharWidth(char, size, font, fontWeight = 400) {
-  if (!OUTLINE_SVG_TEXT) {
-    return measureCharWidth(char, size, font, fontWeight);
-  }
-  const fontObj = await getOutlineFontOrFallback(font, fontWeight);
-  if (!fontObj) {
-    return measureCharWidth(char, size, font, fontWeight);
-  }
-  return fontObj.getAdvanceWidth(char, size);
-}
 
-async function measureSvgSuffixPartWidth(part, size, charGap, baseWeight) {
-  if (!part || !part.text) {
-    return 0;
-  }
-  const sizeScale = Number.isFinite(part.sizeScale) ? part.sizeScale : 1;
-  const font = part.font || "HEJI2Text";
-  const partCharGap = Number.isFinite(part.charGap) ? part.charGap : charGap;
-  const weight = Number.isFinite(part.fontWeight)
-    ? part.fontWeight
-    : part.font
-    ? baseWeight
-    : 400;
-  const chars = Array.from(part.text);
-  const widths = await Promise.all(
-    chars.map((char) => {
-      const baseSize = char === CENTS_CHAR ? getCentsCharSize(size) : size;
-      const charSize = Math.max(6, Math.round(baseSize * sizeScale));
-      return measureSvgCharWidth(char, charSize, font, weight);
-    })
-  );
-  return widths.reduce((sum, width, index) => sum + width + (index > 0 ? partCharGap : 0), 0);
-}
 
-async function buildSvgTextElement({
-  text,
-  x,
-  y,
-  font,
-  size,
-  fontWeight = 400,
-  anchor = "start",
-  baseline = "alphabetic",
-  color,
-  transform = "",
-}) {
-  const safeText = text == null ? "" : String(text);
-  if (!safeText) {
-    return "";
-  }
-  const lines = safeText.split(/\r?\n/);
-  const lineHeight = Math.max(size, Math.round(size * 1.2));
-  if (lines.length > 1) {
-    if (OUTLINE_SVG_TEXT) {
-      const parts = await Promise.all(
-        lines.map((line, index) =>
-          buildSvgTextElement({
-            text: line,
-            x,
-            y: y + index * lineHeight,
-            font,
-            size,
-            fontWeight,
-            anchor,
-            baseline,
-            color,
-            transform,
-          })
-        )
-      );
-      return parts.join("");
+// Scene text for SVG: measured on the canvas (the reference rendering) and
+// outlined from the bundled font files. See src/scene/emit-svg.js.
+const SCENE_SVG_TEXT = {
+  measure({ text, font, size, weight, baseline }) {
+    ctx.save();
+    ctx.font = `${weight} ${size}px ${font}`;
+    ctx.textBaseline = baseline;
+    const metrics = ctx.measureText(text);
+    ctx.restore();
+    return { width: metrics.width, alphabeticBaseline: metrics.alphabeticBaseline || 0 };
+  },
+  // Each glyph is outlined at the x the canvas puts it (prefix width, so
+  // kerning included): the bundled font files' advances differ slightly from
+  // the browser's copy, and per-line placement let long lines drift.
+  async outline({ text, font, size, weight, x, y }) {
+    const fontObj = await getOutlineFontOrFallback(font, weight);
+    if (!fontObj) {
+      return null;
     }
-    const attrs = `text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-      font
-    )}" font-size="${size}" font-weight="${fontWeight}" xml:space="preserve" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
-      "fill",
-      color
-    )}`;
-    const tspans = lines
-      .map((line, index) => {
-        const dy = index === 0 ? 0 : lineHeight;
-        return `<tspan x="${x}" dy="${dy}">${escapeSvgTextPreservingWhitespace(line)}</tspan>`;
-      })
-      .join("");
-    return `<text x="${x}" y="${y}" ${attrs}>${tspans}</text>`;
-  }
-  if (!OUTLINE_SVG_TEXT) {
-    return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-      font
-    )}" font-size="${size}" font-weight="${fontWeight}" xml:space="preserve" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
-      "fill",
-      color
-    )}>${escapeSvgTextPreservingWhitespace(safeText)}</text>`;
-  }
-  const fontObj = await getOutlineFontOrFallback(font, fontWeight);
-  if (!fontObj) {
-    return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-      font
-    )}" font-size="${size}" font-weight="${fontWeight}" xml:space="preserve" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
-      "fill",
-      color
-    )}>${escapeSvgTextPreservingWhitespace(safeText)}</text>`;
-  }
-  const ascent = (fontObj.ascender / fontObj.unitsPerEm) * size;
-  const descent = (-fontObj.descender / fontObj.unitsPerEm) * size;
-  let baselineY = y;
-  if (baseline === "middle") {
-    baselineY = y + (ascent - descent) / 2;
-  } else if (baseline === "text-before-edge" || baseline === "hanging") {
-    baselineY = y + ascent;
-  }
-  let anchorX = x;
-  const advance = fontObj.getAdvanceWidth(safeText, size);
-  if (anchor === "middle") {
-    anchorX = x - advance / 2;
-  } else if (anchor === "end") {
-    anchorX = x - advance;
-  }
-  const pathData = fontObj.getPath(safeText, anchorX, baselineY, size).toPathData(2);
-  return `<path d="${pathData}" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
-    "fill",
-    color
-  )} />`;
-}
+    ctx.save();
+    ctx.font = `${weight} ${size}px ${font}`;
+    let path = "";
+    let prefix = "";
+    for (const char of text) {
+      if (char.trim()) {
+        path += fontObj.getPath(char, x + ctx.measureText(prefix).width, y, size).toPathData(2);
+      }
+      prefix += char;
+    }
+    ctx.restore();
+    return path;
+  },
+};
 
-function measureFontMetrics(sample, size, font, fontWeight = 400) {
-  ctx.save();
-  ctx.font = `${fontWeight} ${size}px ${font}`;
-  const metrics = ctx.measureText(sample);
-  ctx.restore();
-  return {
-    ascent: Number(metrics.actualBoundingBoxAscent) || size * 0.8,
-    descent: Number(metrics.actualBoundingBoxDescent) || size * 0.2,
-  };
-}
 
-function getSvgTopBaselineOffset(size, font, fontWeight) {
-  const metrics = measureFontMetrics("H", size, font, fontWeight);
-  return Math.round(metrics.ascent);
-}
 
-async function ensureFontLoaded(font, size) {
-  if (!document.fonts || !document.fonts.load) {
-    return;
-  }
-  try {
-    await document.fonts.load(`${Math.max(6, Math.round(size))}px "${font}"`);
-  } catch (error) {
-    // Ignore font loading errors; we will fall back to default metrics.
-  }
-}
+
 
 function ensureUiFontReady(font, weight = 400, size = 16) {
   if (!document.fonts || !document.fonts.load) {
@@ -26678,24 +25959,8 @@ function queuePresetFontRecalc() {
   }, 0);
 }
 
-async function getSvgHejiYOffset(size, baseFont, baseWeight) {
-  await Promise.all([
-    ensureFontLoaded("HEJI2Text", size),
-    ensureFontLoaded(baseFont, size),
-  ]);
-  const baseMetrics = measureFontMetrics("H", size, baseFont, baseWeight);
-  const hejiMetrics = measureFontMetrics("v", size, "HEJI2Text", 400);
-  const ascentDelta = baseMetrics.ascent - hejiMetrics.ascent;
-  return Math.round(size * (HEJI_SUFFIX_Y_OFFSET + HEJI_SVG_EXTRA_Y_OFFSET) + ascentDelta);
-}
 
-async function buildLayoutSvgString(
-  hejiFontSrc = null,
-  detailHejiYOffset = null,
-  fontCss = null,
-  noteBaselineOffset = null,
-  labelHejiYOffset = null
-) {
+async function buildLayoutSvgString({ fontCss = null } = {}) {
   if (!layoutMode) {
     return null;
   }
@@ -26704,22 +25969,8 @@ async function buildLayoutSvgString(
   }
   const { widthIn, heightIn, widthPx, heightPx } = getLayoutPageDimensions();
   const { left, top } = getLayoutPageRect();
-  const labelSize = layoutRatioTextSize;
-  const detailSize = layoutNoteTextSize;
-  const titleSize = Math.max(12, Math.round(layoutTitleSize));
-  const creatorSize = getLayoutCreatorSize();
   const exportLabel = getExportMetadataLabel();
-  const svgDetailHejiYOffset = Number.isFinite(detailHejiYOffset)
-    ? detailHejiYOffset
-    : Math.round(detailSize * HEJI_SUFFIX_Y_OFFSET);
-  const svgLabelHejiYOffset = Number.isFinite(labelHejiYOffset)
-    ? labelHejiYOffset
-    : Math.round(labelSize * HEJI_SUFFIX_Y_OFFSET);
-  const svgNoteBaselineOffset = Number.isFinite(noteBaselineOffset)
-    ? noteBaselineOffset
-    : 0;
   const svgFill = (color) => svgColorAttr("fill", color);
-  const svgStroke = (color) => svgColorAttr("stroke", color);
 
   const parts = [];
   parts.push(`<?xml version="1.0" encoding="UTF-8"?>`);
@@ -26737,1310 +25988,76 @@ async function buildLayoutSvgString(
   }
   parts.push(`<rect width="100%" height="100%" ${svgFill(themeColors.page)}/>`);
 
-  if (layoutTitle) {
-    const titlePos = getLayoutTitlePosition();
-    const titleX = layoutTitlePosition
-      ? layoutTitlePosition.x
-      : widthPx / 2;
-    const titleY = layoutTitlePosition
-      ? layoutTitlePosition.y
-      : Math.max(12, titlePos.y - top);
-    parts.push(
-      await buildSvgTextElement({
-        text: layoutTitle,
-        x: titleX,
-        y: titleY,
-        font: layoutTitleFont,
-        size: titleSize,
-        fontWeight: layoutTitleFontWeight,
-        anchor: "middle",
-        baseline: "text-before-edge",
-        color: themeColors.textPrimary,
-      })
-    );
-  }
-  if (layoutCreator) {
-    const creatorPos = getLayoutCreatorPosition();
-    const creatorX = creatorPos.x - left;
-    const creatorY = Math.max(12, creatorPos.y - top);
-    parts.push(
-      await buildSvgTextElement({
-        text: layoutCreator,
-        x: creatorX,
-        y: creatorY,
-        font: layoutCreatorFont,
-        size: creatorSize,
-        fontWeight: layoutCreatorFontWeight,
-        anchor: "middle",
-        baseline: "text-before-edge",
-        color: themeColors.textSecondary,
-      })
-    );
+  parts.push(
+    ...(await emitDisplayListSvg(offsetDisplayList(buildPageChromeScene(), -left, -top), SCENE_SVG_TEXT))
+  );
+
+  const {
+    nodeRenderList: exportNodeRenderList,
+    nodePosMap: exportNodePosMap,
+    detailLabelCollision: exportDetailLabelCollision,
+  } = buildNodeLayout();
+  const exportKeyLabels = getKeyboardMode() === "piano-custom" ? getCustomPianoLabelMap() : null;
+  const emitScene = async (scene) =>
+    parts.push(...(await emitDisplayListSvg(offsetDisplayList(scene, -left, -top), SCENE_SVG_TEXT)));
+  if (!analysisLayers.microtonal) {
+    await emitScene(buildLatticeEdgesScene(exportNodePosMap));
   }
 
-  const axisSettings = getAxisLegendSettings();
-  const axisColor = themeColors.textSecondary;
-  const axisStroke = 1.5;
-  const axisDefs = [
-    getAxisLegendInfo("x", axisSettings),
-    getAxisLegendInfo("y", axisSettings),
-    getAxisLegendInfo("z", axisSettings),
-  ];
-  for (const info of axisDefs) {
-    if (!info) {
-      continue;
-    }
-    const centerX = info.center.x - left;
-    const centerY = info.center.y - top;
-    const leftStart = {
-      x: centerX - info.gapVec.x,
-      y: centerY - info.gapVec.y,
-    };
-    const leftEnd = {
-      x: info.leftEnd.x - left,
-      y: info.leftEnd.y - top,
-    };
-    const rightStart = {
-      x: centerX + info.gapVec.x,
-      y: centerY + info.gapVec.y,
-    };
-    const rightEnd = {
-      x: info.rightEnd.x - left,
-      y: info.rightEnd.y - top,
-    };
-    const buildArrow = (x1, y1, x2, y2) => {
-      const headLength = 10;
-      const angle = Math.atan2(y2 - y1, x2 - x1);
-      const p1 = `${x2},${y2}`;
-      const p2 = `${x2 - headLength * Math.cos(angle - Math.PI / 6)},${y2 -
-        headLength * Math.sin(angle - Math.PI / 6)}`;
-      const p3 = `${x2 - headLength * Math.cos(angle + Math.PI / 6)},${y2 -
-        headLength * Math.sin(angle + Math.PI / 6)}`;
-      parts.push(
-        `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${svgStroke(
-          axisColor
-        )} stroke-width="${axisStroke}" />`
-      );
-      parts.push(
-        `<polygon points="${p1} ${p2} ${p3}" ${svgFill(axisColor)} />`
-      );
-    };
-    buildArrow(leftStart.x, leftStart.y, leftEnd.x, leftEnd.y);
-    buildArrow(rightStart.x, rightStart.y, rightEnd.x, rightEnd.y);
-    const rotation = (info.textAngle * 180) / Math.PI;
-    parts.push(
-      await buildSvgTextElement({
-        text: info.label,
-        x: centerX,
-        y: centerY,
-        font: layoutAxisLegendFont,
-        size: axisSettings.fontSize,
-        fontWeight: layoutAxisLegendFontWeight,
-        anchor: "middle",
-        baseline: "middle",
-        color: axisColor,
-        transform: `rotate(${rotation} ${centerX} ${centerY})`,
-      })
-    );
+  if (analysisLayers.distances) {
+    await emitScene(buildDistanceConnectionsScene(exportNodePosMap).scene);
   }
 
-  if (layoutCustomLabels.length) {
-    const customSize = Math.max(8, Math.round(layoutCustomLabelTextSize));
-    for (const entry of layoutCustomLabels) {
-      if (!entry.text || !entry.position) {
-        continue;
-      }
-      const { lines } = getLayoutCustomLabelMetrics(entry);
-      const x = entry.position.x;
-      const y = entry.position.y;
-      const align = getLayoutCustomLabelAlign(entry);
-      const anchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
-      parts.push(
-        await buildSvgTextElement({
-          text: lines.join("\n"),
-          x,
-          y,
-          font: layoutCustomLabelFont,
-          size: customSize,
-          fontWeight: layoutCustomLabelFontWeight,
-          anchor,
-          baseline: "hanging",
-          color: themeColors.textSecondary,
-        })
-      );
-    }
-  }
-
-  const exportNodeRenderList = nodes
-    .map((node) => ({
-      node,
-      pos: worldToScreen(getNodeDisplayCoordinate(node)),
-    }))
-    .sort((a, b) => {
-      if (a.node.isCustom && !b.node.isCustom) {
-        return 1;
-      }
-      if (!a.node.isCustom && b.node.isCustom) {
-        return -1;
-      }
-      return a.pos.depth - b.pos.depth;
-    });
-  const exportNodePosMap = new Map();
-  exportNodeRenderList.forEach(({ node, pos }) => {
-    exportNodePosMap.set(node.id, { pos, radius: getLayoutNodeRadius(pos) });
-  });
-  const keyboardMode = getKeyboardMode();
-  if (keyboardMode === "piano-custom" && layoutKeyMappingMode !== "hide") {
-    const customPianoLabels = getCustomPianoLabelMap();
-    const keyMappingSize = Math.max(8, Math.round(layoutKeyMappingTextSize));
-    for (const { node } of exportNodeRenderList) {
-      if (!(node.isCenter || node.active || node.isCustom)) {
-        continue;
-      }
-      const keyLabel = customPianoLabels.get(node.id);
-      if (!keyLabel) {
-        continue;
-      }
-      const displayInfo = getCachedDisplayInfo(node);
-      const pitchClass = displayInfo.pitchClass || node.pitch_class;
-      if (!shouldShowLayoutKeyMappingLabel(keyLabel, pitchClass)) {
-        continue;
-      }
-      const nodeEntry = exportNodePosMap.get(node.id);
-      if (!nodeEntry) {
-        continue;
-      }
-      const labelText = getLayoutKeyMappingLabelText(keyLabel);
-      const labelPos = getLayoutKeyMappingLabelPosition(node, nodeEntry.pos, nodeEntry.radius);
-      const x = labelPos.x - left;
-      const y = labelPos.y - top;
-      const textWidth = await measureSvgTextWidth(
-        labelText,
-        keyMappingSize,
-        layoutKeyMappingFont,
-        layoutKeyMappingFontWeight
-      );
-      if (layoutKeyMappingDark) {
-        const paddingX = 6;
-        const paddingY = 3;
-        const boxWidth = textWidth + paddingX * 2;
-        const boxHeight = keyMappingSize + paddingY * 2;
-        const boxX = x - boxWidth;
-        const boxY = y - boxHeight;
-        parts.push(
-          `<rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="6" ry="6" fill="rgb(10,15,20)" fill-opacity="0.7" stroke="rgba(255,255,255,0.4)" />`
-        );
-        parts.push(
-          await buildSvgTextElement({
-            text: labelText,
-            x: boxX + paddingX,
-            y: boxY + paddingY,
-            font: layoutKeyMappingFont,
-            size: keyMappingSize,
-            fontWeight: layoutKeyMappingFontWeight,
-            anchor: "start",
-            baseline: "hanging",
-            color: "#ffffff",
-          })
-        );
-      } else {
-        parts.push(
-          await buildSvgTextElement({
-            text: labelText,
-            x: x - textWidth,
-            y: y - keyMappingSize,
-            font: layoutKeyMappingFont,
-            size: keyMappingSize,
-            fontWeight: layoutKeyMappingFontWeight,
-            anchor: "start",
-            baseline: "hanging",
-            color: themeColors.textSecondary,
-          })
-        );
-      }
-    }
-  }
-  const exportDetailLabelSegments = [];
-  edges.forEach(([a, b]) => {
-    if (!a.active || !b.active) {
-      return;
-    }
-    if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
-      return;
-    }
-    const startEntry = exportNodePosMap.get(a.id);
-    const endEntry = exportNodePosMap.get(b.id);
-    if (!startEntry || !endEntry) {
-      return;
-    }
-    const start = startEntry.pos;
-    const end = endEntry.pos;
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const dist = Math.hypot(dx, dy);
-    if (!dist) {
-      return;
-    }
-    const ux = dx / dist;
-    const uy = dy / dist;
-    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-    exportDetailLabelSegments.push({
-      x1: start.x + ux * startRadius,
-      y1: start.y + uy * startRadius,
-      x2: end.x - ux * endRadius,
-      y2: end.y - uy * endRadius,
-    });
-  });
-  addCustomConnectionSegments(exportNodePosMap, exportDetailLabelSegments);
-  addTriangleDiagonalSegments(exportNodePosMap, exportDetailLabelSegments);
-  addDistanceLineSegments(exportNodePosMap, exportDetailLabelSegments);
-  const exportDetailLabelCollision = {
-    circles: exportNodeRenderList
-      .filter(({ node }) => node.isCenter || node.active || node.isCustom)
-      .map(({ node, pos }) => ({
-        id: node.id,
-        x: pos.x,
-        y: pos.y,
-        r: getLayoutNodeRadius(pos),
-      })),
-    segments: exportDetailLabelSegments,
-    rects: [],
-  };
-  const getExportDetailLabelPosition = (node, pos, radius, width, height) => {
-    if (layoutLabelOffsets.has(node.id)) {
-      const rawLabelPos = getLayoutNoteLabelPosition(node, pos, radius);
-      exportDetailLabelCollision.rects.push({
-        left: rawLabelPos.x,
-        top: rawLabelPos.y,
-        right: rawLabelPos.x + width,
-        bottom: rawLabelPos.y + height,
-      });
-      return rawLabelPos;
-    }
-    return getDetailLabelPosition({
-      center: pos,
-      baseOffset: getDefaultNoteDetailOffset(radius, 1),
-      width,
-      height,
-      circles: exportDetailLabelCollision.circles,
-      placedRects: exportDetailLabelCollision.rects,
-      segments: exportDetailLabelCollision.segments,
-      ignoreId: node.id,
-    });
-  };
-
-  const edgeLabelSize = getLayoutLineLabelSize();
-  const lineLabelFont = layoutLineLabelFont;
-  const lineLabelWeight = layoutLineLabelFontWeight;
-  for (const [a, b] of edges) {
-    if (!a.active || !b.active) {
-      continue;
-    }
-    if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
-      continue;
-    }
-    const startEntry = exportNodePosMap.get(a.id);
-    const endEntry = exportNodePosMap.get(b.id);
-    if (!startEntry || !endEntry) {
-      continue;
-    }
-    const start = startEntry.pos;
-    const end = endEntry.pos;
-    const radiusA = startEntry.radius;
-    const radiusB = endEntry.radius;
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const dist = Math.hypot(dx, dy);
-    if (!dist) {
-      continue;
-    }
-    const ux = dx / dist;
-    const uy = dy / dist;
-    const startRadius = getNodeEdgeRadius(a, ux, uy, radiusA);
-    const endRadius = getNodeEdgeRadius(b, ux, uy, radiusB);
-    const edgeStart = {
-      x: start.x + ux * startRadius - left,
-      y: start.y + uy * startRadius - top,
-    };
-    const edgeEnd = {
-      x: end.x - ux * endRadius - left,
-      y: end.y - uy * endRadius - top,
-    };
-    const lineLen = Math.max(0, dist - startRadius - endRadius);
-    const labelText = getEdgeLabelText(a, b);
-    const eitherMuted = Boolean(a.muted) || Boolean(b.muted);
-    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
-    const edgeStrokeColor = eitherMuted
-      ? blendOverPage(themeColors.edge, 0.4)
-      : getInkEdgeColor(false);
-    const edgeStrokeWidth = getInkEdgeLineWidth(eitherMuted);
-    const edgeDashAttr = eitherMuted ? ' stroke-dasharray="6 4"' : "";
-    const pushLine = (from, to) => {
-      parts.push(
-        `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" ${svgStroke(
-          edgeStrokeColor
-        )} stroke-width="${edgeStrokeWidth}"${edgeDashAttr} />`
-      );
-    };
-    if (label && lineLen > 0) {
-      const baseWidth = await measureSvgTextWidth(
-        label,
-        edgeLabelSize,
-        lineLabelFont,
-        lineLabelWeight
-      );
-      const layout = computeEdgeLabelLayoutFromWidth({
-        baseSize: edgeLabelSize,
-        baseWidth,
-        lineLen,
-        minSize: 4,
-      });
-      const size = layout.size;
-      const gap = layout.gap;
-      const labelT = getLineLabelPositionOverride(a, b) ?? 0.5;
-      if (gap > 0) {
-        const gapHalf = gap / 2;
-        const midX = edgeStart.x + (edgeEnd.x - edgeStart.x) * labelT;
-        const midY = edgeStart.y + (edgeEnd.y - edgeStart.y) * labelT;
-        const gapStart = {
-          x: midX - ux * gapHalf,
-          y: midY - uy * gapHalf,
-        };
-        const gapEnd = {
-          x: midX + ux * gapHalf,
-          y: midY + uy * gapHalf,
-        };
-        pushLine(edgeStart, gapStart);
-        pushLine(gapEnd, edgeEnd);
-        let angle = 0;
-        if (Math.abs(edgeEnd.x - edgeStart.x) > 1e-6 || Math.abs(edgeEnd.y - edgeStart.y) > 1e-6) {
-          angle = Math.atan2(edgeEnd.y - edgeStart.y, edgeEnd.x - edgeStart.x);
-          if (!shouldUseHorizontalText(angle)) {
-            if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
-              angle += Math.PI;
-            }
-          } else {
-            angle = 0;
-          }
-        }
-        const rotation = (angle * 180) / Math.PI;
-        parts.push(
-          await buildSvgTextElement({
-            text: label,
-            x: midX,
-            y: midY,
-            font: lineLabelFont,
-            size,
-            fontWeight: lineLabelWeight,
-            anchor: "middle",
-            baseline: "middle",
-            color: themeColors.textSecondary,
-            transform: `rotate(${rotation} ${midX} ${midY})`,
-          })
-        );
-      } else {
-        pushLine(edgeStart, edgeEnd);
-      }
-    } else {
-      pushLine(edgeStart, edgeEnd);
-    }
-  }
-
-  if (analysisLayers.distances && distanceSelectedEdges.size) {
-    const distanceNodePosMap = new Map();
-    nodes.forEach((node) => {
-      const pos = worldToScreen(getNodeDisplayCoordinate(node));
-      distanceNodePosMap.set(node.id, { pos, radius: getLayoutNodeRadius(pos) });
-    });
-    const labelFont = layoutLineLabelFont;
-    const labelWeight = layoutLineLabelFontWeight;
-    const labelSize = getLayoutLineLabelSize();
-    const drawCurveSegment = (segment, dashed = true) => {
-      const dashAttr = dashed ? ' stroke-dasharray="6 6"' : "";
-      parts.push(
-        `<path d="M ${segment.p0.x} ${segment.p0.y} Q ${segment.p1.x} ${segment.p1.y} ${segment.p2.x} ${segment.p2.y}" ${svgStroke(
-          getInkEdgeColor(false)
-        )} stroke-width="${getInkEdgeLineWidth(false)}"${dashAttr} fill="none" />`
-      );
-    };
-    for (const edgeKey of distanceSelectedEdges) {
-      if (!edgeKey) {
-        continue;
-      }
-      const partsKey = parseDistanceEdgeKey(edgeKey);
-      if (!partsKey) {
-        continue;
-      }
-      const [aKey, bKey] = partsKey;
-      const a = getNodeByDistanceKey(aKey);
-      const b = getNodeByDistanceKey(bKey);
-      if (!a || !b || !a.active || !b.active) {
-        continue;
-      }
-      const startEntry = distanceNodePosMap.get(a.id);
-      const endEntry = distanceNodePosMap.get(b.id);
-      if (!startEntry || !endEntry) {
-        continue;
-      }
-      const override = getDistanceEdgeOverride(edgeKey);
-      if (override && override.hidden) {
-        continue;
-      }
-      const ratioInfo = getDistanceRatioLabel(a, b);
-      if (!ratioInfo) {
-        continue;
-      }
-      const showName = !override || override.showName !== false;
-      const customText =
-        override && typeof override.customText === "string" ? override.customText.trim() : "";
-      const commaName = showName
-        ? getDistanceCommaName(ratioInfo.numerator, ratioInfo.denominator)
-        : "";
-      const baseLabel = showName
-        ? customText
-          ? `${ratioInfo.label} ${customText}`
-          : ratioInfo.label
-        : customText;
-      const label =
-        baseLabel && commaName && showName ? `${baseLabel} (${commaName})` : baseLabel;
-      if (!label) {
-        continue;
-      }
-      const start = startEntry.pos;
-      const end = endEntry.pos;
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const dist = Math.hypot(dx, dy);
-      if (!dist) {
-        continue;
-      }
-      const ux = dx / dist;
-      const uy = dy / dist;
-      const straightStartRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-      const straightEndRadius = getNodeEdgeRadius(b, -ux, -uy, endEntry.radius);
-      let lineStart = {
-        x: start.x + ux * straightStartRadius - left,
-        y: start.y + uy * straightStartRadius - top,
-      };
-      let lineEnd = {
-        x: end.x - ux * straightEndRadius - left,
-        y: end.y - uy * straightEndRadius - top,
-      };
-      const autoControl = getAutoDistanceControl(
-        { x: lineStart.x + left, y: lineStart.y + top },
-        { x: lineEnd.x + left, y: lineEnd.y + top },
-        distanceNodePosMap,
-        a,
-        b
-      );
-      const defaultControl = { x: autoControl.x - left, y: autoControl.y - top };
-      let controlOffset = override && override.controlOffset ? override.controlOffset : null;
-      if (!controlOffset && override && override.control) {
-        controlOffset = {
-          x: override.control.x - defaultControl.x,
-          y: override.control.y - defaultControl.y,
-        };
-      }
-      const control = controlOffset
-        ? { x: defaultControl.x + controlOffset.x, y: defaultControl.y + controlOffset.y }
-        : defaultControl;
-      const startVector = {
-        x: control.x - (start.x - left),
-        y: control.y - (start.y - top),
-      };
-      const endVector = {
-        x: control.x - (end.x - left),
-        y: control.y - (end.y - top),
-      };
-      const startLen = Math.hypot(startVector.x, startVector.y);
-      const endLen = Math.hypot(endVector.x, endVector.y);
-      const startUx = startLen > 0 ? startVector.x / startLen : ux;
-      const startUy = startLen > 0 ? startVector.y / startLen : uy;
-      const endUx = endLen > 0 ? endVector.x / endLen : -ux;
-      const endUy = endLen > 0 ? endVector.y / endLen : -uy;
-      const startRadius = getNodeEdgeRadius(a, startUx, startUy, startEntry.radius);
-      const endRadius = getNodeEdgeRadius(b, endUx, endUy, endEntry.radius);
-      lineStart = {
-        x: start.x + startUx * startRadius - left,
-        y: start.y + startUy * startRadius - top,
-      };
-      lineEnd = {
-        x: end.x + endUx * endRadius - left,
-        y: end.y + endUy * endRadius - top,
-      };
-      const labelT = override && Number.isFinite(override.labelT) ? override.labelT : 0.5;
-      const curveInfo = buildQuadraticCurveInfo(lineStart, control, lineEnd);
-      const t = curveInfo.tAtRatio(labelT);
-      const labelPos = getQuadraticPoint(lineStart, control, lineEnd, t);
-      const tangent = getQuadraticTangent(lineStart, control, lineEnd, t);
-      const baseWidth = await measureSvgTextWidth(label, labelSize, labelFont, labelWeight);
-      let angle = 0;
-      let useHorizontal = false;
-      if (Math.abs(tangent.x) > 1e-6 || Math.abs(tangent.y) > 1e-6) {
-        angle = Math.atan2(tangent.y, tangent.x);
-        useHorizontal = shouldUseHorizontalText(angle);
-        if (!useHorizontal) {
-          if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
-            angle += Math.PI;
-          }
-        } else {
-          angle = 0;
-        }
-      }
-      const gapWidth = useHorizontal ? labelSize * 0.9 : baseWidth;
-      const layout = computeEdgeLabelLayoutFromWidth({
-        baseSize: labelSize,
-        baseWidth: gapWidth,
-        lineLen: curveInfo.total,
-        minSize: 4,
-      });
-      const size = layout.size;
-      const gap = layout.gap;
-      const gapHalf = gap / 2;
-      const labelArcLen = curveInfo.total * Math.min(1, Math.max(0, labelT));
-      const tLeft = curveInfo.tAtLength(labelArcLen - gapHalf);
-      const tRight = curveInfo.tAtLength(labelArcLen + gapHalf);
-      const leftSegment = getQuadraticSubcurve(lineStart, control, lineEnd, 0, tLeft);
-      const rightSegment = getQuadraticSubcurve(lineStart, control, lineEnd, tRight, 1);
-      const dashed = !isAdjacentLatticeEdge(a, b);
-      if (leftSegment) {
-        drawCurveSegment(leftSegment, dashed);
-      }
-      if (rightSegment) {
-        drawCurveSegment(rightSegment, dashed);
-      }
-      if (useHorizontal) {
-        const rotation = (angle * 180) / Math.PI;
-        parts.push(
-          await buildSvgTextElement({
-            text: label,
-            x: labelPos.x,
-            y: labelPos.y,
-            font: labelFont,
-            size,
-            fontWeight: labelWeight,
-            anchor: "middle",
-            baseline: "middle",
-            color: themeColors.textSecondary,
-            transform: `rotate(${rotation} ${labelPos.x} ${labelPos.y})`,
-          })
-        );
-      } else {
-        const chars = Array.from(label);
-        const charWidths = await Promise.all(
-          chars.map((char) => measureSvgCharWidth(char, size, labelFont, labelWeight))
-        );
-        const { placements } = placeGlyphsAlongQuadratic({
-          p0: lineStart,
-          p1: control,
-          p2: lineEnd,
-          curveInfo,
-          chars,
-          charWidths,
-          centerArcLen: labelArcLen,
-        });
-        for (const placement of placements) {
-          const rotationDeg = (placement.angle * 180) / Math.PI;
-          parts.push(
-            await buildSvgTextElement({
-              text: placement.char,
-              x: placement.pos.x,
-              y: placement.pos.y,
-              font: labelFont,
-              size,
-              fontWeight: labelWeight,
-              anchor: "middle",
-              baseline: "middle",
-              color: themeColors.textSecondary,
-              transform: `rotate(${rotationDeg} ${placement.pos.x} ${placement.pos.y})`,
-            })
-          );
-        }
-      }
-    }
-  }
-
-  const customEdgeOutset = 1;
-  for (const customNode of customNodes) {
-    const source = nodeById.get(customNode.sourceNodeId);
-    if (!source) {
-      continue;
-    }
-    if (hasSelectedDistanceEdgeBetweenNodes(source, customNode)) {
-      continue;
-    }
-    const startEntry = exportNodePosMap.get(source.id);
-    const endEntry = exportNodePosMap.get(customNode.id);
-    if (!startEntry || !endEntry) {
-      continue;
-    }
-    const start = startEntry.pos;
-    const end = endEntry.pos;
-    const radiusA = startEntry.radius;
-    const radiusB = endEntry.radius;
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const dist = Math.hypot(dx, dy);
-    if (!dist) {
-      continue;
-    }
-    const ux = dx / dist;
-    const uy = dy / dist;
-    const startRadius = Math.max(0, getNodeEdgeRadius(source, ux, uy, radiusA) + customEdgeOutset);
-    const customEdgeInset = Math.max(0, Math.round(radiusB * 0.03));
-    const endRadius = Math.max(
-      0,
-      getNodeEdgeRadius(customNode, ux, uy, radiusB) + customEdgeOutset - customEdgeInset
-    );
-    const edgeStart = {
-      x: start.x + ux * startRadius - left,
-      y: start.y + uy * startRadius - top,
-    };
-    const edgeEnd = {
-      x: end.x - ux * endRadius - left,
-      y: end.y - uy * endRadius - top,
-    };
-    const lineLen = Math.max(0, dist - startRadius - endRadius);
-    const eitherMutedCustom = Boolean(source.muted) || Boolean(customNode.muted);
-    const label = getCustomConnectionLabelText(customNode);
-    const customStrokeColor = eitherMutedCustom
-      ? blendOverPage(themeColors.edge, 0.4)
-      : getInkEdgeColor(false);
-    const customStrokeWidth = getInkEdgeLineWidth(eitherMutedCustom);
-    const customDashAttr = eitherMutedCustom ? ' stroke-dasharray="6 4"' : "";
-    const pushLine = (from, to) => {
-      parts.push(
-        `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" ${svgStroke(
-          customStrokeColor
-        )} stroke-width="${customStrokeWidth}"${customDashAttr} />`
-      );
-    };
-    if (label && lineLen > 0) {
-      const baseWidth = await measureSvgTextWidth(label, edgeLabelSize, lineLabelFont, lineLabelWeight);
-      const layout = computeEdgeLabelLayoutFromWidth({
-        baseSize: edgeLabelSize,
-        baseWidth,
-        lineLen,
-        minSize: 4,
-      });
-      const size = layout.size;
-      const gap = layout.gap;
-      const labelT = getLineLabelPositionOverride(source, customNode) ?? 0.5;
-      if (gap > 0) {
-        const gapHalf = gap / 2;
-        const midX = edgeStart.x + (edgeEnd.x - edgeStart.x) * labelT;
-        const midY = edgeStart.y + (edgeEnd.y - edgeStart.y) * labelT;
-        const gapStart = {
-          x: midX - ux * gapHalf,
-          y: midY - uy * gapHalf,
-        };
-        const gapEnd = {
-          x: midX + ux * gapHalf,
-          y: midY + uy * gapHalf,
-        };
-        pushLine(edgeStart, gapStart);
-        pushLine(gapEnd, edgeEnd);
-        let angle = 0;
-        if (Math.abs(edgeEnd.x - edgeStart.x) > 1e-6 || Math.abs(edgeEnd.y - edgeStart.y) > 1e-6) {
-          angle = Math.atan2(edgeEnd.y - edgeStart.y, edgeEnd.x - edgeStart.x);
-          if (!shouldUseHorizontalText(angle)) {
-            if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
-              angle += Math.PI;
-            }
-          } else {
-            angle = 0;
-          }
-        }
-        const rotation = (angle * 180) / Math.PI;
-        parts.push(
-          await buildSvgTextElement({
-            text: label,
-            x: midX,
-            y: midY,
-            font: lineLabelFont,
-            size,
-            fontWeight: lineLabelWeight,
-            anchor: "middle",
-            baseline: "middle",
-            color: themeColors.textSecondary,
-            transform: `rotate(${rotation} ${midX} ${midY})`,
-          })
-        );
-      } else {
-        pushLine(edgeStart, edgeEnd);
-      }
-    } else {
-      pushLine(edgeStart, edgeEnd);
-    }
-  }
+  await emitScene(buildCustomConnectionsScene(exportNodePosMap, null));
 
   const exportOrphanResult = connectOrphansEnabled ? buildOrphanGuideSet() : null;
   const exportOrphanGuides = exportOrphanResult ? exportOrphanResult.guides : null;
   if (exportOrphanResult) {
-    exportOrphanResult.edges.forEach((edgeKey) => {
-      const partsKey = edgeKey.split("|");
-      if (partsKey.length !== 2) {
-        return;
-      }
-      const a = nodeById.get(Number(partsKey[0]));
-      const b = nodeById.get(Number(partsKey[1]));
-      if (!a || !b) {
-        return;
-      }
-      const isOrphanA = exportOrphanGuides && exportOrphanGuides.has(a.id);
-      const isOrphanB = exportOrphanGuides && exportOrphanGuides.has(b.id);
-      if (!isOrphanA && !isOrphanB) {
-        return;
-      }
-      const startEntry = exportNodePosMap.get(a.id);
-      const endEntry = exportNodePosMap.get(b.id);
-      if (!startEntry || !endEntry) {
-        return;
-      }
-      const start = startEntry.pos;
-      const end = endEntry.pos;
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const dist = Math.hypot(dx, dy);
-      if (!dist) {
-        return;
-      }
-      const ux = dx / dist;
-      const uy = dy / dist;
-      const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-      const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-      const edgeStart = {
-        x: start.x + ux * startRadius - left,
-        y: start.y + uy * startRadius - top,
-      };
-      const edgeEnd = {
-        x: end.x - ux * endRadius - left,
-        y: end.y - uy * endRadius - top,
-      };
-      const strokeColor = blendOverPage(themeColors.nodeStroke, 0.08);
-      parts.push(
-        `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" ${svgStroke(
-          strokeColor
-        )} stroke-width="${getInkEdgeLineWidth(false)}" />`
-      );
-    });
+    await emitScene(
+      buildOrphanGuideEdgesScene(exportNodePosMap, {
+        edges: exportOrphanResult.edges,
+        orphans: exportOrphanGuides,
+        guideNodes: new Map(),
+        axisEntry: null,
+      })
+    );
   }
 
-  ensureAutoTriangleDiagonals();
-  if (triangleDiagonals.size || autoTriangleDiagonals.size) {
-    const gridMap = getActiveGridNodeMap();
-    forEachEffectiveTriangleDiagonal((entry) => {
-      const { a, b } = getTriangleDiagonalNodes(entry, gridMap);
-      if (!a || !b) {
-        return;
-      }
-      const start = worldToScreen(getNodeDisplayCoordinate(a));
-      const end = worldToScreen(getNodeDisplayCoordinate(b));
-      const radiusA = getLayoutNodeRadius(start);
-      const radiusB = getLayoutNodeRadius(end);
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const dist = Math.hypot(dx, dy);
-      if (!dist) {
-        return;
-      }
-      const ux = dx / dist;
-      const uy = dy / dist;
-      const edgeStart = {
-        x: start.x + ux * radiusA - left,
-        y: start.y + uy * radiusA - top,
-      };
-      const edgeEnd = {
-        x: end.x - ux * radiusB - left,
-        y: end.y - uy * radiusB - top,
-      };
-      parts.push(
-        `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" ${svgStroke(
-          getInkEdgeColor(false)
-        )} stroke-width="${getInkEdgeLineWidth(false)}" stroke-dasharray="6 4" />`
-      );
-    });
-  }
-  if (triangleLabels.size) {
-    const gridMap = getActiveGridNodeMap();
-    for (const entry of triangleLabels.values()) {
-      if (!entry.label) {
-        continue;
-      }
-      const diag = TRIANGLE_TRI_TO_DIAG[entry.tri];
-      if (!diag || !hasEffectiveTriangleDiagonal(triangleKey({ ...entry, diag }))) {
-        continue;
-      }
-      const cellNodes = getTriangleCellNodes(entry, gridMap);
-      const labelNodes = getTriangleLabelPoints(entry.tri, cellNodes);
-      if (!labelNodes) {
-        continue;
-      }
-      const points = labelNodes.map((node) => {
-        const proj = worldToScreen(getNodeDisplayCoordinate(node));
-        return { x: proj.x - left, y: proj.y - top };
-      });
-      const cx = (points[0].x + points[1].x + points[2].x) / 3;
-      const cy = (points[0].y + points[1].y + points[2].y) / 3;
-      const baseSize = Math.max(12, Math.round(layoutTriangleLabelTextSize));
-      const layout = computeTriangleLabelLayout(
-        entry.label,
-        layoutTriangleLabelFont,
-        baseSize,
-        points,
-        layoutTriangleLabelFontWeight
-      );
-      parts.push(
-        await buildSvgTextElement({
-          text: entry.label,
-          x: cx,
-          y: cy,
-          font: layoutTriangleLabelFont,
-          size: layout.size,
-          fontWeight: layoutTriangleLabelFontWeight,
-          anchor: "middle",
-          baseline: "middle",
-          color: themeColors.textSecondary,
-        })
-      );
-    }
+  if (!analysisLayers.microtonal) {
+    await emitScene(buildTriangleDiagonalsScene(exportNodePosMap));
+    await emitScene(buildTriangleLabelsScene(exportNodePosMap));
   }
 
+  const exportNodeEnv = getStaticNodeEnv(exportOrphanGuides);
   for (const { node, pos } of exportNodeRenderList) {
-    const isMuted = Boolean(node.muted);
-    const isOrphanGuide = exportOrphanGuides && exportOrphanGuides.has(node.id);
-    const isVisible = node.isCenter || node.active || node.isCustom || isOrphanGuide;
-    if (!isVisible) {
-      continue;
-    }
+    const state = getNodeRenderState(node, exportNodeEnv);
     const entry = exportNodePosMap.get(node.id);
-    if (!entry) {
+    if (!state.isVisible || !entry) {
       continue;
     }
-    const x = pos.x - left;
-    const y = pos.y - top;
     const radius = entry.radius;
-    const innerTextScale =
-      layoutPerspectiveTextSize && layoutMode
-        ? Math.min(1.8, Math.max(0.65, radius / Math.max(1, Number(layoutNodeSize) || 1)))
-        : 1;
-    const nodeLabelSize = labelSize * innerTextScale;
     const shape = getLayoutNodeShape(node);
-    const fill = "none";
-    const stroke = isMuted
-      ? blendOverPage(themeColors.nodeStroke, 0.4)
-      : isOrphanGuide && !node.active && !node.isCenter && !node.isCustom
-      ? blendOverPage(themeColors.nodeStroke, 0.08)
-      : getInkNodeStrokeColor(false);
-    const strokeWidth = getInkNodeStrokeLineWidth(isMuted);
-    if (showCircles) {
-      if (shape === "circle") {
-        parts.push(
-          `<circle cx="${x}" cy="${y}" r="${radius}" ${svgFill(
-            fill
-          )} ${svgStroke(stroke)} stroke-width="${strokeWidth}" />`
-        );
-      } else if (shape === "square") {
-        parts.push(
-          `<rect x="${x - radius}" y="${y - radius}" width="${radius * 2}" height="${
-            radius * 2
-          }" ${svgFill(fill)} ${svgStroke(stroke)} stroke-width="${strokeWidth}" />`
-        );
-      } else if (shape === "triangle") {
-        const height = radius * 1.2;
-        const points = [
-          `${x},${y - height}`,
-          `${x + radius},${y + height * 0.6}`,
-          `${x - radius},${y + height * 0.6}`,
-        ].join(" ");
-        parts.push(
-          `<polygon points="${points}" ${svgFill(fill)} ${svgStroke(
-            stroke
-          )} stroke-width="${strokeWidth}" />`
-        );
-      } else if (shape === "diamond") {
-        const dr = radius * DIAMOND_RADIUS_SCALE;
-        const points = [
-          `${x},${y - dr}`,
-          `${x + dr},${y}`,
-          `${x},${y + dr}`,
-          `${x - dr},${y}`,
-        ].join(" ");
-        parts.push(
-          `<polygon points="${points}" ${svgFill(fill)} ${svgStroke(
-            stroke
-          )} stroke-width="${strokeWidth}" />`
-        );
+    const scene = [];
+    if (showCircles && shape !== "none") {
+      scene.push(...buildNodeShapeScene(node, pos, radius, shape, state));
+    }
+    scene.push(...buildNodeInnerLabelScene(node, pos, radius, state));
+    const hasDetail = !(
+      state.isOrphanGuide ||
+      state.isGuide ||
+      (!node.active && !node.isCustom && !node.isCenter)
+    );
+    if (hasDetail) {
+      scene.push(
+        ...buildNodeDetailLabelScene(node, pos, radius, state, exportDetailLabelCollision).scene
+      );
+      const keyLabel = exportKeyLabels && exportKeyLabels.get(node.id);
+      const pitchClass = getCachedDisplayInfo(node).pitchClass || node.pitch_class;
+      if (keyLabel && shouldShowLayoutKeyMappingLabel(keyLabel, pitchClass)) {
+        scene.push(...buildLayoutKeyMappingScene(node, pos, radius, keyLabel, state.alpha));
       }
     }
-    const isOrphanText = isOrphanGuide && !node.active && !node.isCenter && !node.isCustom;
-    const textColorPrimary = isMuted
-      ? blendOverPage(themeColors.textPrimary, 0.7)
-      : isOrphanText
-      ? blendOverPage(themeColors.textPrimary, 0.08)
-      : themeColors.textPrimary;
-    const textColorSecondary = isMuted
-      ? blendOverPage(themeColors.textSecondary, 0.7)
-      : isOrphanText
-      ? blendOverPage(themeColors.textSecondary, 0.08)
-      : themeColors.textSecondary;
-
-    if (featureMode === "note") {
-      if (hejiEnabled && nodeHasHighPrime(node)) {
-        const displayInfo = getDisplayNoteInfo(node);
-        const base = getHejiBaseAndDefaults(displayInfo.pitchClass);
-        const centsText = showCentsDeviation ? formatCents(displayInfo.cents) : "";
-        const suffixParts = centsText
-          ? [
-              ...base.suffixParts,
-              {
-                text: centsText,
-                source: "cents",
-                font: layoutRatioFont,
-                charGap: 0,
-                sizeScale: 0.67,
-              },
-            ]
-          : base.suffixParts;
-        parts.push(
-          await buildHejiSvgInline({
-            x,
-            y,
-            baseText: base.baseText,
-            suffixParts,
-            restText: "",
-            font: layoutRatioFont,
-            fontWeight: layoutRatioFontWeight,
-            size: nodeLabelSize,
-            align: "center",
-            baseline: "middle",
-            hejiYOffset: svgLabelHejiYOffset,
-            color: textColorPrimary,
-          })
-        );
-      } else {
-        const annotation = getHejiAnnotation(node, getNodePitchLabel(node));
-        parts.push(
-          await buildHejiSvgInline({
-            x,
-            y,
-            baseText: annotation.baseText,
-            suffixParts: annotation.suffixParts,
-            restText: "",
-            font: layoutRatioFont,
-            fontWeight: layoutRatioFontWeight,
-            size: nodeLabelSize,
-            align: "center",
-            baseline: "middle",
-            hejiYOffset: svgLabelHejiYOffset,
-            color: textColorPrimary,
-          })
-        );
-      }
-      const centsLabel = buildCentsReadout(node, { wrap: enharmonicsEnabled });
-      const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
-      const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
-      const ratioText = `${node.numerator}:${node.denominator}${octaveLabel}`;
-      const hzText = showHz ? formatHzReadout(node.freq) : "";
-      const ratioWidth = await measureSvgTextWidth(
-        ratioText,
-        detailSize,
-        layoutNoteFont,
-        layoutNoteFontWeight
-      );
-      const centsWidth = centsLabel
-        ? await measureSvgTextWidth(centsLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const ratioCentsWidth = ratioCentsLabel
-        ? await measureSvgTextWidth(ratioCentsLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const hzWidth = hzText
-        ? await measureSvgTextWidth(hzText, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const labelWidth = Math.max(ratioWidth, centsWidth, ratioCentsWidth, hzWidth);
-      const lineCount = 1 + (centsLabel ? 1 : 0) + (ratioCentsLabel ? 1 : 0) + (hzText ? 1 : 0);
-      const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
-      const rawLabelPos = getExportDetailLabelPosition(node, pos, radius, labelWidth, labelHeight);
-      const ratioX = rawLabelPos.x - left;
-      const ratioY = rawLabelPos.y - top;
-      parts.push(
-        await buildSvgTextElement({
-          text: ratioText,
-          x: ratioX,
-          y: ratioY + svgNoteBaselineOffset,
-          font: layoutNoteFont,
-          size: detailSize,
-          fontWeight: layoutNoteFontWeight,
-          anchor: "start",
-          baseline: "alphabetic",
-          color: textColorSecondary,
-        })
-      );
-      let detailLine = 1;
-      if (centsLabel) {
-        parts.push(
-          await buildSvgTextWithSmallCent({
-            text: centsLabel,
-            x: ratioX,
-            y: ratioY + detailSize + 4 + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            align: "left",
-            baseline: "alphabetic",
-            hejiAccidentals: hejiEnabled,
-            hejiYOffset: svgDetailHejiYOffset,
-            color: textColorSecondary,
-          })
-        );
-        detailLine += 1;
-      }
-      if (ratioCentsLabel) {
-        parts.push(
-          await buildSvgTextElement({
-            text: ratioCentsLabel,
-            x: ratioX,
-            y: ratioY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            anchor: "start",
-            baseline: "alphabetic",
-            color: textColorSecondary,
-          })
-        );
-        detailLine += 1;
-      }
-      if (hzText) {
-        parts.push(
-          await buildSvgTextElement({
-            text: hzText,
-            x: ratioX,
-            y: ratioY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            anchor: "start",
-            baseline: "alphabetic",
-            color: textColorSecondary,
-          })
-        );
-      }
-    } else {
-      const maxWidth = radius * 1.6;
-      const maxHeight = radius * 1.6;
-      const layout = computeRatioLabelLayout(
-        node.numerator,
-        node.denominator,
-        layoutRatioFont,
-        nodeLabelSize,
-        maxWidth,
-        layoutRatioFontWeight,
-        maxHeight
-      );
-      const ratioTextColor = textColorPrimary;
-      if (layout.lines.length === 1) {
-        const ratioFontObj = await getOutlineFontOrFallback(
-          layoutRatioFont,
-          layoutRatioFontWeight
-        );
-        let ratioY = y;
-        let ratioBaseline = "middle";
-        if (ratioFontObj) {
-          const bbox = ratioFontObj
-            .getPath(layout.lines[0], 0, 0, layout.size)
-            .getBoundingBox();
-          ratioY = y - (bbox.y1 + bbox.y2) / 2;
-          ratioBaseline = "alphabetic";
-        }
-        parts.push(
-          await buildSvgTextElement({
-            text: layout.lines[0],
-            x,
-            y: ratioY,
-            font: layoutRatioFont,
-            size: layout.size,
-            fontWeight: layoutRatioFontWeight,
-            anchor: "middle",
-            baseline: ratioBaseline,
-            color: ratioTextColor,
-          })
-        );
-      } else {
-        const positions = computeStackedRatioPositionsFromLine(
-          layout.lines,
-          layoutRatioFont,
-          layout.size,
-          layoutRatioFontWeight,
-          y,
-          layout.lineGap
-        );
-        parts.push(
-          await buildSvgTextElement({
-            text: layout.lines[0],
-            x,
-            y: positions.topBaseline,
-            font: layoutRatioFont,
-            size: layout.size,
-            fontWeight: layoutRatioFontWeight,
-            anchor: "middle",
-            baseline: "alphabetic",
-            color: ratioTextColor,
-          })
-        );
-        parts.push(
-          await buildSvgTextElement({
-            text: layout.lines[1],
-            x,
-            y: positions.bottomBaseline,
-            font: layoutRatioFont,
-            size: layout.size,
-            fontWeight: layoutRatioFontWeight,
-            anchor: "middle",
-            baseline: "alphabetic",
-            color: ratioTextColor,
-          })
-        );
-        parts.push(
-          `<line x1="${x - positions.lineWidth / 2}" y1="${positions.lineY}" x2="${x + positions.lineWidth / 2}" y2="${positions.lineY}" ${svgStroke(
-            ratioTextColor
-          )} stroke-width="${Math.max(1, Math.round(layout.size * 0.06))}" />`
-        );
-      }
-
-      const displayInfo = getDisplayNoteInfo(node);
-      const centsLabel = buildCentsReadout(node, {
-        wrap: enharmonicsEnabled,
-        requireHejiDetail: true,
-        baseTextForHeji: displayInfo.pitchClass,
-      });
-      const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
-      const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
-      const hzText = showHz ? formatHzReadout(node.freq) : "";
-      const hasParen = centsLabel && centsLabel.includes("(");
-      const restGapScale =
-        hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN;
-      const baseLabel = featureMode === "ratio" ? displayInfo.pitchClass : displayInfo.name;
-      const annotation = getHejiAnnotation(node, baseLabel || node.note_name);
-      const suffixText = annotation.suffixParts
-        .map((part) => (part && part.text ? part.text : ""))
-        .join("");
-      const line1 = `${annotation.baseText || ""}${suffixText}${
-        hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : ""
-      }`;
-      const lineWidth = line1
-        ? await measureSvgTextWidth(line1, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const centsWidth =
-        hejiEnabled && centsLabel
-          ? await measureSvgTextWidth(centsLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
-          : 0;
-      const octaveWidth = octaveLabel
-        ? await measureSvgTextWidth(octaveLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const ratioCentsWidth = ratioCentsLabel
-        ? await measureSvgTextWidth(ratioCentsLabel, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const hzWidth = hzText
-        ? await measureSvgTextWidth(hzText, detailSize, layoutNoteFont, layoutNoteFontWeight)
-        : 0;
-      const labelWidth = Math.max(lineWidth, centsWidth, octaveWidth, ratioCentsWidth, hzWidth);
-      const lineCount =
-        1 +
-        (hejiEnabled && centsLabel ? 1 : 0) +
-        (octaveLabel ? 1 : 0) +
-        (ratioCentsLabel ? 1 : 0) +
-        (hzText ? 1 : 0);
-      const labelHeight = lineCount * detailSize + (lineCount - 1) * 4;
-      const rawLabelPos = getExportDetailLabelPosition(node, pos, radius, labelWidth, labelHeight);
-      const labelX = rawLabelPos.x - left;
-      const labelY = rawLabelPos.y - top;
-      parts.push(
-        await buildHejiSvgInline({
-          x: labelX,
-          y: labelY + svgNoteBaselineOffset,
-          baseText: annotation.baseText,
-          suffixParts: annotation.suffixParts,
-          restText: hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "",
-          font: layoutNoteFont,
-          size: detailSize,
-          align: "left",
-          baseline: "alphabetic",
-          hejiYOffset: svgDetailHejiYOffset,
-          restGapScale,
-          restHejiAccidentals: hejiEnabled && hasParen,
-          fontWeight: layoutNoteFontWeight,
-          color: textColorSecondary,
-        })
-      );
-      let detailLine = 1;
-      if (hejiEnabled && centsLabel) {
-        parts.push(
-          await buildSvgTextWithSmallCent({
-            text: centsLabel,
-            x: labelX,
-            y: labelY + detailSize + 4 + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            align: "left",
-            baseline: "alphabetic",
-            hejiAccidentals: hejiEnabled,
-            hejiYOffset: svgDetailHejiYOffset,
-            color: textColorSecondary,
-          })
-        );
-        detailLine += 1;
-      }
-      if (octaveLabel) {
-        parts.push(
-          await buildSvgTextElement({
-            text: octaveLabel,
-            x: labelX,
-            y: labelY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            anchor: "start",
-            baseline: "alphabetic",
-            color: textColorSecondary,
-          })
-        );
-        detailLine += 1;
-      }
-      if (ratioCentsLabel) {
-        parts.push(
-          await buildSvgTextElement({
-            text: ratioCentsLabel,
-            x: labelX,
-            y: labelY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            anchor: "start",
-            baseline: "alphabetic",
-            color: textColorSecondary,
-          })
-        );
-        detailLine += 1;
-      }
-      if (hzText) {
-        parts.push(
-          await buildSvgTextElement({
-            text: hzText,
-            x: labelX,
-            y: labelY + detailLine * (detailSize + 4) + svgNoteBaselineOffset,
-            font: layoutNoteFont,
-            size: detailSize,
-            fontWeight: layoutNoteFontWeight,
-            anchor: "start",
-            baseline: "alphabetic",
-            color: textColorSecondary,
-          })
-        );
-      }
-    }
+    await emitScene(scene);
   }
 
   parts.push("</svg>");
@@ -28061,28 +26078,7 @@ async function exportLayoutSvg() {
   const exportFontCss = OUTLINE_SVG_TEXT
     ? null
     : await getExportFontCss(hejiFontDataUrl || hejiFontUrl);
-  const svgDetailHejiYOffset = await getSvgHejiYOffset(
-    layoutNoteTextSize,
-    layoutNoteFont,
-    layoutNoteFontWeight
-  );
-  const svgLabelHejiYOffset = await getSvgHejiYOffset(
-    layoutRatioTextSize,
-    layoutRatioFont,
-    layoutRatioFontWeight
-  );
-  const svgNoteBaselineOffset = getSvgTopBaselineOffset(
-    layoutNoteTextSize,
-    layoutNoteFont,
-    layoutNoteFontWeight
-  );
-  const svg = await buildLayoutSvgString(
-    hejiFontDataUrl || hejiFontUrl,
-    svgDetailHejiYOffset,
-    exportFontCss,
-    svgNoteBaselineOffset,
-    svgLabelHejiYOffset
-  );
+  const svg = await buildLayoutSvgString({ fontCss: exportFontCss });
   if (!svg) {
     alert("Enable Page Layout mode to export SVG.");
     return;
@@ -28122,28 +26118,7 @@ async function exportLayoutPdf() {
   const exportFontCss = OUTLINE_SVG_TEXT
     ? null
     : await getExportFontCss(hejiFontSrc);
-  const svgDetailHejiYOffset = await getSvgHejiYOffset(
-    layoutNoteTextSize,
-    layoutNoteFont,
-    layoutNoteFontWeight
-  );
-  const svgLabelHejiYOffset = await getSvgHejiYOffset(
-    layoutRatioTextSize,
-    layoutRatioFont,
-    layoutRatioFontWeight
-  );
-  const svgNoteBaselineOffset = getSvgTopBaselineOffset(
-    layoutNoteTextSize,
-    layoutNoteFont,
-    layoutNoteFontWeight
-  );
-  const svg = await buildLayoutSvgString(
-    hejiFontSrc,
-    svgDetailHejiYOffset,
-    exportFontCss,
-    svgNoteBaselineOffset,
-    svgLabelHejiYOffset
-  );
+  const svg = await buildLayoutSvgString({ fontCss: exportFontCss });
   if (!svg) {
     alert("Enable Page Layout mode to export PDF.");
     win.close();
@@ -29027,14 +27002,20 @@ function initPresentationMode() {
       }
     });
     // Escape closes the intro when it's the topmost UI.
-    window.addEventListener("keydown", (event) => {
-      if (introOverlay.hidden) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        closeIntro();
-      }
-    }, { capture: true });
+    keyBindings.bind({
+      id: "deck-intro-escape",
+      type: "keydown",
+      phase: "capture",
+      description: "Escape: close the deck intro",
+      handle(event) {
+        if (introOverlay.hidden) return;
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          closeIntro();
+        }
+      },
+    });
   }
   if (helpButton) {
     helpButton.hidden = false;
@@ -29053,21 +27034,26 @@ function initPresentationMode() {
   // Arrow Left / Right = prev / next slide (edge-clamped). Skipped when the
   // active slide opts into `pan: true` (in which case arrows control the
   // canvas). Also skipped when focus is in a form input.
-  window.addEventListener("keydown", (event) => {
-    if (!isInPresentationMode()) return;
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    const tag = event.target && event.target.tagName;
-    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
-    if (isPresentationInteractionAllowed("pan")) return;
-    if (!slides.length || !activeSlug) return;
-    const idx = slides.findIndex((s) => s.slug === activeSlug);
-    if (idx < 0) return;
-    let nextIdx = -1;
-    if (event.key === "ArrowLeft" && idx > 0) nextIdx = idx - 1;
-    if (event.key === "ArrowRight" && idx < slides.length - 1) nextIdx = idx + 1;
-    if (nextIdx < 0) return;
-    event.preventDefault();
-    loadSlide(slides[nextIdx]);
+  keyBindings.bind({
+    id: "deck-arrows",
+    type: "keydown",
+    description: "Left/Right arrows: previous/next slide",
+    handle: (event) => {
+      if (!isInPresentationMode()) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const tag = event.target && event.target.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      if (isPresentationInteractionAllowed("pan")) return;
+      if (!slides.length || !activeSlug) return;
+      const idx = slides.findIndex((s) => s.slug === activeSlug);
+      if (idx < 0) return;
+      let nextIdx = -1;
+      if (event.key === "ArrowLeft" && idx > 0) nextIdx = idx - 1;
+      if (event.key === "ArrowRight" && idx < slides.length - 1) nextIdx = idx + 1;
+      if (nextIdx < 0) return;
+      event.preventDefault();
+      loadSlide(slides[nextIdx]);
+    },
   });
 
   (async () => {
@@ -29118,6 +27104,12 @@ if (isPresentationMode) {
 function applyPresetStateSafely(state, sourceLabel) {
   try {
     applyPresetState(state);
+    if (migrateState(state).newerThanApp) {
+      showTemporaryBanner(
+        `This ${sourceLabel} was saved by a newer version of Tuning Lattice. Some settings may not load — reload the page to update.`,
+        8000
+      );
+    }
     return true;
   } catch (error) {
     console.error(`Could not apply ${sourceLabel}`, error);
@@ -29434,7 +27426,7 @@ snapshotKeyboardKeys = document.getElementById("snapshot-keyboard-keys");
 if (snapshotKeyboardContainer) {
   buildSnapshotKeyboard();
 }
-bindOptionalEvent(window, "keydown", (event) => {
+function handleSnapshotHotkey(event) {
   if (event.defaultPrevented) {
     return;
   }
@@ -29486,7 +27478,7 @@ bindOptionalEvent(window, "keydown", (event) => {
   } else {
     recallSnapshot(numberIndex);
   }
-});
+}
 const snapshotResetButton = document.getElementById("snapshot-reset");
 bindOptionalClick(snapshotResetButton, () => {
   clearSnapshots();
@@ -30863,11 +28855,11 @@ if (welcomeOverlayEl) {
     }
   });
 }
-bindOptionalEvent(window, "keydown", (event) => {
+function handleWelcomeEscape(event) {
   if (event.key === "Escape" && welcomeOverlayEl && !welcomeOverlayEl.hidden) {
     hideWelcomeOverlay();
   }
-});
+}
 if (creditsTrigger && creditsDialog) {
   bindOptionalClick(creditsTrigger, (event) => {
     event.preventDefault();
@@ -31813,14 +29805,77 @@ bindOptionalEvent(canvas, "wheel", onWheel, { passive: false });
 bindOptionalEvent(window, "resize", resizeCanvas);
 bindOptionalEvent(window, "resize", updateRatioWheelPosition);
 bindOptionalEvent(window, "resize", updateKeyboardMapPopoverPosition);
-bindOptionalEvent(window, "keydown", handlePerformanceModeHotkey, { capture: true });
-bindOptionalEvent(window, "keydown", handleModeSwitchHotkey, { capture: true });
-bindOptionalEvent(window, "keydown", handleKeyboardModeToggleHotkey, { capture: true });
 bindOptionalEvent(window, "pointerdown", enableAudioFromGesture);
-bindOptionalEvent(window, "keydown", enableAudioFromGesture);
-bindOptionalEvent(window, "keydown", handleKeyDown);
-bindOptionalEvent(window, "keyup", handleKeyUp);
-bindOptionalEvent(window, "keydown", (event) => {
+
+// ---- Keyboard: the binding table ----
+// One native listener per phase runs these in order (src/input/keyboard.js).
+// Capture bindings run before dialog/input handlers; returning true consumes
+// the key. The deck's bindings (initPresentationMode) are bound first.
+[
+  {
+    id: "performance-mode",
+    type: "keydown",
+    phase: "capture",
+    description: "Toggle performance mode",
+    handle: handlePerformanceModeHotkey,
+  },
+  {
+    id: "view-mode",
+    type: "keydown",
+    phase: "capture",
+    description: "Ctrl+1/2/3: 2D, 3D, page layout",
+    handle: handleModeSwitchHotkey,
+  },
+  {
+    id: "keyboard-mode-toggle",
+    type: "keydown",
+    phase: "capture",
+    description: "Ctrl+K: computer keyboard on/off",
+    handle: handleKeyboardModeToggleHotkey,
+  },
+  {
+    id: "snapshots",
+    type: "keydown",
+    description: "Digits (and mapped letters): recall a snapshot; Alt+key saves",
+    handle: handleSnapshotHotkey,
+  },
+  {
+    id: "welcome-escape",
+    type: "keydown",
+    description: "Escape: close the welcome overlay",
+    handle: handleWelcomeEscape,
+  },
+  {
+    id: "audio-unlock",
+    type: "keydown",
+    description: "First key press starts audio",
+    handle: () => {
+      enableAudioFromGesture();
+    },
+  },
+  {
+    id: "play",
+    type: "keydown",
+    description: "Space: pattern play; looper keys; layout undo/redo; play notes",
+    handle: handleKeyDown,
+  },
+  {
+    id: "editor",
+    type: "keydown",
+    description: "Held letters, Shift add mode, arrow-key pan, Escape cancels",
+    handle: handleEditorKeyDown,
+  },
+  { id: "play-release", type: "keyup", description: "Release played notes", handle: handleKeyUp },
+  {
+    id: "editor-release",
+    type: "keyup",
+    description: "Release held letters and Shift",
+    handle: handleEditorKeyUp,
+  },
+].forEach((binding) => keyBindings.bind(binding));
+keyBindings.attach(window);
+
+function handleEditorKeyDown(event) {
   syncCapsLockState(event);
   if (handleTourKeydown(event)) {
     return;
@@ -31874,45 +29929,8 @@ bindOptionalEvent(window, "keydown", (event) => {
     updateAddModeFromShift();
     draw();
   }
-  if (event.key.toLowerCase() === "t") {
-    tHeld = true;
+  if (heldKeys.press(event) === "t") {
     updateUiHint();
-  }
-  if (event.key.toLowerCase() === "l") {
-    lHeld = true;
-  }
-  if (event.key.toLowerCase() === "v") {
-    vHeld = true;
-  }
-  if (event.key.toLowerCase() === "f") {
-    fHeld = true;
-  }
-  if (event.key.toLowerCase() === "o") {
-    oHeld = true;
-  }
-  if (event.key.toLowerCase() === "i") {
-    iHeld = true;
-  }
-  if (event.key.toLowerCase() === "m") {
-    mHeld = true;
-  }
-  if (event.key.toLowerCase() === "n") {
-    nHeld = true;
-  }
-  if (event.key.toLowerCase() === "r") {
-    rHeld = true;
-  }
-  if (event.key.toLowerCase() === "z") {
-    zKeyHeld = true;
-  }
-  if (event.key.toLowerCase() === "x") {
-    xKeyHeld = true;
-  }
-  if (event.key.toLowerCase() === "y") {
-    yKeyHeld = true;
-  }
-  if (event.key.toLowerCase() === "c") {
-    cHeld = true;
   }
   // Skip view-pan in presentation mode unless the active slide opts into pan.
   // Without this guard, left/right arrows both advance the slide AND shift
@@ -31969,7 +29987,7 @@ bindOptionalEvent(window, "keydown", (event) => {
     }
     return;
   }
-});
+}
 bindOptionalEvent(window, "pointerdown", (event) => {
   if (!layoutSpacePopover || layoutSpacePopover.hidden) {
     return;
@@ -32059,56 +30077,19 @@ bindOptionalEvent(window, "pointerdown", (event) => {
   }
   keyboardMapPopover.hidden = true;
 });
-bindOptionalEvent(window, "keyup", (event) => {
+function handleEditorKeyUp(event) {
   syncCapsLockState(event);
   if (event.key === "Shift") {
     shiftHeld = false;
     updateAddModeFromShift();
     draw();
   }
-  if (event.key.toLowerCase() === "r") {
-    rHeld = false;
-  }
-  if (event.key.toLowerCase() === "t") {
-    tHeld = false;
+  if (heldKeys.release(event) === "t") {
     triangleHover = null;
     updateUiHint();
     scheduleDraw();
   }
-  if (event.key.toLowerCase() === "l") {
-    lHeld = false;
-  }
-  if (event.key.toLowerCase() === "v") {
-    vHeld = false;
-  }
-  if (event.key.toLowerCase() === "f") {
-    fHeld = false;
-  }
-  if (event.key.toLowerCase() === "o") {
-    oHeld = false;
-  }
-  if (event.key.toLowerCase() === "i") {
-    iHeld = false;
-  }
-  if (event.key.toLowerCase() === "m") {
-    mHeld = false;
-  }
-  if (event.key.toLowerCase() === "n") {
-    nHeld = false;
-  }
-  if (event.key.toLowerCase() === "z") {
-    zKeyHeld = false;
-  }
-  if (event.key.toLowerCase() === "x") {
-    xKeyHeld = false;
-  }
-  if (event.key.toLowerCase() === "y") {
-    yKeyHeld = false;
-  }
-  if (event.key.toLowerCase() === "c") {
-    cHeld = false;
-  }
-});
+}
 
 bindOptionalDialogClose(customRatioDialog, handleCustomRatioDialogClose);
 bindOptionalDialogClose(distanceLabelDialog, () => {

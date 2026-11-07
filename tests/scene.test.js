@@ -3,7 +3,15 @@ import { arrow, text } from "../src/scene/display-list.js";
 import { emitDisplayListSvg, svgColorAttr } from "../src/scene/emit-svg.js";
 import { paintDisplayList } from "../src/scene/paint-canvas.js";
 
-const echoText = async (options) => JSON.stringify(options);
+// Fake canvas metrics: every glyph 10px wide; "top" puts the alphabetic
+// baseline 8px down, "middle" 3px down.
+const fakeText = {
+  measure: ({ text, baseline }) => ({
+    width: text.length * 10,
+    alphabeticBaseline: baseline === "top" ? -8 : baseline === "middle" ? -3 : 0,
+  }),
+  outline: async ({ text, x, y }) => `${text}@${x},${y}`,
+};
 
 describe("svgColorAttr", () => {
   it("splits alpha into an opacity attribute", () => {
@@ -22,7 +30,7 @@ describe("emitDisplayListSvg", () => {
   it("emits an arrow as a line plus a filled head", async () => {
     const parts = await emitDisplayListSvg(
       arrow({ x1: 0, y1: 0, x2: 10, y2: 0, color: "#000000", width: 1.5 }),
-      { textElement: echoText },
+      fakeText,
     );
     expect(parts).toHaveLength(2);
     expect(parts[0]).toBe(
@@ -33,47 +41,63 @@ describe("emitDisplayListSvg", () => {
     );
   });
 
-  it("maps text alignment, baseline, rotation (including 0) and lines", async () => {
-    const [rotated, block] = await emitDisplayListSvg(
+  it("places glyph runs where the canvas would draw them", async () => {
+    const parts = await emitDisplayListSvg(
       [
         text({
-          text: "x",
-          x: 5,
-          y: 6,
-          font: "Lexend",
+          text: "ab",
+          x: 50,
+          y: 20,
+          font: "F",
           size: 12,
           weight: 400,
-          color: "#000",
+          color: "#000000",
           align: "center",
           baseline: "middle",
           rotation: 0,
         }),
         text({
-          lines: ["a", "b"],
+          lines: ["abc", "", "d"],
           lineHeight: 14,
-          x: 1,
-          y: 2,
-          font: "Lexend",
+          x: 100,
+          y: 0,
+          font: "F",
           size: 12,
           weight: 400,
-          color: "#000",
+          color: "#000000",
           align: "right",
           baseline: "top",
         }),
       ],
-      { textElement: echoText },
+      fakeText,
     );
-    expect(JSON.parse(rotated)).toMatchObject({
-      anchor: "middle",
-      baseline: "middle",
-      transform: "rotate(0 5 6)",
-    });
-    expect(JSON.parse(block)).toMatchObject({
-      text: "a\nb",
-      anchor: "end",
-      baseline: "hanging",
-      transform: "",
-    });
+    expect(parts).toEqual([
+      '<path d="ab@40,23" transform="rotate(0 50 20)" fill="#000000" />',
+      '<path d="abc@70,8" fill="#000000" />',
+      '<path d="d@90,36" fill="#000000" />',
+    ]);
+  });
+
+  it("falls back to a live text element when the font cannot be outlined", async () => {
+    const [part] = await emitDisplayListSvg(
+      [
+        text({
+          text: "a<b",
+          x: 1,
+          y: 2,
+          font: "F",
+          size: 12,
+          weight: 400,
+          color: "#000000",
+          align: "left",
+          baseline: "top",
+        }),
+      ],
+      { ...fakeText, outline: async () => null },
+    );
+    expect(part).toBe(
+      '<text x="1" y="2" text-anchor="start" dominant-baseline="text-before-edge" font-family="F" font-size="12" font-weight="400" xml:space="preserve" fill="#000000">a&lt;b</text>',
+    );
   });
 });
 

@@ -1,41 +1,26 @@
 // SVG emitter for the display list (see display-list.js).
 //
-// Output is byte-compatible with the pre-Phase-3 `buildLayoutSvgString`, which
-// the golden captures check. Text goes through the caller's `textElement`
-// (main.js's `buildSvgTextElement`, which outlines glyphs with opentype.js).
+// The canvas is the reference rendering: SVG text is outlined glyphs placed
+// with the canvas's own metrics, so an export matches what's on screen.
+// Callers inject both halves of that:
+//   measure({ text, font, size, weight, baseline }) -> { width, alphabeticBaseline }
+//     canvas TextMetrics (width; distance from `baseline` to the alphabetic
+//     baseline, negative when the alphabetic baseline is below it)
+//   outline({ text, font, size, weight, x, y }) -> Promise<pathData | null>
+//     glyph outlines with the alphabetic baseline at y; null if the font
+//     can't be loaded (a live <text> element is emitted instead)
 
 const SVG_ANCHOR = { left: "start", center: "middle", right: "end" };
-const SVG_BASELINE = { top: "hanging", middle: "middle" };
+const SVG_BASELINE = { top: "text-before-edge", middle: "middle" };
 
-/**
- * Emit `list` as SVG element strings. Async because text outlining loads
- * fonts. `textElement(options)` returns a Promise<string>.
- */
-export async function emitDisplayListSvg(list, { textElement }) {
+/** Emit `list` as SVG element strings. */
+export async function emitDisplayListSvg(list, { measure, outline }) {
   const parts = [];
   for (const item of list) {
     switch (item.kind) {
-      case "text": {
-        const transform =
-          item.rotation != null
-            ? `rotate(${(item.rotation * 180) / Math.PI} ${item.x} ${item.y})`
-            : "";
-        parts.push(
-          await textElement({
-            text: item.lines ? item.lines.join("\n") : item.text,
-            x: item.x,
-            y: item.y,
-            font: item.font,
-            size: item.size,
-            fontWeight: item.weight,
-            anchor: SVG_ANCHOR[item.align] || "start",
-            baseline: SVG_BASELINE[item.baseline] || "alphabetic",
-            color: item.color,
-            transform,
-          }),
-        );
+      case "text":
+        parts.push(...(await emitText(item, { measure, outline })));
         break;
-      }
       case "line":
         parts.push(
           `<line x1="${item.x1}" y1="${item.y1}" x2="${item.x2}" y2="${item.y2}" ${svgColorAttr(
@@ -57,6 +42,65 @@ export async function emitDisplayListSvg(list, { textElement }) {
     }
   }
   return parts;
+}
+
+/**
+ * Outlined glyph runs for a text primitive, one per line, positioned exactly
+ * as the canvas painter's fillText would draw them.
+ */
+export async function emitText(item, { measure, outline }) {
+  const lines = item.lines || [item.text];
+  const baseline = item.baseline || "alphabetic";
+  const transform =
+    item.rotation != null
+      ? ` transform="rotate(${(item.rotation * 180) / Math.PI} ${item.x} ${item.y})"`
+      : "";
+  const fill = svgColorAttr("fill", item.color);
+  const out = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const lineText = lines[index] == null ? "" : String(lines[index]);
+    if (!lineText) {
+      continue;
+    }
+    const y = item.y + index * (item.lineHeight || 0);
+    const { width, alphabeticBaseline } = measure({
+      text: lineText,
+      font: item.font,
+      size: item.size,
+      weight: item.weight,
+      baseline,
+    });
+    const shift = item.align === "center" ? width / 2 : item.align === "right" ? width : 0;
+    const pathData = await outline({
+      text: lineText,
+      font: item.font,
+      size: item.size,
+      weight: item.weight,
+      x: item.x - shift,
+      y: y - alphabeticBaseline,
+    });
+    if (pathData != null) {
+      out.push(`<path d="${pathData}"${transform} ${fill} />`);
+    } else {
+      out.push(
+        `<text x="${item.x}" y="${y}" text-anchor="${SVG_ANCHOR[item.align] || "start"}" dominant-baseline="${
+          SVG_BASELINE[baseline] || "alphabetic"
+        }" font-family="${escapeXml(item.font)}" font-size="${item.size}" font-weight="${
+          item.weight
+        }" xml:space="preserve"${transform} ${fill}>${escapeXml(lineText)}</text>`,
+      );
+    }
+  }
+  return out;
+}
+
+export function escapeXml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 /** `fill="rgb(...)" fill-opacity="0.5"` from any CSS colour string. */

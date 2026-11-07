@@ -26479,6 +26479,23 @@ async function measureSvgSuffixPartWidth(part, size, charGap, baseWeight) {
   return widths.reduce((sum, width, index) => sum + width + (index > 0 ? partCharGap : 0), 0);
 }
 
+// Scene text for SVG: measured on the canvas (the reference rendering) and
+// outlined from the bundled font files. See src/scene/emit-svg.js.
+const SCENE_SVG_TEXT = {
+  measure({ text, font, size, weight, baseline }) {
+    ctx.save();
+    ctx.font = `${weight} ${size}px ${font}`;
+    ctx.textBaseline = baseline;
+    const metrics = ctx.measureText(text);
+    ctx.restore();
+    return { width: metrics.width, alphabeticBaseline: metrics.alphabeticBaseline || 0 };
+  },
+  async outline({ text, font, size, weight, x, y }) {
+    const fontObj = await getOutlineFontOrFallback(font, weight);
+    return fontObj ? fontObj.getPath(text, x, y, size).toPathData(2) : null;
+  },
+};
+
 async function buildSvgTextElement({
   text,
   x,
@@ -26695,7 +26712,7 @@ async function buildLayoutSvgString(
   }
   parts.push(`<rect width="100%" height="100%" ${svgFill(themeColors.page)}/>`);
 
-  parts.push(...(await emitDisplayListSvg(buildPageChromeScene(), { textElement: buildSvgTextElement })));
+  parts.push(...(await emitDisplayListSvg(buildPageChromeScene(), SCENE_SVG_TEXT)));
 
   const exportNodeRenderList = nodes
     .map((node) => ({

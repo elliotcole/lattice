@@ -14,6 +14,7 @@ export default [
       "src/scene/**/*.js",
       "src/input/**/*.js",
       "src/audio/**/*.js",
+      "src/state/**/*.js",
       "src/custom-oscillator-types.js",
       "src/custom-oscillators.js",
       "src/lib/**/*.js",

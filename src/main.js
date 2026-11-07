@@ -57,6 +57,7 @@ import { emitDisplayListSvg, svgColorAttr } from "./scene/emit-svg.js";
 import { hitTestDisplayList } from "./scene/hit-test.js";
 import { createKeyDispatcher, createHeldKeys } from "./input/keyboard.js";
 import { createVoiceBackends } from "./audio/voice-backends.js";
+import { createStore } from "./state/store.js";
 
 // Main editor spells ET fallbacks from its mixed default table (Eb/Bb flats).
 function getNearestEtInfo(freq, a4) {
@@ -584,6 +585,22 @@ let synthMode = "waveform";
 let soundfontPresetIndex = 0;
 let currentSynthWaveform = "";
 let lastCustomOctaveReduce = true;
+// The document store (src/state/store.js): everything a saved file or link
+// contains moves here slice by slice (audit Phase 4.1). Read `doc.x`; change
+// it only with `store.set({ x })`; reactions live in the subscriber set up by
+// bindDocumentReactions().
+const store = createStore({
+  showHz: false,
+  showRatioCents: false,
+  showCentsDeviation: true,
+  showCentsSign: false,
+  directionalRatioLabels: false,
+  hejiEnabled: true,
+  enharmonicsEnabled: true,
+  centsPrecision: 0,
+  hzPrecision: 2,
+});
+const doc = store.doc;
 // Quasimode letters currently held (see HELD_KEYS in src/input/keyboard.js).
 const heldKeys = createHeldKeys();
 // The editor's single keyboard pipeline: bindings are added in precedence
@@ -1878,16 +1895,7 @@ let spellingMode = "true";
 let spellingHintActive = false;
 let fundamentalSpelling = "sharp";
 let featureMode = "note";
-let showHz = false;
-let showRatioCents = false;
-let showCentsDeviation = true;
-let showCentsSign = false;
-let directionalRatioLabels = false;
-let hejiEnabled = true;
-let enharmonicsEnabled = true;
 let enharmonicsEnabledPreference = true;
-let centsPrecision = 0;
-let hzPrecision = 2;
 let showCircles = true;
 let show3DShading = true;
 let showLineLabels = true;
@@ -2070,7 +2078,7 @@ function syncCentsPrecisionControls() {
     return;
   }
   centsPrecisionButtons.forEach((button) => {
-    const isActive = Number(button.dataset.centsPrecision) === centsPrecision;
+    const isActive = Number(button.dataset.centsPrecision) === doc.centsPrecision;
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
@@ -2081,7 +2089,7 @@ function syncHzPrecisionControls() {
     return;
   }
   hzPrecisionButtons.forEach((button) => {
-    const isActive = Number(button.dataset.hzPrecision) === hzPrecision;
+    const isActive = Number(button.dataset.hzPrecision) === doc.hzPrecision;
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
@@ -5799,7 +5807,7 @@ function getCustomNodeDisplayInfo(node) {
   const nearestPitchClass = preferredNames[nearest.midi % 12];
   const nearestName = `${nearestPitchClass}${Math.floor(nearest.midi / 12) - 1}`;
   const nearestCents = Number.isFinite(node.cents_from_et) ? node.cents_from_et : nearest.cents;
-  if (spellingMode === "true" || hejiEnabled) {
+  if (spellingMode === "true" || doc.hejiEnabled) {
     const analysis = analyzeRatioForTrueSpelling(node.derivedNumerator || node.numerator, node.derivedDenominator || node.denominator);
     if (analysis) {
       const info = buildTrueSpellingFromAxisRatios({
@@ -8347,7 +8355,7 @@ function getLayoutNodeShape(node) {
 function getNodeNoteLabel(node) {
   const info = getCachedDisplayInfo(node);
   const noteText = featureMode === "ratio" ? info.pitchClass : info.name;
-  const wrap = enharmonicsEnabled;
+  const wrap = doc.enharmonicsEnabled;
   const requireHejiDetail = featureMode === "ratio";
   const centsText = getCachedCentsReadout(
     node,
@@ -8376,7 +8384,7 @@ function getNoteNamesForNode(node) {
 }
 
 function formatCents(value) {
-  const precision = Math.min(2, Math.max(0, Number(centsPrecision) || 0));
+  const precision = Math.min(2, Math.max(0, Number(doc.centsPrecision) || 0));
   const numeric = Number.isFinite(value) ? value : 0;
   const factor = Math.pow(10, precision);
   let rounded = Math.round(numeric * factor) / factor;
@@ -8390,12 +8398,12 @@ function formatCents(value) {
       ? rounded.toFixed(precision)
       : String(Math.round(rounded));
   const sign = rounded >= 0 ? "+" : "";
-  const centsSuffix = showCentsSign ? CENTS_CHAR : "";
+  const centsSuffix = doc.showCentsSign ? CENTS_CHAR : "";
   return `${sign}${text}${centsSuffix}`;
 }
 
 function formatHzNumber(value) {
-  const precision = Math.min(2, Math.max(0, Number(hzPrecision) || 0));
+  const precision = Math.min(2, Math.max(0, Number(doc.hzPrecision) || 0));
   if (!Number.isFinite(value)) {
     return "";
   }
@@ -8423,7 +8431,7 @@ function getRatioCents(numerator, denominator) {
   if (!Number.isFinite(ratio) || ratio <= 0) {
     return null;
   }
-  const precision = Math.min(2, Math.max(0, Number(centsPrecision) || 0));
+  const precision = Math.min(2, Math.max(0, Number(doc.centsPrecision) || 0));
   const factor = Math.pow(10, precision);
   let rounded = Math.round(1200 * Math.log2(ratio) * factor) / factor;
   if (Object.is(rounded, -0)) {
@@ -8629,14 +8637,14 @@ function computeStackedRatioPositionsFromLine(
 function getLabelCacheKey() {
   return [
     featureMode,
-    hejiEnabled ? "heji" : "no-heji",
-    enharmonicsEnabled ? "enharmonics" : "no-enharmonics",
+    doc.hejiEnabled ? "heji" : "no-heji",
+    doc.enharmonicsEnabled ? "enharmonics" : "no-enharmonics",
     spellingMode,
-    centsPrecision,
-    hzPrecision,
-    showCentsSign ? "cents" : "no-cents",
-    showHz ? "hz" : "no-hz",
-    showRatioCents ? "ratio-cents" : "no-ratio-cents",
+    doc.centsPrecision,
+    doc.hzPrecision,
+    doc.showCentsSign ? "cents" : "no-cents",
+    doc.showHz ? "hz" : "no-hz",
+    doc.showRatioCents ? "ratio-cents" : "no-ratio-cents",
     fundamentalSpelling,
   ].join("|");
 }
@@ -8829,7 +8837,7 @@ function formatRatioCentsLabel(node) {
   if (!Number.isFinite(cents)) {
     return "";
   }
-  const precision = Math.min(2, Math.max(0, Number(centsPrecision) || 0));
+  const precision = Math.min(2, Math.max(0, Number(doc.centsPrecision) || 0));
   const factor = Math.pow(10, precision);
   let rounded = Math.round(cents * factor) / factor;
   if (Object.is(rounded, -0)) {
@@ -8842,24 +8850,18 @@ function formatRatioCentsLabel(node) {
 }
 
 function enforceCentsDisplayMode() {
-  if (showRatioCents && showCentsDeviation) {
-    showCentsDeviation = false;
+  if (doc.showRatioCents && doc.showCentsDeviation) {
+    store.set({ showCentsDeviation: false });
   }
-  if (showCentsDeviation) {
-    showRatioCents = false;
+  if (doc.showCentsDeviation) {
+    store.set({ showRatioCents: false });
   }
-  const centsDeviationEnabled = Boolean(showCentsDeviation);
+  const centsDeviationEnabled = Boolean(doc.showCentsDeviation);
   if (!centsDeviationEnabled) {
-    enharmonicsEnabled = false;
+    store.set({ enharmonicsEnabled: false });
   } else {
-    enharmonicsEnabled = Boolean(enharmonicsEnabledPreference);
+    store.set({ enharmonicsEnabled: Boolean(enharmonicsEnabledPreference) });
   }
-  setControlChecked(showCentsDeviationToggle, showCentsDeviation);
-  setControlChecked(layoutShowCentsDeviationToggle, showCentsDeviation);
-  setControlChecked(showRatioCentsToggle, showRatioCents);
-  setControlChecked(layoutShowRatioCentsToggle, showRatioCents);
-  setControlChecked(enharmonicsEnabledToggle, enharmonicsEnabled);
-  setControlChecked(layoutEnharmonicsEnabledToggle, enharmonicsEnabled);
   setControlDisabled(enharmonicsEnabledToggle, !centsDeviationEnabled);
   setControlDisabled(layoutEnharmonicsEnabledToggle, !centsDeviationEnabled);
   if (enharmonicsGroup) {
@@ -9065,7 +9067,7 @@ function getCentsCacheKey(options) {
   const wrap = options && options.wrap ? "w1" : "w0";
   const detail = options && options.requireHejiDetail ? "d1" : "d0";
   const baseText = options && options.baseTextForHeji ? options.baseTextForHeji : "";
-  const show = showCentsDeviation ? "s1" : "s0";
+  const show = doc.showCentsDeviation ? "s1" : "s0";
   return `${wrap}|${detail}|${show}|${baseText}`;
 }
 
@@ -9114,11 +9116,11 @@ function buildCentsReadout(
     displayInfo = null,
   } = {}
 ) {
-  if (!showCentsDeviation) {
+  if (!doc.showCentsDeviation) {
     return "";
   }
   const info = displayInfo || getDisplayNoteInfo(node);
-  if (!hejiEnabled && !enharmonicsEnabled) {
+  if (!doc.hejiEnabled && !doc.enharmonicsEnabled) {
     const text = formatCents(info.cents);
     return text;
   }
@@ -9127,18 +9129,18 @@ function buildCentsReadout(
     const annotation = getHejiAnnotation(node, baseTextForHeji);
     hasHejiRule = annotation.suffixParts.some((part) => part.source === "rule");
   }
-  if (requireHejiDetail && !hasHejiRule && !enharmonicsEnabled) {
+  if (requireHejiDetail && !hasHejiRule && !doc.enharmonicsEnabled) {
     return formatCents(info.cents);
   }
   const mapAccidentals = (text) =>
-    hejiEnabled ? text.replace(/#/g, "v").replace(/b/g, "e").replace(/x/g, "V") : text;
+    doc.hejiEnabled ? text.replace(/#/g, "v").replace(/b/g, "e").replace(/x/g, "V") : text;
   const baseText = baseTextForHeji || info.pitchClass || "";
   const sharpCount = (baseText.match(/#/g) || []).length;
   const doubleSharpCount = (baseText.match(/x/g) || []).length;
   const flatCount = (baseText.match(/b/g) || []).length;
   const hasHeavyAccidentals = sharpCount + doubleSharpCount * 2 >= 2 || flatCount >= 2;
   const includePitchClass = Math.abs(info.cents) > 50;
-  const shouldAnnotate = enharmonicsEnabled && (includePitchClass || hasHeavyAccidentals);
+  const shouldAnnotate = doc.enharmonicsEnabled && (includePitchClass || hasHeavyAccidentals);
   if (shouldAnnotate) {
     const nearest = getNearestNoteInfo(node);
     const targetPc = nearest.midi % 12;
@@ -9224,7 +9226,7 @@ function getDisplayNoteInfo(node) {
   if (spellingMode === "true") {
     return getTrueSpellingPitchClass(node);
   }
-  if (!hejiEnabled) {
+  if (!doc.hejiEnabled) {
     const targetPc = nearest.midi % 12;
     const pitchClass =
       spellingMode === "simple"
@@ -9359,7 +9361,7 @@ function getHejiAnnotation(node, baseText) {
   for (let i = 0; i < doubleSharpCount; i += 1) {
     suffixParts.push({ text: "V", expLabel: "", source: "default" });
   }
-  if (!hejiEnabled) {
+  if (!doc.hejiEnabled) {
     return { baseText: nextBase, suffixParts };
   }
   HEJI_RULES.forEach((rule) => {
@@ -11771,7 +11773,7 @@ function getEdgeLabelText(a, b) {
     }
     return 1;
   };
-  const useDirectional = directionalRatioLabels;
+  const useDirectional = doc.directionalRatioLabels;
   let ratio = null;
   let axisMaxExp = 0;
   if (Math.abs(dx) === 1 && dy === 0 && dz === 0) {
@@ -13822,10 +13824,10 @@ function buildNodeInnerLabelScene(node, pos, radius, state) {
   if (featureMode === "note") {
     let baseText;
     let suffixParts;
-    if (hejiEnabled && nodeHasHighPrime(node)) {
+    if (doc.hejiEnabled && nodeHasHighPrime(node)) {
       const displayInfo = getCachedDisplayInfo(node);
       const base = getHejiBaseAndDefaults(displayInfo.pitchClass);
-      const centsText = showCentsDeviation ? formatCents(displayInfo.cents) : "";
+      const centsText = doc.showCentsDeviation ? formatCents(displayInfo.cents) : "";
       baseText = base.baseText;
       suffixParts = centsText
         ? [
@@ -13973,9 +13975,9 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
       measureTextWidthWithWeight(text, detailSize, noteLabelFont, noteLabelWeight);
     const octaveLabel = formatOctaveShiftLabel(getNodeOctaveShift(node));
     const ratioText = `${node.numerator}:${node.denominator}${octaveLabel}`;
-    const centsLabel = getCachedCentsReadout(node, { wrap: enharmonicsEnabled }, displayInfo);
-    const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
-    const hzText = showHz ? formatHzReadout(node.freq) : "";
+    const centsLabel = getCachedCentsReadout(node, { wrap: doc.enharmonicsEnabled }, displayInfo);
+    const ratioCentsLabel = doc.showRatioCents ? formatRatioCentsLabel(node) : "";
+    const hzText = doc.showHz ? formatHzReadout(node.freq) : "";
     const labelWidth = Math.max(
       measure(ratioText),
       centsLabel ? measure(centsLabel) : 0,
@@ -13999,7 +14001,7 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
             fontWeight: noteLabelWeight,
             align: "left",
             baseline: "top",
-            hejiAccidentals: hejiEnabled,
+            hejiAccidentals: doc.hejiEnabled,
             hejiYOffset,
             color,
           })
@@ -14023,7 +14025,7 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
   const centsLabel = getCachedCentsReadout(
     node,
     {
-      wrap: enharmonicsEnabled,
+      wrap: doc.enharmonicsEnabled,
       requireHejiDetail: true,
       baseTextForHeji: displayInfo.pitchClass,
     },
@@ -14036,20 +14038,20 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
   const suffixText = annotation.suffixParts
     .map((part) => (part && part.text ? part.text : ""))
     .join("");
-  const restText = hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "";
+  const restText = doc.hejiEnabled && centsLabel ? "" : centsLabel ? ` ${centsLabel}` : "";
   const line1 = `${annotation.baseText || ""}${suffixText}${restText}`;
-  const ratioCentsLabel = showRatioCents ? formatRatioCentsLabel(node) : "";
-  const hzText = showHz ? formatHzReadout(node.freq) : "";
+  const ratioCentsLabel = doc.showRatioCents ? formatRatioCentsLabel(node) : "";
+  const hzText = doc.showHz ? formatHzReadout(node.freq) : "";
   const labelWidth = Math.max(
     line1 ? measure(line1) : 0,
-    hejiEnabled && centsLabel ? measure(centsLabel) : 0,
+    doc.hejiEnabled && centsLabel ? measure(centsLabel) : 0,
     octaveLabel ? measure(octaveLabel) : 0,
     ratioCentsLabel ? measure(ratioCentsLabel) : 0,
     hzText ? measure(hzText) : 0
   );
   const lineCount =
     1 +
-    (hejiEnabled && centsLabel ? 1 : 0) +
+    (doc.hejiEnabled && centsLabel ? 1 : 0) +
     (octaveLabel ? 1 : 0) +
     (ratioCentsLabel ? 1 : 0) +
     (hzText ? 1 : 0);
@@ -14068,15 +14070,15 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
         align: "left",
         baseline: "top",
         hejiYOffset,
-        restGapScale: hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN,
-        restHejiAccidentals: hejiEnabled && hasParen,
+        restGapScale: doc.hejiEnabled && hasParen ? HEJI_REST_GAP : HEJI_REST_GAP_PLAIN,
+        restHejiAccidentals: doc.hejiEnabled && hasParen,
         fontWeight: noteLabelWeight,
         color,
       })
     )
   );
   y += lineStep;
-  if (hejiEnabled && centsLabel) {
+  if (doc.hejiEnabled && centsLabel) {
     scene.push(
       ...tag(
         buildTextWithSmallCentScene({
@@ -14088,7 +14090,7 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
           fontWeight: noteLabelWeight,
           align: "left",
           baseline: "top",
-          hejiAccidentals: hejiEnabled,
+          hejiAccidentals: doc.hejiEnabled,
           hejiYOffset,
           color,
         })
@@ -15613,7 +15615,7 @@ function onPointerDown(event) {
       const a4 = Number(a4Input.value) || 440;
       const nearest = getNearestEtInfo(Number(hit.freq), a4);
       let targetPc = nearest.midi % 12;
-      if (hejiEnabled) {
+      if (doc.hejiEnabled) {
         const ratioX = Number(ratioXSelect.value);
         const ratioY = Number(ratioYSelect.value);
         const ratioZ = Number(ratioZSelect.value);
@@ -19394,7 +19396,7 @@ function drawRatioWheel(canvasEl, options = {}) {
         size: fontSize,
         align: "center",
         baseline: "middle",
-        hejiAccidentals: hejiEnabled,
+        hejiAccidentals: doc.hejiEnabled,
         hejiYOffset: Math.round(fontSize * HEJI_SUFFIX_Y_OFFSET),
         context: ctx2d,
         color: themeColors.wheelText,
@@ -23795,15 +23797,15 @@ function buildPresetStateSkeleton(active, customState, lineLabelState, distanceS
     fundamentalSpelling,
     featureMode,
     spellingMode,
-    showHz,
-    showRatioCents,
-    showCentsDeviation,
-    showCentsSign,
-    directionalRatioLabels,
-    hejiEnabled,
-    enharmonicsEnabled,
-    centsPrecision,
-    hzPrecision,
+    showHz: doc.showHz,
+    showRatioCents: doc.showRatioCents,
+    showCentsDeviation: doc.showCentsDeviation,
+    showCentsSign: doc.showCentsSign,
+    directionalRatioLabels: doc.directionalRatioLabels,
+    hejiEnabled: doc.hejiEnabled,
+    enharmonicsEnabled: doc.enharmonicsEnabled,
+    centsPrecision: doc.centsPrecision,
+    hzPrecision: doc.hzPrecision,
     synth: getPresetSynthState(),
   };
 }
@@ -24283,7 +24285,7 @@ function applyPresetReadoutAndTuningSettings(state) {
     "showHz",
     [showHzToggle, layoutShowHzToggle],
     (value) => {
-      showHz = value;
+      store.set({ showHz: value });
     }
   );
   applyPresetBooleanField(
@@ -24291,16 +24293,16 @@ function applyPresetReadoutAndTuningSettings(state) {
     "showRatioCents",
     [showRatioCentsToggle, layoutShowRatioCentsToggle],
     (value) => {
-      showRatioCents = value;
+      store.set({ showRatioCents: value });
     }
   );
   if (typeof state.showCentsDeviation === "boolean") {
-    showCentsDeviation = state.showCentsDeviation;
+    store.set({ showCentsDeviation: state.showCentsDeviation });
   } else {
-    showCentsDeviation = true;
+    store.set({ showCentsDeviation: true });
   }
   applyPresetBooleanField(state, "showCentsSign", [showCentsSignToggle], (value) => {
-    showCentsSign = value;
+    store.set({ showCentsSign: value });
   });
   applyPresetBooleanField(state, "connectOrphans", [connectOrphansToggle], (value) => {
     connectOrphansEnabled = value;
@@ -24331,7 +24333,7 @@ function applyPresetReadoutAndTuningSettings(state) {
     "directionalRatioLabels",
     [directionalRatioLabelsToggle],
     (value) => {
-      directionalRatioLabels = value;
+      store.set({ directionalRatioLabels: value });
     },
     false
   );
@@ -24340,8 +24342,7 @@ function applyPresetReadoutAndTuningSettings(state) {
     "hejiEnabled",
     [],
     (value) => {
-      hejiEnabled = value;
-      syncHejiButtons();
+      store.set({ hejiEnabled: value });
     }
   );
   applyPresetBooleanField(
@@ -24349,17 +24350,15 @@ function applyPresetReadoutAndTuningSettings(state) {
     "enharmonicsEnabled",
     [enharmonicsEnabledToggle, layoutEnharmonicsEnabledToggle],
     (value) => {
-      enharmonicsEnabled = value;
+      store.set({ enharmonicsEnabled: value });
     }
   );
-  enharmonicsEnabledPreference = Boolean(enharmonicsEnabled);
+  enharmonicsEnabledPreference = Boolean(doc.enharmonicsEnabled);
   if (Number.isFinite(state.centsPrecision)) {
-    centsPrecision = Math.min(2, Math.max(0, Math.round(state.centsPrecision)));
-    syncCentsPrecisionControls();
+    store.set({ centsPrecision: Math.min(2, Math.max(0, Math.round(state.centsPrecision))) });
   }
   if (Number.isFinite(state.hzPrecision)) {
-    hzPrecision = Math.min(2, Math.max(0, Math.round(state.hzPrecision)));
-    syncHzPrecisionControls();
+    store.set({ hzPrecision: Math.min(2, Math.max(0, Math.round(state.hzPrecision))) });
   }
   enforceCentsDisplayMode();
   invalidateLabelCache();
@@ -26521,24 +26520,24 @@ if (layoutPanel) {
 }
 syncFeatureModeControls();
 syncSpellingModeControls();
-setControlChecked(showHzToggle, showHz);
-setControlChecked(layoutShowHzToggle, showHz);
-setControlChecked(showRatioCentsToggle, showRatioCents);
-setControlChecked(layoutShowRatioCentsToggle, showRatioCents);
-setControlChecked(showCentsDeviationToggle, showCentsDeviation);
-setControlChecked(layoutShowCentsDeviationToggle, showCentsDeviation);
-enharmonicsEnabledPreference = Boolean(enharmonicsEnabled);
+setControlChecked(showHzToggle, doc.showHz);
+setControlChecked(layoutShowHzToggle, doc.showHz);
+setControlChecked(showRatioCentsToggle, doc.showRatioCents);
+setControlChecked(layoutShowRatioCentsToggle, doc.showRatioCents);
+setControlChecked(showCentsDeviationToggle, doc.showCentsDeviation);
+setControlChecked(layoutShowCentsDeviationToggle, doc.showCentsDeviation);
+enharmonicsEnabledPreference = Boolean(doc.enharmonicsEnabled);
 enforceCentsDisplayMode();
-setControlChecked(showCentsSignToggle, showCentsSign);
-setControlChecked(directionalRatioLabelsToggle, directionalRatioLabels);
+setControlChecked(showCentsSignToggle, doc.showCentsSign);
+setControlChecked(directionalRatioLabelsToggle, doc.directionalRatioLabels);
 setControlChecked(connectOrphansToggle, connectOrphansEnabled);
 setControlChecked(showOperatorLineLabelsToggle, showOperatorLineLabels);
 setControlChecked(show3DShadingToggle, show3DShading);
 setLatticeTilt(latticeTiltDeg);
 syncHejiButtons();
 
-setControlChecked(enharmonicsEnabledToggle, enharmonicsEnabled);
-setControlChecked(layoutEnharmonicsEnabledToggle, enharmonicsEnabled);
+setControlChecked(enharmonicsEnabledToggle, doc.enharmonicsEnabled);
+setControlChecked(layoutEnharmonicsEnabledToggle, doc.enharmonicsEnabled);
 setControlChecked(navCirclesToggle, showCircles);
 setControlChecked(layoutCirclesToggle, showCircles);
 syncAnalysisLayerToggles();
@@ -27101,6 +27100,55 @@ if (isPresentationMode) {
 // applyPresetState is not atomic yet (Phase 4 makes it so). Until then a bad
 // file or link must not take the whole app down: report, rebuild from
 // whatever did land, and keep the page interactive.
+// What happens when the document changes: one subscriber, so no call site
+// has to remember to redraw, sync a mirrored control or update the URL.
+const LABEL_DOC_KEYS = new Set([
+  "showHz",
+  "showRatioCents",
+  "showCentsDeviation",
+  "showCentsSign",
+  "directionalRatioLabels",
+  "hejiEnabled",
+  "enharmonicsEnabled",
+  "centsPrecision",
+  "hzPrecision",
+]);
+
+function bindDocumentReactions() {
+  // Checkboxes that show a document boolean (sidebar + page-layout panel copies).
+  const mirroredToggles = {
+    showHz: [showHzToggle, layoutShowHzToggle],
+    showRatioCents: [showRatioCentsToggle, layoutShowRatioCentsToggle],
+    showCentsDeviation: [showCentsDeviationToggle, layoutShowCentsDeviationToggle],
+    showCentsSign: [showCentsSignToggle],
+    directionalRatioLabels: [directionalRatioLabelsToggle],
+    enharmonicsEnabled: [enharmonicsEnabledToggle, layoutEnharmonicsEnabledToggle],
+  };
+  store.subscribe((changed) => {
+    let labelsChanged = false;
+    for (const key of changed) {
+      if (LABEL_DOC_KEYS.has(key)) {
+        labelsChanged = true;
+      }
+      (mirroredToggles[key] || []).forEach((toggle) => setControlChecked(toggle, doc[key]));
+    }
+    if (changed.has("hejiEnabled")) {
+      syncHejiButtons();
+    }
+    if (changed.has("centsPrecision")) {
+      syncCentsPrecisionControls();
+    }
+    if (changed.has("hzPrecision")) {
+      syncHzPrecisionControls();
+    }
+    if (labelsChanged) {
+      invalidateLabelCache();
+    }
+    scheduleDraw();
+    schedulePresetUrlUpdate();
+  });
+}
+
 function applyPresetStateSafely(state, sourceLabel) {
   try {
     applyPresetState(state);
@@ -27122,6 +27170,8 @@ function applyPresetStateSafely(state, sourceLabel) {
     return false;
   }
 }
+
+bindDocumentReactions();
 
 const presetState = readPresetFromUrl();
 const hasIncomingPresetState = Boolean(presetState);
@@ -27771,8 +27821,8 @@ bindAnalysisLayerTogglePair(
   layoutShowMicrotonalToggle,
   (checked) => setMicrotonalIntervalsMode(checked)
 );
-bindSingleBooleanDrawToggle(directionalRatioLabelsToggle, (checked) => {
-  directionalRatioLabels = checked;
+bindSingleBooleanToggle(directionalRatioLabelsToggle, (checked) => {
+  store.set({ directionalRatioLabels: checked });
 });
 bindSingleBooleanDrawToggle(connectOrphansToggle, (checked) => {
   connectOrphansEnabled = checked;
@@ -28037,18 +28087,17 @@ function bindOptionalEnterKey(element, handler) {
 
 function applyCentsModeToggle(kind, checked) {
   if (kind === "ratio") {
-    showRatioCents = Boolean(checked);
-    if (showRatioCents) {
-      showCentsDeviation = false;
+    store.set({ showRatioCents: Boolean(checked) });
+    if (doc.showRatioCents) {
+      store.set({ showCentsDeviation: false });
     }
   } else {
-    showCentsDeviation = Boolean(checked);
-    if (showCentsDeviation) {
-      showRatioCents = false;
+    store.set({ showCentsDeviation: Boolean(checked) });
+    if (doc.showCentsDeviation) {
+      store.set({ showRatioCents: false });
     }
   }
   enforceCentsDisplayMode();
-  applyLabelDisplayToggleChange();
 }
 
 function bindCentsModeTogglePair(primaryToggle, secondaryToggle, kind) {
@@ -28076,31 +28125,25 @@ function bindMirroredDrawToggles(primaryToggle, secondaryToggle, applyValue) {
   });
 }
 
-bindMirroredBooleanToggles(
-  showHzToggle,
-  layoutShowHzToggle,
-  (checked) => {
-    showHz = checked;
-  }
-);
+[showHzToggle, layoutShowHzToggle].forEach((toggle) => {
+  bindOptionalChange(toggle, () => store.set({ showHz: Boolean(toggle.checked) }));
+});
 bindCentsModeTogglePair(showRatioCentsToggle, layoutShowRatioCentsToggle, "ratio");
 bindCentsModeTogglePair(showCentsDeviationToggle, layoutShowCentsDeviationToggle, "deviation");
 bindSingleBooleanToggle(showCentsSignToggle, (checked) => {
-  showCentsSign = checked;
-  applyLabelDisplayToggleChange();
+  store.set({ showCentsSign: checked });
 });
 function syncHejiButtons() {
-  if (hejiEnabledButton) hejiEnabledButton.classList.toggle("is-active", hejiEnabled);
-  if (hejiDisabledButton) hejiDisabledButton.classList.toggle("is-active", !hejiEnabled);
-  if (layoutHejiEnabledButton) layoutHejiEnabledButton.classList.toggle("is-active", hejiEnabled);
-  if (layoutHejiDisabledButton) layoutHejiDisabledButton.classList.toggle("is-active", !hejiEnabled);
+  if (hejiEnabledButton) hejiEnabledButton.classList.toggle("is-active", doc.hejiEnabled);
+  if (hejiDisabledButton) hejiDisabledButton.classList.toggle("is-active", !doc.hejiEnabled);
+  if (layoutHejiEnabledButton) layoutHejiEnabledButton.classList.toggle("is-active", doc.hejiEnabled);
+  if (layoutHejiDisabledButton) layoutHejiDisabledButton.classList.toggle("is-active", !doc.hejiEnabled);
   const isDiatonic = spellingMode === "true";
   if (hejiToggleGroup) hejiToggleGroup.style.display = isDiatonic ? "" : "none";
   if (layoutHejiToggleGroup) layoutHejiToggleGroup.style.display = isDiatonic ? "" : "none";
 }
 function setHeji(value) {
-  hejiEnabled = value;
-  syncHejiButtons();
+  store.set({ hejiEnabled: value });
   applyLabelDisplayToggleChange({ refreshCustom: true });
 }
 if (hejiEnabledButton) hejiEnabledButton.addEventListener("click", () => setHeji(true));
@@ -28143,7 +28186,7 @@ bindMirroredBooleanToggles(
   (checked) => {
     const next = Boolean(checked);
     enharmonicsEnabledPreference = next;
-    enharmonicsEnabled = showCentsDeviation ? next : false;
+    store.set({ enharmonicsEnabled: doc.showCentsDeviation ? next : false });
   },
   { refreshCustom: true }
 );
@@ -28168,12 +28211,8 @@ if (centsPrecisionButtons.length) {
       if (!Number.isFinite(next)) {
         return;
       }
-      centsPrecision = Math.min(2, Math.max(0, Math.round(next)));
-      syncCentsPrecisionControls();
-      invalidateLabelCache();
+      store.set({ centsPrecision: Math.min(2, Math.max(0, Math.round(next))) });
       updateIntervalChartIfOpen();
-      draw();
-      schedulePresetUrlUpdate();
     });
   });
 }
@@ -28184,12 +28223,8 @@ if (hzPrecisionButtons.length) {
       if (!Number.isFinite(next)) {
         return;
       }
-      hzPrecision = Math.min(2, Math.max(0, Math.round(next)));
-      syncHzPrecisionControls();
-      invalidateLabelCache();
+      store.set({ hzPrecision: Math.min(2, Math.max(0, Math.round(next))) });
       updateFundamentalNotes();
-      draw();
-      schedulePresetUrlUpdate();
     });
   });
 }

@@ -49,6 +49,15 @@ export async function emitDisplayListSvg(list, { measure, outline }) {
       case "nodeShape":
         parts.push(emitNodeShape(item));
         break;
+      case "curve":
+        parts.push(
+          `<path d="M ${item.p0.x} ${item.p0.y} Q ${item.p1.x} ${item.p1.y} ${item.p2.x} ${
+            item.p2.y
+          }" fill="none" ${svgColorAttr("stroke", item.color)} stroke-width="${item.width}"${
+            item.dash && item.dash.length ? ` stroke-dasharray="${item.dash.join(" ")}"` : ""
+          }${opacityAttr(item)} />`,
+        );
+        break;
       case "polygon":
         parts.push(
           `<polygon points="${item.points.map(([x, y]) => `${x},${y}`).join(" ")}" ${svgColorAttr(

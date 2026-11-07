@@ -19,6 +19,8 @@
 //   { kind: "stroke", subpaths: [[[x, y], ...], ...], color, width, alpha?, dash? }
 //     one stroked path of open polylines (a broken edge is one path with two
 //     subpaths, which antialiases differently from two separate lines)
+//   { kind: "curve", p0, p1, p2, color, width, alpha?, dash? }
+//     stroked quadratic Bézier; points are { x, y }
 //   { kind: "polygon", points: [[x, y], ...], color, alpha? }  (filled)
 //   { kind: "nodeShape", shape: "circle" | "square" | "triangle" | "diamond",
 //     x, y, radius, fill, fillAlpha?, stroke, width, dash?, alpha? }
@@ -38,6 +40,10 @@ export function line(props) {
 
 export function stroke(props) {
   return { kind: "stroke", ...props };
+}
+
+export function curve(props) {
+  return { kind: "curve", ...props };
 }
 
 export const DIAMOND_RADIUS_SCALE = 1.125;
@@ -118,6 +124,10 @@ export function offsetDisplayList(list, dx, dy) {
         return { ...item, points: item.points.map(([x, y]) => [x + dx, y + dy]) };
       case "nodeShape":
         return { ...item, x: item.x + dx, y: item.y + dy };
+      case "curve": {
+        const move = (point) => ({ x: point.x + dx, y: point.y + dy });
+        return { ...item, p0: move(item.p0), p1: move(item.p1), p2: move(item.p2) };
+      }
       case "stroke":
         return {
           ...item,

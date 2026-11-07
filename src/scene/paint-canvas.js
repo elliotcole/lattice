@@ -62,6 +62,15 @@ const PAINTERS = {
     }
     ctx.stroke();
   },
+  curve(ctx, item) {
+    ctx.strokeStyle = item.color;
+    ctx.lineWidth = item.width;
+    ctx.setLineDash(item.dash && item.dash.length ? item.dash : []);
+    ctx.beginPath();
+    ctx.moveTo(item.p0.x, item.p0.y);
+    ctx.quadraticCurveTo(item.p1.x, item.p1.y, item.p2.x, item.p2.y);
+    ctx.stroke();
+  },
   nodeShape(ctx, item) {
     ctx.beginPath();
     ctx.strokeStyle = item.stroke;

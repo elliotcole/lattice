@@ -44,6 +44,7 @@ import {
   stroke as sceneStroke,
   arrow as sceneArrow,
   nodeShape as sceneNodeShape,
+  curve as sceneCurve,
   offsetDisplayList,
   DIAMOND_RADIUS_SCALE,
 } from "./scene/display-list.js";
@@ -12572,16 +12573,6 @@ function parseColorToRgb(color) {
   return null;
 }
 
-function blendOverPage(color, alpha) {
-  const fg = parseColorToRgb(color) || { r: 0, g: 0, b: 0 };
-  const pageColor = themeColors && themeColors.page ? themeColors.page : "#ffffff";
-  const bg = parseColorToRgb(pageColor) || { r: 255, g: 255, b: 255 };
-  const a = Math.max(0, Math.min(1, alpha));
-  const r = Math.round(fg.r * a + bg.r * (1 - a));
-  const g = Math.round(fg.g * a + bg.g * (1 - a));
-  const b = Math.round(fg.b * a + bg.b * (1 - a));
-  return `rgb(${r}, ${g}, ${b})`;
-}
 
 function colorWithAlpha(color, alpha) {
   const clamped = Math.max(0, Math.min(1, alpha));
@@ -12949,12 +12940,24 @@ function scheduleDraw() {
 }
 
 function drawDistanceConnections(nodePosMap) {
-  if (!distanceSelectedEdges.size) {
-    distanceEdges.length = 0;
-    distanceSelectedNodeKeys.clear();
-    return;
-  }
+  const { scene, hits, nodeKeys } = buildDistanceConnectionsScene(nodePosMap);
   distanceEdges.length = 0;
+  distanceEdges.push(...hits);
+  distanceSelectedNodeKeys.clear();
+  nodeKeys.forEach((key) => distanceSelectedNodeKeys.add(key));
+  paintDisplayList(ctx, scene);
+}
+
+// Distance curves between selected node pairs: a quadratic arc (auto or
+// user-bent control point) broken around its interval label, which runs
+// along the curve glyph by glyph unless the curve is near horizontal.
+// Also returns the per-curve hit data and the node keys involved.
+function buildDistanceConnectionsScene(nodePosMap) {
+  const scene = [];
+  const hits = [];
+  if (!distanceSelectedEdges.size) {
+    return { scene, hits, nodeKeys: new Set() };
+  }
   const selectedEdges = [];
   const resolvedEdges = new Set();
   const resolvedNodeKeys = new Set();
@@ -12977,10 +12980,8 @@ function drawDistanceConnections(nodePosMap) {
     resolvedNodeKeys.add(bKey);
     selectedEdges.push({ a, b, aKey, bKey, edgeKey });
   });
-  distanceSelectedNodeKeys.clear();
-  resolvedNodeKeys.forEach((key) => distanceSelectedNodeKeys.add(key));
   if (!selectedEdges.length) {
-    return;
+    return { scene, hits, nodeKeys: resolvedNodeKeys };
   }
   const labelFont = layoutMode
     ? layoutLineLabelFont
@@ -13011,7 +13012,6 @@ function drawDistanceConnections(nodePosMap) {
     if (override && override.hidden) {
       continue;
     }
-    const dimOthers = false;
     const ratioInfo = getDistanceRatioLabel(a, b);
     if (!ratioInfo) {
       continue;
@@ -13087,7 +13087,7 @@ function drawDistanceConnections(nodePosMap) {
     const t = curveInfo.tAtRatio(labelT);
     const labelPos = getQuadraticPoint(lineStart, control, lineEnd, t);
     const tangent = getQuadraticTangent(lineStart, control, lineEnd, t);
-    distanceEdges.push({
+    hits.push({
       a,
       b,
       key: edgeKey,
@@ -13104,9 +13104,7 @@ function drawDistanceConnections(nodePosMap) {
       labelPos,
       tangent,
     });
-    ctx.save();
-    ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
-    const baseWidth = ctx.measureText(label).width;
+    const baseWidth = measureTextWidthWithWeight(label, labelSize, labelFont, labelWeight);
     let angle = 0;
     let useHorizontal = false;
     if (Math.abs(tangent.x) > 1e-6 || Math.abs(tangent.y) > 1e-6) {
@@ -13128,76 +13126,58 @@ function drawDistanceConnections(nodePosMap) {
       minSize: 4,
     });
     const size = layout.size;
-    const gap = layout.gap;
-    ctx.restore();
-
-    const gapHalf = gap / 2;
+    const gapHalf = layout.gap / 2;
     const labelArcLen = curveInfo.total * Math.min(1, Math.max(0, labelT));
     const tLeft = curveInfo.tAtLength(labelArcLen - gapHalf);
     const tRight = curveInfo.tAtLength(labelArcLen + gapHalf);
-
-    const leftSegment = getQuadraticSubcurve(lineStart, control, lineEnd, 0, tLeft);
-    const rightSegment = getQuadraticSubcurve(lineStart, control, lineEnd, tRight, 1);
-    ctx.save();
-    ctx.strokeStyle = getInkEdgeColor(false);
-    ctx.lineWidth = getInkEdgeLineWidth(false);
-    ctx.globalAlpha = 1;
-    if (!isAdjacentLatticeEdge(a, b)) {
-      ctx.setLineDash([6, 6]);
-    } else {
-      ctx.setLineDash([]);
-    }
-    if (leftSegment) {
-      ctx.beginPath();
-      ctx.moveTo(leftSegment.p0.x, leftSegment.p0.y);
-      ctx.quadraticCurveTo(leftSegment.p1.x, leftSegment.p1.y, leftSegment.p2.x, leftSegment.p2.y);
-      ctx.stroke();
-    }
-    if (rightSegment) {
-      ctx.beginPath();
-      ctx.moveTo(rightSegment.p0.x, rightSegment.p0.y);
-      ctx.quadraticCurveTo(
-        rightSegment.p1.x,
-        rightSegment.p1.y,
-        rightSegment.p2.x,
-        rightSegment.p2.y
-      );
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    ctx.save();
-    ctx.font = `${labelWeight} ${size}px ${labelFont}`;
-    ctx.fillStyle = themeColors.textSecondary;
-    ctx.globalAlpha = 1;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
+    const ref = { type: "distance", key: edgeKey };
+    const curveStyle = {
+      color: getInkEdgeColor(false),
+      width: getInkEdgeLineWidth(false),
+      alpha: 1,
+      dash: isAdjacentLatticeEdge(a, b) ? null : [6, 6],
+      ref,
+    };
+    [
+      getQuadraticSubcurve(lineStart, control, lineEnd, 0, tLeft),
+      getQuadraticSubcurve(lineStart, control, lineEnd, tRight, 1),
+    ].forEach((segment) => {
+      if (segment) {
+        scene.push(sceneCurve({ p0: segment.p0, p1: segment.p1, p2: segment.p2, ...curveStyle }));
+      }
+    });
+    const glyph = (text, pos, rotation) =>
+      sceneText({
+        text,
+        x: pos.x,
+        y: pos.y,
+        rotation,
+        font: labelFont,
+        size,
+        weight: labelWeight,
+        align: "center",
+        baseline: "middle",
+        color: themeColors.textSecondary,
+        alpha: 1,
+        ref,
+      });
     if (useHorizontal) {
-      ctx.translate(labelPos.x, labelPos.y);
-      ctx.rotate(0);
-      ctx.fillText(label, 0, 0);
+      scene.push(glyph(label, labelPos, 0));
     } else {
       const chars = Array.from(label);
-      const charWidths = chars.map((char) => ctx.measureText(char).width);
       const { placements } = placeGlyphsAlongQuadratic({
         p0: lineStart,
         p1: control,
         p2: lineEnd,
         curveInfo,
         chars,
-        charWidths,
+        charWidths: chars.map((char) => measureTextWidthWithWeight(char, size, labelFont, labelWeight)),
         centerArcLen: labelArcLen,
       });
-      for (const placement of placements) {
-        ctx.save();
-        ctx.translate(placement.pos.x, placement.pos.y);
-        ctx.rotate(placement.angle);
-        ctx.fillText(placement.char, 0, 0);
-        ctx.restore();
-      }
+      placements.forEach((placement) => scene.push(glyph(placement.char, placement.pos, placement.angle)));
     }
-    ctx.restore();
   }
+  return { scene, hits, nodeKeys: resolvedNodeKeys };
 }
 
 function drawDistanceDragPreview(nodePosMap) {
@@ -26260,16 +26240,6 @@ async function measureSvgTextWidth(text, size, font, fontWeight = 400) {
   return fontObj.getAdvanceWidth(text, size);
 }
 
-async function measureSvgCharWidth(char, size, font, fontWeight = 400) {
-  if (!OUTLINE_SVG_TEXT) {
-    return measureCharWidth(char, size, font, fontWeight);
-  }
-  const fontObj = await getOutlineFontOrFallback(font, fontWeight);
-  if (!fontObj) {
-    return measureCharWidth(char, size, font, fontWeight);
-  }
-  return fontObj.getAdvanceWidth(char, size);
-}
 
 
 // Scene text for SVG: measured on the canvas (the reference rendering) and
@@ -26436,7 +26406,6 @@ async function buildLayoutSvgString({ fontCss = null } = {}) {
   const { left, top } = getLayoutPageRect();
   const exportLabel = getExportMetadataLabel();
   const svgFill = (color) => svgColorAttr("fill", color);
-  const svgStroke = (color) => svgColorAttr("stroke", color);
 
   const parts = [];
   parts.push(`<?xml version="1.0" encoding="UTF-8"?>`);
@@ -26605,218 +26574,8 @@ async function buildLayoutSvgString({ fontCss = null } = {}) {
     await emitScene(buildLatticeEdgesScene(exportNodePosMap));
   }
 
-  if (analysisLayers.distances && distanceSelectedEdges.size) {
-    const distanceNodePosMap = new Map();
-    nodes.forEach((node) => {
-      const pos = worldToScreen(getNodeDisplayCoordinate(node));
-      distanceNodePosMap.set(node.id, { pos, radius: getLayoutNodeRadius(pos) });
-    });
-    const labelFont = layoutLineLabelFont;
-    const labelWeight = layoutLineLabelFontWeight;
-    const labelSize = getLayoutLineLabelSize();
-    const drawCurveSegment = (segment, dashed = true) => {
-      const dashAttr = dashed ? ' stroke-dasharray="6 6"' : "";
-      parts.push(
-        `<path d="M ${segment.p0.x} ${segment.p0.y} Q ${segment.p1.x} ${segment.p1.y} ${segment.p2.x} ${segment.p2.y}" ${svgStroke(
-          getInkEdgeColor(false)
-        )} stroke-width="${getInkEdgeLineWidth(false)}"${dashAttr} fill="none" />`
-      );
-    };
-    for (const edgeKey of distanceSelectedEdges) {
-      if (!edgeKey) {
-        continue;
-      }
-      const partsKey = parseDistanceEdgeKey(edgeKey);
-      if (!partsKey) {
-        continue;
-      }
-      const [aKey, bKey] = partsKey;
-      const a = getNodeByDistanceKey(aKey);
-      const b = getNodeByDistanceKey(bKey);
-      if (!a || !b || !a.active || !b.active) {
-        continue;
-      }
-      const startEntry = distanceNodePosMap.get(a.id);
-      const endEntry = distanceNodePosMap.get(b.id);
-      if (!startEntry || !endEntry) {
-        continue;
-      }
-      const override = getDistanceEdgeOverride(edgeKey);
-      if (override && override.hidden) {
-        continue;
-      }
-      const ratioInfo = getDistanceRatioLabel(a, b);
-      if (!ratioInfo) {
-        continue;
-      }
-      const showName = !override || override.showName !== false;
-      const customText =
-        override && typeof override.customText === "string" ? override.customText.trim() : "";
-      const commaName = showName
-        ? getDistanceCommaName(ratioInfo.numerator, ratioInfo.denominator)
-        : "";
-      const baseLabel = showName
-        ? customText
-          ? `${ratioInfo.label} ${customText}`
-          : ratioInfo.label
-        : customText;
-      const label =
-        baseLabel && commaName && showName ? `${baseLabel} (${commaName})` : baseLabel;
-      if (!label) {
-        continue;
-      }
-      const start = startEntry.pos;
-      const end = endEntry.pos;
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const dist = Math.hypot(dx, dy);
-      if (!dist) {
-        continue;
-      }
-      const ux = dx / dist;
-      const uy = dy / dist;
-      const straightStartRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-      const straightEndRadius = getNodeEdgeRadius(b, -ux, -uy, endEntry.radius);
-      let lineStart = {
-        x: start.x + ux * straightStartRadius - left,
-        y: start.y + uy * straightStartRadius - top,
-      };
-      let lineEnd = {
-        x: end.x - ux * straightEndRadius - left,
-        y: end.y - uy * straightEndRadius - top,
-      };
-      const autoControl = getAutoDistanceControl(
-        { x: lineStart.x + left, y: lineStart.y + top },
-        { x: lineEnd.x + left, y: lineEnd.y + top },
-        distanceNodePosMap,
-        a,
-        b
-      );
-      const defaultControl = { x: autoControl.x - left, y: autoControl.y - top };
-      let controlOffset = override && override.controlOffset ? override.controlOffset : null;
-      if (!controlOffset && override && override.control) {
-        controlOffset = {
-          x: override.control.x - defaultControl.x,
-          y: override.control.y - defaultControl.y,
-        };
-      }
-      const control = controlOffset
-        ? { x: defaultControl.x + controlOffset.x, y: defaultControl.y + controlOffset.y }
-        : defaultControl;
-      const startVector = {
-        x: control.x - (start.x - left),
-        y: control.y - (start.y - top),
-      };
-      const endVector = {
-        x: control.x - (end.x - left),
-        y: control.y - (end.y - top),
-      };
-      const startLen = Math.hypot(startVector.x, startVector.y);
-      const endLen = Math.hypot(endVector.x, endVector.y);
-      const startUx = startLen > 0 ? startVector.x / startLen : ux;
-      const startUy = startLen > 0 ? startVector.y / startLen : uy;
-      const endUx = endLen > 0 ? endVector.x / endLen : -ux;
-      const endUy = endLen > 0 ? endVector.y / endLen : -uy;
-      const startRadius = getNodeEdgeRadius(a, startUx, startUy, startEntry.radius);
-      const endRadius = getNodeEdgeRadius(b, endUx, endUy, endEntry.radius);
-      lineStart = {
-        x: start.x + startUx * startRadius - left,
-        y: start.y + startUy * startRadius - top,
-      };
-      lineEnd = {
-        x: end.x + endUx * endRadius - left,
-        y: end.y + endUy * endRadius - top,
-      };
-      const labelT = override && Number.isFinite(override.labelT) ? override.labelT : 0.5;
-      const curveInfo = buildQuadraticCurveInfo(lineStart, control, lineEnd);
-      const t = curveInfo.tAtRatio(labelT);
-      const labelPos = getQuadraticPoint(lineStart, control, lineEnd, t);
-      const tangent = getQuadraticTangent(lineStart, control, lineEnd, t);
-      const baseWidth = await measureSvgTextWidth(label, labelSize, labelFont, labelWeight);
-      let angle = 0;
-      let useHorizontal = false;
-      if (Math.abs(tangent.x) > 1e-6 || Math.abs(tangent.y) > 1e-6) {
-        angle = Math.atan2(tangent.y, tangent.x);
-        useHorizontal = shouldUseHorizontalText(angle);
-        if (!useHorizontal) {
-          if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
-            angle += Math.PI;
-          }
-        } else {
-          angle = 0;
-        }
-      }
-      const gapWidth = useHorizontal ? labelSize * 0.9 : baseWidth;
-      const layout = computeEdgeLabelLayoutFromWidth({
-        baseSize: labelSize,
-        baseWidth: gapWidth,
-        lineLen: curveInfo.total,
-        minSize: 4,
-      });
-      const size = layout.size;
-      const gap = layout.gap;
-      const gapHalf = gap / 2;
-      const labelArcLen = curveInfo.total * Math.min(1, Math.max(0, labelT));
-      const tLeft = curveInfo.tAtLength(labelArcLen - gapHalf);
-      const tRight = curveInfo.tAtLength(labelArcLen + gapHalf);
-      const leftSegment = getQuadraticSubcurve(lineStart, control, lineEnd, 0, tLeft);
-      const rightSegment = getQuadraticSubcurve(lineStart, control, lineEnd, tRight, 1);
-      const dashed = !isAdjacentLatticeEdge(a, b);
-      if (leftSegment) {
-        drawCurveSegment(leftSegment, dashed);
-      }
-      if (rightSegment) {
-        drawCurveSegment(rightSegment, dashed);
-      }
-      if (useHorizontal) {
-        const rotation = (angle * 180) / Math.PI;
-        parts.push(
-          await buildSvgTextElement({
-            text: label,
-            x: labelPos.x,
-            y: labelPos.y,
-            font: labelFont,
-            size,
-            fontWeight: labelWeight,
-            anchor: "middle",
-            baseline: "middle",
-            color: themeColors.textSecondary,
-            transform: `rotate(${rotation} ${labelPos.x} ${labelPos.y})`,
-          })
-        );
-      } else {
-        const chars = Array.from(label);
-        const charWidths = await Promise.all(
-          chars.map((char) => measureSvgCharWidth(char, size, labelFont, labelWeight))
-        );
-        const { placements } = placeGlyphsAlongQuadratic({
-          p0: lineStart,
-          p1: control,
-          p2: lineEnd,
-          curveInfo,
-          chars,
-          charWidths,
-          centerArcLen: labelArcLen,
-        });
-        for (const placement of placements) {
-          const rotationDeg = (placement.angle * 180) / Math.PI;
-          parts.push(
-            await buildSvgTextElement({
-              text: placement.char,
-              x: placement.pos.x,
-              y: placement.pos.y,
-              font: labelFont,
-              size,
-              fontWeight: labelWeight,
-              anchor: "middle",
-              baseline: "middle",
-              color: themeColors.textSecondary,
-              transform: `rotate(${rotationDeg} ${placement.pos.x} ${placement.pos.y})`,
-            })
-          );
-        }
-      }
-    }
+  if (analysisLayers.distances) {
+    await emitScene(buildDistanceConnectionsScene(exportNodePosMap).scene);
   }
 
   await emitScene(buildCustomConnectionsScene(exportNodePosMap, null));

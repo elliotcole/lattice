@@ -589,6 +589,10 @@ let lastCustomOctaveReduce = true;
 // contains moves here slice by slice (audit Phase 4.1). Read `doc.x`; change
 // it only with `store.set({ x })`; reactions live in the subscriber set up by
 // bindDocumentReactions().
+// Undo steps close when the runtime commit runs (commitRuntimeToDoc), so a
+// change to store-native fields and the runtime changes it causes — or one
+// user action touching both — land in one step.
+const pendingDocStepClosers = [];
 const store = createStore({
   showHz: false,
   showRatioCents: false,
@@ -622,7 +626,30 @@ const store = createStore({
   edgesBlack: false,
   connectionsBlack: false,
   lineThickness: 1,
-});
+}, { schedule: (closeStep) => pendingDocStepClosers.push(closeStep) });
+// Keys the store owns outright; everything else in the document is committed
+// from the running lattice (see commitRuntimeToDoc).
+const NATIVE_DOC_KEYS = new Set(Object.keys(store.doc));
+if (import.meta.env && import.meta.env.DEV) {
+  // Headless checks read the document directly (dev server only), and find
+  // nodes on screen (2D/3D views; page layout positions nodes differently).
+  window.__latticeDoc = store.doc;
+  window.__latticeStore = store;
+  window.__latticeNodeScreens = () => {
+    const rect = canvas.getBoundingClientRect();
+    return nodes.map((node) => {
+      const point = worldToScreen(getNodeDisplayCoordinate(node));
+      const hit = hitTestScreen({ x: point.x, y: point.y });
+      return {
+        id: node.id,
+        active: Boolean(node.active),
+        clickable: Boolean(hit && hit.id === node.id),
+        x: rect.left + point.x,
+        y: rect.top + point.y,
+      };
+    });
+  };
+}
 const doc = store.doc;
 // Changes made while main.js is still starting up, before the reactions can
 // run (they touch controls and state declared further down); replayed once
@@ -1913,10 +1940,6 @@ let layoutTitleDrag = null;
 let layoutCreatorDrag = null;
 let layoutCustomLabelDrag = null;
 let layoutKeyMappingDrag = null;
-const layoutUndoStack = [];
-const layoutRedoStack = [];
-const LAYOUT_UNDO_LIMIT = 50;
-let layoutWheelUndoTimer = null;
 const LAYOUT_CUSTOM_TEXT_DEFAULT_WIDTH = 260;
 const LAYOUT_CUSTOM_TEXT_MIN_WIDTH = 120;
 let spellingHintActive = false;
@@ -7561,23 +7584,18 @@ function handleKeyDown(event) {
     setCustomPianoMapMode(false);
     return;
   }
-  if (layoutMode && (event.metaKey || event.ctrlKey) && key === "z") {
+  if (!isInPresentationMode() && !isEmbedMode && (event.metaKey || event.ctrlKey) && key === "z") {
     event.preventDefault();
-    if (event.shiftKey) {
-      redoLayoutChange();
-    } else {
-      undoLayoutChange();
-    }
+    stepDocumentHistory(event.shiftKey ? "redo" : "undo");
     return;
   }
-  if (layoutMode && (event.metaKey || event.ctrlKey) && key === "y") {
+  if (!isInPresentationMode() && !isEmbedMode && (event.metaKey || event.ctrlKey) && key === "y") {
     event.preventDefault();
-    redoLayoutChange();
+    stepDocumentHistory("redo");
     return;
   }
   if (layoutMode && layoutAxisEdit && (key === "delete" || key === "backspace")) {
     event.preventDefault();
-    pushLayoutUndoState();
     layoutAxisHidden[layoutAxisEdit] = true;
     layoutAxisEdit = null;
     layoutAxisEditDrag = null;
@@ -10232,7 +10250,6 @@ function openLayoutCustomTextEditor(entryId, options = {}) {
     closeLayoutCustomTextEditor({ commit: true });
   }
   if (!options.isNew && (!layoutCustomTextEditorState || layoutCustomTextEditorState.id !== entryId)) {
-    pushLayoutUndoState();
   }
   const naturalWidth = Math.max(
     LAYOUT_CUSTOM_TEXT_DEFAULT_WIDTH,
@@ -10704,7 +10721,6 @@ function openLayoutCustomLabelDialog(value = "") {
   if (!layoutCustomLabelPending) {
     return;
   }
-  pushLayoutUndoState();
   const entry = createLayoutCustomLabelEntry(layoutCustomLabelPending, {
     text: value,
     width: LAYOUT_CUSTOM_TEXT_DEFAULT_WIDTH,
@@ -15542,7 +15558,6 @@ function onPointerDown(event) {
         } else if (layoutStraightenAnchorId !== hit.id) {
           const anchor = nodeById.get(layoutStraightenAnchorId);
           if (anchor) {
-            pushLayoutUndoState();
             applyLayoutStraightenToNode(hit, anchor, layoutStraightenDir);
             draw();
             schedulePresetUrlUpdate();
@@ -15554,7 +15569,6 @@ function onPointerDown(event) {
         } else if (layoutAlignAnchorId !== hit.id) {
           const anchor = nodeById.get(layoutAlignAnchorId);
           if (anchor) {
-            pushLayoutUndoState();
             applyLayoutAlignToNode(hit, anchor, layoutAlignMode);
             draw();
             schedulePresetUrlUpdate();
@@ -15579,7 +15593,6 @@ function onPointerDown(event) {
     }
     if (layoutMode) {
       view.dragging = true;
-      pushLayoutUndoState();
       view.dragStart = { x: event.offsetX, y: event.offsetY };
       view.dragOffsetStart = { x: view.offsetX, y: view.offsetY };
       view.lastPointer = { x: event.offsetX, y: event.offsetY };
@@ -15750,7 +15763,6 @@ function onPointerDown(event) {
     if (event.altKey && !event.shiftKey) {
       const handleHit = hitTestAxisLegendHandle(screenPoint);
       if (handleHit && layoutAxisOffsets[handleHit.axis]) {
-        pushLayoutUndoState();
         layoutAxisOffsets[handleHit.axis] = { x: 0, y: 0 };
         layoutAxisAngles[handleHit.axis] = null;
         schedulePresetUrlUpdate();
@@ -15759,7 +15771,6 @@ function onPointerDown(event) {
       }
       const customLabelHit = hitTestLayoutCustomLabel(screenPoint);
       if (customLabelHit) {
-        pushLayoutUndoState();
         const entry = layoutCustomLabels.find((label) => label.id === customLabelHit.entry.id);
         if (entry) {
           entry.position = null;
@@ -15770,7 +15781,6 @@ function onPointerDown(event) {
       }
       const titleHit = hitTestLayoutTitle(screenPoint);
       if (titleHit) {
-        pushLayoutUndoState();
         layoutTitlePosition = null;
         schedulePresetUrlUpdate();
         draw();
@@ -15778,7 +15788,6 @@ function onPointerDown(event) {
       }
       const creatorHit = hitTestLayoutCreator(screenPoint);
       if (creatorHit) {
-        pushLayoutUndoState();
         layoutCreatorPosition = null;
         schedulePresetUrlUpdate();
         draw();
@@ -15786,7 +15795,6 @@ function onPointerDown(event) {
       }
       const axisHit = hitTestAxisLegend(screenPoint);
       if (axisHit && layoutAxisOffsets[axisHit.axis]) {
-        pushLayoutUndoState();
         layoutAxisOffsets[axisHit.axis] = { x: 0, y: 0 };
         layoutAxisAngles[axisHit.axis] = null;
         schedulePresetUrlUpdate();
@@ -15795,7 +15803,6 @@ function onPointerDown(event) {
       }
       const keyMappingHit = hitTestLayoutKeyMappingLabel(screenPoint);
       if (keyMappingHit) {
-        pushLayoutUndoState();
         layoutKeyMappingOffsets.delete(keyMappingHit.node.id);
         schedulePresetUrlUpdate();
         draw();
@@ -15803,7 +15810,6 @@ function onPointerDown(event) {
       }
       const labelHit = hitTestNoteLabel(screenPoint);
       if (labelHit) {
-        pushLayoutUndoState();
         layoutLabelOffsets.delete(labelHit.node.id);
         schedulePresetUrlUpdate();
         draw();
@@ -15811,14 +15817,12 @@ function onPointerDown(event) {
       }
       const edgeLabelHit = hitTestEdgeLabel(screenPoint);
       if (edgeLabelHit && edgeLabelHit.key) {
-        pushLayoutUndoState();
         lineLabelPositionOverrides.delete(edgeLabelHit.key);
         schedulePresetUrlUpdate();
         draw();
         return;
       }
       if (hit) {
-        pushLayoutUndoState();
         layoutPositions.delete(hit.id);
         if (!hit.isCustom) {
           const key = `${hit.exponentX},${hit.exponentY},${hit.exponentZ || 0}`;
@@ -15832,7 +15836,6 @@ function onPointerDown(event) {
     if (layoutAxisEdit) {
       const handleHit = hitTestAxisLegendHandle(screenPoint);
       if (handleHit) {
-        pushLayoutUndoState();
         layoutAxisEditDrag = { axis: handleHit.axis };
         canvas.setPointerCapture(event.pointerId);
       }
@@ -15841,7 +15844,6 @@ function onPointerDown(event) {
     const customLabelHit = hitTestLayoutCustomLabel(screenPoint);
     if (customLabelHit) {
       event.preventDefault();
-      pushLayoutUndoState();
       const { left, top } = getLayoutPageRect();
       layoutCustomLabelDrag = {
         id: customLabelHit.entry.id,
@@ -15858,7 +15860,6 @@ function onPointerDown(event) {
     const titleHit = hitTestLayoutTitle(screenPoint);
     if (titleHit) {
       event.preventDefault();
-      pushLayoutUndoState();
       const { left, top } = getLayoutPageRect();
       layoutTitleDrag = {
         offsetX: titleHit.pos.x - screenPoint.x,
@@ -15874,7 +15875,6 @@ function onPointerDown(event) {
     const creatorHit = hitTestLayoutCreator(screenPoint);
     if (creatorHit) {
       event.preventDefault();
-      pushLayoutUndoState();
       const { left, top } = getLayoutPageRect();
       layoutCreatorDrag = {
         offsetX: creatorHit.pos.x - screenPoint.x,
@@ -15889,7 +15889,6 @@ function onPointerDown(event) {
     }
     const axisHit = hitTestAxisLegend(screenPoint);
     if (axisHit) {
-      pushLayoutUndoState();
       layoutAxisDrag = {
         axis: axisHit.axis,
         offsetX: axisHit.center.x - screenPoint.x,
@@ -15904,7 +15903,6 @@ function onPointerDown(event) {
     }
     const keyMappingHit = hitTestLayoutKeyMappingLabel(screenPoint);
     if (keyMappingHit) {
-      pushLayoutUndoState();
       layoutKeyMappingDrag = {
         nodeId: keyMappingHit.node.id,
         offsetX: keyMappingHit.labelPos.x - screenPoint.x,
@@ -15920,7 +15918,6 @@ function onPointerDown(event) {
     }
     const labelHit = hitTestNoteLabel(screenPoint);
     if (labelHit) {
-      pushLayoutUndoState();
       layoutLabelDrag = {
         nodeId: labelHit.node.id,
         offsetX: labelHit.labelPos.x - screenPoint.x,
@@ -15942,7 +15939,6 @@ function onPointerDown(event) {
       edgeLabelHit.key &&
       shouldShowEdgeLabel(edgeLabelHit.a, edgeLabelHit.b)
     ) {
-      pushLayoutUndoState();
       lineLabelDrag = {
         key: edgeLabelHit.key,
         a: edgeLabelHit.a,
@@ -15956,7 +15952,6 @@ function onPointerDown(event) {
     if (hit) {
       const worldPoint = screenToWorld(screenPoint);
       const coord = getNodeDisplayCoordinate(hit);
-      pushLayoutUndoState();
       layoutDrag = {
         nodeId: hit.id,
         offsetX: coord.x - worldPoint.x,
@@ -15974,7 +15969,6 @@ function onPointerDown(event) {
       return;
     }
     view.dragging = true;
-    pushLayoutUndoState();
     view.dragStart = { x: event.offsetX, y: event.offsetY };
     view.dragOffsetStart = { x: view.offsetX, y: view.offsetY };
     view.lastPointer = { x: event.offsetX, y: event.offsetY };
@@ -16161,7 +16155,6 @@ function onCanvasDoubleClick(event) {
   const index = shapes.indexOf(current);
   const next = shapes[(index + 1) % shapes.length];
   const defaultShape = getDefaultLayoutNodeShape(hit);
-  pushLayoutUndoState();
   if (next === defaultShape) {
     layoutNodeShapes.delete(hit.id);
   } else {
@@ -17272,7 +17265,6 @@ function onWheel(event) {
     return;
   }
   if (layoutMode) {
-    pushLayoutUndoStateForWheel();
   }
   const zoomDelta = event.deltaY > 0 ? 0.92 : 1.08;
   if (is3DMode) {
@@ -20675,116 +20667,8 @@ function syncLayoutScaleInput() {
   updateLayoutScaleReadout();
 }
 
-function captureLayoutUndoState() {
-  return {
-    view: {
-      zoom: view.zoom,
-      offsetX: view.offsetX,
-      offsetY: view.offsetY,
-      rotX: view.rotX,
-      rotY: view.rotY,
-    },
-    layoutView: { ...layoutView },
-    layoutPositions: new Map(
-      Array.from(layoutPositions.entries()).map(([id, coord]) => [id, { ...coord }])
-    ),
-    layoutLabelOffsets: new Map(
-      Array.from(layoutLabelOffsets.entries()).map(([id, offset]) => [id, { ...offset }])
-    ),
-    layoutKeyMappingOffsets: new Map(
-      Array.from(layoutKeyMappingOffsets.entries()).map(([id, offset]) => [
-        id,
-        { ...offset },
-      ])
-    ),
-    layoutPositionOffsets: new Map(
-      Array.from(layoutPositionOffsets.entries()).map(([key, offset]) => [
-        key,
-        { ...offset },
-      ])
-    ),
-    layoutNodeShapes: new Map(layoutNodeShapes),
-    layoutAxisOffsets: {
-      x: { ...layoutAxisOffsets.x },
-      y: { ...layoutAxisOffsets.y },
-      z: { ...layoutAxisOffsets.z },
-    },
-    layoutAxisHidden: { ...layoutAxisHidden },
-    layoutAxisAngles: { ...layoutAxisAngles },
-    layoutTitlePosition: layoutTitlePosition ? { ...layoutTitlePosition } : null,
-    layoutCreatorPosition: layoutCreatorPosition ? { ...layoutCreatorPosition } : null,
-    layoutCustomLabels: layoutCustomLabels.map((entry) => ({
-      ...entry,
-      position: entry.position ? { ...entry.position } : null,
-      width: entry.width ?? null,
-      align: normalizeLayoutCustomLabelAlign(entry.align),
-    })),
-    layoutSpacing: { ...layoutSpacing },
-    layoutNodeSize,
-    layoutRatioTextSize,
-    layoutNoteTextSize,
-    layoutTriangleLabelTextSize,
-    layoutCustomLabelTextSize,
-    layoutKeyMappingTextSize,
-    layoutAxisLegendTextSize,
-    layoutLineLabelTextSize,
-    layoutKeyMappingOffset,
-    layoutKeyMappingDark,
-    layoutKeyMappingPrefix,
-    layoutKeyMappingSuffix,
-    layoutKeyMappingMode,
-    layoutNodeShape,
-    layoutTitle,
-    layoutCreator,
-    layoutTitleSize,
-    layoutCreatorSize,
-    layoutTitleMargin,
-    layoutTitleFont,
-    layoutCreatorFont,
-    layoutRatioFont,
-    layoutNoteFont,
-    layoutTriangleLabelFont,
-    layoutCustomLabelFont,
-    layoutKeyMappingFont,
-    layoutAxisLegendFont,
-    layoutLineLabelFont,
-    layoutTitleFontWeight,
-    layoutCreatorFontWeight,
-    layoutRatioFontWeight,
-    layoutNoteFontWeight,
-    layoutTriangleLabelFontWeight,
-    layoutCustomLabelFontWeight,
-    layoutKeyMappingFontWeight,
-    layoutAxisLegendFontWeight,
-    layoutLineLabelFontWeight,
-    layoutUnifyNodeSize,
-    layoutPerspectiveTextSize,
-    layoutPageSize,
-    layoutOrientation,
-    layoutLockPosition,
-  };
-}
 
-function pushLayoutUndoState() {
-  if (!layoutMode) {
-    return;
-  }
-  layoutUndoStack.push(captureLayoutUndoState());
-  layoutRedoStack.length = 0;
-  if (layoutUndoStack.length > LAYOUT_UNDO_LIMIT) {
-    layoutUndoStack.shift();
-  }
-}
 
-function pushLayoutUndoStateForWheel() {
-  if (!layoutMode || layoutWheelUndoTimer) {
-    return;
-  }
-  pushLayoutUndoState();
-  layoutWheelUndoTimer = setTimeout(() => {
-    layoutWheelUndoTimer = null;
-  }, 200);
-}
 
 function setControlValue(control, value) {
   if (control) {
@@ -20846,150 +20730,8 @@ function syncLayoutEditorControls({ includeFreezeToggle = false } = {}) {
   updateLayoutLinkControls();
 }
 
-function applyLayoutUndoState(state) {
-  if (!state) {
-    return;
-  }
-  if (layoutCustomTextEditorState) {
-    closeLayoutCustomTextEditor({ commit: false });
-  }
-  layoutPositions = new Map(
-    Array.from(state.layoutPositions.entries()).map(([id, coord]) => [id, { ...coord }])
-  );
-  layoutLabelOffsets = new Map(
-    Array.from(state.layoutLabelOffsets.entries()).map(([id, offset]) => [id, { ...offset }])
-  );
-  layoutKeyMappingOffsets = new Map(
-    Array.from((state.layoutKeyMappingOffsets || new Map()).entries()).map(
-      ([id, offset]) => [id, { ...offset }]
-    )
-  );
-  layoutPositionOffsets = new Map(
-    Array.from(state.layoutPositionOffsets.entries()).map(([key, offset]) => [
-      key,
-      { ...offset },
-    ])
-  );
-  layoutNodeShapes = new Map(state.layoutNodeShapes);
-  layoutAxisOffsets = {
-    x: { ...state.layoutAxisOffsets.x },
-    y: { ...state.layoutAxisOffsets.y },
-    z: { ...state.layoutAxisOffsets.z },
-  };
-  layoutAxisHidden = state.layoutAxisHidden
-    ? { ...state.layoutAxisHidden }
-    : { ...LAYOUT_DEFAULTS.axisHidden };
-  layoutAxisAngles = { ...state.layoutAxisAngles };
-  layoutTitlePosition = state.layoutTitlePosition ? { ...state.layoutTitlePosition } : null;
-  layoutCreatorPosition = state.layoutCreatorPosition ? { ...state.layoutCreatorPosition } : null;
-  layoutCustomLabels = Array.isArray(state.layoutCustomLabels)
-    ? state.layoutCustomLabels.map((entry) => ({
-        ...entry,
-        position: entry.position ? { ...entry.position } : null,
-        width: normalizeLayoutCustomLabelWidth(entry.width),
-        align: normalizeLayoutCustomLabelAlign(entry.align),
-      }))
-    : [];
-  const maxCustomId = layoutCustomLabels.reduce(
-    (max, entry) => (Number.isFinite(entry.id) ? Math.max(max, entry.id) : max),
-    0
-  );
-  layoutCustomLabelId = maxCustomId + 1;
-  layoutNodeSize = state.layoutNodeSize;
-  layoutRatioTextSize = state.layoutRatioTextSize;
-  layoutNoteTextSize = state.layoutNoteTextSize;
-  layoutTriangleLabelTextSize = state.layoutTriangleLabelTextSize;
-  layoutCustomLabelTextSize = state.layoutCustomLabelTextSize ?? layoutCustomLabelTextSize;
-  layoutKeyMappingTextSize = state.layoutKeyMappingTextSize ?? layoutKeyMappingTextSize;
-  layoutAxisLegendTextSize =
-    state.layoutAxisLegendTextSize ?? layoutAxisLegendTextSize;
-  layoutLineLabelTextSize =
-    state.layoutLineLabelTextSize ?? layoutLineLabelTextSize;
-  layoutKeyMappingOffset = state.layoutKeyMappingOffset ?? layoutKeyMappingOffset;
-  layoutKeyMappingDark = state.layoutKeyMappingDark ?? layoutKeyMappingDark;
-  layoutKeyMappingPrefix = state.layoutKeyMappingPrefix ?? layoutKeyMappingPrefix;
-  layoutKeyMappingSuffix = state.layoutKeyMappingSuffix ?? layoutKeyMappingSuffix;
-  layoutKeyMappingMode = state.layoutKeyMappingMode ?? layoutKeyMappingMode;
-  layoutNodeShape = state.layoutNodeShape;
-  layoutTitle = state.layoutTitle;
-  layoutCreator = state.layoutCreator;
-  layoutTitleSize = state.layoutTitleSize;
-  layoutCreatorSize = state.layoutCreatorSize ?? layoutCreatorSize;
-  layoutTitleMargin = state.layoutTitleMargin;
-  layoutTitleFont = state.layoutTitleFont;
-  layoutRatioFont = state.layoutRatioFont;
-  layoutNoteFont = state.layoutNoteFont;
-  layoutTriangleLabelFont = state.layoutTriangleLabelFont;
-  layoutCustomLabelFont = state.layoutCustomLabelFont ?? layoutCustomLabelFont;
-  layoutKeyMappingFont = state.layoutKeyMappingFont ?? layoutKeyMappingFont;
-  layoutAxisLegendFont = state.layoutAxisLegendFont ?? layoutAxisLegendFont;
-  layoutLineLabelFont = state.layoutLineLabelFont ?? layoutLineLabelFont;
-  layoutCreatorFont = state.layoutCreatorFont ?? layoutCreatorFont;
-  layoutTitleFontWeight = state.layoutTitleFontWeight ?? layoutTitleFontWeight;
-  layoutRatioFontWeight = state.layoutRatioFontWeight ?? layoutRatioFontWeight;
-  layoutNoteFontWeight = state.layoutNoteFontWeight ?? layoutNoteFontWeight;
-  layoutTriangleLabelFontWeight =
-    state.layoutTriangleLabelFontWeight ?? layoutTriangleLabelFontWeight;
-  layoutCustomLabelFontWeight =
-    state.layoutCustomLabelFontWeight ?? layoutCustomLabelFontWeight;
-  layoutKeyMappingFontWeight =
-    state.layoutKeyMappingFontWeight ?? layoutKeyMappingFontWeight;
-  layoutAxisLegendFontWeight =
-    state.layoutAxisLegendFontWeight ?? layoutAxisLegendFontWeight;
-  layoutLineLabelFontWeight =
-    state.layoutLineLabelFontWeight ?? layoutLineLabelFontWeight;
-  layoutCreatorFontWeight =
-    state.layoutCreatorFontWeight ?? layoutCreatorFontWeight;
-  layoutSpacing = state.layoutSpacing
-    ? {
-        x: Number(state.layoutSpacing.x) || 1,
-        y: Number(state.layoutSpacing.y) || 1,
-        z: Number(state.layoutSpacing.z) || 1,
-      }
-    : { ...layoutSpacing };
-  layoutUnifyNodeSize = state.layoutUnifyNodeSize;
-  layoutPerspectiveTextSize = state.layoutPerspectiveTextSize ?? layoutPerspectiveTextSize;
-  layoutPageSize = state.layoutPageSize;
-  layoutOrientation = state.layoutOrientation;
-  layoutLockPosition = state.layoutLockPosition;
-  layoutView = layoutLockPosition ? { ...state.layoutView } : { ...state.view };
-  view.zoom = state.view.zoom;
-  view.offsetX = state.view.offsetX;
-  view.offsetY = state.view.offsetY;
-  view.rotX = state.view.rotX;
-  view.rotY = state.view.rotY;
-  syncLayoutEditorControls();
-  syncLayoutFontVars();
-  syncLayoutScaleInput();
-  invalidateLabelCache({ clearTextWidths: true });
-  draw();
-  markIsomorphicDirty();
-  schedulePresetUrlUpdate();
-}
 
-function undoLayoutChange() {
-  if (!layoutMode || !layoutUndoStack.length) {
-    return;
-  }
-  layoutRedoStack.push(captureLayoutUndoState());
-  if (layoutRedoStack.length > LAYOUT_UNDO_LIMIT) {
-    layoutRedoStack.shift();
-  }
-  const state = layoutUndoStack.pop();
-  applyLayoutUndoState(state);
-}
 
-function redoLayoutChange() {
-  if (!layoutMode || !layoutRedoStack.length) {
-    return;
-  }
-  layoutUndoStack.push(captureLayoutUndoState());
-  if (layoutUndoStack.length > LAYOUT_UNDO_LIMIT) {
-    layoutUndoStack.shift();
-  }
-  const state = layoutRedoStack.pop();
-  applyLayoutUndoState(state);
-}
 
 function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
   if (layoutCustomTextEditorState) {
@@ -21006,7 +20748,6 @@ function resetLayoutState({ resetSettings = true, resetView = true } = {}) {
   layoutCustomLabelId = 1;
   pendingLayoutPositionOffsets = null;
   pendingLayoutSpacing = null;
-  layoutRedoStack.length = 0;
   layoutTitlePosition = null;
   layoutCreatorPosition = null;
     layoutAxisOffsets = {
@@ -21139,8 +20880,8 @@ function setLayoutMode(enabled, { force = false } = {}) {
   if (enabled) {
     setCustomPianoMapMode(false);
     closeKeyboardMapPopover();
-    store.set({ axes: false });
-    store.set({ grid: false });
+    // Page layout hides axes and grid; a view switch, not an undoable edit.
+    store.set({ axes: false, grid: false }, { history: false });
     setControlChecked(navAxesToggle, false);
     setControlChecked(navGridToggle, false);
     setControlChecked(mode3dCheckbox, false);
@@ -21177,8 +20918,10 @@ function setLayoutMode(enabled, { force = false } = {}) {
     closeLayoutFontPopover();
     layoutAxisEdit = null;
     layoutAxisEditDrag = null;
-    store.set({ axes: layoutPrevState.showAxes });
-    store.set({ grid: layoutPrevState.showGrid });
+    store.set(
+      { axes: layoutPrevState.showAxes, grid: layoutPrevState.showGrid },
+      { history: false }
+    );
     setControlChecked(navAxesToggle, doc.axes);
     setControlChecked(navGridToggle, doc.grid);
     if (layoutLockPosition) {
@@ -24032,7 +23775,109 @@ function updatePresetUrl(trigger = "direct") {
   }
 }
 
+// ---- Runtime-backed document keys ----
+// Nodes, per-node maps, layout and lattice structure still live in the
+// running lattice. After any change (every mutation already schedules a URL
+// update) they are committed into the store, which records the undo step;
+// undo/redo apply them back through applyPresetState, like a snapshot recall.
+// View mode (2D/3D, page layout) and playback are not part of undo.
+const RUNTIME_DOC_SKIPPED_KEYS = new Set(["v", "mode3d", "play", "caption"]);
+let runtimeCommitTimer = null;
+let runtimeCommitRecordsHistory = true;
+
+function captureRuntimeDocPatch() {
+  const state = getPresetState({ keepEmptyCollections: true }) || {};
+  if (state.layout && typeof state.layout === "object") {
+    const layout = { ...state.layout };
+    delete layout.mode;
+    state.layout = layout;
+  }
+  const patch = {};
+  const keys = new Set([...Object.keys(state), ...Object.keys(doc)]);
+  for (const key of keys) {
+    if (NATIVE_DOC_KEYS.has(key) || RUNTIME_DOC_SKIPPED_KEYS.has(key)) {
+      continue;
+    }
+    if (JSON.stringify(state[key]) !== JSON.stringify(doc[key])) {
+      patch[key] = state[key];
+    }
+  }
+  return patch;
+}
+
+function commitRuntimeToDoc() {
+  if (runtimeCommitTimer) {
+    clearTimeout(runtimeCommitTimer);
+    runtimeCommitTimer = null;
+  }
+  store.set(captureRuntimeDocPatch(), { history: runtimeCommitRecordsHistory });
+  runtimeCommitRecordsHistory = true;
+  pendingDocStepClosers.splice(0).forEach((closeStep) => closeStep());
+}
+
+function scheduleRuntimeCommit() {
+  if (runtimeCommitTimer) {
+    clearTimeout(runtimeCommitTimer);
+  }
+  runtimeCommitTimer = setTimeout(commitRuntimeToDoc, 250);
+}
+
+/** Put the runtime-backed document keys back into the lattice (undo/redo). */
+function applyRuntimeDocToLattice() {
+  const state = getPresetState({ keepEmptyCollections: true });
+  for (const key of Object.keys(doc)) {
+    if (!NATIVE_DOC_KEYS.has(key) && !RUNTIME_DOC_SKIPPED_KEYS.has(key)) {
+      state[key] = doc[key];
+    }
+  }
+  if (state.layout && typeof state.layout === "object") {
+    state.layout = { ...state.layout, mode: layoutMode };
+  }
+  state.mode3d = Boolean(is3DMode);
+  applyPresetState(state, {
+    skipLayoutModeSwitch: true,
+    skipStopVoices: true,
+    preserveViewMode: true,
+    preserveActiveVoicesOnSynthChange: true,
+  });
+}
+
+/** Cmd+Z / Shift+Cmd+Z everywhere: one step of the document history. */
+function stepDocumentHistory(direction) {
+  if (runtimeCommitTimer) {
+    commitRuntimeToDoc();
+  }
+  pendingDocStepClosers.splice(0).forEach((closeStep) => closeStep());
+  const touched = new Set();
+  const stopWatching = store.subscribe((changed) => changed.forEach((key) => touched.add(key)));
+  const moved = direction === "redo" ? store.redo() : store.undo();
+  stopWatching();
+  if (!moved) {
+    return false;
+  }
+  if ([...touched].some((key) => !NATIVE_DOC_KEYS.has(key))) {
+    // Applying the lattice state rewrites store-native fields as a side
+    // effect (and page layout re-hides axes/grid); none of that is a new
+    // step, and the native fields keep the values this undo step gave them.
+    const nativeValues = {};
+    NATIVE_DOC_KEYS.forEach((key) => {
+      nativeValues[key] = doc[key];
+    });
+    store.withoutHistory(() => {
+      applyRuntimeDocToLattice();
+      store.set(nativeValues);
+    });
+    // Whatever the apply normalised is absorbed without becoming a new step.
+    runtimeCommitRecordsHistory = false;
+    commitRuntimeToDoc();
+  }
+  updateUiHint();
+  draw();
+  return true;
+}
+
 function schedulePresetUrlUpdate(trigger = "scheduled") {
+  scheduleRuntimeCommit();
   if (!presetSyncEnabled) {
     return;
   }
@@ -26492,8 +26337,6 @@ function resetLattice() {
   nodeVolumeLimits.clear();
   triangleDiagonals.clear();
   triangleLabels.clear();
-  layoutUndoStack.length = 0;
-  layoutRedoStack.length = 0;
   fundamentalNoteSelect.value = "60";
   onFundamentalNoteChange();
   resetLayoutState();
@@ -27249,8 +27092,12 @@ function bindDocumentReactions() {
     if (changed.has("synth") && doc.synth && !sameSynthSettings(readSynthControls(), doc.synth)) {
       applyPresetSynthState(doc.synth, { preserveActiveVoicesOnSynthChange: true });
     }
-    scheduleDraw();
-    schedulePresetUrlUpdate();
+    // Runtime-backed keys only change through commitRuntimeToDoc, after the
+    // mutation that caused them has already redrawn and scheduled the URL.
+    if ([...changed].some((key) => NATIVE_DOC_KEYS.has(key))) {
+      scheduleDraw();
+      schedulePresetUrlUpdate();
+    }
   };
   // Synth controls write the document after their own handlers have run
   // (capture + microtask also catches change events dispatched in code).
@@ -27318,6 +27165,10 @@ presetSyncEnabled = !isEmbedMode && !isPresentationMode;
 if (!isEmbedMode && !isPresentationMode) {
   updatePresetUrl();
 }
+// The loaded document is where undo starts.
+runtimeCommitRecordsHistory = false;
+commitRuntimeToDoc();
+store.clearHistory();
 if (requestedTour !== null) {
   requestAnimationFrame(() => {
     if (requestedTour === "deep") {
@@ -28405,7 +28256,6 @@ bindLayoutSelectControl(layoutOrientationSelect, (value) => {
   layoutOrientation = value || "portrait";
 });
 bindOptionalInput(layoutScaleInput, () => {
-  pushLayoutUndoState();
   view.zoom = Number(layoutScaleInput.value) || 1;
   if (layoutLockPosition && layoutMode) {
     layoutView = { ...layoutView, zoom: view.zoom };
@@ -28468,7 +28318,6 @@ if (layoutKeyMappingTrigger && layoutKeyMappingPopover) {
 }
 function bindLayoutNumericInput(inputElement, { applyValue, afterChange = null }) {
   bindOptionalInput(inputElement, () => {
-    pushLayoutUndoState();
     applyValue(Number(inputElement.value));
     if (typeof afterChange === "function") {
       afterChange();
@@ -28480,7 +28329,6 @@ function bindLayoutNumericInput(inputElement, { applyValue, afterChange = null }
 
 function bindLayoutBooleanToggle(toggle, applyValue) {
   bindOptionalChange(toggle, () => {
-    pushLayoutUndoState();
     applyValue(Boolean(toggle.checked));
     draw();
     schedulePresetUrlUpdate();
@@ -28489,7 +28337,6 @@ function bindLayoutBooleanToggle(toggle, applyValue) {
 
 function bindLayoutTextInput(inputElement, applyValue) {
   bindOptionalInput(inputElement, () => {
-    pushLayoutUndoState();
     applyValue(String(inputElement.value || "").trim());
     draw();
     schedulePresetUrlUpdate();
@@ -28498,7 +28345,6 @@ function bindLayoutTextInput(inputElement, applyValue) {
 
 function bindLayoutSelectControl(selectElement, applyValue) {
   bindOptionalChange(selectElement, () => {
-    pushLayoutUndoState();
     applyValue(selectElement.value);
     draw();
     schedulePresetUrlUpdate();
@@ -29050,7 +28896,6 @@ function bindLayoutFontFamilyChange(
   { getCurrent, setCurrent, getWeight, getSize, syncVars = false, invalidateCache = true }
 ) {
   bindOptionalChange(selectElement, () => {
-    pushLayoutUndoState();
     const nextValue = selectElement.value || getCurrent();
     setCurrent(nextValue);
     if (syncVars) {
@@ -29077,7 +28922,6 @@ function bindLayoutFontWeightChange(
   }
 ) {
   bindOptionalChange(selectElement, () => {
-    pushLayoutUndoState();
     const nextValue = Number(selectElement.value) || getCurrent();
     setCurrent(nextValue);
     if (invalidateCache) {
@@ -29292,14 +29136,12 @@ bindOptionalChange(layoutPerspectiveTextSizeToggle, () => {
       syncLayoutPerspectiveTextToggleState();
       return;
     }
-    pushLayoutUndoState();
     layoutPerspectiveTextSize = layoutPerspectiveTextSizeToggle.checked;
     syncLayoutPerspectiveTextToggleState();
     draw();
     schedulePresetUrlUpdate();
 });
 bindOptionalClick(layoutResetButton, () => {
-    pushLayoutUndoState();
     const preserveLockPosition = layoutLockPosition;
     const preservedLayoutView = preserveLockPosition ? { ...layoutView } : null;
     resetLayoutState({ resetView: false });
@@ -29831,7 +29673,6 @@ if (layoutCustomLabelDialog && layoutCustomLabelInput) {
     if (layoutCustomLabelEditId != null) {
       const index = layoutCustomLabels.findIndex((entry) => entry.id === layoutCustomLabelEditId);
       if (index !== -1) {
-        pushLayoutUndoState();
         if (text) {
           layoutCustomLabels[index] = { ...layoutCustomLabels[index], text };
         } else {
@@ -29849,7 +29690,6 @@ if (layoutCustomLabelDialog && layoutCustomLabelInput) {
       return;
     }
     if (layoutCustomLabelDialog.returnValue === "confirm" && text) {
-      pushLayoutUndoState();
       layoutCustomLabels.push({
         id: layoutCustomLabelId++,
         text,

@@ -123,6 +123,25 @@ describe("document store", () => {
     expect(store.doc.list).toBe(original);
   });
 
+  it("a step ends at the document as it stood when the step closed", () => {
+    const { store, tick } = setup();
+    store.set({ a: 2 });
+    store.set({ a: 5 }, { history: false });
+    tick();
+    store.undo();
+    expect(store.doc.a).toBe(1);
+    store.redo();
+    expect(store.doc.a).toBe(5);
+  });
+
+  it("withoutHistory records nothing", () => {
+    const { store, tick } = setup();
+    store.withoutHistory(() => store.set({ a: 9 }));
+    tick();
+    expect(store.canUndo()).toBe(false);
+    expect(store.inspectHistory()).toEqual({ undo: [], redo: [] });
+  });
+
   it("caps the history", () => {
     const { store, tick } = setup({ a: 0 }, { historyLimit: 3 });
     for (let i = 1; i <= 5; i += 1) {

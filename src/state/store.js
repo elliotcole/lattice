@@ -43,6 +43,7 @@ export function createStore(
   const redoStack = [];
   let openStep = null;
   let lastCoalescedAt = -Infinity;
+  let historyPaused = 0;
 
   function notify(changed, previous) {
     for (const subscriber of subscribers) {
@@ -90,9 +91,20 @@ export function createStore(
   function closeAtEndOfTask(step) {
     schedule(() => {
       if (openStep === step) {
-        openStep = null;
+        closeOpenStep();
       }
     });
+  }
+
+  // A step ends at the document the user saw: history-free writes made while
+  // it was open (view-mode side effects) can overwrite keys it recorded.
+  function closeOpenStep() {
+    if (openStep) {
+      for (const key of openStep.after.keys()) {
+        openStep.after.set(key, doc[key]);
+      }
+    }
+    openStep = null;
   }
 
   /**
@@ -116,7 +128,7 @@ export function createStore(
     for (const [key, value] of after) {
       doc[key] = value;
     }
-    if (history) {
+    if (history && !historyPaused) {
       record(before, after, coalesce);
     }
     notify(new Set(after.keys()), Object.fromEntries(before));
@@ -136,7 +148,7 @@ export function createStore(
       return () => subscribers.delete(fn);
     },
     undo() {
-      openStep = null;
+      closeOpenStep();
       const step = undoStack.pop();
       if (!step) {
         return false;
@@ -146,7 +158,7 @@ export function createStore(
       return true;
     },
     redo() {
-      openStep = null;
+      closeOpenStep();
       const step = redoStack.pop();
       if (!step) {
         return false;
@@ -155,11 +167,29 @@ export function createStore(
       applyStep(step.after);
       return true;
     },
+    /** Run `fn` with history recording off (applying undo, view-mode side effects). */
+    withoutHistory(fn) {
+      historyPaused += 1;
+      try {
+        return fn();
+      } finally {
+        historyPaused -= 1;
+      }
+    },
+    /** The recorded steps as { before, after } plain objects (tests, debugging). */
+    inspectHistory() {
+      const plain = (step) => ({
+        before: Object.fromEntries(step.before),
+        after: Object.fromEntries(step.after),
+        tag: step.tag,
+      });
+      return { undo: undoStack.map(plain), redo: redoStack.map(plain) };
+    },
     canUndo: () => undoStack.length > 0,
     canRedo: () => redoStack.length > 0,
     /** Forget all history (a new document was loaded and shouldn't undo into the old one). */
     clearHistory() {
-      openStep = null;
+      closeOpenStep();
       undoStack.length = 0;
       redoStack.length = 0;
     },

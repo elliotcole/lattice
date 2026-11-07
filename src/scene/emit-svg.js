@@ -13,7 +13,7 @@ import { nodeShapePoints } from "./display-list.js";
 //     can't be loaded (a live <text> element is emitted instead)
 
 const SVG_ANCHOR = { left: "start", center: "middle", right: "end" };
-const SVG_BASELINE = { top: "text-before-edge", middle: "middle" };
+const SVG_BASELINE = { top: "text-before-edge", middle: "middle", bottom: "text-after-edge" };
 
 /** Emit `list` as SVG element strings. */
 export async function emitDisplayListSvg(list, { measure, outline }) {
@@ -48,6 +48,17 @@ export async function emitDisplayListSvg(list, { measure, outline }) {
         break;
       case "nodeShape":
         parts.push(emitNodeShape(item));
+        break;
+      case "rect":
+        parts.push(
+          `<rect x="${item.x}" y="${item.y}" width="${item.width}" height="${item.height}"${
+            item.radius ? ` rx="${item.radius}" ry="${item.radius}"` : ""
+          } ${svgColorAttr("fill", item.fill)}${
+            item.stroke
+              ? ` ${svgColorAttr("stroke", item.stroke)} stroke-width="${item.strokeWidth ?? 1}"`
+              : ""
+          }${opacityAttr(item)} />`,
+        );
         break;
       case "curve":
         parts.push(

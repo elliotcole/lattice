@@ -62,6 +62,17 @@ const PAINTERS = {
     }
     ctx.stroke();
   },
+  rect(ctx, item) {
+    ctx.fillStyle = item.fill;
+    ctx.beginPath();
+    ctx.roundRect(item.x, item.y, item.width, item.height, item.radius || 0);
+    ctx.fill();
+    if (item.stroke) {
+      ctx.strokeStyle = item.stroke;
+      ctx.lineWidth = item.strokeWidth ?? 1;
+      ctx.stroke();
+    }
+  },
   curve(ctx, item) {
     ctx.strokeStyle = item.color;
     ctx.lineWidth = item.width;

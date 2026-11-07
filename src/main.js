@@ -45,6 +45,7 @@ import {
   arrow as sceneArrow,
   nodeShape as sceneNodeShape,
   curve as sceneCurve,
+  rect as sceneRect,
   offsetDisplayList,
   DIAMOND_RADIUS_SCALE,
 } from "./scene/display-list.js";
@@ -13674,6 +13675,80 @@ function addDistanceLineSegments(nodePosMap, segments) {
   }
 }
 
+// Where every node is on screen and how big, in paint order (lattice nodes
+// back to front, custom nodes on top), plus the obstacles detail labels
+// avoid: node circles, edge/connection/diagonal/distance segments, and
+// (filled in while labels are placed) the label rects themselves.
+function buildNodeLayout() {
+  const nodeRenderList = nodes
+    .map((node) => ({
+      node,
+      pos: worldToScreen(getNodeDisplayCoordinate(node)),
+    }))
+    .sort((a, b) => {
+      if (a.node.isCustom && !b.node.isCustom) {
+        return 1;
+      }
+      if (!a.node.isCustom && b.node.isCustom) {
+        return -1;
+      }
+      return a.pos.depth - b.pos.depth;
+    });
+  const nodePosMap = new Map();
+  nodeRenderList.forEach(({ node, pos }) => {
+    const radius = layoutMode ? getLayoutNodeRadius(pos) : getNodeRadius(node) * (pos.scale || 1);
+    nodePosMap.set(node.id, { pos, radius });
+  });
+  const segments = [];
+  edges.forEach(([a, b]) => {
+    if (!a.active || !b.active) {
+      return;
+    }
+    if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
+      return;
+    }
+    const startEntry = nodePosMap.get(a.id);
+    const endEntry = nodePosMap.get(b.id);
+    if (!startEntry || !endEntry) {
+      return;
+    }
+    const start = startEntry.pos;
+    const end = endEntry.pos;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    if (!dist) {
+      return;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
+    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
+    segments.push({
+      x1: start.x + ux * startRadius,
+      y1: start.y + uy * startRadius,
+      x2: end.x - ux * endRadius,
+      y2: end.y - uy * endRadius,
+    });
+  });
+  addCustomConnectionSegments(nodePosMap, segments);
+  addTriangleDiagonalSegments(nodePosMap, segments);
+  addDistanceLineSegments(nodePosMap, segments);
+  const detailLabelCollision = {
+    circles: nodeRenderList
+      .filter(({ node }) => node.isCenter || node.active || node.isCustom)
+      .map(({ node, pos }) => ({
+        id: node.id,
+        x: pos.x,
+        y: pos.y,
+        r: nodePosMap.get(node.id).radius,
+      })),
+    segments,
+    rects: [],
+  };
+  return { nodeRenderList, nodePosMap, detailLabelCollision };
+}
+
 // How a node is drawn right now: visibility, opacity, colours. `env` carries
 // the interactive state (hover, guides, playing amplitudes, add-interval and
 // analysis modes); the SVG export passes a neutral env, so exports show the
@@ -14079,6 +14154,53 @@ function buildNodeDetailLabelScene(node, pos, radius, state, collision) {
   return result(hitbox);
 }
 
+// A node's custom piano-key label on the page (bottom-right anchored, plain
+// or in a dark box).
+function buildLayoutKeyMappingScene(node, pos, radius, keyLabel, alpha) {
+  const labelText = getLayoutKeyMappingLabelText(keyLabel);
+  const labelPos = getLayoutKeyMappingLabelPosition(node, pos, radius);
+  const fontSize = Math.max(8, Math.round(layoutKeyMappingTextSize));
+  const ref = { type: "keyMapping", id: node.id };
+  const textProps = {
+    text: labelText,
+    font: layoutKeyMappingFont,
+    size: fontSize,
+    weight: layoutKeyMappingFontWeight,
+    align: "right",
+    baseline: "bottom",
+    alpha,
+    ref,
+  };
+  if (!layoutKeyMappingDark) {
+    return [sceneText({ ...textProps, x: labelPos.x, y: labelPos.y, color: themeColors.textSecondary })];
+  }
+  const paddingX = 6;
+  const paddingY = 3;
+  const textWidth = measureTextWidthWithWeight(
+    labelText,
+    fontSize,
+    layoutKeyMappingFont,
+    layoutKeyMappingFontWeight
+  );
+  const boxWidth = textWidth + paddingX * 2;
+  const boxHeight = fontSize + paddingY * 2;
+  return [
+    sceneRect({
+      x: labelPos.x - boxWidth,
+      y: labelPos.y - boxHeight,
+      width: boxWidth,
+      height: boxHeight,
+      radius: 6,
+      fill: "rgba(10, 15, 20, 0.7)",
+      stroke: "rgba(255, 255, 255, 0.4)",
+      strokeWidth: 1,
+      alpha,
+      ref,
+    }),
+    sceneText({ ...textProps, x: labelPos.x - paddingX, y: labelPos.y - paddingY, color: "#ffffff" }),
+  ];
+}
+
 // The 2D lattice edges (page layout always uses this path): each active edge
 // trimmed to its node circles, with its interval label. Screen coordinates.
 function buildLatticeEdgesScene(nodePosMap) {
@@ -14152,76 +14274,10 @@ function draw() {
     drawLayoutPage(pageScene);
   }
 
-  const nodeRenderList = nodes
-    .map((node) => ({
-      node,
-      pos: worldToScreen(getNodeDisplayCoordinate(node)),
-    }))
-    .sort((a, b) => {
-      if (a.node.isCustom && !b.node.isCustom) {
-        return 1;
-      }
-      if (!a.node.isCustom && b.node.isCustom) {
-        return -1;
-      }
-      return a.pos.depth - b.pos.depth;
-    });
-  const nodePosMap = new Map();
-  nodeRenderList.forEach(({ node, pos }) => {
-    const baseRadius = layoutMode ? layoutNodeSize : getNodeRadius(node);
-    const radius = layoutMode ? getLayoutNodeRadius(pos) : baseRadius * (pos.scale || 1);
-    nodePosMap.set(node.id, { pos, radius });
-  });
-  const detailLabelSegments = [];
-  edges.forEach(([a, b]) => {
-    if (!a.active || !b.active) {
-      return;
-    }
-    if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
-      return;
-    }
-    const startEntry = nodePosMap.get(a.id);
-    const endEntry = nodePosMap.get(b.id);
-    if (!startEntry || !endEntry) {
-      return;
-    }
-    const start = startEntry.pos;
-    const end = endEntry.pos;
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const dist = Math.hypot(dx, dy);
-    if (!dist) {
-      return;
-    }
-    const ux = dx / dist;
-    const uy = dy / dist;
-    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-    detailLabelSegments.push({
-      x1: start.x + ux * startRadius,
-      y1: start.y + uy * startRadius,
-      x2: end.x - ux * endRadius,
-      y2: end.y - uy * endRadius,
-    });
-  });
-  addCustomConnectionSegments(nodePosMap, detailLabelSegments);
-  addTriangleDiagonalSegments(nodePosMap, detailLabelSegments);
-  addDistanceLineSegments(nodePosMap, detailLabelSegments);
+  const { nodeRenderList, nodePosMap, detailLabelCollision } = buildNodeLayout();
   const orphanResult = buildOrphanGuideSet();
   orphanGuideNodes = orphanResult.guides;
   orphanGuideEdges = orphanResult.edges;
-  const detailLabelCollision = {
-    circles: nodeRenderList
-      .filter(({ node }) => node.isCenter || node.active || node.isCustom)
-      .map(({ node, pos }) => ({
-        id: node.id,
-        x: pos.x,
-        y: pos.y,
-        r: layoutMode ? getLayoutNodeRadius(pos) : getNodeRadius(node) * (pos.scale || 1),
-      })),
-    segments: detailLabelSegments,
-    rects: [],
-  };
   const axisEntry = getActiveAxisEntry();
   const axisModeActive = Boolean(axisEntry);
   const shouldDrawAxisLine =
@@ -14625,36 +14681,7 @@ function draw() {
         : true;
       if (keyLabel && showLabel) {
         if (layoutMode) {
-          const labelText = getLayoutKeyMappingLabelText(keyLabel);
-          const labelPos = getLayoutKeyMappingLabelPosition(node, pos, radius);
-          const fontSize = Math.max(8, Math.round(layoutKeyMappingTextSize));
-          ctx.save();
-          ctx.globalAlpha = alpha;
-          ctx.font = `${layoutKeyMappingFontWeight} ${fontSize}px ${layoutKeyMappingFont}`;
-          ctx.textAlign = "right";
-          ctx.textBaseline = "bottom";
-          if (layoutKeyMappingDark) {
-            const paddingX = 6;
-            const paddingY = 3;
-            const textWidth = ctx.measureText(labelText).width;
-            const boxWidth = textWidth + paddingX * 2;
-            const boxHeight = fontSize + paddingY * 2;
-            const boxX = labelPos.x - boxWidth;
-            const boxY = labelPos.y - boxHeight;
-            ctx.fillStyle = "rgba(10, 15, 20, 0.7)";
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 6);
-            ctx.fill();
-            ctx.stroke();
-            ctx.fillStyle = "#ffffff";
-            ctx.fillText(labelText, labelPos.x - paddingX, labelPos.y - paddingY);
-          } else {
-            ctx.fillStyle = themeColors.textSecondary;
-            ctx.fillText(labelText, labelPos.x, labelPos.y);
-          }
-          ctx.restore();
+          paintDisplayList(ctx, buildLayoutKeyMappingScene(node, pos, radius, keyLabel, alpha));
         } else if (is3DMode) {
           drawKeyBanner(pos, radius, keyLabel, alpha);
         } else {
@@ -25938,35 +25965,7 @@ function escapeSvgText(text) {
     .replace(/'/g, "&apos;");
 }
 
-function escapeSvgTextPreservingWhitespace(text) {
-  const value = String(text ?? "");
-  if (!value) {
-    return "&#160;";
-  }
-  return escapeSvgText(value);
-}
 
-function buildHejiSvgText({
-  x,
-  y,
-  baseText,
-  suffix,
-  restText,
-  font,
-  size,
-  anchor,
-  baseline,
-  color,
-}) {
-  const baseSpan = `<tspan>${escapeSvgText(baseText)}</tspan>`;
-  const suffixSpan = suffix
-    ? `<tspan font-family="HEJI2Text">${escapeSvgText(suffix)}</tspan>`
-    : "";
-  const restSpan = restText ? `<tspan>${escapeSvgText(restText)}</tspan>` : "";
-  return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-    font
-  )}" font-size="${size}" ${svgColorAttr("fill", color)}>${baseSpan}${suffixSpan}${restSpan}</text>`;
-}
 
 
 const LEXEND_FONT_URL =
@@ -26065,13 +26064,6 @@ async function getExportFontCss(hejiFontSrc = null) {
 @font-face { font-family: "HEJI2Text"; src: url("${hejiFontUrl}") format("opentype"); font-display: swap; }`;
 }
 
-function analyzeExportFontCss(css) {
-  const content = String(css || "");
-  const hasImport = content.includes("@import");
-  const embeddedFonts = (content.match(/data:font\//g) || []).length;
-  const hasHejiData = content.includes("HEJI2Text") && content.includes("data:font/");
-  return { hasImport, embeddedFonts, hasHejiData };
-}
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) {
@@ -26229,16 +26221,6 @@ async function getOutlineFontOrFallback(fontFamily, fontWeight) {
   return loadOutlineFont("Noto Serif", fontWeight);
 }
 
-async function measureSvgTextWidth(text, size, font, fontWeight = 400) {
-  if (!OUTLINE_SVG_TEXT) {
-    return measureTextWidthWithWeight(text, size, font, fontWeight);
-  }
-  const fontObj = await getOutlineFontOrFallback(font, fontWeight);
-  if (!fontObj) {
-    return measureTextWidthWithWeight(text, size, font, fontWeight);
-  }
-  return fontObj.getAdvanceWidth(text, size);
-}
 
 
 
@@ -26253,102 +26235,29 @@ const SCENE_SVG_TEXT = {
     ctx.restore();
     return { width: metrics.width, alphabeticBaseline: metrics.alphabeticBaseline || 0 };
   },
+  // Each glyph is outlined at the x the canvas puts it (prefix width, so
+  // kerning included): the bundled font files' advances differ slightly from
+  // the browser's copy, and per-line placement let long lines drift.
   async outline({ text, font, size, weight, x, y }) {
     const fontObj = await getOutlineFontOrFallback(font, weight);
-    return fontObj ? fontObj.getPath(text, x, y, size).toPathData(2) : null;
+    if (!fontObj) {
+      return null;
+    }
+    ctx.save();
+    ctx.font = `${weight} ${size}px ${font}`;
+    let path = "";
+    let prefix = "";
+    for (const char of text) {
+      if (char.trim()) {
+        path += fontObj.getPath(char, x + ctx.measureText(prefix).width, y, size).toPathData(2);
+      }
+      prefix += char;
+    }
+    ctx.restore();
+    return path;
   },
 };
 
-async function buildSvgTextElement({
-  text,
-  x,
-  y,
-  font,
-  size,
-  fontWeight = 400,
-  anchor = "start",
-  baseline = "alphabetic",
-  color,
-  transform = "",
-}) {
-  const safeText = text == null ? "" : String(text);
-  if (!safeText) {
-    return "";
-  }
-  const lines = safeText.split(/\r?\n/);
-  const lineHeight = Math.max(size, Math.round(size * 1.2));
-  if (lines.length > 1) {
-    if (OUTLINE_SVG_TEXT) {
-      const parts = await Promise.all(
-        lines.map((line, index) =>
-          buildSvgTextElement({
-            text: line,
-            x,
-            y: y + index * lineHeight,
-            font,
-            size,
-            fontWeight,
-            anchor,
-            baseline,
-            color,
-            transform,
-          })
-        )
-      );
-      return parts.join("");
-    }
-    const attrs = `text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-      font
-    )}" font-size="${size}" font-weight="${fontWeight}" xml:space="preserve" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
-      "fill",
-      color
-    )}`;
-    const tspans = lines
-      .map((line, index) => {
-        const dy = index === 0 ? 0 : lineHeight;
-        return `<tspan x="${x}" dy="${dy}">${escapeSvgTextPreservingWhitespace(line)}</tspan>`;
-      })
-      .join("");
-    return `<text x="${x}" y="${y}" ${attrs}>${tspans}</text>`;
-  }
-  if (!OUTLINE_SVG_TEXT) {
-    return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-      font
-    )}" font-size="${size}" font-weight="${fontWeight}" xml:space="preserve" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
-      "fill",
-      color
-    )}>${escapeSvgTextPreservingWhitespace(safeText)}</text>`;
-  }
-  const fontObj = await getOutlineFontOrFallback(font, fontWeight);
-  if (!fontObj) {
-    return `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-family="${escapeSvgText(
-      font
-    )}" font-size="${size}" font-weight="${fontWeight}" xml:space="preserve" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
-      "fill",
-      color
-    )}>${escapeSvgTextPreservingWhitespace(safeText)}</text>`;
-  }
-  const ascent = (fontObj.ascender / fontObj.unitsPerEm) * size;
-  const descent = (-fontObj.descender / fontObj.unitsPerEm) * size;
-  let baselineY = y;
-  if (baseline === "middle") {
-    baselineY = y + (ascent - descent) / 2;
-  } else if (baseline === "text-before-edge" || baseline === "hanging") {
-    baselineY = y + ascent;
-  }
-  let anchorX = x;
-  const advance = fontObj.getAdvanceWidth(safeText, size);
-  if (anchor === "middle") {
-    anchorX = x - advance / 2;
-  } else if (anchor === "end") {
-    anchorX = x - advance;
-  }
-  const pathData = fontObj.getPath(safeText, anchorX, baselineY, size).toPathData(2);
-  return `<path d="${pathData}" ${transform ? `transform="${transform}" ` : ""}${svgColorAttr(
-    "fill",
-    color
-  )} />`;
-}
 
 
 
@@ -26427,147 +26336,12 @@ async function buildLayoutSvgString({ fontCss = null } = {}) {
     ...(await emitDisplayListSvg(offsetDisplayList(buildPageChromeScene(), -left, -top), SCENE_SVG_TEXT))
   );
 
-  const exportNodeRenderList = nodes
-    .map((node) => ({
-      node,
-      pos: worldToScreen(getNodeDisplayCoordinate(node)),
-    }))
-    .sort((a, b) => {
-      if (a.node.isCustom && !b.node.isCustom) {
-        return 1;
-      }
-      if (!a.node.isCustom && b.node.isCustom) {
-        return -1;
-      }
-      return a.pos.depth - b.pos.depth;
-    });
-  const exportNodePosMap = new Map();
-  exportNodeRenderList.forEach(({ node, pos }) => {
-    exportNodePosMap.set(node.id, { pos, radius: getLayoutNodeRadius(pos) });
-  });
-  const keyboardMode = getKeyboardMode();
-  if (keyboardMode === "piano-custom" && layoutKeyMappingMode !== "hide") {
-    const customPianoLabels = getCustomPianoLabelMap();
-    const keyMappingSize = Math.max(8, Math.round(layoutKeyMappingTextSize));
-    for (const { node } of exportNodeRenderList) {
-      if (!(node.isCenter || node.active || node.isCustom)) {
-        continue;
-      }
-      const keyLabel = customPianoLabels.get(node.id);
-      if (!keyLabel) {
-        continue;
-      }
-      const displayInfo = getCachedDisplayInfo(node);
-      const pitchClass = displayInfo.pitchClass || node.pitch_class;
-      if (!shouldShowLayoutKeyMappingLabel(keyLabel, pitchClass)) {
-        continue;
-      }
-      const nodeEntry = exportNodePosMap.get(node.id);
-      if (!nodeEntry) {
-        continue;
-      }
-      const labelText = getLayoutKeyMappingLabelText(keyLabel);
-      const labelPos = getLayoutKeyMappingLabelPosition(node, nodeEntry.pos, nodeEntry.radius);
-      const x = labelPos.x - left;
-      const y = labelPos.y - top;
-      const textWidth = await measureSvgTextWidth(
-        labelText,
-        keyMappingSize,
-        layoutKeyMappingFont,
-        layoutKeyMappingFontWeight
-      );
-      if (layoutKeyMappingDark) {
-        const paddingX = 6;
-        const paddingY = 3;
-        const boxWidth = textWidth + paddingX * 2;
-        const boxHeight = keyMappingSize + paddingY * 2;
-        const boxX = x - boxWidth;
-        const boxY = y - boxHeight;
-        parts.push(
-          `<rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="6" ry="6" fill="rgb(10,15,20)" fill-opacity="0.7" stroke="rgba(255,255,255,0.4)" />`
-        );
-        parts.push(
-          await buildSvgTextElement({
-            text: labelText,
-            x: boxX + paddingX,
-            y: boxY + paddingY,
-            font: layoutKeyMappingFont,
-            size: keyMappingSize,
-            fontWeight: layoutKeyMappingFontWeight,
-            anchor: "start",
-            baseline: "hanging",
-            color: "#ffffff",
-          })
-        );
-      } else {
-        parts.push(
-          await buildSvgTextElement({
-            text: labelText,
-            x: x - textWidth,
-            y: y - keyMappingSize,
-            font: layoutKeyMappingFont,
-            size: keyMappingSize,
-            fontWeight: layoutKeyMappingFontWeight,
-            anchor: "start",
-            baseline: "hanging",
-            color: themeColors.textSecondary,
-          })
-        );
-      }
-    }
-  }
-  const exportDetailLabelSegments = [];
-  edges.forEach(([a, b]) => {
-    if (!a.active || !b.active) {
-      return;
-    }
-    if (hasSelectedDistanceEdgeBetweenNodes(a, b)) {
-      return;
-    }
-    const startEntry = exportNodePosMap.get(a.id);
-    const endEntry = exportNodePosMap.get(b.id);
-    if (!startEntry || !endEntry) {
-      return;
-    }
-    const start = startEntry.pos;
-    const end = endEntry.pos;
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const dist = Math.hypot(dx, dy);
-    if (!dist) {
-      return;
-    }
-    const ux = dx / dist;
-    const uy = dy / dist;
-    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-    exportDetailLabelSegments.push({
-      x1: start.x + ux * startRadius,
-      y1: start.y + uy * startRadius,
-      x2: end.x - ux * endRadius,
-      y2: end.y - uy * endRadius,
-    });
-  });
-  addCustomConnectionSegments(exportNodePosMap, exportDetailLabelSegments);
-  addTriangleDiagonalSegments(exportNodePosMap, exportDetailLabelSegments);
-  addDistanceLineSegments(exportNodePosMap, exportDetailLabelSegments);
-  const exportDetailLabelCollision = {
-    circles: exportNodeRenderList
-      .filter(({ node }) => node.isCenter || node.active || node.isCustom)
-      .map(({ node, pos }) => ({
-        id: node.id,
-        x: pos.x,
-        y: pos.y,
-        r: getLayoutNodeRadius(pos),
-      })),
-    segments: exportDetailLabelSegments,
-    rects: [],
-  };
-
-
-  const edgeLabelSize = getLayoutLineLabelSize();
-  const lineLabelFont = layoutLineLabelFont;
-  const lineLabelWeight = layoutLineLabelFontWeight;
+  const {
+    nodeRenderList: exportNodeRenderList,
+    nodePosMap: exportNodePosMap,
+    detailLabelCollision: exportDetailLabelCollision,
+  } = buildNodeLayout();
+  const exportKeyLabels = getKeyboardMode() === "piano-custom" ? getCustomPianoLabelMap() : null;
   const emitScene = async (scene) =>
     parts.push(...(await emitDisplayListSvg(offsetDisplayList(scene, -left, -top), SCENE_SVG_TEXT)));
   if (!analysisLayers.microtonal) {
@@ -26621,6 +26395,11 @@ async function buildLayoutSvgString({ fontCss = null } = {}) {
       scene.push(
         ...buildNodeDetailLabelScene(node, pos, radius, state, exportDetailLabelCollision).scene
       );
+      const keyLabel = exportKeyLabels && exportKeyLabels.get(node.id);
+      const pitchClass = getCachedDisplayInfo(node).pitchClass || node.pitch_class;
+      if (keyLabel && shouldShowLayoutKeyMappingLabel(keyLabel, pitchClass)) {
+        scene.push(...buildLayoutKeyMappingScene(node, pos, radius, keyLabel, state.alpha));
+      }
     }
     await emitScene(scene);
   }

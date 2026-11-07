@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { encodePresetState, decodePresetState } from "../src/serialization.js";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -93,3 +94,24 @@ describe("codec edge cases", () => {
     expect(decodePresetState(b64)).toEqual(state);
   });
 });
+
+// Links already shared in the wild must keep their exact bytes: pin the
+// encoder's output (as a SHA-256) for every preset and Creator export.
+describe("encoded links are stable", () => {
+  const presets = JSON.parse(readFileSync(join(ROOT, "src/presets.json"), "utf8"));
+  it("preset and fixture encodings match the pinned snapshot", () => {
+    const encoded = {};
+    for (const preset of presets) {
+      encoded[`preset: ${preset.title}`] = sha256(encodePresetState(preset.state));
+    }
+    for (const name of readdirSync(join(ROOT, "fixtures/creator-exports")).sort()) {
+      const state = JSON.parse(readFileSync(join(ROOT, "fixtures/creator-exports", name), "utf8"));
+      encoded[`fixture: ${name}`] = sha256(encodePresetState(state));
+    }
+    expect(encoded).toMatchSnapshot();
+  });
+});
+
+function sha256(text) {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}

@@ -58,6 +58,7 @@ import { hitTestDisplayList } from "./scene/hit-test.js";
 import { createKeyDispatcher, createHeldKeys } from "./input/keyboard.js";
 import { createVoiceBackends } from "./audio/voice-backends.js";
 import { createStore } from "./state/store.js";
+import { createDocMap } from "./state/doc-map.js";
 
 // Main editor spells ET fallbacks from its mixed default table (Eb/Bb flats).
 function getNearestEtInfo(freq, a4) {
@@ -614,6 +615,9 @@ const store = createStore({
   // Synth settings, filled from the controls once they exist (see
   // readSynthControls); null until then.
   synth: null,
+  // Per-node maps ([nodeKey, value] entries; see createDocMap).
+  noteSpellings: [],
+  octaveOffsets: [],
   // Display layers and line styling.
   axes: true,
   grid: true,
@@ -644,6 +648,7 @@ if (import.meta.env && import.meta.env.DEV) {
         id: node.id,
         active: Boolean(node.active),
         clickable: Boolean(hit && hit.id === node.id),
+        freq: node.freq,
         x: rect.left + point.x,
         y: rect.top + point.y,
       };
@@ -1861,11 +1866,12 @@ let pendingLayoutNodeShapes = null;
 let pendingLayoutSpacing = null;
 let customNodeDrag = null;
 let layoutNodeShapes = new Map();
-let nodeSpellingOverrides = new Map();
+// Per-node maps saved as entry arrays live in the document (src/state/doc-map.js).
+const nodeSpellingOverrides = createDocMap(store, "noteSpellings");
 // Legacy files key spelling overrides by positional node id; those ids only
 // exist once the file's lattice is rebuilt, so they wait here until then.
 let pendingLegacySpellingOverrides = new Map();
-let nodeOctaveOffsets = new Map();
+const nodeOctaveOffsets = createDocMap(store, "octaveOffsets");
 let octaveShiftTargetId = null;
 let layoutNodeSize = 35;
 let layoutRatioTextSize = 21;
@@ -6636,13 +6642,13 @@ function rebaseLatticeFromNode(node) {
     y: (Number(latticeExponentOffset.y) || 0) + deltaY,
     z: (Number(latticeExponentOffset.z) || 0) + deltaZ,
   };
-  nodeOctaveOffsets = shiftNodeKeyedMap(nodeOctaveOffsets, deltaX, deltaY, deltaZ);
+  nodeOctaveOffsets.replaceAll(shiftNodeKeyedMap(nodeOctaveOffsets, deltaX, deltaY, deltaZ));
   const shiftedVolumes = shiftNodeKeyedMap(nodeVolumeLimits, deltaX, deltaY, deltaZ);
   nodeVolumeLimits.clear();
   if (shiftedVolumes && shiftedVolumes.size) {
     shiftedVolumes.forEach((value, key) => nodeVolumeLimits.set(key, value));
   }
-  nodeSpellingOverrides = shiftNodeKeyedMap(nodeSpellingOverrides, deltaX, deltaY, deltaZ);
+  nodeSpellingOverrides.replaceAll(shiftNodeKeyedMap(nodeSpellingOverrides, deltaX, deltaY, deltaZ));
   shiftLineLabelOverrides(deltaX, deltaY, deltaZ);
   shiftDistanceState(deltaX, deltaY, deltaZ);
   nodes.forEach((entry) => {
@@ -23597,8 +23603,8 @@ function buildPresetStateSkeleton(active, customState, lineLabelState, distanceS
     ratios: getPresetRatiosState(),
     axisRanges: getPresetAxisRangesState(),
     exponentOffset: getPresetExponentOffsetState(),
-    noteSpellings: Array.from(nodeSpellingOverrides.entries()),
-    octaveOffsets: Array.from(nodeOctaveOffsets.entries()),
+    noteSpellings: doc.noteSpellings,
+    octaveOffsets: doc.octaveOffsets,
     nodeVolumes: serializePresetNodeVolumes(),
     triangles: getPresetTrianglesState(),
     triangleLabels: getPresetTriangleLabelsState(),
@@ -23855,7 +23861,7 @@ function stepDocumentHistory(direction) {
   if (!moved) {
     return false;
   }
-  if ([...touched].some((key) => !NATIVE_DOC_KEYS.has(key))) {
+  if ([...touched].some((key) => !NATIVE_DOC_KEYS.has(key) || LATTICE_DOC_KEYS.has(key))) {
     // Applying the lattice state rewrites store-native fields as a side
     // effect (and page layout re-hides axes/grid); none of that is a new
     // step, and the native fields keep the values this undo step gave them.
@@ -24140,7 +24146,7 @@ function applyPresetDistanceState(state) {
 function applyPresetSpellingAndOctaveState(state) {
   // Absent means none: a preset without spellings must not inherit the
   // previous lattice's overrides (hash navigation reuses the module state).
-  nodeSpellingOverrides = new Map();
+  nodeSpellingOverrides.clear();
   pendingLegacySpellingOverrides = new Map();
   if (Array.isArray(state.noteSpellings)) {
     forEachNormalizedPresetEntry(state.noteSpellings, normalizePresetSpellingEntry, (normalized) => {
@@ -24152,7 +24158,7 @@ function applyPresetSpellingAndOctaveState(state) {
       }
     });
   }
-  nodeOctaveOffsets = new Map();
+  nodeOctaveOffsets.clear();
   forEachNormalizedPresetEntry(
     state.octaveOffsets,
     normalizePresetOctaveOffsetEntry,
@@ -27024,7 +27030,13 @@ const LABEL_DOC_KEYS = new Set([
   "featureMode",
   "spellingMode",
   "showOperatorLineLabels",
+  "noteSpellings",
+  "octaveOffsets",
 ]);
+// Store-native keys whose undo also needs the lattice rebuilt from the
+// document (node frequencies, pitch instances, custom nodes depend on them;
+// undoing the fundamental must retune the nodes, not just the input).
+const LATTICE_DOC_KEYS = new Set(["noteSpellings", "octaveOffsets", "fundamental", "a4"]);
 
 function bindDocumentReactions() {
   // Checkboxes that show a document boolean (sidebar + page-layout panel copies).

@@ -11177,15 +11177,18 @@ function getTriangleLabelPoints(tri, nodes) {
 }
 
 function drawTriangleDiagonals(nodePosMap) {
+  paintDisplayList(ctx, buildTriangleDiagonalsScene(nodePosMap));
+}
+
+// Dashed diagonals that split lattice squares into triangles (drawn and
+// automatic), trimmed to the node circles.
+function buildTriangleDiagonalsScene(nodePosMap) {
+  const scene = [];
   ensureAutoTriangleDiagonals();
   if (!triangleDiagonals.size && !autoTriangleDiagonals.size) {
-    return;
+    return scene;
   }
   const gridMap = getActiveGridNodeMap();
-  ctx.save();
-  ctx.strokeStyle = getInkEdgeColor(false);
-  ctx.lineWidth = getInkEdgeLineWidth(false);
-  ctx.setLineDash([6, 4]);
   forEachEffectiveTriangleDiagonal((entry) => {
     const { a, b } = getTriangleDiagonalNodes(entry, gridMap);
     if (!a || !b) {
@@ -11193,12 +11196,8 @@ function drawTriangleDiagonals(nodePosMap) {
     }
     const startEntry = nodePosMap && nodePosMap.get(a.id);
     const endEntry = nodePosMap && nodePosMap.get(b.id);
-    const start = startEntry
-      ? startEntry.pos
-      : worldToScreen(getNodeDisplayCoordinate(a));
-    const end = endEntry
-      ? endEntry.pos
-      : worldToScreen(getNodeDisplayCoordinate(b));
+    const start = startEntry ? startEntry.pos : worldToScreen(getNodeDisplayCoordinate(a));
+    const end = endEntry ? endEntry.pos : worldToScreen(getNodeDisplayCoordinate(b));
     const radiusA = startEntry
       ? startEntry.radius
       : layoutMode
@@ -11217,26 +11216,31 @@ function drawTriangleDiagonals(nodePosMap) {
     }
     const ux = dx / dist;
     const uy = dy / dist;
-    const edgeStart = {
-      x: start.x + ux * radiusA,
-      y: start.y + uy * radiusA,
-    };
-    const edgeEnd = {
-      x: end.x - ux * radiusB,
-      y: end.y - uy * radiusB,
-    };
-    ctx.beginPath();
-    ctx.moveTo(edgeStart.x, edgeStart.y);
-    ctx.lineTo(edgeEnd.x, edgeEnd.y);
-    ctx.stroke();
-
+    scene.push(
+      sceneLine({
+        x1: start.x + ux * radiusA,
+        y1: start.y + uy * radiusA,
+        x2: end.x - ux * radiusB,
+        y2: end.y - uy * radiusB,
+        color: getInkEdgeColor(false),
+        width: getInkEdgeLineWidth(false),
+        dash: [6, 4],
+        ref: { type: "triangleDiagonal" },
+      })
+    );
   });
-  ctx.restore();
+  return scene;
 }
 
 function drawTriangleLabels(nodePosMap) {
+  paintDisplayList(ctx, buildTriangleLabelsScene(nodePosMap));
+}
+
+// Text labels centred in labelled triangles, shrunk to fit the triangle.
+function buildTriangleLabelsScene(nodePosMap) {
+  const scene = [];
   if (!triangleLabels.size) {
-    return;
+    return scene;
   }
   ensureAutoTriangleDiagonals();
   const gridMap = getActiveGridNodeMap();
@@ -11253,17 +11257,12 @@ function drawTriangleLabels(nodePosMap) {
     if (!labelNodes) {
       return;
     }
-    const points = labelNodes.map((node) => {
-      const projected = nodePosMap && nodePosMap.get(node.id)
+    const points = labelNodes.map((node) =>
+      nodePosMap && nodePosMap.get(node.id)
         ? nodePosMap.get(node.id).pos
-        : worldToScreen(getNodeDisplayCoordinate(node));
-      return projected;
-    });
-    const cx = (points[0].x + points[1].x + points[2].x) / 3;
-    const cy = (points[0].y + points[1].y + points[2].y) / 3;
-    const baseSize = layoutMode
-      ? Math.max(12, Math.round(layoutTriangleLabelTextSize))
-      : 18;
+        : worldToScreen(getNodeDisplayCoordinate(node))
+    );
+    const baseSize = layoutMode ? Math.max(12, Math.round(layoutTriangleLabelTextSize)) : 18;
     const fontWeight = layoutMode ? layoutTriangleLabelFontWeight : 400;
     const layout = computeTriangleLabelLayout(
       entry.label,
@@ -11272,15 +11271,22 @@ function drawTriangleLabels(nodePosMap) {
       points,
       fontWeight
     );
-    ctx.save();
-    ctx.setLineDash([]);
-    ctx.fillStyle = themeColors.textSecondary;
-    ctx.font = `${fontWeight} ${layout.size}px ${layoutTriangleLabelFont}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(entry.label, cx, cy);
-    ctx.restore();
+    scene.push(
+      sceneText({
+        text: entry.label,
+        x: (points[0].x + points[1].x + points[2].x) / 3,
+        y: (points[0].y + points[1].y + points[2].y) / 3,
+        font: layoutTriangleLabelFont,
+        size: layout.size,
+        weight: fontWeight,
+        align: "center",
+        baseline: "middle",
+        color: themeColors.textSecondary,
+        ref: { type: "triangleLabel" },
+      })
+    );
   });
+  return scene;
 }
 
 function drawTriangleHover(nodePosMap) {
@@ -11373,15 +11379,31 @@ function getNodeGuideAlpha(node, guideNodes, axisEntry) {
 }
 
 function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
-  if (!connectOrphansEnabled || !orphanGuideEdges.size) {
+  if (!connectOrphansEnabled) {
     return;
+  }
+  paintDisplayList(
+    ctx,
+    buildOrphanGuideEdgesScene(nodePosMap, {
+      edges: orphanGuideEdges,
+      orphans: orphanGuideNodes,
+      guideNodes,
+      axisEntry,
+    })
+  );
+}
+
+// Faint guide edges that connect orphaned active nodes back to the lattice
+// ("connect orphans"). `edges` holds "idA|idB" keys; `orphans` the guide ids.
+function buildOrphanGuideEdgesScene(nodePosMap, { edges: edgeKeys, orphans, guideNodes, axisEntry }) {
+  const scene = [];
+  if (!edgeKeys || !edgeKeys.size) {
+    return scene;
   }
   const labelFont = layoutMode ? layoutLineLabelFont : "Noto Serif";
   const labelWeight = layoutMode ? layoutLineLabelFontWeight : 400;
   const labelSize = layoutMode ? getLayoutLineLabelSize() : EDGE_LABEL_SIZE_DEFAULT;
-  ctx.save();
-  ctx.lineWidth = getInkEdgeLineWidth(false);
-  orphanGuideEdges.forEach((edgeKey) => {
+  edgeKeys.forEach((edgeKey) => {
     const partsKey = edgeKey.split("|");
     if (partsKey.length !== 2) {
       return;
@@ -11396,8 +11418,8 @@ function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
     if (!startEntry || !endEntry) {
       return;
     }
-    const isOrphanA = orphanGuideNodes.has(a.id);
-    const isOrphanB = orphanGuideNodes.has(b.id);
+    const isOrphanA = orphans.has(a.id);
+    const isOrphanB = orphans.has(b.id);
     if (!isOrphanA && !isOrphanB) {
       return;
     }
@@ -11417,26 +11439,25 @@ function drawOrphanGuideEdges(nodePosMap, guideNodes, axisEntry) {
     }
     const ux = dx / dist;
     const uy = dy / dist;
-    const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-    const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-    const labelText = getEdgeLabelText(a, b);
-    const label = shouldShowEdgeLabel(a, b) ? labelText : null;
-    drawCanvasEdgeSegment({
-      start,
-      end,
-      startRadius,
-      endRadius,
-      color: themeColors.nodeStroke,
-      label,
-      labelFont,
-      labelWeight,
-      labelSize,
-      alpha: edgeAlpha,
-      labelAlpha: Math.min(1, (edgeAlpha + 1) * 0.3),
-      lineWidth: getInkEdgeLineWidth(false),
-    });
+    scene.push(
+      ...buildEdgeSegmentScene({
+        start,
+        end,
+        startRadius: getNodeEdgeRadius(a, ux, uy, startEntry.radius),
+        endRadius: getNodeEdgeRadius(b, ux, uy, endEntry.radius),
+        color: themeColors.nodeStroke,
+        label: shouldShowEdgeLabel(a, b) ? getEdgeLabelText(a, b) : null,
+        labelFont,
+        labelWeight,
+        labelSize,
+        alpha: edgeAlpha,
+        labelAlpha: Math.min(1, (edgeAlpha + 1) * 0.3),
+        lineWidth: getInkEdgeLineWidth(false),
+        ref: { type: "orphanGuideEdge", a: a.id, b: b.id },
+      })
+    );
   });
-  ctx.restore();
+  return scene;
 }
 
 function getGuideRevealInfo(nodePosMap, axisEntry = null) {
@@ -13410,8 +13431,15 @@ function drawCommaConnections(nodePosMap) {
 }
 
 function drawCustomConnections(nodePosMap) {
+  paintDisplayList(ctx, buildCustomConnectionsScene(nodePosMap, getActiveAxisEntry()));
+}
+
+// Connections from each active custom node to its source node, labelled
+// with the custom interval. `axisEntry` dims connections off the active axis.
+function buildCustomConnectionsScene(nodePosMap, axisEntry) {
+  const scene = [];
   if (!customNodes.length) {
-    return;
+    return scene;
   }
   const edgeOutset = 1;
   const labelFont = layoutMode
@@ -13429,7 +13457,6 @@ function drawCustomConnections(nodePosMap) {
     : is3DMode
     ? Math.max(10, Math.round(layoutRatioTextSize * 0.6))
     : 14;
-  const axisEntry = getActiveAxisEntry();
   const axisActive = Boolean(axisEntry);
   customNodes.forEach((node) => {
     if (!node.active) {
@@ -13476,7 +13503,8 @@ function drawCustomConnections(nodePosMap) {
     const labelText = getCustomConnectionLabelText(node);
     const label = shouldShowEdgeLabel(source, node) ? labelText : null;
     const labelT = getLineLabelPositionOverride(source, node) ?? 0.5;
-    drawCanvasEdgeSegment({
+    scene.push(
+      ...buildEdgeSegmentScene({
       start,
       end,
       startRadius,
@@ -13491,8 +13519,11 @@ function drawCustomConnections(nodePosMap) {
       dash: eitherMuted ? [6, 4] : null,
       lineWidth: getInkEdgeLineWidth(eitherMuted),
       labelAlpha: eitherMuted ? 1 : null,
-    });
+      ref: { type: "customConnection", id: node.id },
+    })
+    );
   });
+  return scene;
 }
 
 function addCustomConnectionSegments(nodePosMap, segments) {
@@ -26788,250 +26819,24 @@ async function buildLayoutSvgString({ fontCss = null } = {}) {
     }
   }
 
-  const customEdgeOutset = 1;
-  for (const customNode of customNodes) {
-    const source = nodeById.get(customNode.sourceNodeId);
-    if (!source) {
-      continue;
-    }
-    if (hasSelectedDistanceEdgeBetweenNodes(source, customNode)) {
-      continue;
-    }
-    const startEntry = exportNodePosMap.get(source.id);
-    const endEntry = exportNodePosMap.get(customNode.id);
-    if (!startEntry || !endEntry) {
-      continue;
-    }
-    const start = startEntry.pos;
-    const end = endEntry.pos;
-    const radiusA = startEntry.radius;
-    const radiusB = endEntry.radius;
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const dist = Math.hypot(dx, dy);
-    if (!dist) {
-      continue;
-    }
-    const ux = dx / dist;
-    const uy = dy / dist;
-    const startRadius = Math.max(0, getNodeEdgeRadius(source, ux, uy, radiusA) + customEdgeOutset);
-    const customEdgeInset = Math.max(0, Math.round(radiusB * 0.03));
-    const endRadius = Math.max(
-      0,
-      getNodeEdgeRadius(customNode, ux, uy, radiusB) + customEdgeOutset - customEdgeInset
-    );
-    const edgeStart = {
-      x: start.x + ux * startRadius - left,
-      y: start.y + uy * startRadius - top,
-    };
-    const edgeEnd = {
-      x: end.x - ux * endRadius - left,
-      y: end.y - uy * endRadius - top,
-    };
-    const lineLen = Math.max(0, dist - startRadius - endRadius);
-    const eitherMutedCustom = Boolean(source.muted) || Boolean(customNode.muted);
-    const label = getCustomConnectionLabelText(customNode);
-    const customStrokeColor = eitherMutedCustom
-      ? blendOverPage(themeColors.edge, 0.4)
-      : getInkEdgeColor(false);
-    const customStrokeWidth = getInkEdgeLineWidth(eitherMutedCustom);
-    const customDashAttr = eitherMutedCustom ? ' stroke-dasharray="6 4"' : "";
-    const pushLine = (from, to) => {
-      parts.push(
-        `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" ${svgStroke(
-          customStrokeColor
-        )} stroke-width="${customStrokeWidth}"${customDashAttr} />`
-      );
-    };
-    if (label && lineLen > 0) {
-      const baseWidth = await measureSvgTextWidth(label, edgeLabelSize, lineLabelFont, lineLabelWeight);
-      const layout = computeEdgeLabelLayoutFromWidth({
-        baseSize: edgeLabelSize,
-        baseWidth,
-        lineLen,
-        minSize: 4,
-      });
-      const size = layout.size;
-      const gap = layout.gap;
-      const labelT = getLineLabelPositionOverride(source, customNode) ?? 0.5;
-      if (gap > 0) {
-        const gapHalf = gap / 2;
-        const midX = edgeStart.x + (edgeEnd.x - edgeStart.x) * labelT;
-        const midY = edgeStart.y + (edgeEnd.y - edgeStart.y) * labelT;
-        const gapStart = {
-          x: midX - ux * gapHalf,
-          y: midY - uy * gapHalf,
-        };
-        const gapEnd = {
-          x: midX + ux * gapHalf,
-          y: midY + uy * gapHalf,
-        };
-        pushLine(edgeStart, gapStart);
-        pushLine(gapEnd, edgeEnd);
-        let angle = 0;
-        if (Math.abs(edgeEnd.x - edgeStart.x) > 1e-6 || Math.abs(edgeEnd.y - edgeStart.y) > 1e-6) {
-          angle = Math.atan2(edgeEnd.y - edgeStart.y, edgeEnd.x - edgeStart.x);
-          if (!shouldUseHorizontalText(angle)) {
-            if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
-              angle += Math.PI;
-            }
-          } else {
-            angle = 0;
-          }
-        }
-        const rotation = (angle * 180) / Math.PI;
-        parts.push(
-          await buildSvgTextElement({
-            text: label,
-            x: midX,
-            y: midY,
-            font: lineLabelFont,
-            size,
-            fontWeight: lineLabelWeight,
-            anchor: "middle",
-            baseline: "middle",
-            color: themeColors.textSecondary,
-            transform: `rotate(${rotation} ${midX} ${midY})`,
-          })
-        );
-      } else {
-        pushLine(edgeStart, edgeEnd);
-      }
-    } else {
-      pushLine(edgeStart, edgeEnd);
-    }
-  }
+  await emitScene(buildCustomConnectionsScene(exportNodePosMap, null));
 
   const exportOrphanResult = connectOrphansEnabled ? buildOrphanGuideSet() : null;
   const exportOrphanGuides = exportOrphanResult ? exportOrphanResult.guides : null;
   if (exportOrphanResult) {
-    exportOrphanResult.edges.forEach((edgeKey) => {
-      const partsKey = edgeKey.split("|");
-      if (partsKey.length !== 2) {
-        return;
-      }
-      const a = nodeById.get(Number(partsKey[0]));
-      const b = nodeById.get(Number(partsKey[1]));
-      if (!a || !b) {
-        return;
-      }
-      const isOrphanA = exportOrphanGuides && exportOrphanGuides.has(a.id);
-      const isOrphanB = exportOrphanGuides && exportOrphanGuides.has(b.id);
-      if (!isOrphanA && !isOrphanB) {
-        return;
-      }
-      const startEntry = exportNodePosMap.get(a.id);
-      const endEntry = exportNodePosMap.get(b.id);
-      if (!startEntry || !endEntry) {
-        return;
-      }
-      const start = startEntry.pos;
-      const end = endEntry.pos;
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const dist = Math.hypot(dx, dy);
-      if (!dist) {
-        return;
-      }
-      const ux = dx / dist;
-      const uy = dy / dist;
-      const startRadius = getNodeEdgeRadius(a, ux, uy, startEntry.radius);
-      const endRadius = getNodeEdgeRadius(b, ux, uy, endEntry.radius);
-      const edgeStart = {
-        x: start.x + ux * startRadius - left,
-        y: start.y + uy * startRadius - top,
-      };
-      const edgeEnd = {
-        x: end.x - ux * endRadius - left,
-        y: end.y - uy * endRadius - top,
-      };
-      const strokeColor = blendOverPage(themeColors.nodeStroke, 0.08);
-      parts.push(
-        `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" ${svgStroke(
-          strokeColor
-        )} stroke-width="${getInkEdgeLineWidth(false)}" />`
-      );
-    });
+    await emitScene(
+      buildOrphanGuideEdgesScene(exportNodePosMap, {
+        edges: exportOrphanResult.edges,
+        orphans: exportOrphanGuides,
+        guideNodes: new Map(),
+        axisEntry: null,
+      })
+    );
   }
 
-  ensureAutoTriangleDiagonals();
-  if (triangleDiagonals.size || autoTriangleDiagonals.size) {
-    const gridMap = getActiveGridNodeMap();
-    forEachEffectiveTriangleDiagonal((entry) => {
-      const { a, b } = getTriangleDiagonalNodes(entry, gridMap);
-      if (!a || !b) {
-        return;
-      }
-      const start = worldToScreen(getNodeDisplayCoordinate(a));
-      const end = worldToScreen(getNodeDisplayCoordinate(b));
-      const radiusA = getLayoutNodeRadius(start);
-      const radiusB = getLayoutNodeRadius(end);
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const dist = Math.hypot(dx, dy);
-      if (!dist) {
-        return;
-      }
-      const ux = dx / dist;
-      const uy = dy / dist;
-      const edgeStart = {
-        x: start.x + ux * radiusA - left,
-        y: start.y + uy * radiusA - top,
-      };
-      const edgeEnd = {
-        x: end.x - ux * radiusB - left,
-        y: end.y - uy * radiusB - top,
-      };
-      parts.push(
-        `<line x1="${edgeStart.x}" y1="${edgeStart.y}" x2="${edgeEnd.x}" y2="${edgeEnd.y}" ${svgStroke(
-          getInkEdgeColor(false)
-        )} stroke-width="${getInkEdgeLineWidth(false)}" stroke-dasharray="6 4" />`
-      );
-    });
-  }
-  if (triangleLabels.size) {
-    const gridMap = getActiveGridNodeMap();
-    for (const entry of triangleLabels.values()) {
-      if (!entry.label) {
-        continue;
-      }
-      const diag = TRIANGLE_TRI_TO_DIAG[entry.tri];
-      if (!diag || !hasEffectiveTriangleDiagonal(triangleKey({ ...entry, diag }))) {
-        continue;
-      }
-      const cellNodes = getTriangleCellNodes(entry, gridMap);
-      const labelNodes = getTriangleLabelPoints(entry.tri, cellNodes);
-      if (!labelNodes) {
-        continue;
-      }
-      const points = labelNodes.map((node) => {
-        const proj = worldToScreen(getNodeDisplayCoordinate(node));
-        return { x: proj.x - left, y: proj.y - top };
-      });
-      const cx = (points[0].x + points[1].x + points[2].x) / 3;
-      const cy = (points[0].y + points[1].y + points[2].y) / 3;
-      const baseSize = Math.max(12, Math.round(layoutTriangleLabelTextSize));
-      const layout = computeTriangleLabelLayout(
-        entry.label,
-        layoutTriangleLabelFont,
-        baseSize,
-        points,
-        layoutTriangleLabelFontWeight
-      );
-      parts.push(
-        await buildSvgTextElement({
-          text: entry.label,
-          x: cx,
-          y: cy,
-          font: layoutTriangleLabelFont,
-          size: layout.size,
-          fontWeight: layoutTriangleLabelFontWeight,
-          anchor: "middle",
-          baseline: "middle",
-          color: themeColors.textSecondary,
-        })
-      );
-    }
+  if (!analysisLayers.microtonal) {
+    await emitScene(buildTriangleDiagonalsScene(exportNodePosMap));
+    await emitScene(buildTriangleLabelsScene(exportNodePosMap));
   }
 
   const exportNodeEnv = getStaticNodeEnv(exportOrphanGuides);

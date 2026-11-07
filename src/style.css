@@ -3756,10 +3756,21 @@ body.presentation-mode #lattice {
 }
 
 .presentation-help-button:hover,
+body.embed-mode .nav-3d,
+body.embed-mode .synth-panel,
 .presentation-help-button:focus-visible {
   color: var(--accent);
   border-color: var(--accent);
   outline: none;
+/* The only control an embed keeps: plays the lattice's notes as the
+ * ascending pattern (same as Animation > Patterns > Play). */
+.embed-play-button {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+}
+
 }
 
 .presentation-toc-eyebrow {

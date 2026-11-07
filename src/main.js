@@ -2218,13 +2218,14 @@ function updateScoreButton() {
   if (!scorePlayToggle) {
     return;
   }
-  if (patternPlayerState === "playing") {
-    scorePlayToggle.textContent = "Stop";
-    scorePlayToggle.classList.add("button-on");
-  } else {
-    scorePlayToggle.textContent = "Play";
-    scorePlayToggle.classList.remove("button-on");
-  }
+  const playing = patternPlayerState === "playing";
+  [scorePlayToggle, document.getElementById("embed-play-button")].forEach((button) => {
+    if (!button) {
+      return;
+    }
+    button.textContent = playing ? "Stop" : "Play";
+    button.classList.toggle("button-on", playing);
+  });
 }
 
 function updateTempoReadout() {
@@ -29167,6 +29168,104 @@ bindOptionalClick(loadLatticeButton, () => {
   loadLatticeInput.click();
 });
 bindOptionalChange(loadLatticeInput, async () => {
+if (isEmbedMode) {
+  initEmbedMode();
+}
+
+// ?embed: the host page owns the chrome and the frame is usually smaller than
+// the screen the link was made on, so the lattice frames itself. Page layout
+// draws the page at full size and scales the canvas element down (pointer
+// handlers read offsetX/Y, which are in the element's untransformed space);
+// 2D/3D views do the same below 640×400. 2D/3D views keep the link's
+// rotation but re-center and only ever zoom out.
+function initEmbedMode() {
+  const playButton = document.getElementById("embed-play-button");
+  if (playButton) {
+    playButton.hidden = false;
+    bindOptionalClick(playButton, () => {
+      if (patternPlayerState === "playing") {
+        stopPatternPlayback();
+      } else {
+        startPatternPlayback();
+      }
+    });
+  }
+  const linkZoom = view.zoom;
+  let frame = 0;
+  const refit = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => fitEmbedView(linkZoom));
+  };
+  window.addEventListener("resize", refit);
+  fitEmbedView(linkZoom);
+}
+
+function fitEmbedView(maxZoom) {
+  const margin = 16;
+  const frameWidth = window.innerWidth;
+  const frameHeight = window.innerHeight;
+  // Below this size node circles (fixed pixel radius) start to collide, so
+  // smaller frames get a scaled-down 640×400 view instead.
+  const minCanvasWidth = 640;
+  const minCanvasHeight = 400;
+  const pageScale = layoutMode
+    ? Math.min(
+        1,
+        (frameWidth - margin * 2) / getLayoutPageDimensions().widthPx,
+        (frameHeight - margin * 2) / getLayoutPageDimensions().heightPx
+      )
+    : Math.min(1, frameWidth / minCanvasWidth, frameHeight / minCanvasHeight);
+  Object.assign(canvas.style, pageScale < 1
+    ? {
+        width: `${frameWidth / pageScale}px`,
+        height: `${frameHeight / pageScale}px`,
+        transform: `scale(${pageScale})`,
+        transformOrigin: "0 0",
+      }
+    : { width: "", height: "", transform: "", transformOrigin: "" });
+  resizeCanvas();
+  if (layoutMode) {
+    return;
+  }
+  const activeNodes = nodes.filter((node) => node.active);
+  if (!activeNodes.length) {
+    return;
+  }
+  // Node centers in view space (screen space with zoom and offset removed), so
+  // the fit works the same for 2D and for the link's 3D rotation and tilt.
+  // Node circles don't scale with zoom, so their radius is reserved in pixels.
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let radius = 0;
+  activeNodes.forEach((node) => {
+    const screen = worldToScreen(getNodeDisplayCoordinate(node));
+    const x = (screen.x - canvas.clientWidth / 2) / view.zoom - view.offsetX;
+    const y = (screen.y - canvas.clientHeight / 2) / view.zoom - view.offsetY;
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+    radius = Math.max(radius, getNodeRadius(node) * (screen.scale || 1));
+  });
+  // Ratio/cents labels sit below-right of each node.
+  const labelRight = 80;
+  const labelBottom = 40;
+  const availableWidth = Math.max(1, canvas.clientWidth - (margin + radius) * 2 - labelRight);
+  const availableHeight = Math.max(1, canvas.clientHeight - (margin + radius) * 2 - labelBottom);
+  const fitZoom = Math.min(
+    availableWidth / Math.max(1, maxX - minX),
+    availableHeight / Math.max(1, maxY - minY)
+  );
+  view.zoom = clampZoom(Math.min(maxZoom, fitZoom));
+  const labelShiftX = labelRight / 2 / view.zoom;
+  const labelShiftY = labelBottom / 2 / view.zoom;
+  view.offsetX = -((minX + maxX) / 2) - labelShiftX;
+  view.offsetY = -((minY + maxY) / 2) - labelShiftY;
+  draw();
+  markIsomorphicDirty();
+}
   if (!loadLatticeInput) {
     return;
   }

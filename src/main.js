@@ -5,6 +5,8 @@ const karplusWorkletUrl = new URL("./karplus-worklet.js", import.meta.url);
 const resonatorWorkletUrl = new URL("./modal-resonator-worklet.js", import.meta.url);
 import { quickTourSteps, deepTourSteps } from "./tour-steps.js";
 import { encodePresetState, decodePresetState } from "./serialization.js";
+import { STATE_VERSION, migrateState } from "./state-migrations.js";
+import { getDistanceEdgeKey, parseDistanceEdgeKey } from "./node-keys.js";
 import {
   isPlainObject,
   deepClonePresetValue,
@@ -3556,6 +3558,7 @@ function applySnapshotsFromPreset(value) {
     if (!snapshot.state) {
       return;
     }
+    snapshot.state = migrateState(snapshot.state).state;
     snapshotSlots[index] = snapshot;
   });
   updateSnapshotUi();
@@ -3584,6 +3587,7 @@ function applyLetterSnapshotsFromPreset(value) {
     if (!snapshot.state) {
       return;
     }
+    snapshot.state = migrateState(snapshot.state).state;
     snapshotLetterSlots[index] = snapshot;
   });
   updateSnapshotUi();
@@ -18358,81 +18362,6 @@ function openDistanceLabelDialog(edgeKey) {
   });
 }
 
-function getDistanceEdgeKey(aKey, bKey) {
-  if (!aKey || !bKey) {
-    return "";
-  }
-  return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
-}
-
-// Edge keys join two node keys with "|". A custom node key itself contains a
-// "|" (custom:x,y,z|slot), so split only at a "|" that starts the next node
-// key. Legacy keys made of two bare numeric ids ("123|456") still split.
-function parseDistanceEdgeKey(edgeKey) {
-  if (!edgeKey || typeof edgeKey !== "string") {
-    return null;
-  }
-  let parts = edgeKey.split(/\|(?=grid:|custom:)/);
-  if (parts.length !== 2) {
-    parts = edgeKey.split("|");
-    if (parts.length !== 2 || parts.some((part) => /^(grid|custom):/.test(part))) {
-      return null;
-    }
-  }
-  return parts[0] && parts[1] ? parts : null;
-}
-
-// Pre-September-2026 files keyed custom nodes in distance edges by runtime
-// id, handed out as 200000 + index into the file's own customNodes array.
-// Rewrite such keys to the stable address using that same array.
-function migrateLegacyDistanceNodeKey(nodeKey, customEntries) {
-  if (!nodeKey.startsWith("custom:") || nodeKey.includes("|")) {
-    return nodeKey;
-  }
-  const index = Number(nodeKey.slice(7)) - 200000;
-  const entries = Array.isArray(customEntries) ? customEntries : [];
-  const entry = Number.isInteger(index) && index >= 0 ? entries[index] : null;
-  if (!entry || typeof entry !== "object") {
-    return null;
-  }
-  const source = Array.isArray(entry.sourceExponents)
-    ? entry.sourceExponents
-    : Array.isArray(entry.exponents)
-    ? entry.exponents
-    : null;
-  if (!source || source.length < 2) {
-    return null;
-  }
-  const [x, y, z = 0] = source.map(Number);
-  if (![x, y, z].every(Number.isFinite)) {
-    return null;
-  }
-  let slot = Number.isFinite(Number(entry.customSlot)) ? Math.trunc(Number(entry.customSlot)) : null;
-  if (slot == null) {
-    // Slots were assigned in file order per source node.
-    slot = entries.slice(0, index).filter((other) => {
-      const otherSource = other && (other.sourceExponents || other.exponents);
-      return (
-        Array.isArray(otherSource) &&
-        Number(otherSource[0]) === x &&
-        Number(otherSource[1]) === y &&
-        Number(otherSource[2] || 0) === z
-      );
-    }).length;
-  }
-  return `custom:${x},${y},${z}|${slot}`;
-}
-
-function migrateLegacyDistanceEdgeKey(edgeKey, customEntries) {
-  const parts = parseDistanceEdgeKey(edgeKey);
-  if (!parts) {
-    return null;
-  }
-  const a = migrateLegacyDistanceNodeKey(parts[0], customEntries);
-  const b = migrateLegacyDistanceNodeKey(parts[1], customEntries);
-  return a && b ? getDistanceEdgeKey(a, b) : null;
-}
-
 function getDistanceEdgeOverride(key) {
   if (!key) {
     return null;
@@ -23949,7 +23878,7 @@ function getPresetSynthState() {
 
 function buildPresetStateSkeleton(active, customState, lineLabelState, distanceState, muted) {
   return {
-    v: 1,
+    v: STATE_VERSION,
     active,
     muted,
     customNodes: customState,
@@ -24394,13 +24323,11 @@ function applyPresetDisplayToggleState(state) {
 }
 
 function applyPresetDistanceState(state) {
-  const customEntries = state.customNodes;
   if (Array.isArray(state.distanceEdges)) {
     state.distanceEdges.forEach((edgeKey) => {
       if (typeof edgeKey === "string" && edgeKey) {
-        const migrated = migrateLegacyDistanceEdgeKey(edgeKey, customEntries);
-        if (migrated) {
-          distanceSelectedEdges.add(migrated);
+        if (parseDistanceEdgeKey(edgeKey)) {
+          distanceSelectedEdges.add(edgeKey);
         }
       }
     });
@@ -24409,9 +24336,8 @@ function applyPresetDistanceState(state) {
     state.distanceEdgeOverrides,
     normalizeDistanceEdgeOverrideEntry,
     (normalized) => {
-      const migrated = migrateLegacyDistanceEdgeKey(normalized.key, customEntries);
-      if (migrated) {
-        distanceEdgeOverrides.set(migrated, normalized.value);
+      if (parseDistanceEdgeKey(normalized.key)) {
+        distanceEdgeOverrides.set(normalized.key, normalized.value);
       }
     }
   );
@@ -25589,10 +25515,13 @@ function runPresetApplyPipeline(state, options, presetContext) {
   applyPresetPostRebuildPipeline(state, presetContext);
 }
 
-function applyPresetState(state, options = {}) {
-  if (!state || typeof state !== "object") {
+function applyPresetState(rawState, options = {}) {
+  if (!rawState || typeof rawState !== "object") {
     return;
   }
+  // Every load path funnels through here: bring the state to the current
+  // format first (src/state-migrations.js).
+  const state = migrateState(rawState).state;
   const isSnapshotRecall = Boolean(
     options && (options.skipStopVoices || options.preserveViewMode)
   );
@@ -27284,6 +27213,12 @@ if (isPresentationMode) {
 function applyPresetStateSafely(state, sourceLabel) {
   try {
     applyPresetState(state);
+    if (migrateState(state).newerThanApp) {
+      showTemporaryBanner(
+        `This ${sourceLabel} was saved by a newer version of Tuning Lattice. Some settings may not load — reload the page to update.`,
+        8000
+      );
+    }
     return true;
   } catch (error) {
     console.error(`Could not apply ${sourceLabel}`, error);

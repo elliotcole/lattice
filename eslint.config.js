@@ -12,6 +12,7 @@ export default [
       "src/state-migrations.js",
       "src/node-keys.js",
       "src/scene/**/*.js",
+      "src/input/**/*.js",
       "src/custom-oscillator-types.js",
       "src/custom-oscillators.js",
       "src/lib/**/*.js",

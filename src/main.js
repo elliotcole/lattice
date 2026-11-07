@@ -55,6 +55,7 @@ import {
 import { paintDisplayList, traceNodeShape } from "./scene/paint-canvas.js";
 import { emitDisplayListSvg, svgColorAttr } from "./scene/emit-svg.js";
 import { hitTestDisplayList } from "./scene/hit-test.js";
+import { createKeyDispatcher, createHeldKeys } from "./input/keyboard.js";
 
 // Main editor spells ET fallbacks from its mixed default table (Eb/Bb flats).
 function getNearestEtInfo(freq, a4) {
@@ -401,7 +402,6 @@ let distanceSelectMode = false;
 let addIntervalMode = false;
 let addIntervalSourceNodeId = null;
 let addIntervalSelectedRing = null;
-let iHeld = false;
 const distanceSelectedNodeKeys = new Set();
 const distanceSelectedEdges = new Set();
 const commaEdges = [];
@@ -583,14 +583,12 @@ let synthMode = "waveform";
 let soundfontPresetIndex = 0;
 let currentSynthWaveform = "";
 let lastCustomOctaveReduce = true;
-let rHeld = false;
-let tHeld = false;
-let lHeld = false;
-let vHeld = false;
-let fHeld = false;
-let oHeld = false;
-let mHeld = false;
-let nHeld = false;
+// Quasimode letters currently held (see HELD_KEYS in src/input/keyboard.js).
+const heldKeys = createHeldKeys();
+// The editor's single keyboard pipeline: bindings are added in precedence
+// order (the deck's in initPresentationMode, the rest at the bottom of this
+// file) and attached once.
+const keyBindings = createKeyDispatcher();
 let suppressClickAfterRespell = false;
 let nodeVolumeAdjustMode = false;
 let nodeVolumeSliderDrag = null;
@@ -598,19 +596,7 @@ let nodeVolumeSliderHitboxes = [];
 const nodeVolumeLimits = new Map();
 
 function resetHeldModifiers() {
-  rHeld = false;
-  tHeld = false;
-  lHeld = false;
-  vHeld = false;
-  fHeld = false;
-  oHeld = false;
-  iHeld = false;
-  cHeld = false;
-  zKeyHeld = false;
-  xKeyHeld = false;
-  yKeyHeld = false;
-  mHeld = false;
-  nHeld = false;
+  heldKeys.clear();
 }
 const midiActiveNotes = new Map();
 const activeKeys = new Map();
@@ -1516,9 +1502,6 @@ let gridDepth = 1;
 let gridCenterZ = 0;
 let latticeExponentOffset = { x: 0, y: 0, z: 0 };
 const axisStack = [];
-let zKeyHeld = false;
-let xKeyHeld = false;
-let yKeyHeld = false;
 let isAddMode = false;
 let shiftHeld = false;
 let capsLockOn = false;
@@ -1629,13 +1612,13 @@ function isEdgeOnAxisEntry(a, b, entry) {
 }
 
 function getRequestedAxisKey() {
-  if (zKeyHeld) {
+  if (heldKeys.has("z")) {
     return "z";
   }
-  if (xKeyHeld) {
+  if (heldKeys.has("x")) {
     return "x";
   }
-  if (yKeyHeld) {
+  if (heldKeys.has("y")) {
     return "y";
   }
   return null;
@@ -1750,7 +1733,6 @@ let customNodes = [];
 let nextCustomNodeId = 200000;
 let pendingCustomAction = null;
 let lastCustomFactor = { numerator: 5, denominator: 4 };
-let cHeld = false;
 let layoutMode = false;
 let layoutAlignMode = "";
 let layoutAlignAnchorId = null;
@@ -10723,7 +10705,7 @@ function openTriangleLabelDialog(value) {
 }
 
 function openLayoutCustomLabelDialog(value = "") {
-  xKeyHeld = false;
+  heldKeys.delete("x");
   if (layoutCustomLabelEditId != null) {
     openLayoutCustomTextEditor(layoutCustomLabelEditId, { selectAll: !value });
     return;
@@ -11234,7 +11216,7 @@ function buildTriangleLabelsScene(nodePosMap) {
 }
 
 function drawTriangleHover(nodePosMap) {
-  if (!triangleHover || !tHeld) {
+  if (!triangleHover || !heldKeys.has("t")) {
     return;
   }
   const gridMap = new Map();
@@ -15213,13 +15195,17 @@ function toggleAudio() {
   }
 }
 
+let audioGestureUnlockDone = false;
 function enableAudioFromGesture() {
+  if (audioGestureUnlockDone) {
+    return;
+  }
   if (audioCtx && audioCtx.state === "running") {
     return;
   }
   enableAudio();
+  audioGestureUnlockDone = true;
   window.removeEventListener("pointerdown", enableAudioFromGesture);
-  window.removeEventListener("keydown", enableAudioFromGesture);
 }
 
 
@@ -15687,7 +15673,7 @@ function onPointerDown(event) {
       toggleCustomPianoPreviewVoice(hit);
       return;
     }
-    if (tHeld || rHeld) {
+    if (heldKeys.has("t") || heldKeys.has("r")) {
       return;
     }
     if (layoutMode) {
@@ -15701,12 +15687,12 @@ function onPointerDown(event) {
     }
   }
 
-  if (oHeld && hit) {
+  if (heldKeys.has("o") && hit) {
     openOctaveShiftDialog(hit);
     return;
   }
 
-  if (rHeld && hit) {
+  if (heldKeys.has("r") && hit) {
     const isOneToOne = hit.isCenter || (!hit.isCustom && hit.numerator === hit.denominator);
     if (isOneToOne && spellingMode !== "simple") {
       const a4 = Number(a4Input.value) || 440;
@@ -15794,7 +15780,7 @@ function onPointerDown(event) {
       return;
     }
   }
-  if (tHeld) {
+  if (heldKeys.has("t")) {
     const triangle = findTriangleHit(screenPoint);
     if (triangle) {
       const keys = triangleCellKeys(triangle);
@@ -16095,7 +16081,7 @@ function onPointerDown(event) {
     return;
   }
 
-  if (!layoutMode && lHeld && hit) {
+  if (!layoutMode && heldKeys.has("l") && hit) {
     lfoArmingId = hit.id;
     lfoArmingStart = now;
     ensureLfoLoop();
@@ -16106,7 +16092,7 @@ function onPointerDown(event) {
 
   if (
     !layoutMode &&
-    !cHeld &&
+    !heldKeys.has("c") &&
     hit &&
     hit.isCustom &&
     !event.altKey &&
@@ -16602,7 +16588,7 @@ function onPointerMove(event) {
     schedulePresetUrlUpdate();
     return;
   }
-  if (tHeld && !isCustomPianoMapModeActive() && !view.dragging && !view.rotating) {
+  if (heldKeys.has("t") && !isCustomPianoMapModeActive() && !view.dragging && !view.rotating) {
     const screen = { x: event.offsetX, y: event.offsetY };
     const nextTriangle = findTriangleHit(screen);
     const nextKey = nextTriangle
@@ -16835,14 +16821,14 @@ function onPointerUp(event) {
       setNodeVolumeAdjustMode(false);
       return;
     }
-    if (nHeld && hit) {
+    if (heldKeys.has("n") && hit) {
       const projected = projectPoint(hit.coordinate || { x: 0, y: 0, z: 0 });
       view.offsetX = -projected.x;
       view.offsetY = -projected.y;
       draw();
       return;
     }
-    if (mHeld && hit) {
+    if (heldKeys.has("m") && hit) {
       toggleNodeMuted(hit);
       return;
     }
@@ -16870,7 +16856,7 @@ function onPointerUp(event) {
         }
       }
     }
-    if (!layoutMode && fHeld && hit) {
+    if (!layoutMode && heldKeys.has("f") && hit) {
       const freq = Number(hit.freq);
       if (Number.isFinite(freq)) {
         const displayInfo = getDisplayNoteInfo(hit);
@@ -16892,19 +16878,19 @@ function onPointerUp(event) {
       }
       return;
     }
-    if (!layoutMode && iHeld && hit && hit.active) {
+    if (!layoutMode && heldKeys.has("i") && hit && hit.active) {
       startAddIntervalFromNode(hit);
       return;
     }
     if (
       !layoutMode &&
-      !tHeld &&
+      !heldKeys.has("t") &&
       !hit &&
       !event.altKey &&
       !event.shiftKey &&
-      !cHeld &&
-      !oHeld &&
-      !lHeld
+      !heldKeys.has("c") &&
+      !heldKeys.has("o") &&
+      !heldKeys.has("l")
     ) {
       const triangle = findTriangleHit(screenPoint);
       if (triangle && triangle.tri) {
@@ -17054,12 +17040,12 @@ function onPointerUp(event) {
         }
       }
     }
-    if (cHeld && hit && hit.active) {
+    if (heldKeys.has("c") && hit && hit.active) {
       openCustomRatioDialog({ type: "create", sourceId: hit.id });
       return;
     }
     if (hit) {
-      if (vHeld) {
+      if (heldKeys.has("v")) {
         setNodeVolumeAdjustMode(true);
         return;
       }
@@ -19688,7 +19674,7 @@ function getUiHintKey() {
     if (layoutAxisEdit) {
       return "layout-axis-edit";
     }
-    if (tHeld) {
+    if (heldKeys.has("t")) {
       return "layout-triangle";
     }
     return "layout";
@@ -19846,7 +19832,7 @@ function updateUiHint() {
       setUiHintContent("Editing axis legend.\nPress Delete to remove. Reset Layout restores.");
       return;
     }
-    if (tHeld) {
+    if (heldKeys.has("t")) {
       setUiHintContent(
         "Creating triangles (T)\nClick to add a diagonal, click again to label.\nClick line to rotate or remove."
       );
@@ -20019,6 +20005,7 @@ function handlePerformanceModeHotkey(event) {
   event.preventDefault();
   event.stopImmediatePropagation();
   togglePerformanceMode();
+  return true;
 }
 
 function isTextEntryTargetForHotkeys(target) {
@@ -20083,13 +20070,14 @@ function handleModeSwitchHotkey(event) {
   event.stopImmediatePropagation();
   if (targetMode === "layout") {
     setLayoutMode(true);
-    return;
+    return true;
   }
   if (layoutMode) {
     setLayoutMode(false);
   }
   set3DMode(targetMode === "3d", { preserveDepth: true });
   schedulePresetUrlUpdate();
+  return true;
 }
 
 function isKeyboardModeToggleHotkey(event) {
@@ -20125,17 +20113,18 @@ function handleKeyboardModeToggleHotkey(event) {
   event.preventDefault();
   event.stopImmediatePropagation();
   if (!keyboardModeSelect || keyboardModeSelect.disabled) {
-    return;
+    return true;
   }
   const currentMode = keyboardModeSelect.value || "off";
   if (currentMode !== "off") {
     keyboardModeToggleMemory = currentMode;
     applyKeyboardModeValue("off");
-    return;
+    return true;
   }
   if (keyboardModeToggleMemory && keyboardModeToggleMemory !== "off") {
     applyKeyboardModeValue(keyboardModeToggleMemory);
   }
+  return true;
 }
 
 function isCustomPianoMode() {
@@ -20649,7 +20638,7 @@ function updateAddModeFromShift() {
   if (navAddModeToggle) {
     setControlChecked(navAddModeToggle, isAddMode);
   }
-  if (tHeld) {
+  if (heldKeys.has("t")) {
     updateUiHint();
   }
 }
@@ -27127,14 +27116,20 @@ function initPresentationMode() {
       }
     });
     // Escape closes the intro when it's the topmost UI.
-    window.addEventListener("keydown", (event) => {
-      if (introOverlay.hidden) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        closeIntro();
-      }
-    }, { capture: true });
+    keyBindings.bind({
+      id: "deck-intro-escape",
+      type: "keydown",
+      phase: "capture",
+      description: "Escape: close the deck intro",
+      handle(event) {
+        if (introOverlay.hidden) return;
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          closeIntro();
+        }
+      },
+    });
   }
   if (helpButton) {
     helpButton.hidden = false;
@@ -27153,21 +27148,26 @@ function initPresentationMode() {
   // Arrow Left / Right = prev / next slide (edge-clamped). Skipped when the
   // active slide opts into `pan: true` (in which case arrows control the
   // canvas). Also skipped when focus is in a form input.
-  window.addEventListener("keydown", (event) => {
-    if (!isInPresentationMode()) return;
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    const tag = event.target && event.target.tagName;
-    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
-    if (isPresentationInteractionAllowed("pan")) return;
-    if (!slides.length || !activeSlug) return;
-    const idx = slides.findIndex((s) => s.slug === activeSlug);
-    if (idx < 0) return;
-    let nextIdx = -1;
-    if (event.key === "ArrowLeft" && idx > 0) nextIdx = idx - 1;
-    if (event.key === "ArrowRight" && idx < slides.length - 1) nextIdx = idx + 1;
-    if (nextIdx < 0) return;
-    event.preventDefault();
-    loadSlide(slides[nextIdx]);
+  keyBindings.bind({
+    id: "deck-arrows",
+    type: "keydown",
+    description: "Left/Right arrows: previous/next slide",
+    handle: (event) => {
+      if (!isInPresentationMode()) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const tag = event.target && event.target.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      if (isPresentationInteractionAllowed("pan")) return;
+      if (!slides.length || !activeSlug) return;
+      const idx = slides.findIndex((s) => s.slug === activeSlug);
+      if (idx < 0) return;
+      let nextIdx = -1;
+      if (event.key === "ArrowLeft" && idx > 0) nextIdx = idx - 1;
+      if (event.key === "ArrowRight" && idx < slides.length - 1) nextIdx = idx + 1;
+      if (nextIdx < 0) return;
+      event.preventDefault();
+      loadSlide(slides[nextIdx]);
+    },
   });
 
   (async () => {
@@ -27540,7 +27540,7 @@ snapshotKeyboardKeys = document.getElementById("snapshot-keyboard-keys");
 if (snapshotKeyboardContainer) {
   buildSnapshotKeyboard();
 }
-bindOptionalEvent(window, "keydown", (event) => {
+function handleSnapshotHotkey(event) {
   if (event.defaultPrevented) {
     return;
   }
@@ -27592,7 +27592,7 @@ bindOptionalEvent(window, "keydown", (event) => {
   } else {
     recallSnapshot(numberIndex);
   }
-});
+}
 const snapshotResetButton = document.getElementById("snapshot-reset");
 bindOptionalClick(snapshotResetButton, () => {
   clearSnapshots();
@@ -28969,11 +28969,11 @@ if (welcomeOverlayEl) {
     }
   });
 }
-bindOptionalEvent(window, "keydown", (event) => {
+function handleWelcomeEscape(event) {
   if (event.key === "Escape" && welcomeOverlayEl && !welcomeOverlayEl.hidden) {
     hideWelcomeOverlay();
   }
-});
+}
 if (creditsTrigger && creditsDialog) {
   bindOptionalClick(creditsTrigger, (event) => {
     event.preventDefault();
@@ -29919,14 +29919,77 @@ bindOptionalEvent(canvas, "wheel", onWheel, { passive: false });
 bindOptionalEvent(window, "resize", resizeCanvas);
 bindOptionalEvent(window, "resize", updateRatioWheelPosition);
 bindOptionalEvent(window, "resize", updateKeyboardMapPopoverPosition);
-bindOptionalEvent(window, "keydown", handlePerformanceModeHotkey, { capture: true });
-bindOptionalEvent(window, "keydown", handleModeSwitchHotkey, { capture: true });
-bindOptionalEvent(window, "keydown", handleKeyboardModeToggleHotkey, { capture: true });
 bindOptionalEvent(window, "pointerdown", enableAudioFromGesture);
-bindOptionalEvent(window, "keydown", enableAudioFromGesture);
-bindOptionalEvent(window, "keydown", handleKeyDown);
-bindOptionalEvent(window, "keyup", handleKeyUp);
-bindOptionalEvent(window, "keydown", (event) => {
+
+// ---- Keyboard: the binding table ----
+// One native listener per phase runs these in order (src/input/keyboard.js).
+// Capture bindings run before dialog/input handlers; returning true consumes
+// the key. The deck's bindings (initPresentationMode) are bound first.
+[
+  {
+    id: "performance-mode",
+    type: "keydown",
+    phase: "capture",
+    description: "Toggle performance mode",
+    handle: handlePerformanceModeHotkey,
+  },
+  {
+    id: "view-mode",
+    type: "keydown",
+    phase: "capture",
+    description: "Ctrl+1/2/3: 2D, 3D, page layout",
+    handle: handleModeSwitchHotkey,
+  },
+  {
+    id: "keyboard-mode-toggle",
+    type: "keydown",
+    phase: "capture",
+    description: "Ctrl+K: computer keyboard on/off",
+    handle: handleKeyboardModeToggleHotkey,
+  },
+  {
+    id: "snapshots",
+    type: "keydown",
+    description: "Digits (and mapped letters): recall a snapshot; Alt+key saves",
+    handle: handleSnapshotHotkey,
+  },
+  {
+    id: "welcome-escape",
+    type: "keydown",
+    description: "Escape: close the welcome overlay",
+    handle: handleWelcomeEscape,
+  },
+  {
+    id: "audio-unlock",
+    type: "keydown",
+    description: "First key press starts audio",
+    handle: () => {
+      enableAudioFromGesture();
+    },
+  },
+  {
+    id: "play",
+    type: "keydown",
+    description: "Space: pattern play; looper keys; layout undo/redo; play notes",
+    handle: handleKeyDown,
+  },
+  {
+    id: "editor",
+    type: "keydown",
+    description: "Held letters, Shift add mode, arrow-key pan, Escape cancels",
+    handle: handleEditorKeyDown,
+  },
+  { id: "play-release", type: "keyup", description: "Release played notes", handle: handleKeyUp },
+  {
+    id: "editor-release",
+    type: "keyup",
+    description: "Release held letters and Shift",
+    handle: handleEditorKeyUp,
+  },
+].forEach((binding) => keyBindings.bind(binding));
+keyBindings.attach(window);
+
+function handleEditorKeyDown(event) {
   syncCapsLockState(event);
   if (handleTourKeydown(event)) {
     return;
@@ -29980,45 +30043,8 @@ bindOptionalEvent(window, "keydown", (event) => {
     updateAddModeFromShift();
     draw();
   }
-  if (event.key.toLowerCase() === "t") {
-    tHeld = true;
+  if (heldKeys.press(event) === "t") {
     updateUiHint();
-  }
-  if (event.key.toLowerCase() === "l") {
-    lHeld = true;
-  }
-  if (event.key.toLowerCase() === "v") {
-    vHeld = true;
-  }
-  if (event.key.toLowerCase() === "f") {
-    fHeld = true;
-  }
-  if (event.key.toLowerCase() === "o") {
-    oHeld = true;
-  }
-  if (event.key.toLowerCase() === "i") {
-    iHeld = true;
-  }
-  if (event.key.toLowerCase() === "m") {
-    mHeld = true;
-  }
-  if (event.key.toLowerCase() === "n") {
-    nHeld = true;
-  }
-  if (event.key.toLowerCase() === "r") {
-    rHeld = true;
-  }
-  if (event.key.toLowerCase() === "z") {
-    zKeyHeld = true;
-  }
-  if (event.key.toLowerCase() === "x") {
-    xKeyHeld = true;
-  }
-  if (event.key.toLowerCase() === "y") {
-    yKeyHeld = true;
-  }
-  if (event.key.toLowerCase() === "c") {
-    cHeld = true;
   }
   // Skip view-pan in presentation mode unless the active slide opts into pan.
   // Without this guard, left/right arrows both advance the slide AND shift
@@ -30075,7 +30101,7 @@ bindOptionalEvent(window, "keydown", (event) => {
     }
     return;
   }
-});
+}
 bindOptionalEvent(window, "pointerdown", (event) => {
   if (!layoutSpacePopover || layoutSpacePopover.hidden) {
     return;
@@ -30165,56 +30191,19 @@ bindOptionalEvent(window, "pointerdown", (event) => {
   }
   keyboardMapPopover.hidden = true;
 });
-bindOptionalEvent(window, "keyup", (event) => {
+function handleEditorKeyUp(event) {
   syncCapsLockState(event);
   if (event.key === "Shift") {
     shiftHeld = false;
     updateAddModeFromShift();
     draw();
   }
-  if (event.key.toLowerCase() === "r") {
-    rHeld = false;
-  }
-  if (event.key.toLowerCase() === "t") {
-    tHeld = false;
+  if (heldKeys.release(event) === "t") {
     triangleHover = null;
     updateUiHint();
     scheduleDraw();
   }
-  if (event.key.toLowerCase() === "l") {
-    lHeld = false;
-  }
-  if (event.key.toLowerCase() === "v") {
-    vHeld = false;
-  }
-  if (event.key.toLowerCase() === "f") {
-    fHeld = false;
-  }
-  if (event.key.toLowerCase() === "o") {
-    oHeld = false;
-  }
-  if (event.key.toLowerCase() === "i") {
-    iHeld = false;
-  }
-  if (event.key.toLowerCase() === "m") {
-    mHeld = false;
-  }
-  if (event.key.toLowerCase() === "n") {
-    nHeld = false;
-  }
-  if (event.key.toLowerCase() === "z") {
-    zKeyHeld = false;
-  }
-  if (event.key.toLowerCase() === "x") {
-    xKeyHeld = false;
-  }
-  if (event.key.toLowerCase() === "y") {
-    yKeyHeld = false;
-  }
-  if (event.key.toLowerCase() === "c") {
-    cHeld = false;
-  }
-});
+}
 
 bindOptionalDialogClose(customRatioDialog, handleCustomRatioDialogClose);
 bindOptionalDialogClose(distanceLabelDialog, () => {

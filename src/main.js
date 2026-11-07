@@ -56,6 +56,7 @@ import { paintDisplayList, traceNodeShape } from "./scene/paint-canvas.js";
 import { emitDisplayListSvg, svgColorAttr } from "./scene/emit-svg.js";
 import { hitTestDisplayList } from "./scene/hit-test.js";
 import { createKeyDispatcher, createHeldKeys } from "./input/keyboard.js";
+import { createVoiceBackends } from "./audio/voice-backends.js";
 
 // Main editor spells ET fallbacks from its mixed default table (Eb/Bb flats).
 function getNearestEtInfo(freq, a4) {
@@ -1373,6 +1374,42 @@ const CUSTOM_WAVEFORMS = new Set(customOscillatorTypes || []);
 let customOscillators = null;
 let customOscillatorsLoading = null;
 let customOscillatorFallbackWarned = false;
+
+// How each note's sound source is made (src/audio/voice-backends.js).
+const voiceBackends = createVoiceBackends({
+  audioContext: () => audioCtx,
+  worklets: {
+    [KARPLUS_WAVEFORM]: {
+      processor: "karplus-strong",
+      ensure: () => ensureKarplusWorklet(),
+      ready: () => karplusWorkletReady,
+      parameters: { damping: 0.985 },
+    },
+    [RESONANT_WAVEFORM]: {
+      processor: "modal-resonator",
+      ensure: () => ensureResonatorWorklet(),
+      ready: () => resonatorWorkletReady,
+      parameters: { brightness: 0.45 },
+    },
+  },
+  soundfontWaveform: SOUNDFONT_WAVEFORM,
+  soundfont: () => ({ data: soundfontData, preset: soundfontPreset }),
+  startPresetNote,
+  referenceA4: () => Number(a4Input.value) || 440,
+  isWavetable: (type) => CUSTOM_WAVEFORMS.has(type),
+  wavetables: () => customOscillators,
+  ensureWavetables: () => ensureCustomOscillators(),
+  warnFallback: (type) => {
+    if (!CUSTOM_WAVEFORMS.has(type)) {
+      warnWorkletFallback(type);
+      return;
+    }
+    if (!customOscillatorFallbackWarned) {
+      customOscillatorFallbackWarned = true;
+      console.warn(`"${type}" wavetable not loaded yet; this note uses a sine oscillator.`);
+    }
+  },
+});
 
 function ensureCustomOscillators() {
   if (customOscillators || customOscillatorsLoading) {
@@ -14677,105 +14714,14 @@ function startVoice(options) {
   const velocity = Math.max(0, Math.min(1, Number(options.velocity ?? 1)));
   const nodeVolumeMax = options.source === "midi" ? 1 : getNodeVolumeLimit(node);
   const waveformType = getCurrentWaveformType();
-  let oscillator = null;
-  if (waveformType === KARPLUS_WAVEFORM) {
-    ensureKarplusWorklet();
-    if (karplusWorkletReady) {
-      try {
-        oscillator = new AudioWorkletNode(audioCtx, "karplus-strong", {
-          numberOfOutputs: 1,
-          outputChannelCount: [1],
-          parameterData: {
-            frequency: Number.isFinite(effectiveFreq) ? effectiveFreq : 220,
-            damping: 0.985,
-          },
-        });
-        if (oscillator.port) {
-          oscillator.port.postMessage({ type: "trigger" });
-        }
-      } catch (error) {
-        oscillator = audioCtx.createOscillator();
-      }
-    } else {
-      warnWorkletFallback(waveformType);
-      oscillator = audioCtx.createOscillator();
-    }
-  } else if (waveformType === RESONANT_WAVEFORM) {
-    ensureResonatorWorklet();
-    if (resonatorWorkletReady) {
-      try {
-        oscillator = new AudioWorkletNode(audioCtx, "modal-resonator", {
-          numberOfOutputs: 1,
-          outputChannelCount: [1],
-          parameterData: {
-            frequency: Number.isFinite(effectiveFreq) ? effectiveFreq : 220,
-          brightness: 0.45,
-          },
-        });
-        if (oscillator.port) {
-          oscillator.port.postMessage({ type: "trigger" });
-        }
-      } catch (error) {
-        oscillator = audioCtx.createOscillator();
-      }
-    } else {
-      warnWorkletFallback(waveformType);
-      oscillator = audioCtx.createOscillator();
-    }
-  } else if (waveformType === SOUNDFONT_WAVEFORM) {
-  if (soundfontData && soundfontPreset) {
-    const sfCtx = {
-      currentTime: audioCtx.currentTime,
-        destination: null,
-        createGain: audioCtx.createGain.bind(audioCtx),
-        createBuffer: audioCtx.createBuffer.bind(audioCtx),
-        createBufferSource: audioCtx.createBufferSource.bind(audioCtx),
-        createStereoPanner: audioCtx.createStereoPanner.bind(audioCtx),
-      };
-      oscillator = {
-        type: "soundfont",
-        start: () => {},
-        stop: () => {},
-        disconnect: () => {},
-        port: null,
-      };
-      // Use envGain as the destination so ADSR/LFO apply downstream.
-      sfCtx.destination = audioCtx.createGain();
-      const sfDestination = sfCtx.destination;
-      const midi = 69 + 12 * Math.log2((Number.isFinite(effectiveFreq) ? effectiveFreq : 220) / (Number(a4Input.value) || 440));
-      const stopFn = startPresetNote(sfCtx, soundfontPreset, midi, audioCtx.currentTime);
-      oscillator.sfStop = stopFn;
-      oscillator.sfOutput = sfDestination;
-    } else {
-      oscillator = audioCtx.createOscillator();
-    }
-  } else if (CUSTOM_WAVEFORMS.has(waveformType)) {
-    if (customOscillators && typeof customOscillators[waveformType] === "function") {
-      oscillator = customOscillators[waveformType](audioCtx);
-    } else {
-      ensureCustomOscillators();
-      if (!customOscillatorFallbackWarned) {
-        customOscillatorFallbackWarned = true;
-        console.warn(`"${waveformType}" wavetable not loaded yet; this note uses a sine oscillator.`);
-      }
-      oscillator = audioCtx.createOscillator();
-    }
-  } else {
-    oscillator = audioCtx.createOscillator();
-  }
+  const { source: oscillator, kind: voiceKind } = voiceBackends.createSource(
+    waveformType,
+    effectiveFreq
+  );
   const envGain = audioCtx.createGain();
   const lfoGain = audioCtx.createGain();
   const morphGain = audioCtx.createGain();
 
-  if (
-    waveformType !== KARPLUS_WAVEFORM &&
-    waveformType !== RESONANT_WAVEFORM &&
-    !CUSTOM_WAVEFORMS.has(waveformType) &&
-    oscillator &&
-    "type" in oscillator
-  ) {
-    oscillator.type = waveformType;
-  }
   if (oscillator && "frequency" in oscillator && Number.isFinite(effectiveFreq)) {
     oscillator.frequency.value = effectiveFreq;
   }
@@ -14824,8 +14770,9 @@ function startVoice(options) {
     source: options.source || "keyboard",
     loopOffRecorded: false,
     oneShot: isOneShot,
-    usesWorklet: waveformType === KARPLUS_WAVEFORM || waveformType === RESONANT_WAVEFORM,
-    usesSoundfont: waveformType === SOUNDFONT_WAVEFORM,
+    kind: voiceKind,
+    usesWorklet: voiceKind === "worklet",
+    usesSoundfont: voiceKind === "soundfont",
     sfStop: oscillator && oscillator.sfStop ? oscillator.sfStop : null,
     sfOutput: oscillator && oscillator.sfOutput ? oscillator.sfOutput : null,
   };

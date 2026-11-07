@@ -13,6 +13,7 @@ export default [
       "src/node-keys.js",
       "src/scene/**/*.js",
       "src/input/**/*.js",
+      "src/audio/**/*.js",
       "src/custom-oscillator-types.js",
       "src/custom-oscillators.js",
       "src/lib/**/*.js",
